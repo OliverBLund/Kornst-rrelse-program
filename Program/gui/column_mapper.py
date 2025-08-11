@@ -80,14 +80,24 @@ class ColumnMapperDialog(QDialog):
             self.reject()
     
     def load_csv_preview(self):
-        """Load first few rows of CSV for preview"""
-        with open(self.file_path, 'r', encoding='utf-8') as file:
-            reader = csv.reader(file)
-            rows = []
-            for i, row in enumerate(reader):
-                if i >= 20:  # Limit preview to 20 rows
-                    break
-                rows.append(row)
+        """Load first few rows of file for preview"""
+        file_ext = os.path.splitext(self.file_path)[1].lower()
+        rows = []
+        
+        if file_ext == '.csv':
+            with open(self.file_path, 'r', encoding='utf-8') as file:
+                reader = csv.reader(file)
+                for i, row in enumerate(reader):
+                    if i >= 20:  # Limit preview to 20 rows
+                        break
+                    rows.append(row)
+        elif file_ext in ['.xlsx', '.xls']:
+            # Load Excel file with pandas
+            import pandas as pd
+            df = pd.read_excel(self.file_path, nrows=20)
+            # Convert dataframe to list of lists
+            rows = [df.columns.tolist()] + df.values.tolist()
+            rows = [[str(cell) for cell in row] for row in rows]  # Convert all to strings
         
         if not rows:
             raise ValueError("CSV file is empty")
@@ -310,9 +320,17 @@ class ColumnMapperDialog(QDialog):
         percent_passing = []
         
         # Load all data (not just preview)
-        with open(self.file_path, 'r', encoding='utf-8') as file:
-            reader = csv.reader(file)
-            rows = list(reader)
+        file_ext = os.path.splitext(self.file_path)[1].lower()
+        
+        if file_ext == '.csv':
+            with open(self.file_path, 'r', encoding='utf-8') as file:
+                reader = csv.reader(file)
+                rows = list(reader)
+        elif file_ext in ['.xlsx', '.xls']:
+            import pandas as pd
+            df = pd.read_excel(self.file_path)
+            rows = [df.columns.tolist()] + df.values.tolist()
+            rows = [[str(cell) for cell in row] for row in rows]
         
         # Skip header row(s)
         data_rows = rows[1:] if len(rows) > 1 else rows

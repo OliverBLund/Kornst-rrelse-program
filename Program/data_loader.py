@@ -8,6 +8,8 @@ import os
 from typing import Dict, List, Tuple, Optional, Any
 from dataclasses import dataclass
 import logging
+import pandas as pd
+import numpy as np
 
 # Set up logging
 logging.basicConfig(level=logging.INFO)
@@ -29,11 +31,31 @@ class GrainSizeData:
         if len(self.particle_sizes) != len(self.percent_passing):
             raise ValueError("Particle sizes and percent passing must have same length")
         
+        # Validate percent passing range
         if not all(0 <= pp <= 100 for pp in self.percent_passing):
             raise ValueError("Percent passing values must be between 0 and 100")
         
+        # Validate particle sizes are positive and in reasonable range
         if not all(ps > 0 for ps in self.particle_sizes):
             raise ValueError("Particle sizes must be positive")
+        
+        # Check for reasonable grain size range (0.001 mm to 1000 mm)
+        if any(ps < 0.001 or ps > 1000 for ps in self.particle_sizes):
+            logger.warning(f"Unusual grain sizes detected: {min(self.particle_sizes):.4f} - {max(self.particle_sizes):.1f} mm")
+        
+        # Check if percent passing is monotonic (should generally increase with decreasing grain size)
+        # Sort by particle size and check if percent passing increases
+        sorted_data = sorted(zip(self.particle_sizes, self.percent_passing), reverse=True)
+        for i in range(1, len(sorted_data)):
+            if sorted_data[i][1] < sorted_data[i-1][1]:
+                logger.warning(f"Non-monotonic percent passing detected at size {sorted_data[i][0]:.3f} mm")
+        
+        # Validate temperature and porosity
+        if self.temperature < 0 or self.temperature > 50:
+            logger.warning(f"Unusual temperature: {self.temperature}°C (typical range: 0-50°C)")
+        
+        if self.porosity < 0.1 or self.porosity > 0.8:
+            logger.warning(f"Unusual porosity: {self.porosity} (typical range: 0.1-0.8)")
     
     def get_d10(self) -> Optional[float]:
         """Calculate D10 (grain size at 10% passing)"""
@@ -148,7 +170,7 @@ class DataLoader:
     """Main data loader class for grain size analysis"""
     
     def __init__(self):
-        self.supported_formats = ['.csv']
+        self.supported_formats = ['.csv', '.xlsx', '.xls']
         self.loaded_datasets: List[GrainSizeData] = []
     
     def load_file(self, file_path: str) -> GrainSizeData:
@@ -162,6 +184,8 @@ class DataLoader:
         
         if file_ext == '.csv':
             return self._load_csv(file_path)
+        elif file_ext in ['.xlsx', '.xls']:
+            return self._load_excel(file_path)
         
         raise NotImplementedError(f"Loader for {file_ext} not implemented")
     
@@ -393,6 +417,81 @@ class DataLoader:
         
         metadata = {}
         return self._create_dataset(metadata, particle_sizes, percent_passing, file_path)
+    
+    def _load_excel(self, file_path: str) -> GrainSizeData:
+        """Load Excel file with flexible format detection"""
+        try:
+            # Read Excel file - try first sheet by default
+            excel_file = pd.ExcelFile(file_path)
+            
+            # If multiple sheets, use first one (could be enhanced to let user choose)
+            sheet_name = excel_file.sheet_names[0]
+            df = pd.read_excel(file_path, sheet_name=sheet_name)
+            
+            # Try to detect grain size and percent passing columns
+            particle_sizes = []
+            percent_passing = []
+            metadata = {}
+            
+            # Look for columns that might contain grain size data
+            size_cols = []
+            percent_cols = []
+            
+            for col in df.columns:
+                col_lower = str(col).lower()
+                if any(word in col_lower for word in ['size', 'diameter', 'grain', 'particle', 'sieve', 'mm']):
+                    size_cols.append(col)
+                elif any(word in col_lower for word in ['passing', 'percent', 'cumulative', 'finer', '%']):
+                    percent_cols.append(col)
+            
+            # If we found potential columns, use them
+            if size_cols and percent_cols:
+                # Use first matching columns
+                size_col = size_cols[0]
+                percent_col = percent_cols[0]
+                
+                # Extract data, removing NaN values
+                df_clean = df[[size_col, percent_col]].dropna()
+                
+                particle_sizes = df_clean[size_col].astype(float).tolist()
+                percent_passing = df_clean[percent_col].astype(float).tolist()
+            else:
+                # Fall back to assuming first two numeric columns
+                numeric_cols = df.select_dtypes(include=[np.number]).columns
+                if len(numeric_cols) >= 2:
+                    df_clean = df[numeric_cols[:2]].dropna()
+                    particle_sizes = df_clean.iloc[:, 0].astype(float).tolist()
+                    percent_passing = df_clean.iloc[:, 1].astype(float).tolist()
+                else:
+                    raise ValueError(f"Could not find numeric columns in Excel file")
+            
+            # Extract metadata from non-numeric cells if present
+            # Look for temperature, porosity, sample name in first few rows
+            for idx, row in df.head(10).iterrows():
+                for col in df.columns:
+                    cell_value = str(row[col]).lower()
+                    if 'temperature' in cell_value or 'temp' in cell_value:
+                        # Try to extract temperature from next cell or same cell
+                        try:
+                            import re
+                            temp_match = re.search(r'[\d.]+', str(row[col]))
+                            if temp_match:
+                                metadata['temperature'] = float(temp_match.group())
+                        except:
+                            pass
+                    elif 'porosity' in cell_value:
+                        try:
+                            import re
+                            por_match = re.search(r'[\d.]+', str(row[col]))
+                            if por_match:
+                                metadata['porosity'] = float(por_match.group())
+                        except:
+                            pass
+            
+            return self._create_dataset(metadata, particle_sizes, percent_passing, file_path)
+            
+        except Exception as e:
+            raise ValueError(f"Error reading Excel file {file_path}: {str(e)}")
     
     def _create_dataset(self, metadata: dict, particle_sizes: list, percent_passing: list, file_path: str) -> GrainSizeData:
         """Create GrainSizeData object with validation"""

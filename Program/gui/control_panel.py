@@ -29,8 +29,6 @@ class ControlPanel(QFrame):
         # Connect validation to parameter changes
         self.temp_spinbox.valueChanged.connect(self.validate_temperature)
         self.porosity_spinbox.valueChanged.connect(self.validate_porosity)
-        self.diameter_combo.currentTextChanged.connect(self.validate_column_mapping)
-        self.cumulative_combo.currentTextChanged.connect(self.validate_column_mapping)
         
     def setup_ui(self):
         """Setup the control panel layout"""
@@ -155,40 +153,6 @@ class ControlPanel(QFrame):
         samples_layout.addWidget(self.samples_list)
         samples_layout.addWidget(self.sample_info_label)
         
-        # === DATA IMPORT SECTION ===
-        data_group = QGroupBox("🔧 Data Configuration")
-        data_layout = QVBoxLayout(data_group)
-        
-        self.file_path_edit = QLineEdit()
-        self.file_path_edit.setPlaceholderText("Current sample preview...")
-        self.file_path_edit.setReadOnly(True)
-
-        # Column Mapping Section
-        mapping_group = QGroupBox("📊 Column Mapping")
-        mapping_layout = QVBoxLayout(mapping_group)
-        
-        # Sample column mapping
-        mapping_layout.addWidget(QLabel("Map your data columns:"))
-        
-        diameter_layout = QHBoxLayout()
-        diameter_layout.addWidget(QLabel("Diameter (mm):"))
-        self.diameter_combo = QComboBox()
-        self.diameter_combo.addItems(["Select column...", "Diameter", "Size", "D", "Grain_Size"])
-        diameter_layout.addWidget(self.diameter_combo)
-        
-        cumulative_layout = QHBoxLayout()
-        cumulative_layout.addWidget(QLabel("Cumulative %:"))
-        self.cumulative_combo = QComboBox()
-        self.cumulative_combo.addItems(["Select column...", "Cumulative", "Cum_%", "Passing", "Percent_Passing"])
-        cumulative_layout.addWidget(self.cumulative_combo)
-        
-        mapping_layout.addLayout(diameter_layout)
-        mapping_layout.addLayout(cumulative_layout)
-        
-        data_layout.addWidget(QLabel("Selected Sample:"))
-        data_layout.addWidget(self.file_path_edit)
-        data_layout.addWidget(mapping_group)
-
         # === ANALYSIS PARAMETERS ===
         params_group = QGroupBox("⚙️ Analysis Parameters")
         params_layout = QVBoxLayout(params_group)
@@ -222,72 +186,11 @@ class ControlPanel(QFrame):
         params_layout.addLayout(temp_layout)
         params_layout.addLayout(porosity_layout)
         
-        # === BATCH ANALYSIS SECTION ===
-        analysis_group = QGroupBox("🚀 Batch Analysis")
-        analysis_layout = QVBoxLayout(analysis_group)
-        
-        # Analysis options
-        options_layout = QHBoxLayout()
-        
-        self.auto_analyze_cb = QCheckBox("Auto-analyze new samples")
-        self.auto_analyze_cb.setChecked(True)
-        self.auto_analyze_cb.setToolTip("Automatically run analysis when samples are loaded")
-        
-        self.export_results_cb = QCheckBox("Auto-export results")
-        self.export_results_cb.setToolTip("Automatically export results to Excel after analysis")
-        
-        options_layout.addWidget(self.auto_analyze_cb)
-        options_layout.addWidget(self.export_results_cb)
-        
-        # Main action buttons
-        action_buttons_layout = QHBoxLayout()
-        
-        self.analyze_selected_btn = QPushButton("📊 Analyze Selected")
-        self.analyze_selected_btn.clicked.connect(self.analyze_selected_sample)
-        self.analyze_selected_btn.setEnabled(False)
-        self.analyze_selected_btn.setToolTip("Analyze only the currently selected sample")
-        
-        self.analyze_all_btn = QPushButton("⚡ Analyze All Samples")
-        self.analyze_all_btn.clicked.connect(self.analyze_all_samples)
-        self.analyze_all_btn.setEnabled(False)
-        self.analyze_all_btn.setStyleSheet("""
-            QPushButton {
-                background-color: #6b8e23;
-                color: white;
-                font-weight: bold;
-                border: 2px solid #556b2f;
-                border-radius: 6px;
-                padding: 8px 16px;
-                font-size: 11px;
-            }
-            QPushButton:hover {
-                background-color: #7ba428;
-                border-color: #4a5a2a;
-            }
-            QPushButton:pressed {
-                background-color: #5a7a1f;
-            }
-            QPushButton:disabled {
-                background-color: #a8a8a5;
-                color: #ffffff;
-                border-color: #888888;
-            }
-        """)
-        self.analyze_all_btn.setToolTip("Run batch analysis on all loaded samples")
-        
-        action_buttons_layout.addWidget(self.analyze_selected_btn)
-        action_buttons_layout.addWidget(self.analyze_all_btn)
-        
-        analysis_layout.addLayout(options_layout)
-        analysis_layout.addLayout(action_buttons_layout)
-
-        # === VALIDATION STATUS ===
-        validation_group = QGroupBox("✅ Validation Status")
-        validation_layout = QVBoxLayout(validation_group)
-        
-        self.validation_label = QLabel("🔍 Checking parameters...")
-        self.validation_label.setStyleSheet("color: #5d4e37; font-style: italic;")
-        validation_layout.addWidget(self.validation_label)
+        # Optional: auto-export toggle used by analysis_complete()
+        self.export_results_cb = QCheckBox("Auto-export results after analysis")
+        self.export_results_cb.setChecked(False)
+        self.export_results_cb.setToolTip("If enabled, results will be exported automatically after analysis")
+        params_layout.addWidget(self.export_results_cb)
         
         # Progress Bar
         self.progress_bar = QProgressBar()
@@ -297,10 +200,7 @@ class ControlPanel(QFrame):
         
         # Add all groups to main layout
         layout.addWidget(samples_group)
-        layout.addWidget(data_group)
         layout.addWidget(params_group)
-        layout.addWidget(analysis_group)
-        layout.addWidget(validation_group)
         layout.addWidget(self.progress_label)
         layout.addWidget(self.progress_bar)
         layout.addStretch()  # Push everything to top
@@ -311,7 +211,7 @@ class ControlPanel(QFrame):
             self, 
             "Add Grain Size Data Files", 
             "", 
-            "Excel files (*.xlsx *.xls);;CSV files (*.csv);;All files (*.*)"
+            "All Supported (*.csv *.xlsx *.xls);;CSV files (*.csv);;Excel files (*.xlsx *.xls);;All files (*.*)"
         )
         
         if file_paths:
@@ -345,12 +245,8 @@ class ControlPanel(QFrame):
                 if newly_added:
                     self.load_file_preview(self.loaded_samples[newly_added[0]]['file_path'])
                 
-                # Emit signal
+                # Emit signal with list of sample names
                 self.files_loaded.emit(newly_added)
-                
-                # Auto-analyze if enabled
-                if self.auto_analyze_cb.isChecked():
-                    self.analyze_all_samples()
             else:
                 QMessageBox.information(self, "Info", "All selected files were already loaded.")
     
@@ -393,74 +289,19 @@ class ControlPanel(QFrame):
             sample_name = current_item.data(Qt.ItemDataRole.UserRole)
             sample_data = self.loaded_samples[sample_name]
             
-            # Update preview
-            self.file_path_edit.setText(f"{sample_name} ({sample_data['file_path']})")
-            
-            # Load file preview for column mapping
-            self.load_file_preview(sample_data['file_path'])
+            # Update sample info
+            self.sample_info_label.setText(f"Selected: {sample_name}")
             
             # Update UI state
             self.remove_file_btn.setEnabled(True)
-            self.analyze_selected_btn.setEnabled(True)
+            pass  # Sample selected
             
             # Emit signal
             self.sample_selected.emit(sample_name)
         else:
-            self.file_path_edit.setText("")
             self.remove_file_btn.setEnabled(False)
-            self.analyze_selected_btn.setEnabled(False)
+            pass  # No sample selected
     
-    def analyze_selected_sample(self):
-        """Analyze only the currently selected sample"""
-        current_item = self.samples_list.currentItem()
-        if current_item:
-            sample_name = current_item.data(Qt.ItemDataRole.UserRole)
-            self.run_analysis([sample_name])
-    
-    def analyze_all_samples(self):
-        """Analyze all loaded samples"""
-        if self.loaded_samples:
-            sample_names = list(self.loaded_samples.keys())
-            self.run_analysis(sample_names)
-        else:
-            QMessageBox.information(self, "No Samples", "Please add some samples first.")
-    
-    def run_analysis(self, sample_names):
-        """Run analysis on specified samples"""
-        if not sample_names:
-            return
-        
-        # Perform full validation before analysis
-        if not self.perform_full_validation():
-            QMessageBox.warning(
-                self, 
-                "Validation Failed", 
-                "Please fix the validation errors before running analysis:\n\n" + 
-                "\n".join([err for err in self.validation_errors if '❌' in err or 'should be' in err])
-            )
-            return
-            
-        # Prepare analysis parameters
-        analysis_params = {
-            'samples': sample_names,
-            'temperature': self.temp_spinbox.value(),
-            'porosity': self.porosity_spinbox.value(),
-            'diameter_column': self.diameter_combo.currentText(),
-            'cumulative_column': self.cumulative_combo.currentText(),
-            'auto_export': self.export_results_cb.isChecked()
-        }
-        
-        # Show progress
-        self.show_progress(True)
-        self.progress_label.setText(f"🔄 Analyzing {len(sample_names)} sample(s)...")
-        
-        # Update sample status
-        for sample_name in sample_names:
-            if sample_name in self.loaded_samples:
-                self.loaded_samples[sample_name]['status'] = 'Analyzing...'
-        
-        # Emit analysis request signal
-        self.analysis_requested.emit(analysis_params)
     
     def extract_sample_name(self, file_path):
         """Extract a clean sample name from file path"""
@@ -489,65 +330,7 @@ class ControlPanel(QFrame):
         # Trigger validation to determine if analysis buttons should be enabled
         self.perform_full_validation()
     
-    def browse_file(self):
-        """Legacy method - redirect to add_files"""
-        self.add_files()
             
-    def load_file_preview(self, file_path):
-        """Load and preview the selected file"""
-        try:
-            # Try to detect CSV structure
-            import csv
-            with open(file_path, 'r', encoding='utf-8') as file:
-                # Read first few rows to detect columns
-                reader = csv.reader(file)
-                rows = list(reader)[:10]
-            
-            if not rows:
-                self.sample_info_label.setText("❌ File appears to be empty")
-                return
-            
-            # Try to detect header row
-            headers = []
-            for i, row in enumerate(rows[:3]):  # Check first 3 rows
-                if len(row) >= 2:
-                    # Check if this row looks like headers (contains text, not just numbers)
-                    text_count = sum(1 for cell in row if not self._is_numeric(cell.strip()))
-                    if text_count >= len(row) * 0.5:  # At least half are text
-                        headers = [cell.strip() for cell in row]
-                        break
-            
-            # If no headers detected, create generic ones
-            if not headers and rows:
-                max_cols = max(len(row) for row in rows)
-                headers = [f"Column_{i+1}" for i in range(max_cols)]
-            
-            # Update combo boxes with detected columns
-            self.diameter_combo.clear()
-            self.cumulative_combo.clear()
-            
-            self.diameter_combo.addItem("Select column...")
-            self.cumulative_combo.addItem("Select column...")
-            
-            for col in headers:
-                self.diameter_combo.addItem(col)
-                self.cumulative_combo.addItem(col)
-            
-            # Try to auto-select reasonable defaults
-            for i, col in enumerate(headers):
-                col_lower = col.lower()
-                if any(word in col_lower for word in ['diameter', 'size', 'grain', 'particle', 'sieve']):
-                    if self.diameter_combo.currentText() == "Select column...":
-                        self.diameter_combo.setCurrentIndex(i + 1)
-                elif any(word in col_lower for word in ['cumulative', 'passing', 'percent', 'cum']):
-                    if self.cumulative_combo.currentText() == "Select column...":
-                        self.cumulative_combo.setCurrentIndex(i + 1)
-            
-            # Update UI
-            self.sample_info_label.setText(f"✅ Detected {len(headers)} columns. Please verify mapping below.")
-            
-        except Exception as e:
-            self.sample_info_label.setText(f"❌ Error loading file: {str(e)}")
     
     def _is_numeric(self, value: str) -> bool:
         """Check if a string represents a number"""
@@ -590,8 +373,6 @@ class ControlPanel(QFrame):
         return {
             'temperature': self.temp_spinbox.value(),
             'porosity': self.porosity_spinbox.value(),
-            'diameter_column': self.diameter_combo.currentText(),
-            'cumulative_column': self.cumulative_combo.currentText(),
             'auto_export': self.export_results_cb.isChecked()
         }
     
@@ -651,22 +432,8 @@ class ControlPanel(QFrame):
         self.update_validation_display()
     
     def validate_column_mapping(self):
-        """Validate column mapping selection"""
-        self.validation_errors = [err for err in self.validation_errors if 'Column' not in err]
-        
-        diameter_col = self.diameter_combo.currentText()
-        cumulative_col = self.cumulative_combo.currentText()
-        
-        if diameter_col == "Select column..." or diameter_col == "":
-            self.validation_errors.append("📊 Column: Please select a diameter column")
-        
-        if cumulative_col == "Select column..." or cumulative_col == "":
-            self.validation_errors.append("📊 Column: Please select a cumulative percent column")
-            
-        if diameter_col == cumulative_col and diameter_col != "Select column...":
-            self.validation_errors.append("❌ Column: Diameter and cumulative columns cannot be the same")
-            
-        self.update_validation_display()
+        """Column mapping validation - simplified since we auto-detect"""
+        pass
     
     def validate_samples(self):
         """Validate that samples are loaded and ready"""
@@ -684,14 +451,13 @@ class ControlPanel(QFrame):
     def update_validation_display(self):
         """Update the validation status display"""
         if not self.validation_errors:
-            self.validation_label.setText("✅ All parameters valid - ready for analysis!")
-            self.validation_label.setStyleSheet("color: #6b8e23; font-weight: bold;")
+            pass  # Validation passed
             
             # Enable analysis if we have samples
             if self.loaded_samples:
-                self.analyze_all_btn.setEnabled(True)
+                pass  # Samples ready
                 if self.samples_list.currentItem():
-                    self.analyze_selected_btn.setEnabled(True)
+                    pass  # Sample selected
         else:
             # Show the most critical errors (limit to 3)
             display_errors = self.validation_errors[:3]
@@ -699,14 +465,13 @@ class ControlPanel(QFrame):
             if len(self.validation_errors) > 3:
                 error_text += f"\n... and {len(self.validation_errors) - 3} more issues"
                 
-            self.validation_label.setText(error_text)
-            self.validation_label.setStyleSheet("color: #d2691e; font-weight: normal;")
+            pass  # Show validation errors in status bar if needed
             
             # Disable analysis if there are critical errors
             critical_errors = [err for err in self.validation_errors if '❌' in err or 'should be' in err]
             if critical_errors:
-                self.analyze_all_btn.setEnabled(False)
-                self.analyze_selected_btn.setEnabled(False)
+                pass  # No samples
+                pass  # No sample selected
     
     def perform_full_validation(self):
         """Perform complete validation of all parameters"""
@@ -715,7 +480,39 @@ class ControlPanel(QFrame):
         # Validate all components
         self.validate_temperature(self.temp_spinbox.value())
         self.validate_porosity(self.porosity_spinbox.value())
-        self.validate_column_mapping()
         self.validate_samples()
         
         return len([err for err in self.validation_errors if '❌' in err or 'should be' in err]) == 0
+
+    # ================================
+    # FILE PREVIEW / VALIDATION
+    # ================================
+    def load_file_preview(self, file_path: str) -> None:
+        """Validate the given file and update UI/sample status.
+
+        This provides a lightweight preview/validation step after adding files.
+        """
+        try:
+            # Lazy import to avoid any potential import cycles
+            from data_loader import DataLoader
+            data_loader = DataLoader()
+            is_valid, message = data_loader.validate_file_format(file_path)
+
+            # Find the corresponding sample name
+            sample_name = None
+            for name, info in self.loaded_samples.items():
+                if info.get('file_path') == file_path:
+                    sample_name = name
+                    break
+
+            if is_valid:
+                if sample_name:
+                    self.set_sample_status(sample_name, f"✅ {message}")
+                self.sample_info_label.setText(f"Preview OK: {sample_name or file_path}\n{message}")
+            else:
+                if sample_name:
+                    self.set_sample_status(sample_name, f"❌ {message}")
+                self.sample_info_label.setText(f"Preview Error: {sample_name or file_path}\n{message}")
+        except Exception as e:
+            # Best-effort UI update on unexpected errors
+            self.sample_info_label.setText(f"Preview failed: {e}")
