@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """
 Grain Size Analysis Program - PyQt6 Prototype
-Main application entry point
+Main application entry pointTEST
 """
 
 import sys
