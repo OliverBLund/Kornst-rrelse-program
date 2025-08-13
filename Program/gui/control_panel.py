@@ -241,10 +241,6 @@ class ControlPanel(QFrame):
                 self.update_ui_state()
                 self.sample_info_label.setText(f"✅ Added {len(newly_added)} new sample(s)")
                 
-                # Auto-detect columns for the first file
-                if newly_added:
-                    self.load_file_preview(self.loaded_samples[newly_added[0]]['file_path'])
-                
                 # Emit signal with list of sample names
                 self.files_loaded.emit(newly_added)
             else:

@@ -169,9 +169,11 @@ class KCalculator:
         """
         results = []
         
-        # Use all methods if none specified
-        if selected_methods is None:
+        # Use all methods if none specified or if True is passed
+        if selected_methods is None or selected_methods is True:
             selected_methods = list(self.methods.keys())
+        elif selected_methods is False:
+            selected_methods = []
         
         for method_name in selected_methods:
             if method_name not in self.methods:
