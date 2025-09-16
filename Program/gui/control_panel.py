@@ -2,12 +2,16 @@
 Control panel widget for data import and analysis controls
 """
 
-from PyQt6.QtWidgets import (QFrame, QVBoxLayout, QHBoxLayout, QGroupBox, 
-                            QPushButton, QLabel, QLineEdit, QComboBox, 
+from PyQt6.QtWidgets import (QFrame, QVBoxLayout, QHBoxLayout, QGroupBox,
+                            QPushButton, QLabel, QLineEdit, QComboBox,
                             QTableWidget, QTableWidgetItem, QTextEdit,
                             QProgressBar, QCheckBox, QSpinBox, QDoubleSpinBox,
                             QListWidget, QListWidgetItem, QSplitter, QWidget,
-                            QFileDialog, QMessageBox)
+                            QFileDialog, QMessageBox, QHeaderView, QApplication)
+from PyQt6.QtCore import QThread, QTimer
+from data_loader import DataLoader
+from gui.column_mapper import ColumnMapperDialog
+import os
 from PyQt6.QtCore import Qt, pyqtSignal
 from PyQt6.QtGui import QIcon, QFont
 
@@ -21,6 +25,8 @@ class ControlPanel(QFrame):
         super().__init__()
         self.loaded_samples = {}  # Dictionary to store sample data
         self.validation_errors = []  # Track validation issues
+        self.data_loader = DataLoader()  # Data loading engine
+        self.file_statuses = {}  # Track file loading status: 'pending', 'auto', 'failed', 'review', 'loaded'
         self.setup_ui()
         self.setup_validation()
         
@@ -139,18 +145,52 @@ class ControlPanel(QFrame):
         file_buttons_layout.addWidget(self.remove_file_btn)
         file_buttons_layout.addWidget(self.clear_all_btn)
         
-        # Sample list
-        self.samples_list = QListWidget()
-        self.samples_list.setMaximumHeight(120)
-        self.samples_list.itemSelectionChanged.connect(self.on_sample_selection_changed)
-        self.samples_list.setToolTip("List of loaded samples. Click to select and preview.")
+        # Sample table with status tracking
+        self.samples_table = QTableWidget()
+        self.samples_table.setColumnCount(4)
+        self.samples_table.setHorizontalHeaderLabels(["File", "Status", "Info", "Actions"])
+        self.samples_table.setMinimumHeight(200)
+        self.samples_table.setMaximumHeight(300)
+        self.samples_table.setAlternatingRowColors(True)
+        self.samples_table.setSelectionBehavior(QTableWidget.SelectionBehavior.SelectRows)
+        self.samples_table.setSelectionMode(QTableWidget.SelectionMode.SingleSelection)
+
+        # Set column widths
+        header = self.samples_table.horizontalHeader()
+        header.setSectionResizeMode(0, QHeaderView.ResizeMode.Stretch)  # File name
+        header.setSectionResizeMode(1, QHeaderView.ResizeMode.Fixed)     # Status
+        header.setSectionResizeMode(2, QHeaderView.ResizeMode.Fixed)     # Info
+        header.setSectionResizeMode(3, QHeaderView.ResizeMode.Fixed)     # Actions
+        self.samples_table.setColumnWidth(1, 60)  # Status column (narrower)
+        self.samples_table.setColumnWidth(2, 120) # Info column (wider for better messages)
+        self.samples_table.setColumnWidth(3, 80)  # Actions column
+
+        self.samples_table.itemSelectionChanged.connect(self.on_sample_selection_changed)
+        self.samples_table.setToolTip("Files to be loaded. Status shows loading progress.")
         
         # Sample info display
         self.sample_info_label = QLabel("No samples loaded")
         self.sample_info_label.setStyleSheet("color: gray; font-style: italic;")
         
         samples_layout.addLayout(file_buttons_layout)
-        samples_layout.addWidget(self.samples_list)
+        samples_layout.addWidget(self.samples_table)
+
+        # Batch action buttons
+        batch_buttons_layout = QHBoxLayout()
+        self.load_auto_btn = QPushButton("✅ Load Auto")
+        self.load_auto_btn.clicked.connect(self.load_auto_files)
+        self.load_auto_btn.setEnabled(False)
+        self.load_auto_btn.setToolTip("Load all files that can be automatically processed")
+
+        self.review_failed_btn = QPushButton("⚠️ Review Failed")
+        self.review_failed_btn.clicked.connect(self.review_failed_files)
+        self.review_failed_btn.setEnabled(False)
+        self.review_failed_btn.setToolTip("Review and manually map files that failed auto-loading")
+
+        batch_buttons_layout.addWidget(self.load_auto_btn)
+        batch_buttons_layout.addWidget(self.review_failed_btn)
+
+        samples_layout.addLayout(batch_buttons_layout)
         samples_layout.addWidget(self.sample_info_label)
         
         # === ANALYSIS PARAMETERS ===
@@ -208,95 +248,439 @@ class ControlPanel(QFrame):
     def add_files(self):
         """Add multiple files for batch processing"""
         file_paths, _ = QFileDialog.getOpenFileNames(
-            self, 
-            "Add Grain Size Data Files", 
-            "", 
+            self,
+            "Add Grain Size Data Files",
+            "",
             "All Supported (*.csv *.xlsx *.xls);;CSV files (*.csv);;Excel files (*.xlsx *.xls);;All files (*.*)"
         )
-        
+
         if file_paths:
             newly_added = []
+            already_added = []
+
             for file_path in file_paths:
-                if file_path not in self.loaded_samples:
-                    # Extract sample name from file path
-                    sample_name = self.extract_sample_name(file_path)
-                    
-                    # Add to samples list
+                if file_path not in self.file_statuses:
+                    # Add to file tracking
+                    self.file_statuses[file_path] = 'pending'
+                    newly_added.append(file_path)
+                else:
+                    already_added.append(os.path.basename(file_path))
+
+            if newly_added:
+                # Add files to table
+                for file_path in newly_added:
+                    self.add_file_to_table(file_path, 'pending')
+
+                # Start batch auto-loading
+                self.batch_auto_load(newly_added)
+
+                self.update_ui_state()
+
+                # Provide feedback on what was processed
+                message = f"Processing {len(newly_added)} new file(s)..."
+                if already_added:
+                    if len(already_added) <= 3:
+                        message += f" (Skipped: {', '.join(already_added)})"
+                    else:
+                        message += f" (Skipped {len(already_added)} duplicate files)"
+
+                self.sample_info_label.setText(message)
+            else:
+                if len(already_added) == 1:
+                    QMessageBox.information(self, "No New Files", f"'{already_added[0]}' is already in the list.")
+                else:
+                    QMessageBox.information(self, "No New Files", f"All {len(already_added)} selected files are already in the list.")
+
+    def add_file_to_table(self, file_path: str, status: str):
+        """Add a file to the samples table"""
+        row = self.samples_table.rowCount()
+        self.samples_table.insertRow(row)
+
+        # File name
+        file_name = os.path.basename(file_path)
+        file_item = QTableWidgetItem(file_name)
+        file_item.setData(Qt.ItemDataRole.UserRole, file_path)  # Store full path
+        file_item.setToolTip(file_path)
+        self.samples_table.setItem(row, 0, file_item)
+
+        # Status
+        status_item = QTableWidgetItem(self.get_status_icon(status))
+        status_item.setData(Qt.ItemDataRole.UserRole, status)
+        self.samples_table.setItem(row, 1, status_item)
+
+        # Info
+        info_item = QTableWidgetItem("...")
+        self.samples_table.setItem(row, 2, info_item)
+
+        # Actions - add buttons based on status
+        self.add_action_buttons(row, file_path, status)
+
+    def get_status_icon(self, status: str) -> str:
+        """Get icon for file status"""
+        icons = {
+            'pending': '🔄',
+            'auto': '✅',
+            'failed': '❌',
+            'review': '⚠️',
+            'loaded': '📄'
+        }
+        return icons.get(status, '❓')
+
+    def add_action_buttons(self, row: int, file_path: str, status: str):
+        """Add action buttons to table row based on file status"""
+        # Create container widget for buttons
+        button_widget = QWidget()
+        button_layout = QHBoxLayout(button_widget)
+        button_layout.setContentsMargins(2, 2, 2, 2)
+        button_layout.setSpacing(2)
+
+        if status == 'review':
+            # Add "Map" button for files needing manual mapping
+            map_btn = QPushButton("Map")
+            map_btn.setMaximumWidth(40)
+            map_btn.setStyleSheet("font-size: 10px; padding: 2px;")
+            map_btn.clicked.connect(lambda: self.edit_file_mapping(file_path))
+            button_layout.addWidget(map_btn)
+
+        elif status in ['auto', 'loaded']:
+            # Add "Edit" button for successfully loaded files
+            edit_btn = QPushButton("Edit")
+            edit_btn.setMaximumWidth(40)
+            edit_btn.setStyleSheet("font-size: 10px; padding: 2px;")
+            edit_btn.clicked.connect(lambda: self.edit_file_mapping(file_path))
+            button_layout.addWidget(edit_btn)
+
+            # Add "Info" button to show details
+            info_btn = QPushButton("Info")
+            info_btn.setMaximumWidth(40)
+            info_btn.setStyleSheet("font-size: 10px; padding: 2px;")
+            info_btn.clicked.connect(lambda: self.show_file_info(file_path))
+            button_layout.addWidget(info_btn)
+
+        elif status == 'failed':
+            # Add "Fix" button for failed files
+            fix_btn = QPushButton("Fix")
+            fix_btn.setMaximumWidth(40)
+            fix_btn.setStyleSheet("font-size: 10px; padding: 2px;")
+            fix_btn.clicked.connect(lambda: self.edit_file_mapping(file_path))
+            button_layout.addWidget(fix_btn)
+
+        # Set the widget in the table
+        self.samples_table.setCellWidget(row, 3, button_widget)
+
+    def edit_file_mapping(self, file_path: str):
+        """Open column mapping dialog for a specific file"""
+        try:
+            dialog = ColumnMapperDialog(file_path, self)
+            if dialog.exec() == QMessageBox.StandardButton.Ok.value:
+                # Get mapped data
+                result = dialog.get_mapping_result()
+
+                # Create dataset
+                from data_loader import GrainSizeData
+                dataset = GrainSizeData(
+                    sample_name=result['sample_name'],
+                    temperature=result['temperature'],
+                    porosity=result['porosity'],
+                    particle_sizes=result['particle_sizes'],
+                    percent_passing=result['percent_passing'],
+                    file_path=file_path
+                )
+
+                # Store as loaded
+                sample_name = result['sample_name']
+                self.loaded_samples[sample_name] = {
+                    'file_path': file_path,
+                    'data': dataset,
+                    'status': 'loaded'
+                }
+
+                # Update status
+                self.file_statuses[file_path] = 'loaded'
+                self.update_file_in_table(file_path, 'loaded', f"{len(dataset.particle_sizes)} pts")
+
+                # Update action buttons
+                for row in range(self.samples_table.rowCount()):
+                    file_item = self.samples_table.item(row, 0)
+                    if file_item and file_item.data(Qt.ItemDataRole.UserRole) == file_path:
+                        self.add_action_buttons(row, file_path, 'loaded')
+                        break
+
+                self.sample_info_label.setText(f"✅ Updated: {os.path.basename(file_path)}")
+
+        except Exception as e:
+            QMessageBox.warning(self, "Error", f"Failed to edit {os.path.basename(file_path)}:\n{str(e)}")
+
+    def show_file_info(self, file_path: str):
+        """Show detailed information about a loaded file"""
+        sample_name = self.extract_sample_name(file_path)
+        if sample_name in self.loaded_samples:
+            dataset = self.loaded_samples[sample_name]['data']
+
+            # Create comprehensive file information
+            info_text = f"""File Analysis Report
+{'='*40}
+
+📄 File: {os.path.basename(file_path)}
+🏷️  Sample: {dataset.sample_name}
+🌡️ Temperature: {dataset.temperature}°C
+🕳️ Porosity: {dataset.porosity}
+📊 Data Points: {len(dataset.particle_sizes)}
+
+Grain Size Range:
+  Largest: {max(dataset.particle_sizes):.3f} mm
+  Smallest: {min(dataset.particle_sizes):.3f} mm
+
+Characteristic Sizes:
+  D10: {dataset.get_d10():.3f if dataset.get_d10() else 'N/A'} mm (Used by: Hazen, Terzaghi, Beyer, etc.)
+  D30: {dataset.get_d30():.3f if dataset.get_d30() else 'N/A'} mm (Used for uniformity calculations)
+  D50: {dataset.get_d50():.3f if dataset.get_d50() else 'N/A'} mm (Median grain size)
+  D60: {dataset.get_d60():.3f if dataset.get_d60() else 'N/A'} mm (Used for uniformity coefficient)
+
+Soil Classification: {dataset.classify_soil()}
+Uniformity Coefficient (Cu): {dataset.get_uniformity_coefficient():.2f if dataset.get_uniformity_coefficient() else 'N/A'}
+
+{'='*40}
+{dataset.get_detailed_validation_report()}"""
+
+            # Show in a dialog
+            msg_box = QMessageBox(self)
+            msg_box.setWindowTitle(f"File Information - {sample_name}")
+            msg_box.setText(info_text)
+            msg_box.setFont(QFont("Courier", 8))  # Monospace font for alignment
+            msg_box.resize(600, 400)  # Make dialog larger
+            msg_box.exec()
+
+    def batch_auto_load(self, file_paths: list):
+        """Attempt to auto-load all files in the list"""
+        self.progress_bar.setVisible(True)
+        self.progress_label.setVisible(True)
+        self.progress_bar.setMaximum(len(file_paths) * 3)  # 3 steps per file
+
+        auto_loaded = 0
+        failed_files = 0
+
+        for i, file_path in enumerate(file_paths):
+            base_progress = i * 3
+            file_name = os.path.basename(file_path)
+
+            # Step 1: Detecting format
+            self.progress_bar.setValue(base_progress)
+            self.progress_label.setText(f"🔍 Analyzing {file_name}...")
+            QApplication.processEvents()  # Update UI
+
+            try:
+                # Step 2: Loading data
+                self.progress_bar.setValue(base_progress + 1)
+                self.progress_label.setText(f"📊 Loading {file_name}...")
+                QApplication.processEvents()  # Update UI
+                # Attempt to auto-load
+                dataset = self.data_loader.load_file(file_path)
+
+                # Step 3: Validating and processing
+                self.progress_bar.setValue(base_progress + 2)
+                self.progress_label.setText(f"✅ Validating {file_name}...")
+                QApplication.processEvents()  # Update UI
+
+                # Success - mark as auto-loaded, but check for validation issues
+                sample_name = self.extract_sample_name(file_path)
+
+                # Determine status based on validation messages
+                if dataset.has_errors():
+                    status = 'failed'
+                    info = f"❌ {len([m for m in dataset.validation_messages if m.severity.value == 'error'])} error(s)"
+                    failed_files += 1
+                elif dataset.has_warnings():
+                    status = 'auto'  # Still usable, but with warnings
+                    info = dataset.get_validation_summary()
+                    auto_loaded += 1
+                else:
+                    status = 'auto'
+                    info = dataset.get_validation_summary()
+                    auto_loaded += 1
+
+                self.file_statuses[file_path] = status
+                self.loaded_samples[sample_name] = {
+                    'file_path': file_path,
+                    'data': dataset,
+                    'status': status
+                }
+
+                # Update table with detailed info
+                self.update_file_in_table(file_path, status, info)
+
+            except Exception as e:
+                # Failed - mark for review with specific error info
+                self.file_statuses[file_path] = 'review'
+
+                # Create user-friendly error message
+                error_str = str(e)
+                if "could not parse" in error_str.lower():
+                    info = "❓ Column mapping needed"
+                elif "no valid" in error_str.lower():
+                    info = "❌ No valid data found"
+                elif "delimiter" in error_str.lower():
+                    info = "⚙️ Format detection failed"
+                else:
+                    info = "⚠️ Loading failed"
+
+                self.update_file_in_table(file_path, 'review', info)
+                failed_files += 1
+
+        # Final progress update
+        self.progress_bar.setValue(len(file_paths) * 3)
+        self.progress_label.setText("🎉 Batch processing complete!")
+        QApplication.processEvents()
+
+        # Small delay to show completion
+        QTimer.singleShot(1000, lambda: self.progress_bar.setVisible(False))
+        QTimer.singleShot(1000, lambda: self.progress_label.setVisible(False))
+
+        # Update summary with detailed feedback
+        if auto_loaded > 0 and failed_files == 0:
+            summary = f"🎉 Successfully loaded all {auto_loaded} file{'s' if auto_loaded != 1 else ''}!"
+        elif auto_loaded > 0 and failed_files > 0:
+            summary = f"✅ {auto_loaded} loaded successfully, ⚠️ {failed_files} need review"
+        elif failed_files > 0:
+            summary = f"⚠️ {failed_files} file{'s' if failed_files != 1 else ''} need manual mapping"
+        else:
+            summary = "No files processed"
+
+        self.sample_info_label.setText(summary)
+        self.update_ui_state()
+
+    def update_file_in_table(self, file_path: str, status: str, info: str):
+        """Update file status in table"""
+        for row in range(self.samples_table.rowCount()):
+            file_item = self.samples_table.item(row, 0)
+            if file_item and file_item.data(Qt.ItemDataRole.UserRole) == file_path:
+                # Update status
+                self.samples_table.item(row, 1).setText(self.get_status_icon(status))
+                self.samples_table.item(row, 1).setData(Qt.ItemDataRole.UserRole, status)
+                # Update info
+                self.samples_table.item(row, 2).setText(info)
+                # Update action buttons
+                self.add_action_buttons(row, file_path, status)
+                break
+
+    def load_auto_files(self):
+        """Load all successfully auto-processed files into the analysis"""
+        auto_files = [path for path, status in self.file_statuses.items() if status == 'auto']
+        if auto_files:
+            loaded_datasets = []
+            for file_path in auto_files:
+                sample_name = self.extract_sample_name(file_path)
+                if sample_name in self.loaded_samples:
+                    loaded_datasets.append(self.loaded_samples[sample_name]['data'])
+
+            if loaded_datasets:
+                self.files_loaded.emit([ds.sample_name for ds in loaded_datasets])
+                self.sample_info_label.setText(f"✅ Loaded {len(loaded_datasets)} dataset(s) for analysis")
+
+    def review_failed_files(self):
+        """Open manual column mapping for files that need review"""
+        review_files = [path for path, status in self.file_statuses.items() if status == 'review']
+
+        for file_path in review_files:
+            try:
+                # Open column mapper dialog
+                dialog = ColumnMapperDialog(file_path, self)
+                if dialog.exec() == QMessageBox.StandardButton.Ok.value:
+                    # Get mapped data
+                    result = dialog.get_mapping_result()
+
+                    # Create dataset
+                    from data_loader import GrainSizeData
+                    dataset = GrainSizeData(
+                        sample_name=result['sample_name'],
+                        temperature=result['temperature'],
+                        porosity=result['porosity'],
+                        particle_sizes=result['particle_sizes'],
+                        percent_passing=result['percent_passing'],
+                        file_path=file_path
+                    )
+
+                    # Store as loaded
+                    sample_name = result['sample_name']
                     self.loaded_samples[sample_name] = {
                         'file_path': file_path,
-                        'columns': [],
-                        'data': None,
-                        'status': 'Loaded'
+                        'data': dataset,
+                        'status': 'loaded'
                     }
-                    
-                    # Add to UI list
-                    item = QListWidgetItem(f"📄 {sample_name}")
-                    item.setData(Qt.ItemDataRole.UserRole, sample_name)
-                    item.setToolTip(f"File: {file_path}\nStatus: Ready for analysis")
-                    self.samples_list.addItem(item)
-                    
-                    newly_added.append(sample_name)
-            
-            if newly_added:
-                self.update_ui_state()
-                self.sample_info_label.setText(f"✅ Added {len(newly_added)} new sample(s)")
-                
-                # Emit signal with list of sample names
-                self.files_loaded.emit(newly_added)
-            else:
-                QMessageBox.information(self, "Info", "All selected files were already loaded.")
-    
+
+                    # Update status
+                    self.file_statuses[file_path] = 'loaded'
+                    self.update_file_in_table(file_path, 'loaded', f"{len(dataset.particle_sizes)} pts")
+
+            except Exception as e:
+                QMessageBox.warning(self, "Error", f"Failed to process {os.path.basename(file_path)}:\n{str(e)}")
+
+        self.update_ui_state()
+
     def remove_selected_file(self):
-        """Remove selected file from the list"""
-        current_item = self.samples_list.currentItem()
-        if current_item:
-            sample_name = current_item.data(Qt.ItemDataRole.UserRole)
-            
-            # Remove from data
+        """Remove selected file from the table"""
+        current_row = self.samples_table.currentRow()
+        if current_row >= 0:
+            # Get file path
+            file_item = self.samples_table.item(current_row, 0)
+            file_path = file_item.data(Qt.ItemDataRole.UserRole)
+
+            # Remove from tracking
+            if file_path in self.file_statuses:
+                del self.file_statuses[file_path]
+
+            # Remove from loaded samples
+            sample_name = self.extract_sample_name(file_path)
             if sample_name in self.loaded_samples:
                 del self.loaded_samples[sample_name]
-            
-            # Remove from UI
-            row = self.samples_list.row(current_item)
-            self.samples_list.takeItem(row)
-            
+
+            # Remove from table
+            self.samples_table.removeRow(current_row)
+
             self.update_ui_state()
-            self.sample_info_label.setText(f"🗑️ Removed sample: {sample_name}")
+            self.sample_info_label.setText(f"🗑️ Removed: {os.path.basename(file_path)}")
+        else:
+            self.remove_file_btn.setEnabled(False)
     
     def clear_all_files(self):
         """Clear all loaded files"""
-        if self.loaded_samples:
+        total_files = len(self.file_statuses)
+        if total_files > 0:
             reply = QMessageBox.question(
-                self, "Clear All", 
-                f"Remove all {len(self.loaded_samples)} loaded samples?",
+                self, "Clear All",
+                f"Remove all {total_files} files?",
                 QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No
             )
-            
+
             if reply == QMessageBox.StandardButton.Yes:
                 self.loaded_samples.clear()
-                self.samples_list.clear()
+                self.file_statuses.clear()
+                self.samples_table.setRowCount(0)
                 self.update_ui_state()
-                self.sample_info_label.setText("🧹 All samples cleared")
+                self.sample_info_label.setText("🧹 All files cleared")
     
     def on_sample_selection_changed(self):
         """Handle sample selection change"""
-        current_item = self.samples_list.currentItem()
-        if current_item:
-            sample_name = current_item.data(Qt.ItemDataRole.UserRole)
-            sample_data = self.loaded_samples[sample_name]
-            
+        current_row = self.samples_table.currentRow()
+        if current_row >= 0:
+            file_item = self.samples_table.item(current_row, 0)
+            file_path = file_item.data(Qt.ItemDataRole.UserRole)
+            status_item = self.samples_table.item(current_row, 1)
+            status = status_item.data(Qt.ItemDataRole.UserRole)
+
             # Update sample info
-            self.sample_info_label.setText(f"Selected: {sample_name}")
-            
+            file_name = os.path.basename(file_path)
+            self.sample_info_label.setText(f"Selected: {file_name} ({status})")
+
             # Update UI state
             self.remove_file_btn.setEnabled(True)
-            pass  # Sample selected
-            
-            # Emit signal
-            self.sample_selected.emit(sample_name)
+
+            # If this is a loaded dataset, emit signal
+            sample_name = self.extract_sample_name(file_path)
+            if sample_name in self.loaded_samples and status in ['auto', 'loaded']:
+                self.sample_selected.emit(sample_name)
         else:
             self.remove_file_btn.setEnabled(False)
-            pass  # No sample selected
     
     
     def extract_sample_name(self, file_path):
@@ -310,19 +694,34 @@ class ControlPanel(QFrame):
         return name if name else base_name
     
     def update_ui_state(self):
-        """Update UI state based on loaded samples"""
-        has_samples = len(self.loaded_samples) > 0
-        has_selection = self.samples_list.currentItem() is not None
-        
-        # Update sample count
-        if has_samples:
-            self.sample_info_label.setText(f"📊 {len(self.loaded_samples)} sample(s) loaded")
-        else:
-            self.sample_info_label.setText("No samples loaded")
-            
-        # Basic UI state (validation will override if needed)
+        """Update UI state based on loaded samples and file statuses"""
+        has_files = len(self.file_statuses) > 0
+        has_selection = self.samples_table.currentRow() >= 0
+
+        # Count files by status
+        auto_count = sum(1 for status in self.file_statuses.values() if status == 'auto')
+        review_count = sum(1 for status in self.file_statuses.values() if status == 'review')
+        loaded_count = sum(1 for status in self.file_statuses.values() if status == 'loaded')
+
+        # Update batch action buttons
+        self.load_auto_btn.setEnabled(auto_count > 0)
+        self.review_failed_btn.setEnabled(review_count > 0)
+
+        # Basic UI state
         self.remove_file_btn.setEnabled(has_selection)
-        
+
+        # If no manual status update, show file counts
+        if has_files and not hasattr(self, '_manual_status_update'):
+            if auto_count > 0 or loaded_count > 0:
+                summary = f"📊 {auto_count + loaded_count} ready"
+                if review_count > 0:
+                    summary += f", {review_count} need review"
+            else:
+                summary = f"{len(self.file_statuses)} file(s) added"
+
+            if not self.sample_info_label.text().startswith(("Processing", "✅", "⚠️", "🗑️", "🧹")):
+                self.sample_info_label.setText(summary)
+
         # Trigger validation to determine if analysis buttons should be enabled
         self.perform_full_validation()
     
@@ -380,14 +779,12 @@ class ControlPanel(QFrame):
         """Update the status of a specific sample"""
         if sample_name in self.loaded_samples:
             self.loaded_samples[sample_name]['status'] = status
-            
-            # Update UI list item tooltip
-            for i in range(self.samples_list.count()):
-                item = self.samples_list.item(i)
-                if item and item.data(Qt.ItemDataRole.UserRole) == sample_name:
-                    file_path = self.loaded_samples[sample_name]['file_path']
-                    item.setToolTip(f"File: {file_path}\nStatus: {status}")
-                    break
+            file_path = self.loaded_samples[sample_name]['file_path']
+
+            # Update file status tracking and table
+            if file_path in self.file_statuses:
+                self.file_statuses[file_path] = status
+                self.update_file_in_table(file_path, status, f"Status: {status}")
             
     def show_progress(self, show=True):
         """Show/hide progress bar"""
@@ -452,7 +849,7 @@ class ControlPanel(QFrame):
             # Enable analysis if we have samples
             if self.loaded_samples:
                 pass  # Samples ready
-                if self.samples_list.currentItem():
+                if self.samples_table.currentRow() >= 0:
                     pass  # Sample selected
         else:
             # Show the most critical errors (limit to 3)

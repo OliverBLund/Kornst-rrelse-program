@@ -6,7 +6,8 @@ Handles CSV file loading and data validation
 import csv
 import os
 from typing import Dict, List, Tuple, Optional, Any
-from dataclasses import dataclass
+from dataclasses import dataclass, field
+from enum import Enum
 import logging
 import pandas as pd
 import numpy as np
@@ -14,6 +15,29 @@ import numpy as np
 # Set up logging
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
+
+class ValidationSeverity(Enum):
+    """Severity levels for validation messages"""
+    INFO = "info"
+    WARNING = "warning"
+    ERROR = "error"
+
+@dataclass
+class ValidationMessage:
+    """A user-friendly validation message"""
+    severity: ValidationSeverity
+    title: str
+    message: str
+    suggestion: str = ""
+    impact: str = ""
+
+    def get_icon(self) -> str:
+        icons = {
+            ValidationSeverity.INFO: "INFO",
+            ValidationSeverity.WARNING: "WARN",
+            ValidationSeverity.ERROR: "ERROR"
+        }
+        return icons.get(self.severity, "UNKNOWN")
 
 @dataclass
 class GrainSizeData:
@@ -25,6 +49,7 @@ class GrainSizeData:
     percent_passing: List[float]  # %
     comments: Optional[str] = None
     file_path: Optional[str] = None
+    validation_messages: List[ValidationMessage] = field(default_factory=list)
     
     def __post_init__(self):
         """Validate data after initialization"""
@@ -41,21 +66,56 @@ class GrainSizeData:
         
         # Check for reasonable grain size range (0.001 mm to 1000 mm)
         if any(ps < 0.001 or ps > 1000 for ps in self.particle_sizes):
-            logger.warning(f"Unusual grain sizes detected: {min(self.particle_sizes):.4f} - {max(self.particle_sizes):.1f} mm")
-        
-        # Check if percent passing is monotonic (should generally increase with decreasing grain size)
-        # Sort by particle size and check if percent passing increases
+            min_size, max_size = min(self.particle_sizes), max(self.particle_sizes)
+            self.validation_messages.append(ValidationMessage(
+                severity=ValidationSeverity.WARNING,
+                title="Unusual grain sizes detected",
+                message=f"Grain sizes range from {min_size:.4f} to {max_size:.1f} mm",
+                suggestion="Typical range is 0.001-1000 mm. Check if units are correct.",
+                impact="May affect method applicability"
+            ))
+
+        # Check if percent passing is monotonic (should generally decrease with decreasing grain size)
+        # Sort by particle size (largest to smallest) and check if percent passing decreases
         sorted_data = sorted(zip(self.particle_sizes, self.percent_passing), reverse=True)
+        non_monotonic_count = 0
+        problem_sizes = []
+
         for i in range(1, len(sorted_data)):
-            if sorted_data[i][1] < sorted_data[i-1][1]:
-                logger.warning(f"Non-monotonic percent passing detected at size {sorted_data[i][0]:.3f} mm")
-        
+            # Percent passing should decrease (or stay same) as grain size decreases
+            if sorted_data[i][1] > sorted_data[i-1][1]:
+                non_monotonic_count += 1
+                if len(problem_sizes) < 3:  # Collect first few examples
+                    problem_sizes.append(f"{sorted_data[i][0]:.3f}mm")
+
+        if non_monotonic_count > 0:
+            severity = ValidationSeverity.WARNING if non_monotonic_count <= 2 else ValidationSeverity.ERROR
+            self.validation_messages.append(ValidationMessage(
+                severity=severity,
+                title="Non-monotonic grain size data",
+                message=f"Found {non_monotonic_count} data points where percent passing increases with smaller grain sizes",
+                suggestion="Check data ordering: larger grain sizes should have higher percent passing values",
+                impact="May affect D10, D30, D50, D60 calculations and hydraulic conductivity estimates"
+            ))
+
         # Validate temperature and porosity
         if self.temperature < 0 or self.temperature > 50:
-            logger.warning(f"Unusual temperature: {self.temperature}°C (typical range: 0-50°C)")
-        
+            self.validation_messages.append(ValidationMessage(
+                severity=ValidationSeverity.WARNING,
+                title="Unusual temperature",
+                message=f"Temperature is {self.temperature}°C",
+                suggestion="Typical range is 0-50°C for soil testing",
+                impact="Used for viscosity corrections in hydraulic conductivity calculations"
+            ))
+
         if self.porosity < 0.1 or self.porosity > 0.8:
-            logger.warning(f"Unusual porosity: {self.porosity} (typical range: 0.1-0.8)")
+            self.validation_messages.append(ValidationMessage(
+                severity=ValidationSeverity.WARNING,
+                title="Unusual porosity",
+                message=f"Porosity is {self.porosity}",
+                suggestion="Typical range is 0.1-0.8 for natural soils",
+                impact="Used directly in some hydraulic conductivity formulas"
+            ))
     
     def get_d10(self) -> Optional[float]:
         """Calculate D10 (grain size at 10% passing)"""
@@ -130,6 +190,46 @@ class GrainSizeData:
         
         return None
     
+    def has_errors(self) -> bool:
+        """Check if dataset has any error-level validation messages"""
+        return any(msg.severity == ValidationSeverity.ERROR for msg in self.validation_messages)
+
+    def has_warnings(self) -> bool:
+        """Check if dataset has any warning-level validation messages"""
+        return any(msg.severity == ValidationSeverity.WARNING for msg in self.validation_messages)
+
+    def get_validation_summary(self) -> str:
+        """Get a brief summary of validation status for GUI display"""
+        if not self.validation_messages:
+            return f"OK {len(self.particle_sizes)} pts"
+
+        errors = sum(1 for msg in self.validation_messages if msg.severity == ValidationSeverity.ERROR)
+        warnings = sum(1 for msg in self.validation_messages if msg.severity == ValidationSeverity.WARNING)
+
+        if errors > 0:
+            return f"ERROR {errors} error{'s' if errors > 1 else ''}"
+        elif warnings > 0:
+            return f"WARN {warnings} warning{'s' if warnings > 1 else ''}"
+        else:
+            return f"INFO {len(self.particle_sizes)} pts"
+
+    def get_detailed_validation_report(self) -> str:
+        """Get detailed validation report for display in info dialog"""
+        if not self.validation_messages:
+            return "OK: No validation issues detected"
+
+        report = "Validation Report:\n" + "="*40 + "\n\n"
+        for msg in self.validation_messages:
+            report += f"{msg.severity.value.upper()}: {msg.title}\n"
+            report += f"   {msg.message}\n"
+            if msg.suggestion:
+                report += f"   Suggestion: {msg.suggestion}\n"
+            if msg.impact:
+                report += f"   Impact: {msg.impact}\n"
+            report += "\n"
+
+        return report
+
     def classify_soil(self) -> str:
         """Classify soil based on grain size distribution"""
         d10 = self.get_d10()
@@ -210,55 +310,128 @@ class DataLoader:
         self.loaded_datasets.extend(datasets)
         return datasets
     
-    def _load_csv(self, file_path: str) -> GrainSizeData:
-        """Load CSV file with flexible format detection"""
-        metadata = {}
-        particle_sizes = []
-        percent_passing = []
-        
+    def _detect_delimiter(self, file_path: str) -> tuple:
+        """
+        Simple delimiter detection - try common delimiters and return best match
+        Returns: (delimiter, confidence_score)
+        """
+        delimiters = [',', ';', '\t', '|']
+
         try:
             with open(file_path, 'r', encoding='utf-8') as file:
-                content = file.read()
-                
-            # Try different approaches to parse the CSV
+                # Read first few lines for analysis
+                sample_lines = []
+                for i, line in enumerate(file):
+                    if i >= 10:  # Analyze first 10 lines
+                        break
+                    sample_lines.append(line.strip())
+        except Exception:
+            return ',', 0.5  # Default fallback
+
+        if not sample_lines:
+            return ',', 0.5
+
+        best_delimiter = ','
+        best_score = 0
+
+        for delimiter in delimiters:
+            score = self._score_delimiter(sample_lines, delimiter)
+            if score > best_score:
+                best_score = score
+                best_delimiter = delimiter
+
+        return best_delimiter, best_score
+
+    def _score_delimiter(self, sample_lines: list, delimiter: str) -> float:
+        """Score a delimiter based on consistency and data patterns"""
+        if not sample_lines:
+            return 0.0
+
+        # Count columns in each line
+        column_counts = []
+        numeric_column_counts = []
+
+        for line in sample_lines:
+            if not line:
+                continue
+
+            parts = line.split(delimiter)
+            column_counts.append(len(parts))
+
+            # Count numeric columns
+            numeric_count = 0
+            for part in parts:
+                try:
+                    float(part.strip())
+                    numeric_count += 1
+                except ValueError:
+                    pass
+            numeric_column_counts.append(numeric_count)
+
+        if not column_counts:
+            return 0.0
+
+        # Consistency score - prefer consistent column counts
+        most_common_count = max(set(column_counts), key=column_counts.count)
+        consistency = column_counts.count(most_common_count) / len(column_counts)
+
+        # Prefer at least 2 columns
+        if most_common_count < 2:
+            return 0.0
+
+        # Numeric data score - expect some numeric columns
+        avg_numeric = sum(numeric_column_counts) / len(numeric_column_counts) if numeric_column_counts else 0
+        numeric_score = min(1.0, avg_numeric / 2)  # Normalize expecting ~2 numeric columns
+
+        # Combined score
+        return consistency * 0.7 + numeric_score * 0.3
+
+    def _load_csv(self, file_path: str) -> GrainSizeData:
+        """Load CSV file with flexible format detection"""
+        try:
+            # First detect the best delimiter
+            delimiter, confidence = self._detect_delimiter(file_path)
+            logger.info(f"Detected delimiter '{delimiter}' with confidence {confidence:.2f} for {os.path.basename(file_path)}")
+
+            # Try different approaches to parse the CSV with detected delimiter
             dataset = None
-            
+
             # Approach 1: Try our specific metadata format first
             try:
-                dataset = self._load_csv_with_metadata(file_path)
+                dataset = self._load_csv_with_metadata(file_path, delimiter)
             except:
                 pass
-            
+
             # Approach 2: Try simple two-column format
             if dataset is None:
                 try:
-                    dataset = self._load_csv_simple_format(file_path)
+                    dataset = self._load_csv_simple_format(file_path, delimiter)
                 except:
                     pass
-            
+
             # Approach 3: Try multi-column format with headers
             if dataset is None:
                 try:
-                    dataset = self._load_csv_multi_column(file_path)
+                    dataset = self._load_csv_multi_column(file_path, delimiter)
                 except:
                     pass
-            
+
             if dataset is None:
                 raise ValueError(f"Could not parse CSV file format in {file_path}")
-                
+
             return dataset
-        
+
         except Exception as e:
             raise ValueError(f"Error reading CSV file {file_path}: {str(e)}")
     
-    def _load_csv_with_metadata(self, file_path: str) -> GrainSizeData:
+    def _load_csv_with_metadata(self, file_path: str, delimiter: str = ',') -> GrainSizeData:
         """Load CSV with metadata section (our format)"""
         metadata = {}
         particle_sizes = []
         percent_passing = []
         
         with open(file_path, 'r', encoding='utf-8') as file:
-            reader = csv.reader(file)
+            reader = csv.reader(file, delimiter=delimiter)
             data_section_started = False
             
             for row in reader:
@@ -304,14 +477,14 @@ class DataLoader:
         
         return self._create_dataset(metadata, particle_sizes, percent_passing, file_path)
     
-    def _load_csv_simple_format(self, file_path: str) -> GrainSizeData:
+    def _load_csv_simple_format(self, file_path: str, delimiter: str = ',') -> GrainSizeData:
         """Load simple two-column CSV (size, percent passing)"""
         particle_sizes = []
         percent_passing = []
         
         with open(file_path, 'r', encoding='utf-8') as file:
-            reader = csv.reader(file)
-            
+            reader = csv.reader(file, delimiter=delimiter)
+
             # Skip potential header row
             first_row = next(reader, None)
             if first_row:
@@ -340,11 +513,11 @@ class DataLoader:
         metadata = {}
         return self._create_dataset(metadata, particle_sizes, percent_passing, file_path)
     
-    def _load_csv_multi_column(self, file_path: str) -> GrainSizeData:
+    def _load_csv_multi_column(self, file_path: str, delimiter: str = ',') -> GrainSizeData:
         """Load multi-column CSV with flexible header detection"""
         with open(file_path, 'r', encoding='utf-8') as file:
-            reader = csv.reader(file)
-            
+            reader = csv.reader(file, delimiter=delimiter)
+
             # Read first few rows to detect headers
             rows = []
             for i, row in enumerate(reader):
@@ -397,7 +570,7 @@ class DataLoader:
         
         # Re-read file and extract data
         with open(file_path, 'r', encoding='utf-8') as file:
-            reader = csv.reader(file)
+            reader = csv.reader(file, delimiter=delimiter)
             
             # Skip to data rows
             for i, row in enumerate(reader):
