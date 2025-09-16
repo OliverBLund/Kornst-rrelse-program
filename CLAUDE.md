@@ -12,22 +12,10 @@ This is a Grain Size Analysis application for calculating hydraulic conductivity
 ```bash
 # Run the main application
 python Program/main.py
-
-# Or use the batch file
-run_app.bat
-```
-
-### Testing
-```bash
-# Test data loading functionality
-python test_all_loading.py
-
-# Test data flow
-python test_data_flow.py
 ```
 
 ### Dependencies
-The application requires the following Python packages (already installed):
+The application requires the following Python packages:
 - PyQt6 (GUI framework)
 - matplotlib (plotting)
 - numpy (numerical computations)
@@ -37,69 +25,112 @@ The application requires the following Python packages (already installed):
 
 ## Architecture
 
-### Core Modules
+### High-Level Architecture
+The application follows a multi-tab, dataset-oriented architecture where:
+- **MainWindow** serves as the primary container with menu, toolbar, and status bar
+- **ControlPanel** (left side) handles file management, batch operations, and global settings
+- **Right side** contains a tab widget with individual **DatasetTab** instances for each loaded dataset
+- Each **DatasetTab** contains nested tabs: plot workspace, results tables, and statistics
+- **ComparisonTab** and **ReportingTab** provide cross-dataset analysis capabilities
 
-1. **Program/main.py**: Entry point, initializes PyQt6 application
-2. **Program/gui/main_window.py**: Main window with tabbed interface (Plots, Results, Statistics)
-3. **Program/data_loader.py**: CSV data loading with flexible format detection
-4. **Program/k_calculations.py**: 12+ hydraulic conductivity calculation methods (Hazen, Terzaghi, Beyer, etc.)
+### Core Data Flow
+```
+CSV/Excel Files → DataLoader → GrainSizeData objects → KCalculator →
+KCalculationResult objects → GUI visualization (plots/tables/reports)
+```
 
-### GUI Components (Program/gui/)
-- **control_panel.py**: Left panel for file management and batch processing
-- **plot_widget.py**: Matplotlib integration for grain size distribution plots
-- **column_mapper.py**: Dialog for mapping CSV columns to data fields
+### Key Modules
 
-### Data Processing Flow
-1. Load CSV/Excel files → auto-detect format with fallback to manual column mapping
-2. Validate data (range checks, monotonic verification)
-3. Calculate characteristic grain sizes (D10, D20, D30, D50, D60)
-4. Apply selected K-calculation methods with temperature/porosity corrections
-5. Display results in tables, plots, and statistics
+**Core Processing:**
+- **Program/main.py**: Application entry point and QApplication initialization
+- **Program/data_loader.py**: Flexible CSV/Excel loading with format auto-detection and validation
+- **Program/k_calculations.py**: Hydraulic conductivity calculations using 12+ empirical methods
+- **Program/report_generator.py**: Professional HTML/PDF report generation
 
-### Supported File Formats
-- **CSV**: Standard format, no headers, custom delimiters
-- **Excel**: .xlsx and .xls files (single or multi-sheet)
-- **Column Mapping**: Automatic detection with manual fallback dialog
-- **Validation**: Grain size range (0.001-1000 mm), monotonic checks, porosity/temperature bounds
+**GUI Architecture:**
+- **Program/gui/main_window.py**: Main application window with two-level tab system
+- **Program/gui/control_panel.py**: Left panel for file management and batch processing
+- **Program/gui/dataset_tab.py**: Individual dataset container with nested tabs
+- **Program/gui/comparison_tab.py**: Cross-dataset comparison and analysis
+- **Program/gui/reporting_tab.py**: Report generation interface
+- **Program/gui/plot_widget.py** & **plot_workspace.py**: Matplotlib integration components
+- **Program/gui/column_mapper.py**: CSV column mapping dialog for flexible data import
+
+### Data Models and Processing
+
+**GrainSizeData Class** (`data_loader.py`):
+- Encapsulates sample data: grain sizes, percent passing, metadata
+- Built-in validation for data ranges and monotonic checks
+- Supports temperature (°C) and porosity (0-1) parameters
+
+**KCalculator Class** (`k_calculations.py`):
+- Implements 12+ empirical hydraulic conductivity methods
+- Returns structured `KCalculationResult` objects with status codes
+- Handles method-specific applicability conditions and warnings
+- Applies temperature corrections using viscosity ratios
+
+### UI State Management Patterns
+
+**Multi-Dataset Architecture:**
+- Each loaded dataset gets its own `DatasetTab` with independent plot/results/statistics
+- Central `ControlPanel` manages batch operations across all datasets
+- `ComparisonTab` enables side-by-side analysis of multiple datasets
+- Tab titles show dataset names with status indicators
+
+**Signal-Slot Communication:**
+- Dataset tabs emit signals for data updates and calculation completion
+- Main window coordinates cross-tab communication and global state
+- Progress tracking through QProgressBar for long-running operations
 
 ## Important Implementation Details
 
-### Hydraulic Conductivity Methods
-The application implements these empirical formulas in `k_calculations.py`:
-- Each method has specific applicability conditions (grain size ranges, uniformity coefficients)
-- Temperature corrections are applied using viscosity ratios
-- Methods return structured `KCalculationResult` objects with status indicators
+### Data Import Strategy
+The `DataLoader` implements a multi-stage detection system:
+1. **Auto-detection**: Attempts to identify CSV format and headers automatically
+2. **Format fallback**: Tries multiple delimiter and header combinations
+3. **Manual mapping**: Falls back to `ColumnMapper` dialog for user-guided import
+4. **Validation**: Comprehensive range checks and data quality validation
 
-### Data Format Support
-The `DataLoader` class supports three CSV formats:
-1. Metadata format (sample name, temperature, porosity headers)
-2. Simple two-column (size, percent passing)
-3. Multi-column with flexible header detection
+### Calculation Method Framework
+Each hydraulic conductivity method in `KCalculator` follows this pattern:
+- Method-specific applicability ranges (grain size, uniformity coefficient)
+- Temperature correction via viscosity adjustment
+- Returns `KCalculationResult` with status codes: OK, WARNING, ERROR, OUT_OF_RANGE
+- Color-coded display in GUI based on result status
 
-### UI State Management
-- Multiple datasets can be loaded simultaneously
-- Sample selector in toolbar for switching between datasets
-- Batch processing capabilities through control panel
-- Method selection dialog for choosing calculation methods
+### Professional UI Design Patterns
+- **Earth-tone color scheme**: Browns, blues, greens for geotechnical appearance
+- **Consistent QGroupBox organization**: Logical section grouping throughout
+- **Status-driven styling**: Color coding based on calculation result status
+- **Progress feedback**: QProgressBar and status messages for user feedback
+
+## Current Development Status
+
+The application is in **Phase 1** (Prototyping) according to `development_roadmap.md`:
+
+**Completed Features:**
+- Multi-tab dataset architecture with nested plot/results/statistics tabs
+- Batch processing system with file management
+- Method selection dialog with color-coded results
+- Basic plotting infrastructure with matplotlib integration
+- Professional UI styling with geotechnical theme
+
+**Next Phase Priorities:**
+- Enhanced data validation and error handling
+- Real calculation method implementations (currently using placeholder logic)
+- Advanced plotting with full matplotlib integration
+- Report generation functionality
 
 ## Development Patterns
 
-### Error Handling
-- Graceful fallback for CSV parsing (tries multiple format detectors)
-- Method-specific validation with status codes (OK, WARNING, ERROR)
-- User-friendly error messages via QMessageBox
+### Error Handling Philosophy
+- **Graceful degradation**: Multiple fallback strategies for data import
+- **User-friendly messaging**: QMessageBox dialogs with clear explanations
+- **Status-based feedback**: Visual indicators for calculation reliability
+- **Comprehensive validation**: Range checks for all input parameters
 
-### Styling
-- Professional geotechnical theme with earth-tone colors
-- Consistent use of QGroupBox for section organization
-- Color-coded method results for visual distinction
-
-## Current Development Phase
-
-The application is in the prototyping phase (Phase 1 of development_roadmap.md) with focus on:
-- Core functionality implementation
-- Professional UI/UX design
-- Batch processing capabilities
-- Method visualization and comparison
-
-Future phases will add advanced features like Excel support, report generation, and machine learning integration.
+### Code Organization Principles
+- **Separation of concerns**: Clear division between data processing and GUI
+- **Signal-driven architecture**: PyQt6 signals for loose coupling between components
+- **Dataclass usage**: Structured data objects (`GrainSizeData`, `KCalculationResult`)
+- **Type hints**: Comprehensive typing throughout for better maintainability
