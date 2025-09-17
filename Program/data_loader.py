@@ -310,6 +310,15 @@ class DataLoader:
         self.loaded_datasets.extend(datasets)
         return datasets
     
+    def _parse_european_float(self, value: str) -> float:
+        """Parse float that might use European format (comma as decimal separator)"""
+        try:
+            # Try standard format first
+            return float(value.strip())
+        except ValueError:
+            # Try European format
+            return float(value.strip().replace(',', '.'))
+
     def _detect_delimiter(self, file_path: str) -> tuple:
         """
         Simple delimiter detection - try common delimiters and return best match
@@ -358,14 +367,20 @@ class DataLoader:
             parts = line.split(delimiter)
             column_counts.append(len(parts))
 
-            # Count numeric columns
+            # Count numeric columns (handle both US and European decimal formats)
             numeric_count = 0
             for part in parts:
                 try:
+                    # Try standard US format first
                     float(part.strip())
                     numeric_count += 1
                 except ValueError:
-                    pass
+                    try:
+                        # Try European format (comma as decimal separator)
+                        float(part.strip().replace(',', '.'))
+                        numeric_count += 1
+                    except ValueError:
+                        pass
             numeric_column_counts.append(numeric_count)
 
         if not column_counts:
@@ -455,12 +470,12 @@ class DataLoader:
                         metadata['sample_name'] = value
                     elif 'temperature' in key or 'temp' in key:
                         try:
-                            metadata['temperature'] = float(value.replace('°C', '').replace('C', ''))
+                            metadata['temperature'] = self._parse_european_float(value.replace('°C', '').replace('C', ''))
                         except ValueError:
                             metadata['temperature'] = 20.0
                     elif 'porosity' in key or 'void' in key:
                         try:
-                            metadata['porosity'] = float(value)
+                            metadata['porosity'] = self._parse_european_float(value)
                         except ValueError:
                             metadata['porosity'] = 0.40
                     elif 'comment' in key or 'note' in key:
@@ -468,8 +483,8 @@ class DataLoader:
                 else:
                     # This is data
                     try:
-                        size = float(row[0])
-                        percent = float(row[1])
+                        size = self._parse_european_float(row[0])
+                        percent = self._parse_european_float(row[1])
                         particle_sizes.append(size)
                         percent_passing.append(percent)
                     except (ValueError, IndexError):
@@ -490,8 +505,8 @@ class DataLoader:
             if first_row:
                 try:
                     # Try to parse first row as data
-                    size = float(first_row[0])
-                    percent = float(first_row[1])
+                    size = self._parse_european_float(first_row[0])
+                    percent = self._parse_european_float(first_row[1])
                     particle_sizes.append(size)
                     percent_passing.append(percent)
                 except (ValueError, IndexError):
@@ -503,8 +518,8 @@ class DataLoader:
                 if not row or len(row) < 2:
                     continue
                 try:
-                    size = float(row[0])
-                    percent = float(row[1])
+                    size = self._parse_european_float(row[0])
+                    percent = self._parse_european_float(row[1])
                     particle_sizes.append(size)
                     percent_passing.append(percent)
                 except (ValueError, IndexError):
@@ -581,8 +596,8 @@ class DataLoader:
                     continue
                     
                 try:
-                    size = float(row[size_col])
-                    percent = float(row[percent_col])
+                    size = self._parse_european_float(row[size_col])
+                    percent = self._parse_european_float(row[percent_col])
                     particle_sizes.append(size)
                     percent_passing.append(percent)
                 except (ValueError, IndexError):
@@ -649,7 +664,7 @@ class DataLoader:
                             import re
                             temp_match = re.search(r'[\d.]+', str(row[col]))
                             if temp_match:
-                                metadata['temperature'] = float(temp_match.group())
+                                metadata['temperature'] = self._parse_european_float(temp_match.group())
                         except:
                             pass
                     elif 'porosity' in cell_value:
@@ -657,7 +672,7 @@ class DataLoader:
                             import re
                             por_match = re.search(r'[\d.]+', str(row[col]))
                             if por_match:
-                                metadata['porosity'] = float(por_match.group())
+                                metadata['porosity'] = self._parse_european_float(por_match.group())
                         except:
                             pass
             

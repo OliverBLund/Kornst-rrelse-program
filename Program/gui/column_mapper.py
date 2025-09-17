@@ -156,6 +156,14 @@ class ColumnMapperDialog(QDialog):
         self.size_combo = QComboBox()
         self.passing_combo = QComboBox()
         self.retained_combo = QComboBox()
+
+        # Style required fields differently
+        required_style = "border: 2px solid #d32f2f; background-color: #fff3f3;"
+        optional_style = "border: 1px solid #8b7355; background-color: #f9f9f9;"
+
+        self.size_combo.setStyleSheet(f"QComboBox {{ {required_style} padding: 5px; border-radius: 3px; }}")
+        self.passing_combo.setStyleSheet(f"QComboBox {{ {required_style} padding: 5px; border-radius: 3px; }}")
+        self.retained_combo.setStyleSheet(f"QComboBox {{ {optional_style} padding: 5px; border-radius: 3px; }}")
         
         # Populate combo boxes
         column_options = ["(Not Used)"] + self.headers
@@ -165,17 +173,20 @@ class ColumnMapperDialog(QDialog):
         # Try auto-detection
         self.auto_detect_columns()
         
-        mapping_form.addRow("Particle Size (mm):", self.size_combo)
-        mapping_form.addRow("Percent Passing (%):", self.passing_combo)
-        mapping_form.addRow("Percent Retained (%):", self.retained_combo)
+        mapping_form.addRow("Particle Size (mm): *", self.size_combo)
+        mapping_form.addRow("Percent Passing (%): *", self.passing_combo)
+        mapping_form.addRow("Percent Retained (%) - Optional:", self.retained_combo)
         
         # Add help text
         help_text = QLabel("""
 💡 Instructions:
-• Select which columns contain particle sizes and percentages
-• If your data has "Percent Retained", it will be converted to "Percent Passing"
+• Only 2 columns are required: Particle Size and Percent Passing
+• Percent Retained is optional - use if your data has retained values instead of passing
+• If both Passing and Retained are available, Passing will be used
 • Leave unused columns as "(Not Used)"
 • Particle sizes should be in millimeters
+
+* = Required fields
         """)
         help_text.setWordWrap(True)
         help_text.setStyleSheet("color: #666; font-style: italic; margin: 10px;")
@@ -268,19 +279,25 @@ class ColumnMapperDialog(QDialog):
         passing_keywords = ['passing', 'pass', 'finer', 'cumulative']
         retained_keywords = ['retained', 'retain']
         
+        # Track what we've found to prioritize properly
+        size_found = False
+        passing_found = False
+
         for i, header in enumerate(self.headers):
             header_lower = header.lower()
-            
-            # Check for size column
-            if any(keyword in header_lower for keyword in size_keywords):
+
+            # Check for size column (highest priority)
+            if any(keyword in header_lower for keyword in size_keywords) and not size_found:
                 self.size_combo.setCurrentIndex(i + 1)  # +1 because of "(Not Used)"
-            
-            # Check for passing column
-            elif any(keyword in header_lower for keyword in passing_keywords):
+                size_found = True
+
+            # Check for passing column (second priority - preferred over retained)
+            elif any(keyword in header_lower for keyword in passing_keywords) and not passing_found:
                 self.passing_combo.setCurrentIndex(i + 1)
-            
-            # Check for retained column
-            elif any(keyword in header_lower for keyword in retained_keywords):
+                passing_found = True
+
+            # Check for retained column (only if no passing column found)
+            elif any(keyword in header_lower for keyword in retained_keywords) and not passing_found:
                 self.retained_combo.setCurrentIndex(i + 1)
     
     def preview_mapping(self):
@@ -311,10 +328,14 @@ class ColumnMapperDialog(QDialog):
         retained_idx = self.retained_combo.currentIndex() - 1
         
         if size_idx < 0:
-            raise ValueError("Please select a particle size column")
-        
+            raise ValueError("Please select a Particle Size column (required)")
+
         if passing_idx < 0 and retained_idx < 0:
-            raise ValueError("Please select either a passing or retained column")
+            raise ValueError("Please select a Percent Passing column (or Percent Retained if you don't have Passing data)")
+
+        # Prefer passing over retained if both are selected
+        if passing_idx >= 0 and retained_idx >= 0:
+            retained_idx = -1  # Ignore retained if both are selected
         
         particle_sizes = []
         percent_passing = []
