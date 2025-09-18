@@ -144,6 +144,9 @@ ENV/
 env.bak/
 venv.bak/
 
+#Pycache
+__pycache__/
+
 # Spyder project settings
 .spyderproject
 .spyproject
@@ -209,3 +212,5 @@ __marimo__/
 #Data files
 *.csv
 *.xls
+*.cpython-312.pyc
+Program/gui/__pycache__/column_mapper.cpython-312.pyc

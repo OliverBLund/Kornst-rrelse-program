@@ -9,7 +9,7 @@ from PyQt6.QtWidgets import (
     QFileDialog, QDialog
 )
 from PyQt6.QtCore import Qt, pyqtSignal
-from PyQt6.QtGui import QAction
+from PyQt6.QtGui import QAction, QColor
 from typing import List, Dict, Optional
 import os
 
@@ -18,6 +18,7 @@ from gui.control_panel import ControlPanel
 from gui.dataset_tab import DatasetTab
 from gui.comparison_tab import ComparisonTab
 from gui.reporting_tab import ReportingTab
+from gui.error_tab import ErrorTab
 from data_loader import DataLoader, GrainSizeData
 from k_calculations import KCalculator
 
@@ -86,6 +87,9 @@ class MainWindow(QMainWindow):
         
         # Connect control panel signals
         self.control_panel.files_loaded.connect(self.on_files_loaded)
+        self.control_panel.error_dataset.connect(self.add_error_tab)
+        self.control_panel.dataset_loaded_successfully.connect(self.replace_error_tab_with_dataset)
+        self.control_panel.update_error_tab_message.connect(self.update_error_tab_message)
         
         # Top-level tab widget with two main tabs
         self.top_tabs = QTabWidget()
@@ -329,7 +333,75 @@ class MainWindow(QMainWindow):
         self.reporting_tab.set_dataset_tabs(self.dataset_tabs)
         
         self._show_status_message(f"Added dataset: {dataset.sample_name}")
-    
+
+    def add_error_tab(self, file_path: str, error_message: str):
+        """Add an error tab for a failed dataset"""
+        # Create error tab
+        error_tab = ErrorTab(file_path, error_message, self)
+
+        # Connect to dataset fixed signal
+        error_tab.dataset_fixed.connect(self.on_dataset_fixed)
+
+        # Add tab with error styling
+        file_name = os.path.basename(file_path)
+        tab_title = f"❌ {file_name}"
+
+        # Add to tabs with red styling
+        index = self.dataset_tabs_widget.addTab(error_tab, tab_title)
+
+        # Style the tab to indicate error
+        tab_bar = self.dataset_tabs_widget.tabBar()
+        tab_bar.setTabTextColor(index, QColor(211, 47, 47))  # Red color
+
+        # Switch to the new tab
+        self.dataset_tabs_widget.setCurrentIndex(index)
+
+        self._show_status_message(f"Error loading: {file_name} - click tab to fix")
+
+    def on_dataset_fixed(self, dataset: GrainSizeData, original_file_path: str):
+        """Handle when an error tab successfully fixes a dataset"""
+        # Find and remove the error tab
+        for i in range(self.dataset_tabs_widget.count()):
+            widget = self.dataset_tabs_widget.widget(i)
+            if isinstance(widget, ErrorTab) and widget.file_path == original_file_path:
+                self.dataset_tabs_widget.removeTab(i)
+                break
+
+        # Add the fixed dataset as a normal tab
+        self.add_dataset_tab(dataset)
+
+        self._show_status_message(f"Fixed and loaded: {dataset.sample_name}")
+
+    def replace_error_tab_with_dataset(self, dataset: GrainSizeData, file_path: str):
+        """Replace an error tab with a successful dataset tab"""
+        # Find the error tab with this file path
+        for i in range(self.dataset_tabs_widget.count()):
+            widget = self.dataset_tabs_widget.widget(i)
+            if isinstance(widget, ErrorTab) and widget.file_path == file_path:
+                # Remove the error tab
+                self.dataset_tabs_widget.removeTab(i)
+                # Add the dataset tab
+                self.add_dataset_tab(dataset)
+                break
+
+    def update_error_tab_message(self, file_path: str, error_message: str):
+        """Update an existing error tab with a new error message"""
+        # Find the error tab with this file path
+        for i in range(self.dataset_tabs_widget.count()):
+            widget = self.dataset_tabs_widget.widget(i)
+            if isinstance(widget, ErrorTab) and widget.file_path == file_path:
+                # Update the error message and refresh UI
+                widget.error_message = error_message
+                widget.setup_ui()
+                widget.load_file_preview()
+
+                # Update tab title to show error
+                file_name = os.path.basename(file_path)
+                self.dataset_tabs_widget.setTabText(i, f"❌ {file_name}")
+                tab_bar = self.dataset_tabs_widget.tabBar()
+                tab_bar.setTabTextColor(i, QColor(211, 47, 47))
+                break
+
     def close_dataset_tab(self, index: int):
         """Close a dataset tab"""
         if self.dataset_tabs_widget.count() > 0:

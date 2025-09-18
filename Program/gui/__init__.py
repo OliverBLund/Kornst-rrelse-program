@@ -7,3 +7,4 @@ from .control_panel import ControlPanel
 from .plot_widget import PlotWidget
 
 __all__ = ["MainWindow", "ControlPanel", "PlotWidget"]
+

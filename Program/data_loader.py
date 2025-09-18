@@ -88,15 +88,38 @@ class GrainSizeData:
                 if len(problem_sizes) < 3:  # Collect first few examples
                     problem_sizes.append(f"{sorted_data[i][0]:.3f}mm")
 
+        # Only flag as error if there are many violations (> 30% of data points)
+        # Some variation is normal in real-world data
         if non_monotonic_count > 0:
-            severity = ValidationSeverity.WARNING if non_monotonic_count <= 2 else ValidationSeverity.ERROR
-            self.validation_messages.append(ValidationMessage(
-                severity=severity,
-                title="Non-monotonic grain size data",
-                message=f"Found {non_monotonic_count} data points where percent passing increases with smaller grain sizes",
-                suggestion="Check data ordering: larger grain sizes should have higher percent passing values",
-                impact="May affect D10, D30, D50, D60 calculations and hydraulic conductivity estimates"
-            ))
+            violation_ratio = non_monotonic_count / len(sorted_data)
+
+            if violation_ratio > 0.5:
+                # Majority of data is non-monotonic - might be "retained" instead of "passing"
+                self.validation_messages.append(ValidationMessage(
+                    severity=ValidationSeverity.WARNING,
+                    title="Data may be 'percent retained' instead of 'percent passing'",
+                    message=f"Found {non_monotonic_count} data points where values increase with smaller grain sizes",
+                    suggestion="Check if your data represents 'percent retained' rather than 'percent passing'. If so, convert using: % passing = 100 - % retained",
+                    impact="Analysis assumes percent passing values; retained values will produce incorrect results"
+                ))
+            elif violation_ratio > 0.3:
+                # Significant violations - quality warning
+                self.validation_messages.append(ValidationMessage(
+                    severity=ValidationSeverity.WARNING,
+                    title="Non-monotonic grain size data detected",
+                    message=f"Found {non_monotonic_count} data points with unexpected trends",
+                    suggestion="Review data for entry errors or confirm this represents the actual grain size distribution",
+                    impact="Minor irregularities may affect characteristic grain size calculations"
+                ))
+            elif non_monotonic_count <= 2:
+                # Minor violations - informational only
+                self.validation_messages.append(ValidationMessage(
+                    severity=ValidationSeverity.INFO,
+                    title="Minor data irregularities detected",
+                    message=f"Found {non_monotonic_count} data points with small deviations from expected trend",
+                    suggestion="Small irregularities are normal in laboratory data",
+                    impact="Minimal impact on analysis results"
+                ))
 
         # Validate temperature and porosity
         if self.temperature < 0 or self.temperature > 50:
@@ -607,79 +630,17 @@ class DataLoader:
         return self._create_dataset(metadata, particle_sizes, percent_passing, file_path)
     
     def _load_excel(self, file_path: str) -> GrainSizeData:
-        """Load Excel file with flexible format detection"""
+        """Load Excel file - conservative approach, requires manual mapping for complex files"""
         try:
-            # Read Excel file - try first sheet by default
-            excel_file = pd.ExcelFile(file_path)
-            
-            # If multiple sheets, use first one (could be enhanced to let user choose)
-            sheet_name = excel_file.sheet_names[0]
-            df = pd.read_excel(file_path, sheet_name=sheet_name)
-            
-            # Try to detect grain size and percent passing columns
-            particle_sizes = []
-            percent_passing = []
-            metadata = {}
-            
-            # Look for columns that might contain grain size data
-            size_cols = []
-            percent_cols = []
-            
-            for col in df.columns:
-                col_lower = str(col).lower()
-                if any(word in col_lower for word in ['size', 'diameter', 'grain', 'particle', 'sieve', 'mm']):
-                    size_cols.append(col)
-                elif any(word in col_lower for word in ['passing', 'percent', 'cumulative', 'finer', '%']):
-                    percent_cols.append(col)
-            
-            # If we found potential columns, use them
-            if size_cols and percent_cols:
-                # Use first matching columns
-                size_col = size_cols[0]
-                percent_col = percent_cols[0]
-                
-                # Extract data, removing NaN values
-                df_clean = df[[size_col, percent_col]].dropna()
-                
-                particle_sizes = df_clean[size_col].astype(float).tolist()
-                percent_passing = df_clean[percent_col].astype(float).tolist()
-            else:
-                # Fall back to assuming first two numeric columns
-                numeric_cols = df.select_dtypes(include=[np.number]).columns
-                if len(numeric_cols) >= 2:
-                    df_clean = df[numeric_cols[:2]].dropna()
-                    particle_sizes = df_clean.iloc[:, 0].astype(float).tolist()
-                    percent_passing = df_clean.iloc[:, 1].astype(float).tolist()
-                else:
-                    raise ValueError(f"Could not find numeric columns in Excel file")
-            
-            # Extract metadata from non-numeric cells if present
-            # Look for temperature, porosity, sample name in first few rows
-            for idx, row in df.head(10).iterrows():
-                for col in df.columns:
-                    cell_value = str(row[col]).lower()
-                    if 'temperature' in cell_value or 'temp' in cell_value:
-                        # Try to extract temperature from next cell or same cell
-                        try:
-                            import re
-                            temp_match = re.search(r'[\d.]+', str(row[col]))
-                            if temp_match:
-                                metadata['temperature'] = self._parse_european_float(temp_match.group())
-                        except:
-                            pass
-                    elif 'porosity' in cell_value:
-                        try:
-                            import re
-                            por_match = re.search(r'[\d.]+', str(row[col]))
-                            if por_match:
-                                metadata['porosity'] = self._parse_european_float(por_match.group())
-                        except:
-                            pass
-            
-            return self._create_dataset(metadata, particle_sizes, percent_passing, file_path)
-            
+            # Read Excel file with default settings only
+            df = pd.read_excel(file_path)
+
+            # Immediately require manual mapping for any Excel file that's not trivially simple
+            raise ValueError(f"Excel files require manual column mapping to ensure data accuracy. Please use the column mapper to select the correct data columns.")
+
         except Exception as e:
-            raise ValueError(f"Error reading Excel file {file_path}: {str(e)}")
+            # Always require manual column mapping for Excel files
+            raise ValueError(f"Excel files require manual column mapping. Please use the column mapper to select the correct data columns.")
     
     def _create_dataset(self, metadata: dict, particle_sizes: list, percent_passing: list, file_path: str) -> GrainSizeData:
         """Create GrainSizeData object with validation"""
@@ -694,9 +655,18 @@ class DataLoader:
         # Validate data
         if not particle_sizes or not percent_passing:
             raise ValueError(f"No valid grain size data found in {file_path}")
-        
+
         if len(particle_sizes) < 3:
             raise ValueError(f"Insufficient data points in {file_path} (minimum 3 required)")
+
+        # Auto-sort data by particle size for consistent analysis
+        # Combine size and percent data, sort by size (descending for grain size analysis)
+        combined_data = list(zip(particle_sizes, percent_passing))
+        combined_data.sort(key=lambda x: x[0], reverse=True)  # Sort by size, largest first
+
+        # Extract sorted data
+        particle_sizes = [item[0] for item in combined_data]
+        percent_passing = [item[1] for item in combined_data]
         
         # Create and return GrainSizeData object
         return GrainSizeData(
@@ -708,7 +678,66 @@ class DataLoader:
             comments=metadata.get('comments'),
             file_path=file_path
         )
-    
+
+    def _validate_auto_extracted_data(self, particle_sizes: list, percent_passing: list) -> bool:
+        """Validate that auto-extracted data looks like actual grain size data"""
+        if len(particle_sizes) < 3:
+            return False  # Too few data points
+
+        # Check for reasonable grain size range (0.001 to 1000 mm)
+        min_size = min(particle_sizes)
+        max_size = max(particle_sizes)
+        if min_size < 0.001 or max_size > 1000:
+            return False  # Unreasonable size range
+
+        # Check for reasonable percentage range (0 to 100%)
+        min_percent = min(percent_passing)
+        max_percent = max(percent_passing)
+        if min_percent < 0 or max_percent > 100:
+            return False  # Invalid percentage range
+
+        # Check for reasonable data spread
+        if max_size / min_size < 2:
+            return False  # Too narrow size range (likely not grain size data)
+
+        if max_percent - min_percent < 10:
+            return False  # Too narrow percentage range
+
+        # Check for suspicious patterns that indicate wrong data
+        # 1. Grain sizes should typically be in descending order for sieve data
+        # 2. Percentages should generally decrease as grain size decreases (for cumulative passing)
+        sorted_by_size = sorted(zip(particle_sizes, percent_passing), reverse=True)
+        sizes_desc = [x[0] for x in sorted_by_size]
+        percents_for_desc_sizes = [x[1] for x in sorted_by_size]
+
+        # Check if percentages are roughly monotonic when sizes are sorted
+        monotonic_violations = 0
+        for i in range(1, len(percents_for_desc_sizes)):
+            if percents_for_desc_sizes[i] > percents_for_desc_sizes[i-1]:
+                monotonic_violations += 1
+
+        # If more than 50% of data violates monotonic expectation, likely wrong data
+        if monotonic_violations > len(percents_for_desc_sizes) * 0.5:
+            return False
+
+        # Check for monotonic tendency (most grain size data should be roughly monotonic)
+        size_order_desc = sorted(particle_sizes, reverse=True)
+        size_order_asc = sorted(particle_sizes)
+
+        # Data should be either mostly ascending or descending by size
+        if particle_sizes != size_order_desc and particle_sizes != size_order_asc:
+            # Check if it's at least 70% monotonic
+            violations_desc = sum(1 for i in range(1, len(particle_sizes))
+                                 if particle_sizes[i] > particle_sizes[i-1])
+            violations_asc = sum(1 for i in range(1, len(particle_sizes))
+                                if particle_sizes[i] < particle_sizes[i-1])
+
+            violation_ratio = min(violations_desc, violations_asc) / len(particle_sizes)
+            if violation_ratio > 0.3:  # More than 30% violations
+                return False
+
+        return True  # Data looks reasonable
+
     def get_sample_summary(self, dataset: GrainSizeData) -> Dict[str, Any]:
         """Get a summary of a grain size dataset"""
         summary = {

@@ -20,6 +20,10 @@ class ControlPanel(QFrame):
     files_loaded = pyqtSignal(list)  # Emitted when files are loaded
     analysis_requested = pyqtSignal(dict)  # Emitted when analysis is requested
     sample_selected = pyqtSignal(str)  # Emitted when a sample is selected
+    error_dataset = pyqtSignal(str, str)  # Emitted when dataset fails to load (file_path, error_message)
+    dataset_loaded_successfully = pyqtSignal(object, str)  # Emitted when dataset loads successfully (dataset, file_path)
+    update_error_tab_message = pyqtSignal(str, str)  # Update existing error tab with new message
+    dataset_fix_requested = pyqtSignal(str)  # Emitted when user wants to fix/remap a dataset (file_path)
     
     def __init__(self):
         super().__init__()
@@ -271,8 +275,8 @@ class ControlPanel(QFrame):
                 for file_path in newly_added:
                     self.add_file_to_table(file_path, 'pending')
 
-                # Start batch auto-loading
-                self.batch_auto_load(newly_added)
+                # Create tabs immediately for all files, then try to load them
+                self.process_files_with_immediate_tabs(newly_added)
 
                 self.update_ui_state()
 
@@ -517,14 +521,23 @@ Uniformity Coefficient (Cu): {dataset.get_uniformity_coefficient():.2f if datase
                 error_str = str(e)
                 if "could not parse" in error_str.lower():
                     info = "❓ Column mapping needed"
+                    detailed_error = "Could not auto-detect column format"
                 elif "no valid" in error_str.lower():
                     info = "❌ No valid data found"
+                    detailed_error = "No valid grain size data found in file"
                 elif "delimiter" in error_str.lower():
                     info = "⚙️ Format detection failed"
+                    detailed_error = "Could not determine file delimiter format"
                 else:
                     info = "⚠️ Loading failed"
+                    detailed_error = str(e)
 
+                # Update table for sidebar status
                 self.update_file_in_table(file_path, 'review', info)
+
+                # Emit signal to create error tab
+                self.error_dataset.emit(file_path, detailed_error)
+
                 failed_files += 1
 
         # Final progress update
@@ -909,3 +922,80 @@ Uniformity Coefficient (Cu): {dataset.get_uniformity_coefficient():.2f if datase
         except Exception as e:
             # Best-effort UI update on unexpected errors
             self.sample_info_label.setText(f"Preview failed: {e}")
+
+    def process_files_with_immediate_tabs(self, file_paths: list):
+        """Process files by creating tabs immediately, then attempting to load data"""
+        self.progress_bar.setVisible(True)
+        self.progress_label.setVisible(True)
+        self.progress_bar.setMaximum(len(file_paths))
+
+        for i, file_path in enumerate(file_paths):
+            file_name = os.path.basename(file_path)
+
+            # Update progress
+            self.progress_bar.setValue(i)
+            self.progress_label.setText(f"Processing {file_name}...")
+            QApplication.processEvents()  # Update UI
+
+            # Step 1: Create tab immediately for visual feedback
+            self.error_dataset.emit(file_path, "Loading...")
+
+            # Step 2: Try to load the data
+            try:
+                dataset = self.data_loader.load_file(file_path)
+
+                # Success! Replace error tab with dataset tab
+                sample_name = self.extract_sample_name(file_path)
+
+                # Determine status based on validation messages
+                if dataset.has_errors():
+                    status = 'failed'
+                    info = f"❌ {len([m for m in dataset.validation_messages if m.severity.value == 'error'])} error(s)"
+                    # Keep as error tab but with validation info
+                    detailed_error = f"Data loaded but has validation errors"
+                    self.update_error_tab_message.emit(file_path, detailed_error)
+                else:
+                    status = 'auto'
+                    info = dataset.get_validation_summary()
+                    # Replace error tab with normal dataset tab
+                    self.dataset_loaded_successfully.emit(dataset, file_path)
+
+                self.file_statuses[file_path] = status
+                self.loaded_samples[sample_name] = {
+                    'file_path': file_path,
+                    'data': dataset,
+                    'status': status
+                }
+                self.update_file_in_table(file_path, status, info)
+
+            except Exception as e:
+                # Failed - update error tab with real error message
+                self.file_statuses[file_path] = 'review'
+
+                error_str = str(e)
+                if "could not parse" in error_str.lower():
+                    info = "❓ Column mapping needed"
+                    detailed_error = "Could not auto-detect column format"
+                elif "no valid" in error_str.lower():
+                    info = "❌ No valid data found"
+                    detailed_error = "No valid grain size data found in file"
+                elif "delimiter" in error_str.lower():
+                    info = "⚙️ Format detection failed"
+                    detailed_error = "Could not determine file delimiter format"
+                else:
+                    info = "⚠️ Loading failed"
+                    detailed_error = str(e)
+
+                self.update_file_in_table(file_path, 'review', info)
+                # Update the existing error tab with real error
+                self.update_error_tab_message.emit(file_path, detailed_error)
+
+        # Final progress update
+        self.progress_bar.setValue(len(file_paths))
+        self.progress_label.setText("🎉 Processing complete!")
+
+        # Hide progress indicators
+        import time
+        time.sleep(0.5)  # Brief pause to show completion
+        self.progress_bar.setVisible(False)
+        self.progress_label.setVisible(False)
