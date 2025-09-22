@@ -44,21 +44,22 @@ class GrainSizeData:
     """Data class for grain size distribution data"""
     sample_name: str
     temperature: float
-    porosity: float
+    porosity: float  # Will be replaced by calculated_porosity
     particle_sizes: List[float]  # mm
     percent_passing: List[float]  # %
     comments: Optional[str] = None
     file_path: Optional[str] = None
     validation_messages: List[ValidationMessage] = field(default_factory=list)
+    calculated_porosity: Optional[float] = field(default=None)  # Urumovic calculation
+    current_porosity: Optional[float] = field(default=None)  # User can override this
     
     def __post_init__(self):
         """Validate data after initialization"""
         if len(self.particle_sizes) != len(self.percent_passing):
             raise ValueError("Particle sizes and percent passing must have same length")
-        
-        # Validate percent passing range
-        if not all(0 <= pp <= 100 for pp in self.percent_passing):
-            raise ValueError("Percent passing values must be between 0 and 100")
+
+        # Clean and validate percent passing values with smart tolerance
+        self.percent_passing = self._clean_percent_passing_values(self.percent_passing)
         
         # Validate particle sizes are positive and in reasonable range
         if not all(ps > 0 for ps in self.particle_sizes):
@@ -139,7 +140,69 @@ class GrainSizeData:
                 suggestion="Typical range is 0.1-0.8 for natural soils",
                 impact="Used directly in some hydraulic conductivity formulas"
             ))
-    
+
+        # Calculate porosity using simple Excel formula by default
+        self.calculated_porosity = self._calculate_simple_porosity()
+
+        # Set current porosity to calculated value (can be overridden by user)
+        if self.current_porosity is None:
+            self.current_porosity = self.calculated_porosity or self.porosity
+
+    def _clean_percent_passing_values(self, percent_values: List[float]) -> List[float]:
+        """Clean percent passing values with smart tolerance for floating-point precision issues"""
+        cleaned_values = []
+        values_rounded = 0
+        values_significantly_rounded = 0
+        invalid_values = []
+
+        for i, value in enumerate(percent_values):
+            if value < 0:
+                # Negative values are always invalid
+                invalid_values.append(f"{value:.6f} (position {i+1})")
+                continue
+            elif 0 <= value <= 100:
+                # Valid range - keep as is
+                cleaned_values.append(value)
+            elif 100 < value <= 100.001:
+                # Minor floating-point precision issue - round to 100
+                cleaned_values.append(100.0)
+                values_rounded += 1
+            elif 100.001 < value <= 105:
+                # Significant but potentially recoverable error - round to 100 with warning
+                cleaned_values.append(100.0)
+                values_significantly_rounded += 1
+            else:
+                # Major error - likely data entry mistake
+                invalid_values.append(f"{value:.6f} (position {i+1})")
+
+        # Report any invalid values that couldn't be cleaned
+        if invalid_values:
+            invalid_str = ", ".join(invalid_values[:5])  # Show first 5
+            if len(invalid_values) > 5:
+                invalid_str += f" and {len(invalid_values) - 5} more"
+            raise ValueError(f"Invalid percent passing values found: {invalid_str}. Values must be between 0 and 100.")
+
+        # Add informative messages about data cleaning
+        if values_rounded > 0:
+            self.validation_messages.append(ValidationMessage(
+                severity=ValidationSeverity.INFO,
+                title="Minor data precision adjustments made",
+                message=f"Rounded {values_rounded} value(s) slightly above 100% to exactly 100%",
+                suggestion="This is normal for Excel data and indicates minor floating-point precision differences",
+                impact="No impact on analysis accuracy"
+            ))
+
+        if values_significantly_rounded > 0:
+            self.validation_messages.append(ValidationMessage(
+                severity=ValidationSeverity.WARNING,
+                title="Significant data adjustments made",
+                message=f"Rounded {values_significantly_rounded} value(s) significantly above 100% to exactly 100%",
+                suggestion="Check original data for potential entry errors - values should not exceed 100%",
+                impact="Minor impact: clamped values may slightly affect curve interpolation"
+            ))
+
+        return cleaned_values
+
     def get_d10(self) -> Optional[float]:
         """Calculate D10 (grain size at 10% passing)"""
         return self._interpolate_grain_size(10.0)
@@ -178,39 +241,71 @@ class GrainSizeData:
         return None
     
     def _interpolate_grain_size(self, target_percent: float) -> Optional[float]:
-        """Interpolate grain size at target percent passing"""
+        """Interpolate grain size at target percent passing using proper grain size distribution logic"""
         if not self.percent_passing or not self.particle_sizes:
             return None
-        
-        # Sort data by percent passing for interpolation
-        sorted_data = sorted(zip(self.percent_passing, self.particle_sizes))
-        percents, sizes = zip(*sorted_data)
-        
-        # Check if target is within range
-        if target_percent < min(percents) or target_percent > max(percents):
+
+        # Create working copies and ensure we have valid data
+        percents = list(self.percent_passing)
+        sizes = list(self.particle_sizes)
+
+        if len(percents) != len(sizes):
             return None
-        
-        # Find exact match
-        if target_percent in percents:
-            idx = percents.index(target_percent)
-            return sizes[idx]
-        
-        # Linear interpolation
-        for i in range(len(percents) - 1):
-            if percents[i] <= target_percent <= percents[i + 1]:
-                # Linear interpolation
-                x1, y1 = percents[i], sizes[i]
-                x2, y2 = percents[i + 1], sizes[i + 1]
-                
-                # Interpolate in log space for grain sizes
-                if y1 > 0 and y2 > 0:
-                    log_y1, log_y2 = __import__('math').log(y1), __import__('math').log(y2)
-                    log_y = log_y1 + (target_percent - x1) * (log_y2 - log_y1) / (x2 - x1)
-                    return __import__('math').exp(log_y)
+
+        # Sort data by percent passing (ascending order) for proper interpolation
+        sorted_data = sorted(zip(percents, sizes))
+        percents_sorted, sizes_sorted = zip(*sorted_data)
+        percents_sorted = list(percents_sorted)
+        sizes_sorted = list(sizes_sorted)
+
+        # Check if target is within data range
+        min_percent, max_percent = min(percents_sorted), max(percents_sorted)
+        if target_percent < min_percent or target_percent > max_percent:
+            # Add a validation message about missing data range
+            missing_range_msg = f"Cannot calculate D{int(target_percent)} - data range is {min_percent:.1f}% to {max_percent:.1f}%"
+
+            # Only add message if it's not already present
+            if not any(msg.message.startswith(f"Cannot calculate D{int(target_percent)}")
+                      for msg in self.validation_messages):
+                self.validation_messages.append(ValidationMessage(
+                    severity=ValidationSeverity.WARNING,
+                    title="Incomplete grain size range",
+                    message=missing_range_msg,
+                    suggestion=f"Extend sieve analysis to include {target_percent}% passing range",
+                    impact="Some characteristic grain sizes cannot be calculated"
+                ))
+            return None
+
+        # Check for exact match first
+        if target_percent in percents_sorted:
+            idx = percents_sorted.index(target_percent)
+            return sizes_sorted[idx]
+
+        # Find the two points that bracket our target percent
+        for i in range(len(percents_sorted) - 1):
+            p1, p2 = percents_sorted[i], percents_sorted[i + 1]
+            if p1 <= target_percent <= p2:
+                s1, s2 = sizes_sorted[i], sizes_sorted[i + 1]
+
+                # Perform interpolation in log space for grain sizes (more appropriate for grain size distributions)
+                if s1 > 0 and s2 > 0:
+                    import math
+                    log_s1 = math.log(s1)
+                    log_s2 = math.log(s2)
+
+                    # Linear interpolation in log space
+                    if p2 != p1:  # Avoid division by zero
+                        log_result = log_s1 + (target_percent - p1) * (log_s2 - log_s1) / (p2 - p1)
+                        return math.exp(log_result)
+                    else:
+                        return s1  # Same percent, return first size
                 else:
-                    # Linear interpolation if log interpolation fails
-                    return y1 + (target_percent - x1) * (y2 - y1) / (x2 - x1)
-        
+                    # Fallback to linear interpolation if log interpolation fails
+                    if p2 != p1:
+                        return s1 + (target_percent - p1) * (s2 - s1) / (p2 - p1)
+                    else:
+                        return s1
+
         return None
     
     def has_errors(self) -> bool:
@@ -287,6 +382,179 @@ class GrainSizeData:
             return f"{gradation} {base_type.lower()}"
         
         return base_type
+
+    def _calculate_simple_porosity(self) -> Optional[float]:
+        """
+        Calculate porosity using simple Excel formula
+        n = 0.255 * (1 + 0.83^U)
+        Where U = D60/D10 (uniformity coefficient)
+        """
+        try:
+            # Get D10 and D60 for uniformity coefficient
+            d10 = self.get_d10()
+            d60 = self.get_d60()
+
+            if d10 is None or d60 is None or d10 <= 0:
+                return None
+
+            # Calculate uniformity coefficient
+            U = d60 / d10
+
+            # Simple Excel formula
+            n = 0.255 * (1 + 0.83**U)
+
+            # Ensure reasonable porosity range
+            if 0.1 <= n <= 0.8:
+                return n
+            else:
+                self.validation_messages.append(ValidationMessage(
+                    severity=ValidationSeverity.WARNING,
+                    title="Calculated porosity outside typical range",
+                    message=f"Simple formula gave porosity = {n:.3f}",
+                    suggestion="Using default porosity value instead",
+                    impact="May affect hydraulic conductivity calculations"
+                ))
+                return None
+
+        except Exception as e:
+            self.validation_messages.append(ValidationMessage(
+                severity=ValidationSeverity.WARNING,
+                title="Porosity calculation failed",
+                message=f"Error in simple calculation: {str(e)}",
+                suggestion="Using default porosity value",
+                impact="May affect hydraulic conductivity calculations"
+            ))
+            return None
+
+    def _calculate_urumovic_porosity(self) -> Optional[float]:
+        """
+        Calculate porosity using Urumovic & Urumovic (2016) method
+        Based on geometric mean grain size and uniformity coefficient
+        """
+        try:
+            # Calculate geometric mean grain size
+            dgeom = self._calculate_geometric_mean_grain_size()
+            if dgeom is None:
+                return None
+
+            # Calculate uniformity coefficient
+            d10 = self.get_d10()
+            d60 = self.get_d60()
+            if d10 is None or d60 is None or d10 <= 0:
+                return None
+
+            U = d60 / d10
+
+            # Urumovic & Urumovic (2016) coefficients
+            # Based on dgeometric and U ranges
+            if dgeom < 0.1:
+                if U < 2:
+                    coeffs = {
+                        'a0': 0.239930340, 'a1': 0.032474578, 'a2': 0.057021316, 'a3': 0.000027594,
+                        'b1': 0.116365861, 'b2': 0.050843630, 'b3': 0.000000000,
+                        'PS': 0.000000000, 'Pd': 7.087465633
+                    }
+                elif U < 20:
+                    coeffs = {
+                        'a0': 0.059050678, 'a1': 0.000010100, 'a2': 0.000010001, 'a3': 0.000000996,
+                        'b1': 0.143417294, 'b2': 0.118561346, 'b3': 0.040133037,
+                        'PS': 0.014623250, 'Pd': 6.684384604
+                    }
+                else:  # U >= 20
+                    coeffs = {
+                        'a0': 0.170865853, 'a1': 0.000052100, 'a2': 0.000350603, 'a3': 0.002273075,
+                        'b1': 0.045587305, 'b2': 0.061260545, 'b3': 0.054019240,
+                        'PS': 0.096121263, 'Pd': 5.124402300
+                    }
+            else:  # dgeometric >= 0.1
+                coeffs = {
+                    'a0': 0.167837529, 'a1': 0.025095016, 'a2': 0.018411845, 'a3': 0.003629859,
+                    'b1': 0.105251524, 'b2': 0.027111256, 'b3': 0.000000000,
+                    'PS': 0.703849715, 'Pd': 4.735241378
+                }
+
+            # Calculate porosity using Urumovic polynomial
+            import math
+
+            # Convert dgeom to mm for calculation (if needed)
+            dgeom_mm = dgeom  # Assuming dgeom is already in mm
+
+            # Calculate the argument for sin/cos functions
+            arg = (2 * math.pi * math.log(dgeom_mm)) / coeffs['Pd'] + coeffs['PS']
+
+            # Urumovic formula: n = a0 + a1*sin(arg) + b1*cos(arg) + a2*sin(arg)*b2*cos(arg) + a3*sin(arg)*b3*cos(arg)
+            sin_arg = math.sin(arg)
+            cos_arg = math.cos(arg)
+
+            ne = (coeffs['a0'] +
+                  coeffs['a1'] * sin_arg +
+                  coeffs['b1'] * cos_arg +
+                  coeffs['a2'] * sin_arg * coeffs['b2'] * cos_arg +
+                  coeffs['a3'] * sin_arg * coeffs['b3'] * cos_arg)
+
+            # Ensure reasonable porosity range
+            if 0.1 <= ne <= 0.8:
+                return ne
+            else:
+                # If calculated porosity is outside reasonable range, return None
+                self.validation_messages.append(ValidationMessage(
+                    severity=ValidationSeverity.WARNING,
+                    title="Calculated porosity outside typical range",
+                    message=f"Urumovic calculation gave porosity = {ne:.3f}",
+                    suggestion="Using default porosity value instead",
+                    impact="May affect hydraulic conductivity calculations"
+                ))
+                return None
+
+        except Exception as e:
+            self.validation_messages.append(ValidationMessage(
+                severity=ValidationSeverity.WARNING,
+                title="Porosity calculation failed",
+                message=f"Error in Urumovic calculation: {str(e)}",
+                suggestion="Using default porosity value",
+                impact="May affect hydraulic conductivity calculations"
+            ))
+            return None
+
+    def _calculate_geometric_mean_grain_size(self) -> Optional[float]:
+        """Calculate geometric mean grain size from distribution"""
+        if not self.particle_sizes or not self.percent_passing:
+            return None
+
+        try:
+            import math
+
+            # Create sorted data by grain size (descending)
+            sorted_data = sorted(zip(self.particle_sizes, self.percent_passing), reverse=True)
+            sizes, percents = zip(*sorted_data)
+
+            # Calculate weight fractions for each size interval
+            weight_fractions = []
+            log_sizes = []
+
+            for i in range(len(sizes)):
+                if i == 0:
+                    # First interval: from 100% to current percent
+                    weight_frac = (100.0 - percents[i]) / 100.0
+                else:
+                    # Subsequent intervals: difference between adjacent percents
+                    weight_frac = (percents[i-1] - percents[i]) / 100.0
+
+                if weight_frac > 0 and sizes[i] > 0:
+                    weight_fractions.append(weight_frac)
+                    log_sizes.append(math.log(sizes[i]))
+
+            if not weight_fractions:
+                return None
+
+            # Calculate geometric mean: exp(sum(wi * ln(di)))
+            weighted_log_sum = sum(w * log_d for w, log_d in zip(weight_fractions, log_sizes))
+            geometric_mean = math.exp(weighted_log_sum)
+
+            return geometric_mean
+
+        except Exception:
+            return None
 
 
 class DataLoader:

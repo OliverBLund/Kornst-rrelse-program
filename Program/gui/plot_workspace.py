@@ -15,6 +15,7 @@ import numpy as np
 
 from data_loader import GrainSizeData
 from .plot_widget import PlotWidget
+from unit_conversions import HydraulicConductivityUnit, HydraulicConductivityConverter
 
 
 class PlotWorkspace(QWidget):
@@ -62,7 +63,10 @@ class PlotWorkspace(QWidget):
         
         # Main plot area using existing PlotWidget
         self.plot_widget = PlotWidget()
-        
+
+        # Set default unit to m/d as specified in requirements
+        self.plot_widget.set_display_unit(HydraulicConductivityUnit.M_PER_DAY)
+
         # Add to layout
         content_layout.addWidget(self.sidebar)
         content_layout.addWidget(self.plot_widget)
@@ -245,6 +249,18 @@ class PlotWorkspace(QWidget):
         self.markers_check.setChecked(False)
         self.markers_check.stateChanged.connect(self.update_display_options)
         display_layout.addWidget(self.markers_check)
+
+        # K-value unit selection
+        display_layout.addWidget(QLabel("K-Value Units:"))
+        self.unit_combo = QComboBox()
+        all_units = HydraulicConductivityConverter.get_all_units()
+        for unit, symbol in all_units.items():
+            self.unit_combo.addItem(symbol, unit)  # Display symbol, store unit enum
+        # Set default to m/d as specified in user requirements
+        default_index = list(all_units.keys()).index(HydraulicConductivityUnit.M_PER_DAY)
+        self.unit_combo.setCurrentIndex(default_index)
+        self.unit_combo.currentTextChanged.connect(self.update_unit_display)
+        display_layout.addWidget(self.unit_combo)
         
         # Export Controls
         export_group = QGroupBox("Export")
@@ -339,11 +355,21 @@ class PlotWorkspace(QWidget):
         """Update axis range"""
         y_min = self.y_min_spin.value()
         y_max = self.y_max_spin.value()
-        
+
         if self.plot_widget and self.plot_widget.grain_size_ax:
             self.plot_widget.grain_size_ax.set_ylim(y_min, y_max)
             self.plot_widget.canvas.draw()
-    
+
+    def update_unit_display(self):
+        """Update K-value unit display"""
+        if not self.plot_widget:
+            return
+
+        # Get selected unit from combo box
+        selected_unit = self.unit_combo.currentData()
+        if selected_unit:
+            self.plot_widget.set_display_unit(selected_unit)
+
     def refresh_plot(self):
         """Refresh the plot based on current settings"""
         if not self.plot_widget:
@@ -354,7 +380,8 @@ class PlotWorkspace(QWidget):
             self.plot_widget.update_plot(
                 self.dataset.particle_sizes,
                 self.dataset.percent_passing,
-                self.dataset.sample_name
+                self.dataset.sample_name,
+                grain_size_data=self.dataset  # Pass the GrainSizeData object for correct D-value calculations
             )
         elif self.current_plot_type == "k-values":
             if self.k_results:

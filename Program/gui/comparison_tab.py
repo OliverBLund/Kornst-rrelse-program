@@ -8,12 +8,14 @@ from PyQt6.QtWidgets import (
     QGroupBox, QMessageBox, QHeaderView
 )
 from PyQt6.QtCore import Qt, pyqtSignal
+from PyQt6.QtGui import QIcon
 from typing import List, Dict, Optional
 import numpy as np
 
 from data_loader import GrainSizeData
 from k_calculations import KCalculationResult
 from .comparison_plot_widget import ComparisonPlotWidget
+from .dataset_selection_dialog import DatasetSelectionDialog
 
 
 class ComparisonTab(QWidget):
@@ -59,25 +61,37 @@ class ComparisonTab(QWidget):
     def create_control_bar(self):
         """Create the control bar for dataset selection"""
         control_layout = QHBoxLayout()
-        
+
         control_layout.addWidget(QLabel("Select Datasets to Compare:"))
-        
-        # Dataset checkboxes will be added dynamically
+
+        # Container for selection UI (either checkboxes or dialog button)
+        self.selection_container = QHBoxLayout()
+        control_layout.addLayout(self.selection_container)
+
+        # Dataset checkboxes layout (for ≤5 datasets)
         self.dataset_checks_layout = QHBoxLayout()
-        control_layout.addLayout(self.dataset_checks_layout)
-        
+
+        # Dialog button (for >5 datasets)
+        self.dataset_dialog_btn = QPushButton("📋 Select Datasets...")
+        self.dataset_dialog_btn.clicked.connect(self.open_dataset_selection_dialog)
+        self.dataset_dialog_btn.setToolTip("Open dialog to select from multiple datasets")
+
+        # Selection summary label (for dialog mode)
+        self.selection_summary_label = QLabel("No datasets selected")
+        self.selection_summary_label.setStyleSheet("color: #666; font-style: italic; margin-left: 8px;")
+
         control_layout.addStretch()
-        
+
         # Update button
         self.update_btn = QPushButton("🔄 Update Comparison")
         self.update_btn.clicked.connect(self.update_comparison)
         control_layout.addWidget(self.update_btn)
-        
+
         # Export button
         self.export_btn = QPushButton("📤 Export Comparison")
         self.export_btn.clicked.connect(self.export_comparison)
         control_layout.addWidget(self.export_btn)
-        
+
         return control_layout
     
     def create_overlay_plots_tab(self):
@@ -128,31 +142,98 @@ class ComparisonTab(QWidget):
         self.update_dataset_checkboxes()
     
     def update_dataset_checkboxes(self):
-        """Update the dataset selection checkboxes"""
-        # Clear existing checkboxes
+        """Update the dataset selection UI (checkboxes for ≤5 datasets, dialog for >5)"""
+        # Clear existing UI elements
+        self.clear_selection_container()
+
+        if len(self.dataset_tabs) <= 5:
+            # Use checkboxes for small number of datasets
+            self.use_checkbox_mode()
+        else:
+            # Use dialog button for large number of datasets
+            self.use_dialog_mode()
+
+    def clear_selection_container(self):
+        """Clear all widgets from the selection container"""
+        # Clear checkboxes layout
         while self.dataset_checks_layout.count():
             item = self.dataset_checks_layout.takeAt(0)
             if item.widget():
                 item.widget().deleteLater()
-        
-        # Add new checkboxes
+
+        # Remove all widgets from selection container
+        while self.selection_container.count():
+            item = self.selection_container.takeAt(0)
+            if item.widget():
+                item.widget().setParent(None)
+            elif item.layout():
+                # Remove layout but don't delete it as we might reuse it
+                pass
+
+    def use_checkbox_mode(self):
+        """Set up UI for checkbox mode (≤5 datasets)"""
+        self.selection_container.addLayout(self.dataset_checks_layout)
+
+        # Add checkboxes for each dataset
         for tab in self.dataset_tabs:
             checkbox = QCheckBox(tab.get_dataset_name())
-            checkbox.setChecked(True)
+            checkbox.setChecked(True)  # Default to all selected
             self.dataset_checks_layout.addWidget(checkbox)
+
+    def use_dialog_mode(self):
+        """Set up UI for dialog mode (>5 datasets)"""
+        self.selection_container.addWidget(self.dataset_dialog_btn)
+        self.selection_container.addWidget(self.selection_summary_label)
+
+        # Initialize with all datasets selected
+        self.selected_datasets = self.dataset_tabs.copy()
+        self.update_selection_summary()
     
+    def open_dataset_selection_dialog(self):
+        """Open the dataset selection dialog for large numbers of datasets"""
+        dialog = DatasetSelectionDialog(
+            self.dataset_tabs,
+            getattr(self, 'selected_datasets', []),
+            self
+        )
+
+        if dialog.exec():
+            self.selected_datasets = dialog.get_selected_tabs()
+            self.update_selection_summary()
+
+    def update_selection_summary(self):
+        """Update the selection summary label in dialog mode"""
+        if not hasattr(self, 'selected_datasets'):
+            self.selected_datasets = []
+
+        count = len(self.selected_datasets)
+        if count == 0:
+            self.selection_summary_label.setText("No datasets selected")
+            self.selection_summary_label.setStyleSheet("color: #d32f2f; font-style: italic; margin-left: 8px;")
+        elif count == 1:
+            self.selection_summary_label.setText("1 dataset selected (need ≥2)")
+            self.selection_summary_label.setStyleSheet("color: #ff9800; font-style: italic; margin-left: 8px;")
+        else:
+            self.selection_summary_label.setText(f"{count} datasets selected")
+            self.selection_summary_label.setStyleSheet("color: #4caf50; font-style: italic; margin-left: 8px;")
+
     def get_selected_datasets(self) -> List:
         """Get the currently selected datasets"""
-        selected = []
-        for i in range(self.dataset_checks_layout.count()):
-            checkbox = self.dataset_checks_layout.itemAt(i).widget()
-            if checkbox and checkbox.isChecked():
-                # Find corresponding dataset tab
-                for tab in self.dataset_tabs:
-                    if tab.get_dataset_name() == checkbox.text():
-                        selected.append(tab)
-                        break
-        return selected
+        if len(self.dataset_tabs) <= 5:
+            # Checkbox mode
+            selected = []
+            for i in range(self.dataset_checks_layout.count()):
+                checkbox = self.dataset_checks_layout.itemAt(i).widget()
+                if checkbox and checkbox.isChecked():
+                    # Find corresponding dataset tab
+                    for tab in self.dataset_tabs:
+                        if tab.get_dataset_name() == checkbox.text():
+                            selected.append(tab)
+                            break
+            return selected
+        else:
+            # Dialog mode
+            return getattr(self, 'selected_datasets', [])
     
     def update_comparison(self):
         """Update all comparison views"""

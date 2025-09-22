@@ -12,6 +12,7 @@ from matplotlib.figure import Figure
 import matplotlib.pyplot as plt
 import numpy as np
 from typing import Optional, List, Dict
+from unit_conversions import HydraulicConductivityConverter, HydraulicConductivityUnit, get_default_plot_unit
 
 
 class PlotWidget(QWidget):
@@ -27,11 +28,14 @@ class PlotWidget(QWidget):
         self.grain_data = None
         self.k_results = {}
         self.sample_name = "No data"
+
+        # Unit display settings
+        self.display_unit = get_default_plot_unit()  # Default to m/d as specified
         
         # Method colors for consistency
         self.method_colors = {
             "Hazen": "#b71c1c",        # Deep red
-            "Terzaghi": "#2e7d32",      # Forest green  
+            "Terzaghi": "#2e7d32",      # Forest green
             "Beyer": "#1565c0",         # Deep blue
             "Slichter": "#ef6c00",      # Deep orange
             "Kozeny-Carman": "#7b1fa2", # Deep purple
@@ -41,7 +45,12 @@ class PlotWidget(QWidget):
             "USBR": "#6d4c41",          # Earth brown
             "Sauerbrei": "#546e7a",     # Blue gray
             "Hazen_1892": "#d84315",    # Deep orange red
-            "Kruger": "#4527a0"         # Deep indigo
+            "Kruger": "#4527a0",        # Deep indigo
+            "Barr": "#8d6e63",          # Medium brown
+            "Alyamani-Sen": "#5d4037",  # Dark brown
+            "Chapuis": "#ff5722",       # Deep orange-red
+            "Krumbein-Monk": "#9c27b0", # Purple
+            "Vukovic-Soro": "#607d8b"   # Blue-gray
         }
         
         self.setup_ui()
@@ -96,41 +105,61 @@ class PlotWidget(QWidget):
         
         self.canvas.draw()
         
-    def update_plot(self, diameters: Optional[List[float]] = None, 
-                   cumulative: Optional[List[float]] = None, 
-                   sample_name: str = "Sample"):
+    def update_plot(self, diameters: Optional[List[float]] = None,
+                   cumulative: Optional[List[float]] = None,
+                   sample_name: str = "Sample",
+                   grain_size_data=None):
         """Update grain size distribution plot with real data"""
         if diameters is None or cumulative is None:
             return
-            
+
         self.grain_data = (diameters, cumulative)
         self.sample_name = sample_name
-        
+
         # Clear figure and create grain size plot
         self.figure.clear()
         self.current_ax = self.figure.add_subplot(1, 1, 1)
         self.grain_size_ax = self.current_ax
-        
+
         # Plot the grain size distribution curve
-        self.current_ax.semilogx(diameters, cumulative, 'b-', linewidth=2, 
+        self.current_ax.semilogx(diameters, cumulative, 'b-', linewidth=2,
                                  label=f'{sample_name}', marker='o', markersize=4)
-        
-        # Add characteristic grain size lines
-        if len(diameters) > 0 and len(cumulative) > 0:
-            # Find D10, D30, D60 by interpolation
+
+        # Add characteristic grain size lines using proper GrainSizeData calculations
+        if grain_size_data is not None:
+            # Use the corrected calculations from GrainSizeData
+            d10 = grain_size_data.get_d10()
+            d30 = grain_size_data.get_d30()
+            d60 = grain_size_data.get_d60()
+
+            d_values = [d10, d30, d60]
             characteristic_percentiles = [10, 30, 60]
             characteristic_colors = ['red', 'green', 'purple']
             characteristic_names = ['D10', 'D30', 'D60']
-            
+
+            for d_value, perc, color, name in zip(d_values, characteristic_percentiles, characteristic_colors, characteristic_names):
+                if d_value is not None:
+                    # Draw vertical line at diameter
+                    self.current_ax.axvline(x=d_value, color=color, linestyle='--',
+                                           alpha=0.7, label=f'{name} = {d_value:.3f} mm')
+
+                    # Draw horizontal line at percentile
+                    self.current_ax.axhline(y=perc, color=color, linestyle=':', alpha=0.5)
+        elif len(diameters) > 0 and len(cumulative) > 0:
+            # Fallback to old interpolation method if no GrainSizeData is provided
+            characteristic_percentiles = [10, 30, 60]
+            characteristic_colors = ['red', 'green', 'purple']
+            characteristic_names = ['D10', 'D30', 'D60']
+
             for perc, color, name in zip(characteristic_percentiles, characteristic_colors, characteristic_names):
                 # Interpolate to find diameter at percentile
                 if min(cumulative) <= perc <= max(cumulative):
                     d_value = np.interp(perc, cumulative, diameters)
-                    
+
                     # Draw vertical line at diameter
-                    self.current_ax.axvline(x=d_value, color=color, linestyle='--', 
+                    self.current_ax.axvline(x=d_value, color=color, linestyle='--',
                                            alpha=0.7, label=f'{name} = {d_value:.3f} mm')
-                    
+
                     # Draw horizontal line at percentile
                     self.current_ax.axhline(y=perc, color=color, linestyle=':', alpha=0.5)
         
@@ -188,20 +217,22 @@ class PlotWidget(QWidget):
         # Plot K-values on right if available
         if self.k_results:
             methods = list(self.k_results.keys())
-            k_values = list(self.k_results.values())
+            k_values_display = self._convert_k_values_for_display(self.k_results)
+            k_values = list(k_values_display.values())
             colors = [self.method_colors.get(method, '#888888') for method in methods]
-            
+
             x_pos = np.arange(len(methods))
             bars = ax2.bar(x_pos, k_values, color=colors, alpha=0.8, edgecolor='black', linewidth=1)
-            
-            # Add value labels on bars
-            for bar, k_val in zip(bars, k_values):
+
+            # Add value labels on bars with proper formatting
+            for bar, method in zip(bars, methods):
                 height = bar.get_height()
+                formatted_value = self._format_k_value(k_values_display[method])
                 ax2.text(bar.get_x() + bar.get_width()/2., height*1.1,
-                        f'{k_val:.2e}', ha='center', va='bottom', fontsize=7)
-            
+                        formatted_value.split()[0], ha='center', va='bottom', fontsize=7)  # Show only number
+
             ax2.set_xlabel('Method', fontsize=9)
-            ax2.set_ylabel('K (m/s)', fontsize=9)
+            ax2.set_ylabel(self._get_k_axis_label(), fontsize=9)
             ax2.set_title('Hydraulic Conductivity', fontsize=10, fontweight='bold')
             ax2.set_xticks(x_pos)
             ax2.set_xticklabels([m[:6] for m in methods], rotation=45, ha='right', fontsize=8)
@@ -234,51 +265,86 @@ class PlotWidget(QWidget):
         self.current_ax = self.figure.add_subplot(1, 1, 1)
         self.k_value_ax = self.current_ax
         
-        # Prepare data for bar chart
+        # Prepare data for bar chart with unit conversion
         methods = list(k_results.keys())
-        k_values = list(k_results.values())
-        
+        k_values_display = self._convert_k_values_for_display(k_results)
+        k_values = list(k_values_display.values())
+
         # Get colors for each method
         colors = [self.method_colors.get(method, '#888888') for method in methods]
-        
+
         # Create bar chart
         x_pos = np.arange(len(methods))
         bars = self.current_ax.bar(x_pos, k_values, color=colors, alpha=0.8, edgecolor='black', linewidth=1)
-        
-        # Add value labels on bars
-        for bar, k_val in zip(bars, k_values):
+
+        # Add value labels on bars with proper formatting
+        for bar, method in zip(bars, methods):
             height = bar.get_height()
+            formatted_value = self._format_k_value(k_values_display[method])
             self.current_ax.text(bar.get_x() + bar.get_width()/2., height*1.1,
-                                f'{k_val:.2e}', ha='center', va='bottom', fontsize=8)
-        
+                                formatted_value.split()[0], ha='center', va='bottom', fontsize=8)  # Show only number
+
         # Setup plot formatting
         self.current_ax.set_xlabel('Calculation Method', fontsize=10)
-        self.current_ax.set_ylabel('Hydraulic Conductivity K (m/s)', fontsize=10)
+        self.current_ax.set_ylabel(self._get_k_axis_label(), fontsize=10)
         self.current_ax.set_title(f'K-Value Comparison: {self.sample_name}', fontsize=12, fontweight='bold')
         self.current_ax.set_xticks(x_pos)
         self.current_ax.set_xticklabels(methods, rotation=45, ha='right')
         self.current_ax.set_yscale('log')
         self.current_ax.grid(True, alpha=0.3, axis='y', linestyle='--')
         
-        # Add min/max/mean lines
+        # Add min/max/mean lines with proper unit formatting
         if k_values:
             mean_k = np.mean(k_values)
             min_k = min(k_values)
             max_k = max(k_values)
-            
-            self.current_ax.axhline(y=mean_k, color='red', linestyle='-', alpha=0.5, 
-                                   label=f'Mean: {mean_k:.2e} m/s')
+
+            unit_symbol = HydraulicConductivityConverter.UNIT_SYMBOLS[self.display_unit]
+            format_str = HydraulicConductivityConverter.DISPLAY_FORMATS[self.display_unit]
+
+            self.current_ax.axhline(y=mean_k, color='red', linestyle='-', alpha=0.5,
+                                   label=f'Mean: {format_str.format(mean_k)} {unit_symbol}')
             self.current_ax.axhline(y=min_k, color='blue', linestyle=':', alpha=0.5,
-                                   label=f'Min: {min_k:.2e} m/s')
+                                   label=f'Min: {format_str.format(min_k)} {unit_symbol}')
             self.current_ax.axhline(y=max_k, color='green', linestyle=':', alpha=0.5,
-                                   label=f'Max: {max_k:.2e} m/s')
-            
+                                   label=f'Max: {format_str.format(max_k)} {unit_symbol}')
+
             self.current_ax.legend(loc='upper right', fontsize=8)
         
         # Adjust layout and redraw
         self.figure.tight_layout()
         self.canvas.draw()
-        
+
+    def set_display_unit(self, unit: HydraulicConductivityUnit):
+        """Set the unit for K-value display and refresh plots"""
+        self.display_unit = unit
+
+        # Refresh current plot if K-values are displayed
+        if self.k_results:
+            if self.k_value_ax == self.current_ax:
+                # K-values only plot
+                self.plot_k_values_only(self.k_results)
+            elif self.k_value_ax is not None:
+                # Combined plot
+                self.plot_combined_view(self.k_results)
+
+    def _convert_k_values_for_display(self, k_values_m_s: Dict[str, float]) -> Dict[str, float]:
+        """Convert K-values from m/s to current display unit"""
+        converted = {}
+        for method, k_m_s in k_values_m_s.items():
+            k_display = HydraulicConductivityConverter.convert_from_m_per_s(k_m_s, self.display_unit)
+            converted[method] = k_display
+        return converted
+
+    def _format_k_value(self, k_value_display_units: float) -> str:
+        """Format K-value for display with appropriate precision"""
+        return HydraulicConductivityConverter.format_value(k_value_display_units, self.display_unit)
+
+    def _get_k_axis_label(self) -> str:
+        """Get the appropriate axis label for current display unit"""
+        unit_symbol = HydraulicConductivityConverter.UNIT_SYMBOLS[self.display_unit]
+        return f'Hydraulic Conductivity K ({unit_symbol})'
+
     def reset_view(self):
         """Reset plot view to default zoom"""
         if not self.current_ax:
@@ -291,8 +357,9 @@ class PlotWidget(QWidget):
             self.current_ax.set_xlim(min(diameters)*0.5, max(diameters)*2)
             self.current_ax.set_ylim(0, 100)
         elif self.k_value_ax == self.current_ax and self.k_results:
-            # K-value plot
-            k_values = list(self.k_results.values())
+            # K-value plot - use converted values for proper scaling
+            k_values_display = self._convert_k_values_for_display(self.k_results)
+            k_values = list(k_values_display.values())
             self.current_ax.set_ylim(min(k_values)*0.1, max(k_values)*10)
         else:
             # Default grain size limits

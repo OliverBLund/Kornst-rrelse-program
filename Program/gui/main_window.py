@@ -83,7 +83,7 @@ class MainWindow(QMainWindow):
         
         # Control panel (simplified)
         self.control_panel = ControlPanel()
-        self.control_panel.setMaximumWidth(250)
+        self.control_panel.setMaximumWidth(300)
         
         # Connect control panel signals
         self.control_panel.files_loaded.connect(self.on_files_loaded)
@@ -212,22 +212,20 @@ class MainWindow(QMainWindow):
         """Setup simplified toolbar"""
         toolbar = QToolBar("Main Tools")
         self.addToolBar(toolbar)
-        
-        # Export options
-        export_results_action = QAction("Export Results", self)
-        export_results_action.triggered.connect(self.export_results)
-        toolbar.addAction(export_results_action)
-        
-        export_plot_action = QAction("Export Plot", self)
-        export_plot_action.triggered.connect(self.export_plot)
-        toolbar.addAction(export_plot_action)
-        
-        toolbar.addSeparator()
-        
-        # Calculate action
-        calculate_action = QAction("Calculate All", self)
+
+        # Primary action: Calculate all samples
+        calculate_action = QAction("🔬 Calculate All", self)
+        calculate_action.setToolTip("Calculate hydraulic conductivity for all loaded samples")
         calculate_action.triggered.connect(self.calculate_all_k_values)
         toolbar.addAction(calculate_action)
+
+        toolbar.addSeparator()
+
+        # Export action (consolidated)
+        export_action = QAction("📤 Export", self)
+        export_action.setToolTip("Export current results or plot")
+        export_action.triggered.connect(self.export_current)
+        toolbar.addAction(export_action)
     
     def setup_statusbar(self):
         """Setup status bar with progress indicator"""
@@ -318,8 +316,7 @@ class MainWindow(QMainWindow):
         
         # Set parameters from control panel
         temperature = self.control_panel.temp_spinbox.value()
-        porosity = self.control_panel.porosity_spinbox.value()
-        dataset_tab.set_parameters(temperature, porosity)
+        dataset_tab.set_parameters(temperature)
         
         # Add to tabs
         self.dataset_tabs_widget.addTab(dataset_tab, f"📁 {dataset.sample_name}")
@@ -390,9 +387,8 @@ class MainWindow(QMainWindow):
         for i in range(self.dataset_tabs_widget.count()):
             widget = self.dataset_tabs_widget.widget(i)
             if isinstance(widget, ErrorTab) and widget.file_path == file_path:
-                # Update the error message and refresh UI
-                widget.error_message = error_message
-                widget.setup_ui()
+                # Update the error message and refresh preview
+                widget.update_error_message(error_message)
                 widget.load_file_preview()
 
                 # Update tab title to show error
@@ -434,10 +430,10 @@ class MainWindow(QMainWindow):
             QMessageBox.information(self, "No Data", "Please load datasets first")
             return
         
-        # Get selected methods from first dataset tab (or use defaults)
-        selected_methods = ["Hazen", "Terzaghi", "Beyer", "Slichter", 
-                          "Kozeny-Carman", "Shepherd", "USBR", "Zunker", 
-                          "Zamarin", "Sauerbrei"]
+        # Get all available methods from calculator
+        from k_calculations import KCalculator
+        calculator = KCalculator()
+        selected_methods = calculator.get_all_method_names()
         
         # Show progress
         self.progress_bar.setVisible(True)
@@ -447,12 +443,11 @@ class MainWindow(QMainWindow):
         try:
             # Get current parameters from control panel
             temperature = self.control_panel.temp_spinbox.value()
-            porosity = self.control_panel.porosity_spinbox.value()
-            
+
             # Calculate for each dataset
             for i, dataset_tab in enumerate(self.dataset_tabs):
                 # Update parameters
-                dataset_tab.set_parameters(temperature, porosity)
+                dataset_tab.set_parameters(temperature)
                 
                 # Calculate K values
                 dataset_tab.calculate_k_values(selected_methods)
@@ -485,6 +480,19 @@ class MainWindow(QMainWindow):
         # Update comparison
         self.comparison_tab.update_comparison()
     
+    def export_current(self):
+        """Export current view (results or plot based on context)"""
+        if self.top_tabs.currentIndex() == 0:  # Individual samples tab
+            current_index = self.dataset_tabs_widget.currentIndex()
+            if current_index >= 0 and current_index < len(self.dataset_tabs):
+                # Try to export results first, fallback to plot
+                try:
+                    self.dataset_tabs[current_index].export_results()
+                except:
+                    self.dataset_tabs[current_index].plot_workspace.export_plot("png")
+        else:  # Comparison or reporting tab
+            self.comparison_tab.export_comparison()
+
     def export_results(self):
         """Export results for current dataset"""
         if self.top_tabs.currentIndex() == 0:  # Individual samples tab

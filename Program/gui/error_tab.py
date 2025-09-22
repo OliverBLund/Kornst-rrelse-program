@@ -168,6 +168,15 @@ Instructions:
 
         layout.addStretch()
 
+        # Store references to UI elements that might need updates
+        self.title_label = title_label
+        self.error_label = error_label
+
+    def update_error_message(self, new_error_message: str):
+        """Update the error message without recreating the entire UI"""
+        self.error_message = new_error_message
+        self.error_label.setText(f"Problem: {self.error_message}")
+
     def load_file_preview(self):
         """Load first few rows of the file for preview"""
         try:

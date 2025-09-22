@@ -38,12 +38,13 @@ class ControlPanel(QFrame):
         """Setup input validation for parameters"""
         # Connect validation to parameter changes
         self.temp_spinbox.valueChanged.connect(self.validate_temperature)
-        self.porosity_spinbox.valueChanged.connect(self.validate_porosity)
+        self.porosity_mode_combo.currentTextChanged.connect(self.on_porosity_mode_changed)
         
     def setup_ui(self):
         """Setup the control panel layout"""
         layout = QVBoxLayout(self)
-        layout.setSpacing(8)
+        layout.setSpacing(12)
+        layout.setContentsMargins(10, 10, 10, 10)
         
         # Apply professional geotechnical styling
         self.setStyleSheet("""
@@ -55,17 +56,20 @@ class ControlPanel(QFrame):
                 font-weight: bold;
                 border: 2px solid #8b7355;
                 border-radius: 8px;
-                margin-top: 15px;
-                padding-top: 15px;
+                margin-top: 18px;
+                padding-top: 18px;
+                padding-left: 10px;
+                padding-right: 10px;
+                padding-bottom: 10px;
                 background-color: #fafaf7;
                 font-size: 12px;
             }
             QGroupBox::title {
                 subcontrol-origin: margin;
                 subcontrol-position: top left;
-                left: 15px;
-                top: 2px;
-                padding: 2px 8px 2px 8px;
+                left: 18px;
+                top: 4px;
+                padding: 4px 10px 4px 10px;
                 color: #5d4e37;
                 background-color: #fafaf7;
                 border: 1px solid #8b7355;
@@ -93,11 +97,27 @@ class ControlPanel(QFrame):
                 color: #999999;
                 border-color: #cccccc;
             }
-            QListWidget {
+            QListWidget, QTableWidget {
                 background-color: #ffffff;
                 border: 1px solid #8b7355;
                 border-radius: 4px;
                 selection-background-color: #d2b48c;
+                gridline-color: #e0e0e0;
+            }
+            QTableWidget::item {
+                padding: 4px;
+            }
+            QTableWidget::item:selected {
+                background-color: #d2b48c;
+                color: #2f2f2f;
+            }
+            QHeaderView::section {
+                background-color: #f0f0ed;
+                color: #5d4e37;
+                padding: 4px 6px;
+                border: 1px solid #d0d0d0;
+                font-weight: bold;
+                font-size: 10px;
             }
             QLineEdit, QComboBox, QDoubleSpinBox {
                 background-color: #ffffff;
@@ -130,9 +150,12 @@ class ControlPanel(QFrame):
         # === SAMPLE MANAGEMENT SECTION ===
         samples_group = QGroupBox("📁 Sample Management")
         samples_layout = QVBoxLayout(samples_group)
-        
+        samples_layout.setSpacing(8)
+        samples_layout.setContentsMargins(8, 8, 8, 8)
+
         # File operation buttons
         file_buttons_layout = QHBoxLayout()
+        file_buttons_layout.setSpacing(6)
         
         self.add_files_btn = QPushButton("➕ Add Files")
         self.add_files_btn.clicked.connect(self.add_files)
@@ -161,26 +184,37 @@ class ControlPanel(QFrame):
 
         # Set column widths
         header = self.samples_table.horizontalHeader()
-        header.setSectionResizeMode(0, QHeaderView.ResizeMode.Stretch)  # File name
-        header.setSectionResizeMode(1, QHeaderView.ResizeMode.Fixed)     # Status
-        header.setSectionResizeMode(2, QHeaderView.ResizeMode.Fixed)     # Info
-        header.setSectionResizeMode(3, QHeaderView.ResizeMode.Fixed)     # Actions
-        self.samples_table.setColumnWidth(1, 60)  # Status column (narrower)
-        self.samples_table.setColumnWidth(2, 120) # Info column (wider for better messages)
-        self.samples_table.setColumnWidth(3, 80)  # Actions column
+        header.setSectionResizeMode(0, QHeaderView.ResizeMode.ResizeToContents)  # File name
+        header.setSectionResizeMode(1, QHeaderView.ResizeMode.Fixed)             # Status
+        header.setSectionResizeMode(2, QHeaderView.ResizeMode.Fixed)             # Info
+        header.setSectionResizeMode(3, QHeaderView.ResizeMode.Fixed)             # Actions
+        self.samples_table.setColumnWidth(0, 120) # File column (minimum reasonable width)
+        self.samples_table.setColumnWidth(1, 70)  # Status column
+        self.samples_table.setColumnWidth(2, 140) # Info column (wider for better messages)
+        self.samples_table.setColumnWidth(3, 90)  # Actions column
 
         self.samples_table.itemSelectionChanged.connect(self.on_sample_selection_changed)
         self.samples_table.setToolTip("Files to be loaded. Status shows loading progress.")
         
         # Sample info display
         self.sample_info_label = QLabel("No samples loaded")
-        self.sample_info_label.setStyleSheet("color: gray; font-style: italic;")
+        self.sample_info_label.setStyleSheet("""
+            color: #666666;
+            font-style: italic;
+            font-size: 10px;
+            padding: 4px;
+            background-color: #f8f8f6;
+            border: 1px solid #e0e0e0;
+            border-radius: 3px;
+            margin-top: 4px;
+        """)
         
         samples_layout.addLayout(file_buttons_layout)
         samples_layout.addWidget(self.samples_table)
 
         # Batch action buttons
         batch_buttons_layout = QHBoxLayout()
+        batch_buttons_layout.setSpacing(6)
         self.load_auto_btn = QPushButton("✅ Load Auto")
         self.load_auto_btn.clicked.connect(self.load_auto_files)
         self.load_auto_btn.setEnabled(False)
@@ -200,40 +234,56 @@ class ControlPanel(QFrame):
         # === ANALYSIS PARAMETERS ===
         params_group = QGroupBox("⚙️ Analysis Parameters")
         params_layout = QVBoxLayout(params_group)
-        
+        params_layout.setSpacing(8)
+        params_layout.setContentsMargins(8, 8, 8, 8)
+
         # Global parameters (apply to all samples)
         global_params_label = QLabel("Global Parameters (applied to all samples):")
         global_params_label.setFont(QFont("", 9, QFont.Weight.Bold))
+        global_params_label.setStyleSheet("color: #5d4e37; margin-bottom: 6px;")
         params_layout.addWidget(global_params_label)
-        
+
         # Temperature for viscosity calculations
         temp_layout = QHBoxLayout()
-        temp_layout.addWidget(QLabel("🌡️ Temperature:"))
+        temp_layout.setSpacing(8)
+        temp_label = QLabel("🌡️ Temperature:")
+        temp_label.setMinimumWidth(90)
+        temp_layout.addWidget(temp_label)
         self.temp_spinbox = QDoubleSpinBox()
         self.temp_spinbox.setRange(0, 50)
         self.temp_spinbox.setValue(20)
         self.temp_spinbox.setSuffix(" °C")
         self.temp_spinbox.setToolTip("Temperature affects water viscosity in calculations")
+        self.temp_spinbox.setMinimumWidth(80)
         temp_layout.addWidget(self.temp_spinbox)
-        
-        # Porosity
+        temp_layout.addStretch()
+
+        # Porosity Calculation Mode
         porosity_layout = QHBoxLayout()
-        porosity_layout.addWidget(QLabel("🕳️ Porosity:"))
-        self.porosity_spinbox = QDoubleSpinBox()
-        self.porosity_spinbox.setRange(0.1, 0.8)
-        self.porosity_spinbox.setValue(0.4)
-        self.porosity_spinbox.setSingleStep(0.01)
-        self.porosity_spinbox.setDecimals(3)
-        self.porosity_spinbox.setToolTip("Typical values: Sand 0.25-0.50, Silt 0.35-0.50, Clay 0.40-0.70")
-        porosity_layout.addWidget(self.porosity_spinbox)
-        
+        porosity_layout.setSpacing(8)
+        porosity_label = QLabel("🕳️ Porosity Mode:")
+        porosity_label.setMinimumWidth(90)
+        porosity_layout.addWidget(porosity_label)
+        self.porosity_mode_combo = QComboBox()
+        self.porosity_mode_combo.addItems([
+            "Simple Formula (Excel Compatible)",
+            "Urumovic Polynomial (Research)"
+        ])
+        self.porosity_mode_combo.setCurrentIndex(0)  # Default to Excel compatible
+        self.porosity_mode_combo.setToolTip("Choose porosity calculation method:\nSimple: n = 0.255 * (1 + 0.83^U)\nUrumovic: Complex polynomial based on grain size distribution")
+        self.porosity_mode_combo.setMinimumWidth(200)
+        porosity_layout.addWidget(self.porosity_mode_combo)
+        porosity_layout.addStretch()
+
         params_layout.addLayout(temp_layout)
         params_layout.addLayout(porosity_layout)
         
         # Optional: auto-export toggle used by analysis_complete()
-        self.export_results_cb = QCheckBox("Auto-export results after analysis")
+        params_layout.addSpacing(6)
+        self.export_results_cb = QCheckBox("📤 Auto-export results after analysis")
         self.export_results_cb.setChecked(False)
         self.export_results_cb.setToolTip("If enabled, results will be exported automatically after analysis")
+        self.export_results_cb.setStyleSheet("font-size: 10px; color: #5d4e37;")
         params_layout.addWidget(self.export_results_cb)
         
         # Progress Bar
@@ -780,7 +830,7 @@ Uniformity Coefficient (Cu): {dataset.get_uniformity_coefficient():.2f if datase
         """Get current analysis parameters"""
         return {
             'temperature': self.temp_spinbox.value(),
-            'porosity': self.porosity_spinbox.value(),
+            'porosity_mode': self.porosity_mode_combo.currentText(),
             'auto_export': self.export_results_cb.isChecked()
         }
     
@@ -824,19 +874,42 @@ Uniformity Coefficient (Cu): {dataset.get_uniformity_coefficient():.2f if datase
             
         self.update_validation_display()
     
-    def validate_porosity(self, value):
-        """Validate porosity input"""
+    def on_porosity_mode_changed(self, mode_text):
+        """Handle porosity calculation mode change"""
+        # Determine which calculation mode is selected
+        use_simple_formula = "Simple Formula" in mode_text
+
+        # Update all loaded datasets to use the new porosity calculation mode
+        if hasattr(self.parent(), 'tab_widget'):
+            main_window = self.parent()
+            for i in range(main_window.tab_widget.count()):
+                tab = main_window.tab_widget.widget(i)
+                if hasattr(tab, 'dataset') and hasattr(tab.dataset, 'recalculate_porosity'):
+                    # Recalculate porosity using the selected method
+                    if use_simple_formula:
+                        new_porosity = tab.dataset._calculate_simple_porosity()
+                    else:
+                        new_porosity = tab.dataset._calculate_urumovic_porosity()
+
+                    if new_porosity is not None:
+                        tab.dataset.current_porosity = new_porosity
+                        # Update the dataset tab UI if it has porosity controls
+                        if hasattr(tab, 'update_grain_statistics'):
+                            tab.update_grain_statistics()
+                        if hasattr(tab, 'porosity_edit'):
+                            tab.porosity_edit.setText(f"{new_porosity:.3f}")
+                            tab.porosity = new_porosity
+
+    def validate_porosity_mode(self):
+        """Validate porosity calculation mode selection"""
         self.validation_errors = [err for err in self.validation_errors if 'Porosity' not in err]
-        
-        if value < 0.1 or value > 0.8:
-            self.validation_errors.append("🕳️ Porosity should be between 0.1-0.8 for natural soils")
-        elif value < 0.2:
-            self.validation_errors.append("ℹ️ Low porosity (<0.2) typical for dense sands/clays")
-        elif value > 0.6:
-            self.validation_errors.append("ℹ️ High porosity (>0.6) typical for loose/organic soils")
-            
+
+        current_mode = self.porosity_mode_combo.currentText()
+        if not current_mode or current_mode not in ["Simple Formula (Excel Compatible)", "Urumovic Polynomial (Research)"]:
+            self.validation_errors.append("🕳️ Please select a valid porosity calculation mode")
+
         self.update_validation_display()
-    
+
     def validate_column_mapping(self):
         """Column mapping validation - simplified since we auto-detect"""
         pass
@@ -882,12 +955,12 @@ Uniformity Coefficient (Cu): {dataset.get_uniformity_coefficient():.2f if datase
     def perform_full_validation(self):
         """Perform complete validation of all parameters"""
         self.validation_errors.clear()
-        
+
         # Validate all components
         self.validate_temperature(self.temp_spinbox.value())
-        self.validate_porosity(self.porosity_spinbox.value())
+        self.validate_porosity_mode()
         self.validate_samples()
-        
+
         return len([err for err in self.validation_errors if '❌' in err or 'should be' in err]) == 0
 
     # ================================

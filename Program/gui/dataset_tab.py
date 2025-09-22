@@ -30,8 +30,9 @@ class DatasetTab(QWidget):
         self.dataset = dataset
         self.k_calculator = KCalculator()
         self.current_results: List[KCalculationResult] = []
-        self.temperature = 20.0  # Default, will be updated
-        self.porosity = 0.4  # Default, will be updated
+        # Use dataset-specific values instead of global defaults
+        self.temperature = dataset.temperature
+        self.porosity = dataset.current_porosity or dataset.porosity
         
         self.init_ui()
         self.load_dataset_data()
@@ -84,8 +85,8 @@ class DatasetTab(QWidget):
         results_group = QGroupBox(f"Hydraulic Conductivity Results - {self.dataset.sample_name}")
         results_layout = QVBoxLayout(results_group)
         
-        self.results_table = QTableWidget(0, 4)
-        self.results_table.setHorizontalHeaderLabels(["Method", "K (m/s)", "Formula", "Status"])
+        self.results_table = QTableWidget(0, 6)
+        self.results_table.setHorizontalHeaderLabels(["Method", "K (cm/s)", "K (m/s)", "K (m/d)", "Formula", "Status"])
         
         # Set header properties
         header = self.results_table.horizontalHeader()
@@ -128,7 +129,44 @@ class DatasetTab(QWidget):
         
         grain_layout.addWidget(self.grain_stats_text)
         layout.addWidget(grain_group)
-        
+
+        # Porosity control section
+        porosity_group = QGroupBox("Porosity Settings")
+        porosity_layout = QVBoxLayout(porosity_group)
+
+        # Porosity display and edit controls
+        porosity_controls_layout = QHBoxLayout()
+
+        # Show calculated vs current porosity
+        from PyQt6.QtWidgets import QLabel, QLineEdit, QPushButton
+        if self.dataset.calculated_porosity is not None:
+            porosity_info = QLabel(f"Calculated: {self.dataset.calculated_porosity:.4f} | Current: {self.porosity:.4f}")
+        else:
+            porosity_info = QLabel(f"Current: {self.porosity:.4f} [Manual]")
+
+        # Add edit capability
+        self.porosity_edit = QLineEdit()
+        self.porosity_edit.setText(f"{self.porosity:.4f}")
+        self.porosity_edit.setMaximumWidth(100)
+
+        update_porosity_btn = QPushButton("Update")
+        update_porosity_btn.clicked.connect(self._update_porosity)
+
+        reset_porosity_btn = QPushButton("Reset to Calculated")
+        reset_porosity_btn.clicked.connect(self._reset_porosity)
+        if self.dataset.calculated_porosity is None:
+            reset_porosity_btn.setEnabled(False)
+
+        porosity_controls_layout.addWidget(porosity_info)
+        porosity_controls_layout.addWidget(QLabel("Edit:"))
+        porosity_controls_layout.addWidget(self.porosity_edit)
+        porosity_controls_layout.addWidget(update_porosity_btn)
+        porosity_controls_layout.addWidget(reset_porosity_btn)
+        porosity_controls_layout.addStretch()
+
+        porosity_layout.addLayout(porosity_controls_layout)
+        layout.addWidget(porosity_group)
+
         # K-value statistics
         k_group = QGroupBox("Hydraulic Conductivity Statistics")
         k_layout = QVBoxLayout(k_group)
@@ -166,7 +204,18 @@ class DatasetTab(QWidget):
         
         # Basic info
         stats_text += f"Temperature: {self.temperature}°C\n"
-        stats_text += f"Porosity: {self.porosity}\n"
+
+        # Porosity display - show both calculated and current
+        if self.dataset.calculated_porosity is not None:
+            stats_text += f"Porosity (Calculated): {self.dataset.calculated_porosity:.4f}\n"
+            stats_text += f"Porosity (Current): {self.porosity:.4f}"
+            if abs(self.dataset.calculated_porosity - self.porosity) > 0.001:
+                stats_text += " [Modified]\n"
+            else:
+                stats_text += "\n"
+        else:
+            stats_text += f"Porosity: {self.porosity} [Manual]\n"
+
         stats_text += f"Data Points: {len(self.dataset.particle_sizes)}\n\n"
         
         # Grain size statistics
@@ -185,11 +234,16 @@ class DatasetTab(QWidget):
         stats_text += f"D50: {d50:.3f} mm\n" if d50 else "D50: N/A\n"
         stats_text += f"D60: {d60:.3f} mm\n" if d60 else "D60: N/A\n"
         
-        # Calculate uniformity coefficient
+        # Calculate uniformity coefficient and add Urumovic info
         if d10 and d60:
             cu = d60 / d10
             stats_text += f"\nUniformity Coefficient (Cu): {cu:.2f}\n"
-            
+
+            # Add geometric mean for Urumovic calculation
+            dgeom = self.dataset._calculate_geometric_mean_grain_size()
+            if dgeom:
+                stats_text += f"Geometric Mean (dgeom): {dgeom:.3f} mm\n"
+
             # Classification based on Cu
             if cu < 4:
                 stats_text += "Classification: Uniform\n"
@@ -208,21 +262,17 @@ class DatasetTab(QWidget):
         
         self.grain_stats_text.setPlainText(stats_text)
     
-    def set_parameters(self, temperature: float, porosity: float):
+    def set_parameters(self, temperature: float):
         """Update calculation parameters"""
         self.temperature = temperature
-        self.porosity = porosity
+        self.dataset.temperature = temperature
         self.update_grain_statistics()
     
     def calculate_k_values(self, selected_methods: Optional[List[str]] = None):
         """Calculate K values for this dataset"""
         if selected_methods is None:
-            # Default methods if none specified
-            selected_methods = [
-                "Hazen", "Terzaghi", "Beyer", "Slichter", 
-                "Kozeny-Carman", "Shepherd", "USBR", "Zunker", 
-                "Zamarin", "Sauerbrei"
-            ]
+            # Get all available methods from calculator
+            selected_methods = self.k_calculator.get_all_method_names()
         
         # Prepare grain data
         grain_data = {}
@@ -266,19 +316,35 @@ class DatasetTab(QWidget):
         for row, result in enumerate(self.current_results):
             # Method name
             self.results_table.setItem(row, 0, QTableWidgetItem(result.method_name))
-            
-            # K value
-            k_item = QTableWidgetItem()
+
+            # K values in different units
             if result.k_value is not None and result.k_value > 0:
-                k_item.setText(f"{result.k_value:.2e}")
+                k_m_s = result.k_value
+
+                # Convert to different units
+                k_cm_s = k_m_s * 100.0  # m/s to cm/s
+                k_m_d = k_m_s * 86400.0  # m/s to m/d
+
+                # K (cm/s) column
+                cm_s_item = QTableWidgetItem(f"{k_cm_s:.3e}")
+                self.results_table.setItem(row, 1, cm_s_item)
+
+                # K (m/s) column
+                m_s_item = QTableWidgetItem(f"{k_m_s:.2e}")
+                self.results_table.setItem(row, 2, m_s_item)
+
+                # K (m/d) column
+                m_d_item = QTableWidgetItem(f"{k_m_d:.1f}")
+                self.results_table.setItem(row, 3, m_d_item)
             else:
-                k_item.setText("N/A")
-            self.results_table.setItem(row, 1, k_item)
-            
-            # Formula
-            self.results_table.setItem(row, 2, QTableWidgetItem(result.formula_used))
-            
-            # Status with color coding
+                # N/A for all unit columns
+                for col in [1, 2, 3]:
+                    self.results_table.setItem(row, col, QTableWidgetItem("N/A"))
+
+            # Formula (column 4)
+            self.results_table.setItem(row, 4, QTableWidgetItem(result.formula_used))
+
+            # Status with color coding (column 5)
             status = result.status.value if hasattr(result.status, 'value') else str(result.status)
             status_item = QTableWidgetItem(status)
             
@@ -293,7 +359,7 @@ class DatasetTab(QWidget):
             elif "Error" in status:
                 status_item.setBackground(QColor(255, 200, 200))
             
-            self.results_table.setItem(row, 3, status_item)
+            self.results_table.setItem(row, 5, status_item)
         
         # Resize columns
         self.results_table.resizeColumnsToContents()
@@ -376,3 +442,47 @@ Permeability Classification:
     def get_results(self) -> List[KCalculationResult]:
         """Get the current K-calculation results"""
         return self.current_results
+
+    def _update_porosity(self):
+        """Update porosity from user input"""
+        try:
+            new_porosity = float(self.porosity_edit.text())
+
+            # Validate porosity range
+            if new_porosity < 0.01 or new_porosity > 0.99:
+                from PyQt6.QtWidgets import QMessageBox
+                QMessageBox.warning(self, "Invalid Porosity",
+                                  "Porosity must be between 0.01 and 0.99")
+                return
+
+            # Update values
+            self.porosity = new_porosity
+            self.dataset.current_porosity = new_porosity
+
+            # Refresh displays
+            self.update_grain_statistics()
+
+            # Show success message
+            from PyQt6.QtWidgets import QMessageBox
+            QMessageBox.information(self, "Porosity Updated",
+                                  f"Porosity updated to {new_porosity:.4f}")
+
+        except ValueError:
+            from PyQt6.QtWidgets import QMessageBox
+            QMessageBox.warning(self, "Invalid Input",
+                              "Please enter a valid number for porosity")
+
+    def _reset_porosity(self):
+        """Reset porosity to calculated value"""
+        if self.dataset.calculated_porosity is not None:
+            self.porosity = self.dataset.calculated_porosity
+            self.dataset.current_porosity = self.dataset.calculated_porosity
+            self.porosity_edit.setText(f"{self.porosity:.4f}")
+
+            # Refresh displays
+            self.update_grain_statistics()
+
+            # Show success message
+            from PyQt6.QtWidgets import QMessageBox
+            QMessageBox.information(self, "Porosity Reset",
+                                  f"Porosity reset to calculated value: {self.porosity:.4f}")
