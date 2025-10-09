@@ -27,6 +27,7 @@ class PlotWidget(QWidget):
         # Data storage
         self.grain_data = None
         self.k_results = {}
+        self.flagged_methods: set[str] = set()
         self.sample_name = "No data"
 
         # Unit display settings
@@ -50,7 +51,6 @@ class PlotWidget(QWidget):
             "Alyamani-Sen": "#5d4037",  # Dark brown
             "Chapuis": "#ff5722",       # Deep orange-red
             "Krumbein-Monk": "#9c27b0", # Purple
-            "Vukovic-Soro": "#607d8b"   # Blue-gray
         }
         
         self.setup_ui()
@@ -222,10 +222,21 @@ class PlotWidget(QWidget):
             colors = [self.method_colors.get(method, '#888888') for method in methods]
 
             x_pos = np.arange(len(methods))
-            bars = ax2.bar(x_pos, k_values, color=colors, alpha=0.8, edgecolor='black', linewidth=1)
+            bars = ax2.bar(x_pos, k_values, color=colors, alpha=0.8)
+            flagged = getattr(self, 'flagged_methods', set())
 
             # Add value labels on bars with proper formatting
-            for bar, method in zip(bars, methods):
+            for bar, method, color in zip(bars, methods, colors):
+                if method in flagged:
+                    bar.set_facecolor('none')
+                    bar.set_edgecolor(color)
+                    bar.set_linewidth(2.0)
+                    bar.set_hatch('////')
+                    bar.set_alpha(1.0)
+                else:
+                    bar.set_edgecolor('black')
+                    bar.set_linewidth(1.0)
+
                 height = bar.get_height()
                 formatted_value = self._format_k_value(k_values_display[method])
                 ax2.text(bar.get_x() + bar.get_width()/2., height*1.1,
@@ -275,10 +286,21 @@ class PlotWidget(QWidget):
 
         # Create bar chart
         x_pos = np.arange(len(methods))
-        bars = self.current_ax.bar(x_pos, k_values, color=colors, alpha=0.8, edgecolor='black', linewidth=1)
+        bars = self.current_ax.bar(x_pos, k_values, color=colors, alpha=0.8)
+        flagged = getattr(self, 'flagged_methods', set())
 
         # Add value labels on bars with proper formatting
-        for bar, method in zip(bars, methods):
+        for bar, method, color in zip(bars, methods, colors):
+            if method in flagged:
+                bar.set_facecolor('none')
+                bar.set_edgecolor(color)
+                bar.set_linewidth(2.5)
+                bar.set_hatch('////')
+                bar.set_alpha(1.0)
+            else:
+                bar.set_edgecolor('black')
+                bar.set_linewidth(1.0)
+
             height = bar.get_height()
             formatted_value = self._format_k_value(k_values_display[method])
             self.current_ax.text(bar.get_x() + bar.get_width()/2., height*1.1,
@@ -373,6 +395,7 @@ class PlotWidget(QWidget):
         """Clear all plot data"""
         self.grain_data = None
         self.k_results = {}
+        self.flagged_methods = set()
         self.sample_name = "No data"
         self.setup_plots()
         

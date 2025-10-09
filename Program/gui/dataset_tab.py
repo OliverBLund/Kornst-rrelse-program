@@ -13,7 +13,7 @@ from typing import Optional, List, Dict
 import numpy as np
 
 from data_loader import GrainSizeData
-from k_calculations import KCalculator, KCalculationResult
+from k_calculations import KCalculator, KCalculationResult, CalculationStatus
 
 
 class DatasetTab(QWidget):
@@ -32,7 +32,18 @@ class DatasetTab(QWidget):
         self.current_results: List[KCalculationResult] = []
         # Use dataset-specific values instead of global defaults
         self.temperature = dataset.temperature
-        self.porosity = dataset.current_porosity or dataset.porosity
+        base_porosity = (
+            dataset.current_porosity
+            if dataset.current_porosity is not None
+            else dataset.calculated_porosity
+            if dataset.calculated_porosity is not None
+            else dataset.porosity
+        )
+        if base_porosity is None:
+            base_porosity = 0.40
+        if dataset.current_porosity is None:
+            dataset.current_porosity = base_porosity
+        self.porosity = base_porosity
         
         self.init_ui()
         self.load_dataset_data()
@@ -139,14 +150,16 @@ class DatasetTab(QWidget):
 
         # Show calculated vs current porosity
         from PyQt6.QtWidgets import QLabel, QLineEdit, QPushButton
-        if self.dataset.calculated_porosity is not None:
-            porosity_info = QLabel(f"Calculated: {self.dataset.calculated_porosity:.4f} | Current: {self.porosity:.4f}")
+        calculated_porosity = self.dataset.calculated_porosity
+        current_text = f"{self.porosity:.4f}" if self.porosity is not None else "N/A"
+        if calculated_porosity is not None:
+            porosity_info = QLabel(f"Calculated: {calculated_porosity:.4f} | Current: {current_text}")
         else:
-            porosity_info = QLabel(f"Current: {self.porosity:.4f} [Manual]")
+            porosity_info = QLabel(f"Current: {current_text} [Manual]")
 
         # Add edit capability
         self.porosity_edit = QLineEdit()
-        self.porosity_edit.setText(f"{self.porosity:.4f}")
+        self.porosity_edit.setText(current_text)
         self.porosity_edit.setMaximumWidth(100)
 
         update_porosity_btn = QPushButton("Update")
@@ -206,15 +219,21 @@ class DatasetTab(QWidget):
         stats_text += f"Temperature: {self.temperature}°C\n"
 
         # Porosity display - show both calculated and current
-        if self.dataset.calculated_porosity is not None:
-            stats_text += f"Porosity (Calculated): {self.dataset.calculated_porosity:.4f}\n"
-            stats_text += f"Porosity (Current): {self.porosity:.4f}"
-            if abs(self.dataset.calculated_porosity - self.porosity) > 0.001:
-                stats_text += " [Modified]\n"
+        calculated_porosity = self.dataset.calculated_porosity
+        current_porosity = self.porosity
+        if calculated_porosity is not None:
+            stats_text += f"Porosity (Calculated): {calculated_porosity:.4f}\n"
+            if current_porosity is not None:
+                stats_text += f"Porosity (Current): {current_porosity:.4f}"
+                if abs(calculated_porosity - current_porosity) > 0.001:
+                    stats_text += " [Modified]\n"
+                else:
+                    stats_text += "\n"
             else:
-                stats_text += "\n"
+                stats_text += "Porosity (Current): N/A [Missing]\n"
         else:
-            stats_text += f"Porosity: {self.porosity} [Manual]\n"
+            current_text = f"{current_porosity:.4f}" if current_porosity is not None else "N/A"
+            stats_text += f"Porosity: {current_text} [Manual]\n"
 
         stats_text += f"Data Points: {len(self.dataset.particle_sizes)}\n\n"
         
@@ -285,7 +304,11 @@ class DatasetTab(QWidget):
         }.items():
             if value is not None:
                 grain_data[key] = value
-        
+
+        # Provide full grain size distribution for methods that need fraction data
+        grain_data['particle_sizes'] = list(self.dataset.particle_sizes)
+        grain_data['percent_passing'] = list(self.dataset.percent_passing)
+
         # Calculate K values
         self.current_results = self.k_calculator.calculate_all_methods(
             grain_data,
@@ -302,9 +325,14 @@ class DatasetTab(QWidget):
         
         # Update plot with K results
         if self.current_results:
-            k_dict = {r.method_name: r.k_value for r in self.current_results 
-                     if r.k_value is not None and r.k_value > 0}
-            self.plot_workspace.add_k_results(k_dict)
+            k_dict = {}
+            flagged_methods = set()
+            for result in self.current_results:
+                if result.k_value is not None and result.k_value > 0:
+                    k_dict[result.method_name] = result.k_value
+                if result.status != CalculationStatus.OK or not result.conditions_met:
+                    flagged_methods.add(result.method_name)
+            self.plot_workspace.add_k_results(k_dict, flagged_methods)
         
         # Emit signal
         self.calculation_complete.emit(self.dataset.sample_name, self.current_results)

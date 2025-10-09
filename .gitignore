@@ -138,6 +138,8 @@ celerybeat.pid
 .env
 .envrc
 .venv
+.png
+.jpg
 env/
 venv/
 ENV/
@@ -146,7 +148,6 @@ venv.bak/
 
 #Pycache
 __pycache__/
-
 # Spyder project settings
 .spyderproject
 .spyproject

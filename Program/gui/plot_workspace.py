@@ -10,7 +10,7 @@ from PyQt6.QtWidgets import (
 )
 from PyQt6.QtCore import Qt, pyqtSignal, QPropertyAnimation, QRect
 from PyQt6.QtGui import QAction
-from typing import Optional, Dict, List
+from typing import Optional, Dict, List, Set
 import numpy as np
 
 from data_loader import GrainSizeData
@@ -31,6 +31,7 @@ class PlotWorkspace(QWidget):
         self.dataset = dataset
         self.plot_widget = None
         self.k_results = {}
+        self.flagged_methods: Set[str] = set()
         self.sidebar_visible = False  # Start with sidebar hidden
         
         # Plot settings
@@ -385,6 +386,7 @@ class PlotWorkspace(QWidget):
             )
         elif self.current_plot_type == "k-values":
             if self.k_results:
+                self.plot_widget.flagged_methods = set(self.flagged_methods)
                 self.plot_widget.plot_k_values_only(self.k_results)
             else:
                 # Show message that K-values need to be calculated
@@ -404,6 +406,7 @@ class PlotWorkspace(QWidget):
                 self.dataset.sample_name
             )
             # Then show combined view
+            self.plot_widget.flagged_methods = set(self.flagged_methods)
             self.plot_widget.plot_combined_view(self.k_results)
         elif self.current_plot_type == "cumulative":
             self.plot_cumulative_distribution()
@@ -482,9 +485,12 @@ class PlotWorkspace(QWidget):
             self.plot_widget.update_plot(particle_sizes, percent_passing, sample_name)
             self.refresh_plot()
     
-    def add_k_results(self, k_results: Dict[str, float]):
+    def add_k_results(self, k_results: Dict[str, float], flagged_methods: Optional[Set[str]] = None):
         """Add K-calculation results to the plot"""
         self.k_results = k_results
+        self.flagged_methods = set(flagged_methods or [])
+        if self.plot_widget:
+            self.plot_widget.flagged_methods = set(self.flagged_methods)
         if self.current_plot_type in ["combined", "k-values"]:
             self.refresh_plot()
     
