@@ -1,0 +1,281 @@
+<h1>🔧 Troubleshooting</h1>
+
+<p>Solutions to common problems when using the Grain Size Analysis application.</p>
+
+<h2>File Loading Issues</h2>
+
+<h3>File Shows "⚠️ Needs Review"</h3>
+<p><strong>Problem:</strong> Application cannot automatically detect column format</p>
+<p><strong>Solutions:</strong></p>
+<ol>
+    <li>Right-click the file in the sample table</li>
+    <li>Select "🗺️ Map Columns..."</li>
+    <li>Manually specify which columns contain:
+        <ul>
+            <li>Particle Size (mm)</li>
+            <li>Percent Passing (%)</li>
+        </ul>
+    </li>
+    <li>Click "OK" to load with manual mapping</li>
+</ol>
+
+<h3>File Shows "❌ Failed"</h3>
+<p><strong>Possible Causes:</strong></p>
+<ul>
+    <li>Data validation errors (values out of range)</li>
+    <li>Data represents "percent retained" instead of "percent passing"</li>
+    <li>Non-numeric values in data columns</li>
+    <li>Insufficient data points (< 3 sieve sizes)</li>
+</ul>
+
+<p><strong>Solutions:</strong></p>
+<ol>
+    <li>Right-click and select "🔧 Fix/Remap..."</li>
+    <li>Review the error message in the error tab</li>
+    <li>Check your data file:
+        <ul>
+            <li>Ensure particle sizes are in millimeters (mm)</li>
+            <li>Ensure percent passing (not retained)</li>
+            <li>Remove any text or blank cells in data rows</li>
+            <li>Include at least 3 sieve sizes</li>
+        </ul>
+    </li>
+    <li>If data is "percent retained", convert using: % passing = 100 - % retained</li>
+</ol>
+
+<h3>Grain Size Curve Looks Inverted</h3>
+<p><strong>Problem:</strong> Curve goes up instead of down</p>
+<p><strong>Cause:</strong> Data represents "percent retained" rather than "percent passing"</p>
+<p><strong>Solution:</strong></p>
+<ul>
+    <li>Convert your data: % passing = 100 - % retained</li>
+    <li>Save the corrected file and reload</li>
+</ul>
+
+<h3>File Won't Load at All</h3>
+<p><strong>Checklist:</strong></p>
+<ul>
+    <li>✓ File is CSV (.csv) or Excel (.xlsx, .xls)</li>
+    <li>✓ File contains numeric data (not formulas or text)</li>
+    <li>✓ File encoding is UTF-8 or standard ASCII</li>
+    <li>✓ File is not password-protected</li>
+    <li>✓ No special characters in filename or path</li>
+</ul>
+
+<h2>Calculation Issues</h2>
+
+<h3>All Methods Show "Error" Status</h3>
+<p><strong>Possible Causes:</strong></p>
+<ul>
+    <li>Missing characteristic grain sizes (D₁₀, D₅₀, D₆₀)</li>
+    <li>Grain size distribution too fine or too coarse</li>
+    <li>Invalid porosity value</li>
+</ul>
+
+<p><strong>Solutions:</strong></p>
+<ol>
+    <li>Check "Stats" tab to see if D₁₀, D₅₀, D₆₀ are calculated</li>
+    <li>If missing, your sample may need additional sieve sizes:
+        <ul>
+            <li>For D₁₀: Need sieves showing 5-15% passing</li>
+            <li>For D₅₀: Need sieves showing 45-55% passing</li>
+            <li>For D₆₀: Need sieves showing 55-65% passing</li>
+        </ul>
+    </li>
+    <li>Verify porosity is in valid range (0.1-0.8)</li>
+</ol>
+
+<h3>Wide Variation in K Values</h3>
+<p><strong>Problem:</strong> Methods disagree significantly (>10x difference)</p>
+<p><strong>Explanations:</strong></p>
+<ul>
+    <li><strong>Normal</strong> - Different methods have different applicability</li>
+    <li><strong>Gap-graded soil</strong> - Some methods not suitable</li>
+    <li><strong>Fine-grained sample</strong> - Empirical methods less accurate</li>
+</ul>
+
+<p><strong>Solutions:</strong></p>
+<ol>
+    <li>Focus on methods showing "OK" status</li>
+    <li>Use median K value rather than mean</li>
+    <li>Report result as a range</li>
+    <li>Consider laboratory permeability test for validation</li>
+</ol>
+
+<h3>Porosity Value Seems Wrong</h3>
+<p><strong>Problem:</strong> Calculated porosity outside expected range</p>
+<p><strong>Solutions:</strong></p>
+<ol>
+    <li>Check "Stats" tab to see porosity calculation details</li>
+    <li>Try switching porosity mode:
+        <ul>
+            <li>Expand "⚙️ Analysis Parameters"</li>
+            <li>Toggle between "Simple Formula" and "Urumovic Polynomial"</li>
+        </ul>
+    </li>
+    <li>If you have measured porosity, manually override:
+        <ul>
+            <li>Go to "Stats" tab</li>
+            <li>Find "Porosity Settings"</li>
+            <li>Enter measured value</li>
+            <li>Click "Update"</li>
+        </ul>
+    </li>
+</ol>
+
+<h2>Display Issues</h2>
+
+<h3>Can't See All Columns in Table</h3>
+<p><strong>Solution:</strong></p>
+<ul>
+    <li>Widen the window</li>
+    <li>Scroll horizontally in the table</li>
+    <li>Adjust column widths by dragging headers</li>
+</ul>
+
+<h3>Plot Not Showing</h3>
+<p><strong>Solutions:</strong></p>
+<ol>
+    <li>Ensure data is loaded (check if tab exists)</li>
+    <li>Click the "Plot" sub-tab in the dataset</li>
+    <li>Try resizing the window</li>
+    <li>Restart the application</li>
+</ol>
+
+<h3>Text Too Small/Large</h3>
+<p><strong>Solutions:</strong></p>
+<ul>
+    <li>Adjust Windows display scaling (Settings → Display)</li>
+    <li>Resize application window</li>
+</ul>
+
+<h2>Export Problems</h2>
+
+<h3>Export Button Disabled</h3>
+<p><strong>Cause:</strong> No results calculated yet</p>
+<p><strong>Solution:</strong></p>
+<ol>
+    <li>Click "🔬 Calculate All Samples" in toolbar</li>
+    <li>Wait for calculations to complete</li>
+    <li>Export buttons will become enabled</li>
+</ol>
+
+<h3>Export File Won't Open</h3>
+<p><strong>For CSV exports:</strong></p>
+<ul>
+    <li>Ensure you have Excel or compatible spreadsheet software</li>
+    <li>Try opening in text editor first to verify file integrity</li>
+</ul>
+
+<p><strong>For plot exports:</strong></p>
+<ul>
+    <li>PNG: Should open in any image viewer</li>
+    <li>PDF: Requires PDF reader (Adobe Acrobat, browser, etc.)</li>
+    <li>SVG: Requires vector graphics software or modern browser</li>
+</ul>
+
+<h2>Performance Issues</h2>
+
+<h3>Application Runs Slowly</h3>
+<p><strong>Possible Causes & Solutions:</strong></p>
+<ul>
+    <li><strong>Many samples loaded</strong> - Close unused dataset tabs</li>
+    <li><strong>Large files</strong> - Consider downsampling to key sieve sizes</li>
+    <li><strong>Old computer</strong> - Close other applications</li>
+</ul>
+
+<h3>Calculations Take Too Long</h3>
+<p><strong>Normal behavior:</strong></p>
+<ul>
+    <li>14+ methods × number of samples</li>
+    <li>Should complete in < 5 seconds for typical data</li>
+</ul>
+
+<p><strong>If longer:</strong></p>
+<ul>
+    <li>Check if many samples are loaded</li>
+    <li>Restart application if stuck</li>
+</ul>
+
+<h2>Error Messages</h2>
+
+<h3>"Could not parse file"</h3>
+<p><strong>Meaning:</strong> File format not recognized</p>
+<p><strong>Solution:</strong> Use Column Mapper to manually specify format</p>
+
+<h3>"No valid data found"</h3>
+<p><strong>Meaning:</strong> No numeric grain size data detected</p>
+<p><strong>Solution:</strong> Verify file contains proper numeric columns</p>
+
+<h3>"Column mapping needed"</h3>
+<p><strong>Meaning:</strong> Automatic detection failed</p>
+<p><strong>Solution:</strong> Right-click file → "Map Columns..."</p>
+
+<h3>"D10 required"</h3>
+<p><strong>Meaning:</strong> Cannot interpolate D₁₀ from grain size distribution</p>
+<p><strong>Solution:</strong> Add sieve data showing 5-15% passing</p>
+
+<h2>Data Quality Warnings</h2>
+
+<h3>"Non-monotonic grain size data detected"</h3>
+<p><strong>Meaning:</strong> Percent passing doesn't consistently decrease with grain size</p>
+<p><strong>Causes:</strong></p>
+<ul>
+    <li>Data entry errors</li>
+    <li>Laboratory measurement variability</li>
+    <li>Using "percent retained" instead of "percent passing"</li>
+</ul>
+
+<p><strong>Actions:</strong></p>
+<ol>
+    <li>Review raw data for errors</li>
+    <li>If many violations (>50%), likely using percent retained</li>
+    <li>Minor violations (<3 points) are usually acceptable</li>
+</ol>
+
+<h3>"Unusual grain sizes detected"</h3>
+<p><strong>Meaning:</strong> Grain sizes outside typical 0.001-1000 mm range</p>
+<p><strong>Solution:</strong></p>
+<ul>
+    <li>Verify units are millimeters (not meters or micrometers)</li>
+    <li>Check for data entry errors</li>
+</ul>
+
+<h2>Getting Additional Help</h2>
+
+<p>If your issue isn't covered here:</p>
+
+<ol>
+    <li><strong>Check other help pages</strong>:
+        <ul>
+            <li><a href="file_formats.html">File Formats</a> - Data format requirements</li>
+            <li><a href="getting_started.html">Getting Started</a> - Basic workflow</li>
+            <li><a href="results.html">Understanding Results</a> - Interpreting output</li>
+        </ul>
+    </li>
+    <li><strong>Review error tab details</strong> - Error tabs show specific information</li>
+    <li><strong>Try test data</strong> - Load <code>test_sample.csv</code> to verify program works</li>
+    <li><strong>Contact support</strong> - Report bugs or request features</li>
+</ol>
+
+<div class="tip">
+<strong>💡 Pro Tip:</strong> Before reporting an issue, try:
+<ol>
+    <li>Restart the application</li>
+    <li>Test with the included sample file</li>
+    <li>Note exact error messages and steps to reproduce</li>
+</ol>
+</div>
+
+<h2>Known Limitations</h2>
+
+<ul>
+    <li><strong>Empirical methods only</strong> - Not a substitute for laboratory testing</li>
+    <li><strong>Granular soils</strong> - Methods designed for sands and gravels, less accurate for clays</li>
+    <li><strong>Clean soils</strong> - Assumes minimal fines content</li>
+    <li><strong>Temperature range</strong> - 0-50°C for reliable corrections</li>
+</ul>
+
+<div class="note">
+<strong>📌 Remember:</strong> Empirical K estimates are approximations. For critical projects, validate with laboratory permeability tests (constant head, falling head, etc.).
+</div>

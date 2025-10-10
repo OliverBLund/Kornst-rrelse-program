@@ -1,0 +1,139 @@
+<h1>🚀 Getting Started</h1>
+
+<p>Welcome to the Grain Size Analysis application! This guide will help you get started with analyzing your grain size distribution data and calculating hydraulic conductivity values.</p>
+
+<h2>Quick Start Workflow</h2>
+
+<p>Follow these steps to analyze your first sample:</p>
+
+<ol>
+    <li><strong>Add Files</strong> - Click the "➕ Add Files" button in the sidebar</li>
+    <li><strong>Select Data</strong> - Choose one or more CSV files containing grain size distribution data</li>
+    <li><strong>Review Status</strong> - Files will be automatically loaded and validated</li>
+    <li><strong>Calculate K Values</strong> - Click "🔬 Calculate All Samples" in the toolbar</li>
+    <li><strong>View Results</strong> - Explore the plots, results tables, and statistics</li>
+</ol>
+
+<h2>Understanding the Interface</h2>
+
+<h3>Sidebar (Control Panel)</h3>
+<p>The left sidebar contains:</p>
+<ul>
+    <li><strong>Sample Management</strong> - Add, remove, and view loaded files</li>
+    <li><strong>File Status</strong> - Monitor loading progress (✅ Auto-loaded, ⚠️ Needs Review, ❌ Failed)</li>
+    <li><strong>Batch Actions</strong> - Load all auto-detected files or review failed files</li>
+    <li><strong>Analysis Parameters</strong> - Set temperature and porosity calculation mode (collapsible section)</li>
+</ul>
+
+<h3>Main Tab Area</h3>
+<p>The main area has three top-level tabs:</p>
+<ul>
+    <li><strong>📊 Individual Samples</strong> - View each dataset with plot, results, and statistics</li>
+    <li><strong>🔍 Comparison</strong> - Compare multiple datasets side-by-side</li>
+    <li><strong>📝 Reports</strong> - Generate professional reports</li>
+</ul>
+
+<h3>Toolbar</h3>
+<p>Quick access to common actions:</p>
+<ul>
+    <li><strong>🔬 Calculate All Samples</strong> - Run calculations on all loaded datasets</li>
+    <li><strong>📊 Export Results</strong> - Save results to CSV/Excel</li>
+    <li><strong>📈 Export Plot</strong> - Save current plot as image</li>
+    <li><strong>🔍 Compare Datasets</strong> - Switch to comparison view</li>
+</ul>
+
+<h2>Your First Analysis</h2>
+
+<div class="tip">
+<strong>💡 Tip:</strong> Try loading the included <code>test_sample.csv</code> file to familiarize yourself with the interface before analyzing your own data.
+</div>
+
+<h3>Step 1: Load Sample Data</h3>
+<ol>
+    <li>Click "➕ Add Files" in the control panel</li>
+    <li>Select your CSV file(s) containing grain size data</li>
+    <li>The application will automatically:
+        <ul>
+            <li>Detect the file format and column structure</li>
+            <li>Validate the data for common issues</li>
+            <li>Create a dataset tab for each file</li>
+        </ul>
+    </li>
+    <li>Check the status column:
+        <ul>
+            <li>✅ <strong>Auto-loaded</strong> - File loaded successfully, ready for analysis</li>
+            <li>⚠️ <strong>Needs Review</strong> - Requires manual column mapping</li>
+            <li>❌ <strong>Failed</strong> - Contains validation errors</li>
+        </ul>
+    </li>
+</ol>
+
+<div class="note">
+<strong>📌 Note:</strong> If files fail to auto-load, right-click on them and select "Map Columns" to manually specify which columns contain particle sizes and percent passing values.
+</div>
+
+<h3>Step 2: Review Sample Data</h3>
+<ol>
+    <li>Click on a dataset tab to view its details</li>
+    <li>The "Plot" sub-tab shows the grain size distribution curve</li>
+    <li>The "Stats" sub-tab displays:
+        <ul>
+            <li>Characteristic grain sizes (D10, D30, D50, D60)</li>
+            <li>Uniformity coefficient (Cu)</li>
+            <li>Soil classification</li>
+            <li>Calculated porosity</li>
+        </ul>
+    </li>
+</ol>
+
+<h3>Step 3: Adjust Parameters (Optional)</h3>
+<p>Click to expand the "⚙️ Analysis Parameters" section in the sidebar:</p>
+<ul>
+    <li><strong>Temperature</strong> - Set the water temperature (°C) for viscosity corrections</li>
+    <li><strong>Porosity Mode</strong> - Choose between:
+        <ul>
+            <li><em>Simple Formula</em> - Excel-compatible calculation: n = 0.255 × (1 + 0.83^U)</li>
+            <li><em>Urumovic Polynomial</em> - Research-grade calculation based on grain size distribution</li>
+        </ul>
+    </li>
+</ul>
+
+<h3>Step 4: Calculate K Values</h3>
+<ol>
+    <li>Click "🔬 Calculate All Samples" in the toolbar</li>
+    <li>The application will calculate hydraulic conductivity using 14+ empirical methods</li>
+    <li>Results appear in the "Results" sub-tab with:
+        <ul>
+            <li>K values in multiple units (cm/s, m/s, m/d)</li>
+            <li>Formula used for each method</li>
+            <li>Status indicators (OK, Warning, Error)</li>
+        </ul>
+    </li>
+</ol>
+
+<h3>Step 5: Interpret Results</h3>
+<p>Switch to the "Results" tab to view:</p>
+<ul>
+    <li><strong>Color-coded status</strong>:
+        <ul>
+            <li><span style="color: green;">Green (OK)</span> - Method applicable, reliable result</li>
+            <li><span style="color: orange;">Yellow (Warning)</span> - Result may be outside method's recommended range</li>
+            <li><span style="color: red;">Red (Error)</span> - Method not applicable for this sample</li>
+        </ul>
+    </li>
+    <li><strong>Statistical summary</strong> - Mean, median, min/max K values across all methods</li>
+</ul>
+
+<h2>Next Steps</h2>
+
+<p>Now that you've completed your first analysis, explore these features:</p>
+<ul>
+    <li><a href="file_formats.html">File Formats</a> - Learn about supported data formats</li>
+    <li><a href="methods_overview.html">K-Calculation Methods</a> - Understand the different calculation methods</li>
+    <li><a href="parameters.html">Parameters Guide</a> - Deep dive into temperature and porosity settings</li>
+    <li><a href="results.html">Understanding Results</a> - Interpret K values and comparison plots</li>
+</ul>
+
+<div class="tip">
+<strong>💡 Pro Tip:</strong> Right-click on files in the sample table for quick access to options like "Show Info", "Edit Mapping", or "Remove from List".
+</div>

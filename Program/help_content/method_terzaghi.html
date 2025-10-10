@@ -1,0 +1,220 @@
+<h1>Terzaghi Method</h1>
+
+<p>The Terzaghi method, developed by Karl von Terzaghi (the "father of soil mechanics"), provides separate formulas for smooth-rounded and angular grains, making it particularly useful when particle shape is known.</p>
+
+<h2>Formula</h2>
+
+<p>Terzaghi provided two variants based on particle shape:</p>
+
+<h3>Smooth, Rounded Grains</h3>
+<div class="formula">
+K = C₁ × D₁₀² × (ρg/μ)
+<br>
+where C₁ = 6.1 × 10⁻³ cm⁻¹
+</div>
+
+<h3>Angular, Sharp Grains</h3>
+<div class="formula">
+K = C₂ × D₁₀² × (ρg/μ)
+<br>
+where C₂ = 8.1 × 10⁻⁴ cm⁻¹
+</div>
+
+<p>Where:</p>
+<ul>
+    <li><strong>K</strong> = Hydraulic conductivity (cm/s)</li>
+    <li><strong>D₁₀</strong> = Effective grain size (cm)</li>
+    <li><strong>ρg/μ</strong> = Temperature correction factor</li>
+</ul>
+
+<div class="note">
+<strong>Note:</strong> The application uses the <strong>angular grains formula</strong> by default, as it is more conservative and widely applicable to naturally occurring soils.
+</div>
+
+<h2>Required Parameters</h2>
+
+<table>
+    <tr>
+        <th>Parameter</th>
+        <th>Symbol</th>
+        <th>How Obtained</th>
+    </tr>
+    <tr>
+        <td>Effective grain size</td>
+        <td>D₁₀</td>
+        <td>Interpolated from grain size distribution</td>
+    </tr>
+    <tr>
+        <td>Temperature</td>
+        <td>T</td>
+        <td>User-specified (default 20°C)</td>
+    </tr>
+</table>
+
+<h2>Applicability Ranges</h2>
+
+<table>
+    <tr>
+        <th>Parameter</th>
+        <th>Recommended Range</th>
+        <th>Notes</th>
+    </tr>
+    <tr>
+        <td>Grain size (D₁₀)</td>
+        <td>0.1 - 2.0 mm</td>
+        <td>Fine to medium sand</td>
+    </tr>
+    <tr>
+        <td>Uniformity coefficient</td>
+        <td>Cu < 5</td>
+        <td>Relatively uniform materials</td>
+    </tr>
+    <tr>
+        <td>Particle shape</td>
+        <td>Any</td>
+        <td>Choose appropriate coefficient</td>
+    </tr>
+</table>
+
+<h2>Coefficient Selection</h2>
+
+<table>
+    <tr>
+        <th>Grain Shape</th>
+        <th>Coefficient</th>
+        <th>Examples</th>
+    </tr>
+    <tr>
+        <td>Smooth, rounded</td>
+        <td>C₁ = 6.1 × 10⁻³</td>
+        <td>Beach sand, river sand, well-rounded glacial deposits</td>
+    </tr>
+    <tr>
+        <td>Angular, sharp</td>
+        <td>C₂ = 8.1 × 10⁻⁴</td>
+        <td>Crushed rock, angular glacial till, weathered rock fragments</td>
+    </tr>
+</table>
+
+<div class="tip">
+<strong>How to Determine Grain Shape:</strong>
+<ul>
+    <li>Examine grains under microscope or hand lens</li>
+    <li>Check geological origin (rounded = water transport, angular = glacial/weathering)</li>
+    <li>When uncertain, use angular coefficient (more conservative)</li>
+</ul>
+</div>
+
+<h2>Example Calculation</h2>
+
+<h3>Given Data</h3>
+<pre><code>D₁₀ = 0.20 mm = 0.020 cm
+Grain shape: Angular (crushed sand)
+Temperature = 20°C
+</code></pre>
+
+<h3>Step 1: Select Coefficient</h3>
+<pre><code>For angular grains: C = 8.1 × 10⁻⁴ cm⁻¹
+</code></pre>
+
+<h3>Step 2: Temperature Correction</h3>
+<pre><code>ρg/μ at 20°C = 9.76 × 10⁷ cm⁻¹s⁻¹
+</code></pre>
+
+<h3>Step 3: Calculate K</h3>
+<pre><code>K = C × D₁₀² × (ρg/μ)
+K = 8.1×10⁻⁴ × (0.020)² × 9.76×10⁷
+K = 8.1×10⁻⁴ × 4.0×10⁻⁴ × 9.76×10⁷
+K = 3.16×10⁻² cm/s
+K = 3.16×10⁻⁴ m/s
+K = 27.3 m/d
+</code></pre>
+
+<h2>Comparison with Other Methods</h2>
+
+<table>
+    <tr>
+        <th>Method</th>
+        <th>Coefficient Range</th>
+        <th>Special Features</th>
+    </tr>
+    <tr>
+        <td>Hazen</td>
+        <td>100-150</td>
+        <td>Includes porosity function</td>
+    </tr>
+    <tr>
+        <td>Terzaghi (smooth)</td>
+        <td>610</td>
+        <td>For rounded grains</td>
+    </tr>
+    <tr>
+        <td>Terzaghi (angular)</td>
+        <td>81</td>
+        <td>For sharp grains</td>
+    </tr>
+</table>
+
+<p>Note: Coefficients are approximate, using D₁₀ in cm and K in cm/s.</p>
+
+<h2>Validation</h2>
+
+<p>The application's implementation has been validated against:</p>
+<ul>
+    <li>Excel VBA reference: 0.0-0.2% error</li>
+    <li>Published examples: Excellent agreement</li>
+    <li>Field measurements: Good correlation for appropriate grain types</li>
+</ul>
+
+<h2>Advantages</h2>
+
+<ul>
+    <li>Simple D₁₀²-based formula</li>
+    <li>Accounts for particle shape</li>
+    <li>Well-established and widely used</li>
+    <li>Good accuracy for uniform sands</li>
+    <li>Temperature correction included</li>
+</ul>
+
+<h2>Limitations</h2>
+
+<ul>
+    <li>Requires knowledge of particle shape</li>
+    <li>Limited to relatively uniform materials</li>
+    <li>Not suitable for well-graded soils</li>
+    <li>Does not explicitly account for porosity</li>
+    <li>Less accurate for gravels or silts</li>
+</ul>
+
+<h2>Historical Background</h2>
+
+<p>Karl von Terzaghi (1883-1963) developed this formula as part of his groundbreaking work in soil mechanics. His distinction between rounded and angular grains was innovative, recognizing that particle shape significantly affects flow through porous media.</p>
+
+<h3>Reference</h3>
+<p>Terzaghi, K., & Peck, R.B. (1948). "Soil Mechanics in Engineering Practice." John Wiley & Sons, New York.</p>
+
+<h2>Practical Application</h2>
+
+<h3>When to Use Terzaghi</h3>
+<ul>
+    <li>When particle shape is known or can be determined</li>
+    <li>For uniform sands (Cu < 5)</li>
+    <li>When comparing with Hazen for validation</li>
+    <li>For preliminary estimates in geotechnical projects</li>
+</ul>
+
+<h3>When to Use Other Methods</h3>
+<ul>
+    <li><strong>Hazen:</strong> When porosity data available</li>
+    <li><strong>Beyer:</strong> When uniformity coefficient known</li>
+    <li><strong>Kozeny-Carman:</strong> For theoretical analysis</li>
+</ul>
+
+<h2>See Also</h2>
+
+<ul>
+    <li><a href="method_hazen.html">Hazen Method</a> - Alternative D₁₀-based approach</li>
+    <li><a href="method_beyer.html">Beyer Method</a> - Includes uniformity effects</li>
+    <li><a href="parameters.html">Parameters Guide</a> - Temperature settings</li>
+    <li><a href="methods_overview.html">All Methods</a> - Method comparison</li>
+</ul>

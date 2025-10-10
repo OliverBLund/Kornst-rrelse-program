@@ -7,13 +7,14 @@ from PyQt6.QtWidgets import (QFrame, QVBoxLayout, QHBoxLayout, QGroupBox,
                             QTableWidget, QTableWidgetItem, QTextEdit,
                             QProgressBar, QCheckBox, QSpinBox, QDoubleSpinBox,
                             QListWidget, QListWidgetItem, QSplitter, QWidget,
-                            QFileDialog, QMessageBox, QHeaderView, QApplication)
+                            QFileDialog, QMessageBox, QHeaderView, QApplication,
+                            QMenu)
 from PyQt6.QtCore import QThread, QTimer
 from data_loader import DataLoader
 from gui.column_mapper import ColumnMapperDialog
 import os
 from PyQt6.QtCore import Qt, pyqtSignal
-from PyQt6.QtGui import QIcon, QFont
+from PyQt6.QtGui import QIcon, QFont, QAction
 
 class ControlPanel(QFrame):
     # Signals for communication with main window
@@ -153,49 +154,73 @@ class ControlPanel(QFrame):
         samples_layout.setSpacing(8)
         samples_layout.setContentsMargins(8, 8, 8, 8)
 
-        # File operation buttons
-        file_buttons_layout = QHBoxLayout()
-        file_buttons_layout.setSpacing(6)
-        
+        # File operation buttons - Primary action prominent
+        primary_button_layout = QHBoxLayout()
+        primary_button_layout.setSpacing(8)
+
         self.add_files_btn = QPushButton("➕ Add Files")
         self.add_files_btn.clicked.connect(self.add_files)
         self.add_files_btn.setToolTip("Add one or more grain size data files")
-        
+        self.add_files_btn.setStyleSheet("""
+            QPushButton {
+                background-color: #6b8e23;
+                color: white;
+                font-weight: bold;
+                padding: 8px 16px;
+                font-size: 11px;
+            }
+            QPushButton:hover {
+                background-color: #7ba428;
+            }
+            QPushButton:pressed {
+                background-color: #5a7a1e;
+            }
+        """)
+
+        # Secondary actions - smaller and less prominent
+        secondary_buttons_layout = QHBoxLayout()
+        secondary_buttons_layout.setSpacing(4)
+
         self.remove_file_btn = QPushButton("🗑️ Remove")
         self.remove_file_btn.clicked.connect(self.remove_selected_file)
         self.remove_file_btn.setEnabled(False)
-        
+        self.remove_file_btn.setStyleSheet("font-size: 10px; padding: 4px 8px;")
+
         self.clear_all_btn = QPushButton("🧹 Clear All")
         self.clear_all_btn.clicked.connect(self.clear_all_files)
-        
-        file_buttons_layout.addWidget(self.add_files_btn)
-        file_buttons_layout.addWidget(self.remove_file_btn)
-        file_buttons_layout.addWidget(self.clear_all_btn)
-        
-        # Sample table with status tracking
+        self.clear_all_btn.setStyleSheet("font-size: 10px; padding: 4px 8px;")
+
+        secondary_buttons_layout.addWidget(self.remove_file_btn)
+        secondary_buttons_layout.addWidget(self.clear_all_btn)
+        secondary_buttons_layout.addStretch()
+
+        primary_button_layout.addWidget(self.add_files_btn, 1)
+
+        samples_layout.addLayout(primary_button_layout)
+        samples_layout.addLayout(secondary_buttons_layout)
+
+        # Sample table with status tracking - SIMPLIFIED to 2 columns
         self.samples_table = QTableWidget()
-        self.samples_table.setColumnCount(4)
-        self.samples_table.setHorizontalHeaderLabels(["File", "Status", "Info", "Actions"])
+        self.samples_table.setColumnCount(2)
+        self.samples_table.setHorizontalHeaderLabels(["Sample File", "Status"])
         self.samples_table.setMinimumHeight(200)
-        self.samples_table.setMaximumHeight(300)
+        self.samples_table.setMaximumHeight(400)
         self.samples_table.setAlternatingRowColors(True)
         self.samples_table.setSelectionBehavior(QTableWidget.SelectionBehavior.SelectRows)
         self.samples_table.setSelectionMode(QTableWidget.SelectionMode.SingleSelection)
 
+        # Enable context menu
+        self.samples_table.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
+        self.samples_table.customContextMenuRequested.connect(self.show_context_menu)
+
         # Set column widths
         header = self.samples_table.horizontalHeader()
-        header.setSectionResizeMode(0, QHeaderView.ResizeMode.ResizeToContents)  # File name
-        header.setSectionResizeMode(1, QHeaderView.ResizeMode.Fixed)             # Status
-        header.setSectionResizeMode(2, QHeaderView.ResizeMode.Fixed)             # Info
-        header.setSectionResizeMode(3, QHeaderView.ResizeMode.Fixed)             # Actions
-        self.samples_table.setColumnWidth(0, 120) # File column (minimum reasonable width)
-        self.samples_table.setColumnWidth(1, 70)  # Status column
-        self.samples_table.setColumnWidth(2, 140) # Info column (wider for better messages)
-        self.samples_table.setColumnWidth(3, 90)  # Actions column
+        header.setSectionResizeMode(0, QHeaderView.ResizeMode.Stretch)  # File name - stretch to fill
+        header.setSectionResizeMode(1, QHeaderView.ResizeMode.ResizeToContents)  # Status - fit content
 
         self.samples_table.itemSelectionChanged.connect(self.on_sample_selection_changed)
-        self.samples_table.setToolTip("Files to be loaded. Status shows loading progress.")
-        
+        self.samples_table.setToolTip("Right-click on a file for options")
+
         # Sample info display
         self.sample_info_label = QLabel("No samples loaded")
         self.sample_info_label.setStyleSheet("""
@@ -208,22 +233,52 @@ class ControlPanel(QFrame):
             border-radius: 3px;
             margin-top: 4px;
         """)
-        
-        samples_layout.addLayout(file_buttons_layout)
+
         samples_layout.addWidget(self.samples_table)
 
-        # Batch action buttons
-        batch_buttons_layout = QHBoxLayout()
-        batch_buttons_layout.setSpacing(6)
-        self.load_auto_btn = QPushButton("✅ Load Auto")
+        # Batch action buttons - Organized by purpose
+        batch_buttons_layout = QVBoxLayout()
+        batch_buttons_layout.setSpacing(4)
+
+        self.load_auto_btn = QPushButton("✅ Load All Auto-Detected Files")
         self.load_auto_btn.clicked.connect(self.load_auto_files)
         self.load_auto_btn.setEnabled(False)
-        self.load_auto_btn.setToolTip("Load all files that can be automatically processed")
+        self.load_auto_btn.setToolTip("Load all files that were automatically detected and validated")
+        self.load_auto_btn.setStyleSheet("""
+            QPushButton {
+                font-size: 10px;
+                padding: 6px 12px;
+                background-color: #5a9;
+                color: white;
+            }
+            QPushButton:hover {
+                background-color: #6ba;
+            }
+            QPushButton:disabled {
+                background-color: #e8e8e5;
+                color: #999999;
+            }
+        """)
 
-        self.review_failed_btn = QPushButton("⚠️ Review Failed")
+        self.review_failed_btn = QPushButton("⚠️ Review Files Needing Attention")
         self.review_failed_btn.clicked.connect(self.review_failed_files)
         self.review_failed_btn.setEnabled(False)
         self.review_failed_btn.setToolTip("Review and manually map files that failed auto-loading")
+        self.review_failed_btn.setStyleSheet("""
+            QPushButton {
+                font-size: 10px;
+                padding: 6px 12px;
+                background-color: #f39c12;
+                color: white;
+            }
+            QPushButton:hover {
+                background-color: #f5ab35;
+            }
+            QPushButton:disabled {
+                background-color: #e8e8e5;
+                color: #999999;
+            }
+        """)
 
         batch_buttons_layout.addWidget(self.load_auto_btn)
         batch_buttons_layout.addWidget(self.review_failed_btn)
@@ -231,8 +286,10 @@ class ControlPanel(QFrame):
         samples_layout.addLayout(batch_buttons_layout)
         samples_layout.addWidget(self.sample_info_label)
         
-        # === ANALYSIS PARAMETERS ===
+        # === ANALYSIS PARAMETERS (Collapsible) ===
         params_group = QGroupBox("⚙️ Analysis Parameters")
+        params_group.setCheckable(True)
+        params_group.setChecked(False)  # Collapsed by default
         params_layout = QVBoxLayout(params_group)
         params_layout.setSpacing(8)
         params_layout.setContentsMargins(8, 8, 8, 8)
@@ -271,7 +328,6 @@ class ControlPanel(QFrame):
         ])
         self.porosity_mode_combo.setCurrentIndex(0)  # Default to Excel compatible
         self.porosity_mode_combo.setToolTip("Choose porosity calculation method:\nSimple: n = 0.255 * (1 + 0.83^U)\nUrumovic: Complex polynomial based on grain size distribution")
-        self.porosity_mode_combo.setMinimumWidth(200)
         porosity_layout.addWidget(self.porosity_mode_combo)
         porosity_layout.addStretch()
 
@@ -357,17 +413,12 @@ class ControlPanel(QFrame):
         file_item.setToolTip(file_path)
         self.samples_table.setItem(row, 0, file_item)
 
-        # Status
-        status_item = QTableWidgetItem(self.get_status_icon(status))
+        # Status with icon and text
+        status_text = self.get_status_text(status)
+        status_item = QTableWidgetItem(status_text)
         status_item.setData(Qt.ItemDataRole.UserRole, status)
+        status_item.setToolTip(self.get_status_tooltip(status))
         self.samples_table.setItem(row, 1, status_item)
-
-        # Info
-        info_item = QTableWidgetItem("...")
-        self.samples_table.setItem(row, 2, info_item)
-
-        # Actions - add buttons based on status
-        self.add_action_buttons(row, file_path, status)
 
     def get_status_icon(self, status: str) -> str:
         """Get icon for file status"""
@@ -380,47 +431,100 @@ class ControlPanel(QFrame):
         }
         return icons.get(status, '❓')
 
-    def add_action_buttons(self, row: int, file_path: str, status: str):
-        """Add action buttons to table row based on file status"""
-        # Create container widget for buttons
-        button_widget = QWidget()
-        button_layout = QHBoxLayout(button_widget)
-        button_layout.setContentsMargins(2, 2, 2, 2)
-        button_layout.setSpacing(2)
+    def get_status_text(self, status: str) -> str:
+        """Get descriptive status text with icon"""
+        status_map = {
+            'pending': '🔄 Processing...',
+            'auto': '✅ Auto-loaded',
+            'failed': '❌ Failed',
+            'review': '⚠️ Needs Review',
+            'loaded': '📄 Loaded'
+        }
+        return status_map.get(status, '❓ Unknown')
 
+    def get_status_tooltip(self, status: str) -> str:
+        """Get tooltip text for status"""
+        tooltip_map = {
+            'pending': 'File is being processed',
+            'auto': 'File was automatically loaded and validated',
+            'failed': 'File failed validation - contains errors',
+            'review': 'File needs manual column mapping',
+            'loaded': 'File successfully loaded and ready for analysis'
+        }
+        return tooltip_map.get(status, 'Unknown status')
+
+    def show_context_menu(self, position):
+        """Show context menu for file operations"""
+        # Get the selected row
+        item = self.samples_table.itemAt(position)
+        if item is None:
+            return
+
+        row = item.row()
+        file_item = self.samples_table.item(row, 0)
+        status_item = self.samples_table.item(row, 1)
+
+        if not file_item or not status_item:
+            return
+
+        file_path = file_item.data(Qt.ItemDataRole.UserRole)
+        status = status_item.data(Qt.ItemDataRole.UserRole)
+
+        # Create context menu
+        menu = QMenu(self)
+
+        # Add actions based on status
         if status == 'review':
-            # Add "Map" button for files needing manual mapping
-            map_btn = QPushButton("Map")
-            map_btn.setMaximumWidth(40)
-            map_btn.setStyleSheet("font-size: 10px; padding: 2px;")
-            map_btn.clicked.connect(lambda: self.edit_file_mapping(file_path))
-            button_layout.addWidget(map_btn)
+            map_action = QAction("🗺️ Map Columns...", self)
+            map_action.triggered.connect(lambda: self.edit_file_mapping(file_path))
+            menu.addAction(map_action)
 
         elif status in ['auto', 'loaded']:
-            # Add "Edit" button for successfully loaded files
-            edit_btn = QPushButton("Edit")
-            edit_btn.setMaximumWidth(40)
-            edit_btn.setStyleSheet("font-size: 10px; padding: 2px;")
-            edit_btn.clicked.connect(lambda: self.edit_file_mapping(file_path))
-            button_layout.addWidget(edit_btn)
+            info_action = QAction("ℹ️ Show Info...", self)
+            info_action.triggered.connect(lambda: self.show_file_info(file_path))
+            menu.addAction(info_action)
 
-            # Add "Info" button to show details
-            info_btn = QPushButton("Info")
-            info_btn.setMaximumWidth(40)
-            info_btn.setStyleSheet("font-size: 10px; padding: 2px;")
-            info_btn.clicked.connect(lambda: self.show_file_info(file_path))
-            button_layout.addWidget(info_btn)
+            menu.addSeparator()
+
+            edit_action = QAction("✏️ Edit Mapping...", self)
+            edit_action.triggered.connect(lambda: self.edit_file_mapping(file_path))
+            menu.addAction(edit_action)
 
         elif status == 'failed':
-            # Add "Fix" button for failed files
-            fix_btn = QPushButton("Fix")
-            fix_btn.setMaximumWidth(40)
-            fix_btn.setStyleSheet("font-size: 10px; padding: 2px;")
-            fix_btn.clicked.connect(lambda: self.edit_file_mapping(file_path))
-            button_layout.addWidget(fix_btn)
+            fix_action = QAction("🔧 Fix/Remap...", self)
+            fix_action.triggered.connect(lambda: self.edit_file_mapping(file_path))
+            menu.addAction(fix_action)
 
-        # Set the widget in the table
-        self.samples_table.setCellWidget(row, 3, button_widget)
+        # Always show remove option
+        menu.addSeparator()
+        remove_action = QAction("🗑️ Remove from List", self)
+        remove_action.triggered.connect(lambda: self.remove_file_at_row(row))
+        menu.addAction(remove_action)
+
+        # Show menu at cursor position
+        menu.exec(self.samples_table.viewport().mapToGlobal(position))
+
+    def remove_file_at_row(self, row: int):
+        """Remove a file at a specific row"""
+        if row >= 0:
+            # Get file path
+            file_item = self.samples_table.item(row, 0)
+            file_path = file_item.data(Qt.ItemDataRole.UserRole)
+
+            # Remove from tracking
+            if file_path in self.file_statuses:
+                del self.file_statuses[file_path]
+
+            # Remove from loaded samples
+            sample_name = self.extract_sample_name(file_path)
+            if sample_name in self.loaded_samples:
+                del self.loaded_samples[sample_name]
+
+            # Remove from table
+            self.samples_table.removeRow(row)
+
+            self.update_ui_state()
+            self.sample_info_label.setText(f"🗑️ Removed: {os.path.basename(file_path)}")
 
     def edit_file_mapping(self, file_path: str):
         """Open column mapping dialog for a specific file"""
@@ -451,14 +555,7 @@ class ControlPanel(QFrame):
 
                 # Update status
                 self.file_statuses[file_path] = 'loaded'
-                self.update_file_in_table(file_path, 'loaded', f"{len(dataset.particle_sizes)} pts")
-
-                # Update action buttons
-                for row in range(self.samples_table.rowCount()):
-                    file_item = self.samples_table.item(row, 0)
-                    if file_item and file_item.data(Qt.ItemDataRole.UserRole) == file_path:
-                        self.add_action_buttons(row, file_path, 'loaded')
-                        break
+                self.update_file_in_table(file_path, 'loaded')
 
                 self.sample_info_label.setText(f"✅ Updated: {os.path.basename(file_path)}")
 
@@ -542,15 +639,12 @@ Uniformity Coefficient (Cu): {dataset.get_uniformity_coefficient():.2f if datase
                 # Determine status based on validation messages
                 if dataset.has_errors():
                     status = 'failed'
-                    info = f"❌ {len([m for m in dataset.validation_messages if m.severity.value == 'error'])} error(s)"
                     failed_files += 1
                 elif dataset.has_warnings():
                     status = 'auto'  # Still usable, but with warnings
-                    info = dataset.get_validation_summary()
                     auto_loaded += 1
                 else:
                     status = 'auto'
-                    info = dataset.get_validation_summary()
                     auto_loaded += 1
 
                 self.file_statuses[file_path] = status
@@ -561,7 +655,7 @@ Uniformity Coefficient (Cu): {dataset.get_uniformity_coefficient():.2f if datase
                 }
 
                 # Update table with detailed info
-                self.update_file_in_table(file_path, status, info)
+                self.update_file_in_table(file_path, status)
 
             except Exception as e:
                 # Failed - mark for review with specific error info
@@ -570,20 +664,16 @@ Uniformity Coefficient (Cu): {dataset.get_uniformity_coefficient():.2f if datase
                 # Create user-friendly error message
                 error_str = str(e)
                 if "could not parse" in error_str.lower():
-                    info = "❓ Column mapping needed"
                     detailed_error = "Could not auto-detect column format"
                 elif "no valid" in error_str.lower():
-                    info = "❌ No valid data found"
                     detailed_error = "No valid grain size data found in file"
                 elif "delimiter" in error_str.lower():
-                    info = "⚙️ Format detection failed"
                     detailed_error = "Could not determine file delimiter format"
                 else:
-                    info = "⚠️ Loading failed"
                     detailed_error = str(e)
 
                 # Update table for sidebar status
-                self.update_file_in_table(file_path, 'review', info)
+                self.update_file_in_table(file_path, 'review')
 
                 # Emit signal to create error tab
                 self.error_dataset.emit(file_path, detailed_error)
@@ -612,18 +702,16 @@ Uniformity Coefficient (Cu): {dataset.get_uniformity_coefficient():.2f if datase
         self.sample_info_label.setText(summary)
         self.update_ui_state()
 
-    def update_file_in_table(self, file_path: str, status: str, info: str):
+    def update_file_in_table(self, file_path: str, status: str):
         """Update file status in table"""
         for row in range(self.samples_table.rowCount()):
             file_item = self.samples_table.item(row, 0)
             if file_item and file_item.data(Qt.ItemDataRole.UserRole) == file_path:
                 # Update status
-                self.samples_table.item(row, 1).setText(self.get_status_icon(status))
-                self.samples_table.item(row, 1).setData(Qt.ItemDataRole.UserRole, status)
-                # Update info
-                self.samples_table.item(row, 2).setText(info)
-                # Update action buttons
-                self.add_action_buttons(row, file_path, status)
+                status_item = self.samples_table.item(row, 1)
+                status_item.setText(self.get_status_text(status))
+                status_item.setData(Qt.ItemDataRole.UserRole, status)
+                status_item.setToolTip(self.get_status_tooltip(status))
                 break
 
     def load_auto_files(self):
@@ -673,7 +761,7 @@ Uniformity Coefficient (Cu): {dataset.get_uniformity_coefficient():.2f if datase
 
                     # Update status
                     self.file_statuses[file_path] = 'loaded'
-                    self.update_file_in_table(file_path, 'loaded', f"{len(dataset.particle_sizes)} pts")
+                    self.update_file_in_table(file_path, 'loaded')
 
             except Exception as e:
                 QMessageBox.warning(self, "Error", f"Failed to process {os.path.basename(file_path)}:\n{str(e)}")
@@ -847,7 +935,7 @@ Uniformity Coefficient (Cu): {dataset.get_uniformity_coefficient():.2f if datase
             # Update file status tracking and table
             if file_path in self.file_statuses:
                 self.file_statuses[file_path] = status
-                self.update_file_in_table(file_path, status, f"Status: {status}")
+                self.update_file_in_table(file_path, status)
             
     def show_progress(self, show=True):
         """Show/hide progress bar"""
@@ -1023,13 +1111,11 @@ Uniformity Coefficient (Cu): {dataset.get_uniformity_coefficient():.2f if datase
                 # Determine status based on validation messages
                 if dataset.has_errors():
                     status = 'failed'
-                    info = f"❌ {len([m for m in dataset.validation_messages if m.severity.value == 'error'])} error(s)"
                     # Keep as error tab but with validation info
                     detailed_error = f"Data loaded but has validation errors"
                     self.update_error_tab_message.emit(file_path, detailed_error)
                 else:
                     status = 'auto'
-                    info = dataset.get_validation_summary()
                     # Replace error tab with normal dataset tab
                     self.dataset_loaded_successfully.emit(dataset, file_path)
 
@@ -1039,7 +1125,7 @@ Uniformity Coefficient (Cu): {dataset.get_uniformity_coefficient():.2f if datase
                     'data': dataset,
                     'status': status
                 }
-                self.update_file_in_table(file_path, status, info)
+                self.update_file_in_table(file_path, status)
 
             except Exception as e:
                 # Failed - update error tab with real error message
@@ -1047,19 +1133,15 @@ Uniformity Coefficient (Cu): {dataset.get_uniformity_coefficient():.2f if datase
 
                 error_str = str(e)
                 if "could not parse" in error_str.lower():
-                    info = "❓ Column mapping needed"
                     detailed_error = "Could not auto-detect column format"
                 elif "no valid" in error_str.lower():
-                    info = "❌ No valid data found"
                     detailed_error = "No valid grain size data found in file"
                 elif "delimiter" in error_str.lower():
-                    info = "⚙️ Format detection failed"
                     detailed_error = "Could not determine file delimiter format"
                 else:
-                    info = "⚠️ Loading failed"
                     detailed_error = str(e)
 
-                self.update_file_in_table(file_path, 'review', info)
+                self.update_file_in_table(file_path, 'review')
                 # Update the existing error tab with real error
                 self.update_error_tab_message.emit(file_path, detailed_error)
 

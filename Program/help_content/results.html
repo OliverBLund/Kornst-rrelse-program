@@ -1,0 +1,257 @@
+<h1>📊 Understanding Results</h1>
+
+<p>This guide helps you interpret the hydraulic conductivity calculation results and understand what the different values mean.</p>
+
+<h2>Results Tab Overview</h2>
+
+<p>After calculating K values, the Results tab displays a table with:</p>
+
+<table>
+    <tr>
+        <th>Column</th>
+        <th>Description</th>
+    </tr>
+    <tr>
+        <td><strong>Method</strong></td>
+        <td>Name of the empirical calculation method</td>
+    </tr>
+    <tr>
+        <td><strong>K (cm/s)</strong></td>
+        <td>Hydraulic conductivity in centimeters per second</td>
+    </tr>
+    <tr>
+        <td><strong>K (m/s)</strong></td>
+        <td>Hydraulic conductivity in meters per second (SI units)</td>
+    </tr>
+    <tr>
+        <td><strong>K (m/d)</strong></td>
+        <td>Hydraulic conductivity in meters per day</td>
+    </tr>
+    <tr>
+        <td><strong>Formula</strong></td>
+        <td>The specific formula variant used</td>
+    </tr>
+    <tr>
+        <td><strong>Status</strong></td>
+        <td>OK, Warning, or Error indicator</td>
+    </tr>
+</table>
+
+<h2>Unit Conversions</h2>
+
+<p>K values are displayed in three common units:</p>
+
+<div class="formula">
+1 cm/s = 0.01 m/s = 864 m/d
+</div>
+
+<p><strong>Which unit to use?</strong></p>
+<ul>
+    <li><strong>cm/s</strong> - Traditional geotechnical engineering</li>
+    <li><strong>m/s</strong> - SI standard, scientific publications</li>
+    <li><strong>m/d</strong> - Hydrogeology, groundwater modeling</li>
+</ul>
+
+<h2>Permeability Classification</h2>
+
+<p>K values can be classified by permeability:</p>
+
+<table>
+    <tr>
+        <th>K Range (m/s)</th>
+        <th>Classification</th>
+        <th>Typical Materials</th>
+    </tr>
+    <tr>
+        <td>> 10⁻²</td>
+        <td>Very High</td>
+        <td>Gravel, coarse sand</td>
+    </tr>
+    <tr>
+        <td>10⁻⁴ to 10⁻²</td>
+        <td>High</td>
+        <td>Clean sand, sand-gravel mixtures</td>
+    </tr>
+    <tr>
+        <td>10⁻⁵ to 10⁻⁴</td>
+        <td>Moderate</td>
+        <td>Fine sand, silty sand</td>
+    </tr>
+    <tr>
+        <td>10⁻⁷ to 10⁻⁵</td>
+        <td>Low</td>
+        <td>Silt, sandy silt</td>
+    </tr>
+    <tr>
+        <td>< 10⁻⁷</td>
+        <td>Very Low</td>
+        <td>Clay, silty clay</td>
+    </tr>
+</table>
+
+<h2>Status Indicators</h2>
+
+<h3>Green - OK ✅</h3>
+<ul>
+    <li>Method is applicable for this grain size distribution</li>
+    <li>All applicability conditions are met</li>
+    <li>Result is within the method's recommended range</li>
+    <li><strong>Action:</strong> Result is reliable, use with confidence</li>
+</ul>
+
+<h3>Yellow - Warning ⚠️</h3>
+<ul>
+    <li>Result may be outside method's optimal range</li>
+    <li>Grain size distribution near applicability limits</li>
+    <li>Use with caution</li>
+    <li><strong>Action:</strong> Check method applicability, consider corroborating with other methods</li>
+</ul>
+
+<h3>Red - Error ❌</h3>
+<ul>
+    <li>Method not applicable for this sample</li>
+    <li>Missing required grain size parameters (e.g., D₁₀, D₅₀)</li>
+    <li>Calculation failed or produced invalid result</li>
+    <li><strong>Action:</strong> Do not use this result</li>
+</ul>
+
+<div class="tip">
+<strong>💡 Tip:</strong> Hover over a status indicator to see detailed information about why a method received that status.
+</div>
+
+<h2>Statistical Summary</h2>
+
+<p>The Stats tab provides statistical analysis of K values:</p>
+
+<h3>Measures of Central Tendency</h3>
+<ul>
+    <li><strong>Mean K</strong> - Average of all valid K values</li>
+    <li><strong>Median K</strong> - Middle value (recommended for skewed distributions)</li>
+</ul>
+
+<h3>Measures of Spread</h3>
+<ul>
+    <li><strong>Standard Deviation</strong> - Variability among methods</li>
+    <li><strong>Min/Max K</strong> - Range of calculated values</li>
+    <li><strong>Variability</strong> - Ratio of Max/Min (how much methods disagree)</li>
+</ul>
+
+<div class="note">
+<strong>📌 Interpretation:</strong> High variability (>10x difference between min and max) suggests:
+<ul>
+    <li>Methods have different applicability for this sample</li>
+    <li>Some methods may be outside their valid range</li>
+    <li>Grain size distribution is unusual or complex</li>
+</ul>
+</div>
+
+<h2>Recommended Best Estimate</h2>
+
+<p>To determine your best estimate of hydraulic conductivity:</p>
+
+<ol>
+    <li><strong>Filter by status</strong> - Consider only methods showing "OK" (green)</li>
+    <li><strong>Calculate median</strong> - Use the median of these OK methods</li>
+    <li><strong>Report range</strong> - Provide min-max as uncertainty bounds</li>
+    <li><strong>Note outliers</strong> - Identify methods significantly different from median</li>
+</ol>
+
+<div class="formula">
+K<sub>best</sub> = median(K<sub>OK methods</sub>)
+<br>
+Uncertainty: [min(K<sub>OK methods</sub>), max(K<sub>OK methods</sub>)]
+</div>
+
+<h2>Common Result Patterns</h2>
+
+<h3>All Methods Show Similar Values</h3>
+<p><strong>Interpretation:</strong> High confidence in result</p>
+<ul>
+    <li>Grain size distribution is well-suited for empirical methods</li>
+    <li>Sample is uniform, well-graded sand</li>
+    <li>All methods agree on K value</li>
+</ul>
+
+<h3>Wide Spread of Values</h3>
+<p><strong>Interpretation:</strong> Lower confidence, use caution</p>
+<ul>
+    <li>Sample may be outside typical range for some methods</li>
+    <li>Gap-graded or poorly sorted material</li>
+    <li>Consider which methods are most appropriate</li>
+</ul>
+
+<h3>Several Methods Show Errors</h3>
+<p><strong>Possible causes:</strong></p>
+<ul>
+    <li>Missing characteristic grain sizes (e.g., no D₁₀ for fine-grained soil)</li>
+    <li>Grain size distribution incomplete</li>
+    <li>Sample contains significant fines (clay/silt)</li>
+</ul>
+<p><strong>Action:</strong> Use only methods showing "OK" status</p>
+
+<h2>Exporting Results</h2>
+
+<h3>Export to CSV/Excel</h3>
+<p>Click "📊 Export Results" to save:</p>
+<ul>
+    <li>All K values in all units</li>
+    <li>Method names and status</li>
+    <li>Statistical summary</li>
+    <li>Sample parameters (temperature, porosity)</li>
+</ul>
+
+<h3>Export Plots</h3>
+<p>Click "📈 Export Plot" to save:</p>
+<ul>
+    <li>Grain size distribution curve</li>
+    <li>K value comparison chart</li>
+    <li>High-resolution PNG, PDF, or SVG format</li>
+</ul>
+
+<h2>Comparison Across Samples</h2>
+
+<p>Use the "🔍 Comparison" tab to:</p>
+<ul>
+    <li>Compare K values from multiple samples side-by-side</li>
+    <li>Identify trends across different locations or depths</li>
+    <li>Visualize grain size distribution differences</li>
+</ul>
+
+<h2>Quality Assurance Checks</h2>
+
+<div class="warning">
+<strong>⚠️ Red Flags:</strong>
+<ul>
+    <li><strong>Outliers >100x different</strong> - Review input data for errors</li>
+    <li><strong>All methods show errors</strong> - Check file format and data validity</li>
+    <li><strong>Negative K values</strong> - Calculation error, report to developers</li>
+    <li><strong>K > 1 m/s</strong> - Unusually high, verify data (unless gravel)</li>
+    <li><strong>K < 10⁻⁹ m/s</strong> - Unusually low, empirical methods may not apply</li>
+</ul>
+</div>
+
+<h2>Reporting Results</h2>
+
+<p>When reporting hydraulic conductivity, include:</p>
+
+<ol>
+    <li><strong>Best estimate</strong> - Median K from OK methods</li>
+    <li><strong>Uncertainty range</strong> - Min to max of OK methods</li>
+    <li><strong>Methods used</strong> - List which methods contributed to estimate</li>
+    <li><strong>Parameters</strong> - Temperature, porosity mode</li>
+    <li><strong>Grain size characteristics</strong> - D₁₀, D₅₀, D₆₀, Cu</li>
+    <li><strong>Soil classification</strong> - Based on grain size distribution</li>
+</ol>
+
+<p><strong>Example:</strong></p>
+<div class="note">
+<em>"Hydraulic conductivity estimated as K = 3.5×10⁻⁴ m/s (range: 2.8×10⁻⁴ to 4.2×10⁻⁴ m/s) based on median of 8 empirical methods (Hazen, Terzaghi, Beyer, Slichter, Kozeny-Carman, Shepherd, USBR, Sauerbrei) at T=20°C. Sample classified as fine to medium sand (D₁₀=0.15 mm, D₅₀=0.35 mm, Cu=2.3)."</em>
+</div>
+
+<h2>See Also</h2>
+
+<ul>
+    <li><a href="methods_overview.html">K-Calculation Methods</a> - Details on each method</li>
+    <li><a href="parameters.html">Parameters Guide</a> - Effect of temperature and porosity</li>
+    <li><a href="troubleshooting.html">Troubleshooting</a> - Resolving result issues</li>
+</ul>

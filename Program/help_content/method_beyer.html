@@ -1,0 +1,102 @@
+<h1>Beyer Method</h1>
+
+<p>The Beyer method incorporates the uniformity coefficient, making it particularly suitable for materials that are not perfectly uniform. It's widely used in German-speaking countries and provides good accuracy for moderately graded sands.</p>
+
+<h2>Formula</h2>
+
+<div class="formula">
+K = C × log(500/Cu) × D₁₀² × (ρg/μ)
+</div>
+
+<p>Where:</p>
+<ul>
+    <li><strong>K</strong> = Hydraulic conductivity (cm/s)</li>
+    <li><strong>C</strong> = 6 × 10⁻⁴ cm⁻¹</li>
+    <li><strong>Cu</strong> = Uniformity coefficient = D₆₀/D₁₀</li>
+    <li><strong>D₁₀</strong> = Effective grain size (cm)</li>
+    <li><strong>ρg/μ</strong> = Temperature correction factor</li>
+</ul>
+
+<h2>Required Parameters</h2>
+
+<ul>
+    <li>D₁₀ (10% passing)</li>
+    <li>D₆₀ (60% passing)</li>
+    <li>Temperature</li>
+</ul>
+
+<h2>Applicability</h2>
+
+<table>
+    <tr>
+        <th>Parameter</th>
+        <th>Range</th>
+    </tr>
+    <tr>
+        <td>D₁₀</td>
+        <td>0.06 - 0.6 mm</td>
+    </tr>
+    <tr>
+        <td>Uniformity coefficient (Cu)</td>
+        <td>1 - 20</td>
+    </tr>
+    <tr>
+        <td>Soil type</td>
+        <td>Fine to medium sands</td>
+    </tr>
+</table>
+
+<h2>Example</h2>
+
+<pre><code>Given:
+D₁₀ = 0.15 mm = 0.015 cm
+D₆₀ = 0.40 mm = 0.040 cm
+Cu = D₆₀/D₁₀ = 0.40/0.15 = 2.67
+T = 20°C
+
+Calculate:
+log(500/Cu) = log(500/2.67) = log(187.3) = 2.27
+
+K = 6×10⁻⁴ × 2.27 × (0.015)² × 9.76×10⁷
+K = 2.99×10⁻³ cm/s
+K = 2.99×10⁻⁵ m/s
+K = 2.58 m/d
+</code></pre>
+
+<h2>Advantages</h2>
+
+<ul>
+    <li>Accounts for grain size distribution (via Cu)</li>
+    <li>More accurate than Hazen for non-uniform materials</li>
+    <li>Well-validated for fine to medium sands</li>
+    <li>Temperature correction included</li>
+</ul>
+
+<h2>Limitations</h2>
+
+<ul>
+    <li>Requires both D₁₀ and D₆₀</li>
+    <li>Limited to Cu < 20</li>
+    <li>Not suitable for gravels or silts</li>
+</ul>
+
+<h2>When to Use</h2>
+
+<p>Beyer is recommended when:</p>
+<ul>
+    <li>Material is moderately graded (Cu > 2)</li>
+    <li>Working with fine to medium sands</li>
+    <li>Both D₁₀ and D₆₀ can be reliably determined</li>
+</ul>
+
+<h2>Reference</h2>
+
+<p>Beyer, W. (1964). "Zur Bestimmung der Wasserdurchlässigkeit von Kiesen und Sanden aus der Kornverteilungskurve." Wasserwirtschaft Wassertechnik, 14(6), 165-168.</p>
+
+<h2>See Also</h2>
+
+<ul>
+    <li><a href="method_hazen.html">Hazen Method</a> - Simpler, uniform sands only</li>
+    <li><a href="method_terzaghi.html">Terzaghi Method</a> - Alternative D₁₀ method</li>
+    <li><a href="methods_overview.html">All Methods</a></li>
+</ul>

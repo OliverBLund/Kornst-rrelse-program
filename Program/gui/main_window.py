@@ -83,7 +83,8 @@ class MainWindow(QMainWindow):
         
         # Control panel (simplified)
         self.control_panel = ControlPanel()
-        self.control_panel.setMaximumWidth(300)
+        self.control_panel.setMaximumWidth(400)
+        self.control_panel.setMinimumWidth(350)
         
         # Connect control panel signals
         self.control_panel.files_loaded.connect(self.on_files_loaded)
@@ -204,28 +205,71 @@ class MainWindow(QMainWindow):
         # Help menu
         help_menu = menubar.addMenu("&Help")
         if help_menu is not None:
+            help_topics_action = QAction("📚 &Help Topics", self)
+            help_topics_action.setShortcut("F1")
+            help_topics_action.triggered.connect(self.show_help)
+            help_menu.addAction(help_topics_action)
+
+            help_menu.addSeparator()
+
             about_action = QAction("&About", self)
             about_action.triggered.connect(self.show_about)
             help_menu.addAction(about_action)
     
     def setup_toolbar(self):
-        """Setup simplified toolbar"""
+        """Setup simplified toolbar with clear actions"""
         toolbar = QToolBar("Main Tools")
+        toolbar.setMovable(False)
+        toolbar.setStyleSheet("""
+            QToolBar {
+                background-color: #f5f5f0;
+                border-bottom: 2px solid #d4c4a8;
+                padding: 4px;
+                spacing: 8px;
+            }
+            QToolButton {
+                background-color: #d2b48c;
+                border: 1px solid #8b7355;
+                border-radius: 4px;
+                padding: 6px 12px;
+                font-weight: bold;
+                font-size: 11px;
+            }
+            QToolButton:hover {
+                background-color: #ddbf94;
+            }
+            QToolButton:pressed {
+                background-color: #c4a574;
+            }
+        """)
         self.addToolBar(toolbar)
 
         # Primary action: Calculate all samples
-        calculate_action = QAction("🔬 Calculate All", self)
-        calculate_action.setToolTip("Calculate hydraulic conductivity for all loaded samples")
+        calculate_action = QAction("🔬 Calculate All Samples", self)
+        calculate_action.setToolTip("Calculate hydraulic conductivity for all loaded samples using all methods")
         calculate_action.triggered.connect(self.calculate_all_k_values)
         toolbar.addAction(calculate_action)
 
         toolbar.addSeparator()
 
-        # Export action (consolidated)
-        export_action = QAction("📤 Export", self)
-        export_action.setToolTip("Export current results or plot")
-        export_action.triggered.connect(self.export_current)
-        toolbar.addAction(export_action)
+        # Export actions
+        export_results_action = QAction("📊 Export Results", self)
+        export_results_action.setToolTip("Export calculation results to CSV/Excel")
+        export_results_action.triggered.connect(self.export_results)
+        toolbar.addAction(export_results_action)
+
+        export_plot_action = QAction("📈 Export Plot", self)
+        export_plot_action.setToolTip("Export current plot as image")
+        export_plot_action.triggered.connect(self.export_plot)
+        toolbar.addAction(export_plot_action)
+
+        toolbar.addSeparator()
+
+        # Comparison action
+        comparison_action = QAction("🔍 Compare Datasets", self)
+        comparison_action.setToolTip("Switch to comparison view")
+        comparison_action.triggered.connect(lambda: self.top_tabs.setCurrentIndex(1))
+        toolbar.addAction(comparison_action)
     
     def setup_statusbar(self):
         """Setup status bar with progress indicator"""
@@ -513,22 +557,30 @@ class MainWindow(QMainWindow):
         else:  # Comparison tab
             self.comparison_tab.export_comparison()
     
+    def show_help(self):
+        """Show comprehensive help dialog"""
+        from gui.help_dialog import HelpDialog
+        help_dialog = HelpDialog(self)
+        help_dialog.exec()
+
     def show_about(self):
         """Show about dialog"""
         QMessageBox.about(self, "About",
             """<h3>Grain Size Analysis Tool</h3>
             <p>Version 2.0 - New Architecture</p>
-            <p>A comprehensive tool for grain size distribution analysis 
+            <p>A comprehensive tool for grain size distribution analysis
             and hydraulic conductivity calculations.</p>
             <p>Features:</p>
             <ul>
             <li>Multiple dataset management</li>
-            <li>12+ K-calculation methods</li>
+            <li>14+ K-calculation methods</li>
             <li>Interactive plots with controls</li>
             <li>Dataset comparison tools</li>
             <li>Statistical analysis</li>
+            <li>Comprehensive help system</li>
             </ul>
-            <p>© 2024 - Geotechnical Analysis Suite</p>""")
+            <p>© 2024 - Geotechnical Analysis Suite</p>
+            <p><em>Press F1 for detailed help topics</em></p>""")
     
     def _show_status_message(self, message: str, timeout: int = 0):
         """Show a message in the status bar"""

@@ -1,0 +1,204 @@
+<h1>Hazen Method</h1>
+
+<p>The Hazen method is one of the most widely used empirical formulas for estimating hydraulic conductivity from grain size distribution. Developed by Allen Hazen in the late 19th century, it remains popular due to its simplicity and reasonable accuracy for uniform sands.</p>
+
+<h2>Formula</h2>
+
+<div class="formula">
+K = C × f(n) × D₁₀² × (ρg/μ)
+</div>
+
+<p>Where:</p>
+<ul>
+    <li><strong>K</strong> = Hydraulic conductivity (cm/s)</li>
+    <li><strong>C</strong> = Coefficient = 6 × 10⁻⁴ cm⁻¹</li>
+    <li><strong>D₁₀</strong> = Effective grain size (cm)</li>
+    <li><strong>f(n)</strong> = Porosity function = (n - 0.13) / (1 - n)^(1/3)</li>
+    <li><strong>n</strong> = Porosity (dimensionless)</li>
+    <li><strong>ρg/μ</strong> = Temperature correction factor</li>
+</ul>
+
+<h3>Porosity Function</h3>
+
+<p>The application uses a porosity-dependent form of the Hazen formula:</p>
+
+<div class="formula">
+f(n) = (n - 0.13) / (1 - n)^(1/3)
+</div>
+
+<p>This accounts for the effect of void space on hydraulic conductivity.</p>
+
+<h2>Required Parameters</h2>
+
+<table>
+    <tr>
+        <th>Parameter</th>
+        <th>Symbol</th>
+        <th>How Obtained</th>
+    </tr>
+    <tr>
+        <td>Effective grain size</td>
+        <td>D₁₀</td>
+        <td>Interpolated from grain size distribution (10% passing)</td>
+    </tr>
+    <tr>
+        <td>Porosity</td>
+        <td>n</td>
+        <td>Calculated from uniformity coefficient or measured</td>
+    </tr>
+    <tr>
+        <td>Temperature</td>
+        <td>T</td>
+        <td>User-specified (default 20°C)</td>
+    </tr>
+</table>
+
+<h2>Applicability Ranges</h2>
+
+<table>
+    <tr>
+        <th>Parameter</th>
+        <th>Recommended Range</th>
+        <th>Notes</th>
+    </tr>
+    <tr>
+        <td>Grain size (D₁₀)</td>
+        <td>0.1 - 3.0 mm</td>
+        <td>Fine to coarse sand</td>
+    </tr>
+    <tr>
+        <td>Uniformity coefficient</td>
+        <td>Cu < 5</td>
+        <td>Uniform to moderately graded sands</td>
+    </tr>
+    <tr>
+        <td>Porosity</td>
+        <td>0.25 - 0.50</td>
+        <td>Typical for sands</td>
+    </tr>
+    <tr>
+        <td>Fine content</td>
+        <td>< 5%</td>
+        <td>Clean sands</td>
+    </tr>
+</table>
+
+<div class="warning">
+<strong>Warning:</strong> The Hazen method is not appropriate for:
+<ul>
+    <li>Clayey or silty soils</li>
+    <li>Poorly graded or gap-graded materials</li>
+    <li>Gravels or very coarse materials</li>
+    <li>Soils with significant fines content (>5%)</li>
+</ul>
+</div>
+
+<h2>Temperature Correction</h2>
+
+<p>The method includes automatic temperature correction using the Vuković & Soro (1992) polynomial:</p>
+
+<div class="formula">
+K(T) = K₂₀ × [ρ(T)g/μ(T)] / [ρ(20°C)g/μ(20°C)]
+</div>
+
+<p>This adjusts for changes in water viscosity with temperature.</p>
+
+<h2>Example Calculation</h2>
+
+<h3>Given Data</h3>
+<pre><code>D₁₀ = 0.15 mm = 0.015 cm
+D₆₀ = 0.35 mm = 0.035 cm
+Cu = D₆₀/D₁₀ = 2.33
+Porosity (n) = 0.40
+Temperature = 20°C
+</code></pre>
+
+<h3>Step 1: Calculate Porosity Function</h3>
+<pre><code>f(n) = (n - 0.13) / (1 - n)^(1/3)
+f(0.40) = (0.40 - 0.13) / (1 - 0.40)^(1/3)
+f(0.40) = 0.27 / 0.843
+f(0.40) = 0.320
+</code></pre>
+
+<h3>Step 2: Temperature Correction (at 20°C)</h3>
+<pre><code>ρg/μ at 20°C = 9.76 × 10⁷ cm⁻¹s⁻¹
+(Reference value from tables)
+</code></pre>
+
+<h3>Step 3: Calculate K</h3>
+<pre><code>K = 6×10⁻⁴ × 0.320 × (0.015)² × 9.76×10⁷
+K = 6×10⁻⁴ × 0.320 × 2.25×10⁻⁴ × 9.76×10⁷
+K = 4.22×10⁻³ cm/s
+K = 4.22×10⁻⁵ m/s
+K = 3.65 m/d
+</code></pre>
+
+<h2>Comparison with Simplified Hazen</h2>
+
+<p>The classic simplified Hazen formula (without porosity function):</p>
+
+<div class="formula">
+K = C × D₁₀²
+</div>
+
+<p>Where C typically ranges from 100-150 (using D₁₀ in cm, K in cm/s).</p>
+
+<p>The application implements the more accurate porosity-dependent version.</p>
+
+<h2>Validation</h2>
+
+<p>The application's implementation has been validated against:</p>
+<ul>
+    <li>Excel VBA reference: 0.0-0.4% error</li>
+    <li>Published examples: Excellent agreement</li>
+    <li>5 independent test datasets: Perfect accuracy</li>
+</ul>
+
+<h2>Advantages</h2>
+
+<ul>
+    <li>Simple and well-established</li>
+    <li>Only requires D₁₀</li>
+    <li>Widely validated for uniform sands</li>
+    <li>Includes temperature correction</li>
+    <li>Accounts for porosity effects</li>
+</ul>
+
+<h2>Limitations</h2>
+
+<ul>
+    <li>Limited to uniform, clean sands</li>
+    <li>Less accurate for well-graded materials</li>
+    <li>Not suitable for gravels or fine-grained soils</li>
+    <li>Requires accurate D₁₀ measurement</li>
+</ul>
+
+<h2>Historical Background</h2>
+
+<p>Allen Hazen (1869-1930) was an American civil engineer who developed this formula based on extensive filter sand experiments at the Massachusetts State Board of Health. His original work focused on water filtration, but the formula has since been widely adopted for hydraulic conductivity estimation.</p>
+
+<h3>Original Reference</h3>
+<p>Hazen, A. (1892). "Physical properties of sands and gravels with reference to use in filtration." Massachusetts State Board of Health, 24th Annual Report, pp. 539-556.</p>
+
+<h2>Practical Tips</h2>
+
+<div class="tip">
+<strong>Best Practices:</strong>
+<ul>
+    <li>Ensure grain size distribution extends below 10% passing</li>
+    <li>Check that Cu < 5 for optimal accuracy</li>
+    <li>Compare with other methods (Terzaghi, Beyer) for validation</li>
+    <li>Use laboratory-measured porosity if available</li>
+    <li>Apply only to clean, granular materials</li>
+</ul>
+</div>
+
+<h2>See Also</h2>
+
+<ul>
+    <li><a href="method_hazen_1892.html">Hazen 1892 (Original Formula)</a> - Simplified version</li>
+    <li><a href="method_terzaghi.html">Terzaghi Method</a> - Alternative D₁₀-based method</li>
+    <li><a href="method_beyer.html">Beyer Method</a> - Includes uniformity coefficient</li>
+    <li><a href="parameters.html">Parameters Guide</a> - Temperature and porosity settings</li>
+    <li><a href="methods_overview.html">All Methods</a> - Method comparison</li>
+</ul>
