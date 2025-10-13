@@ -64,7 +64,7 @@ class MainWindow(QMainWindow):
         """)
         
         self.setup_ui()
-        self.setup_menus()
+        # Menu bar removed - all actions in toolbar
         self.setup_toolbar()
         self.setup_statusbar()
         
@@ -231,9 +231,9 @@ class MainWindow(QMainWindow):
                 background-color: #d2b48c;
                 border: 1px solid #8b7355;
                 border-radius: 4px;
-                padding: 6px 12px;
-                font-weight: bold;
-                font-size: 11px;
+                padding: 4px 8px;
+                font-weight: normal;
+                font-size: 10px;
             }
             QToolButton:hover {
                 background-color: #ddbf94;
@@ -245,31 +245,39 @@ class MainWindow(QMainWindow):
         self.addToolBar(toolbar)
 
         # Primary action: Calculate all samples
-        calculate_action = QAction("🔬 Calculate All Samples", self)
-        calculate_action.setToolTip("Calculate hydraulic conductivity for all loaded samples using all methods")
+        calculate_action = QAction("Calculate All", self)
+        calculate_action.setShortcut("Ctrl+K")
+        calculate_action.setToolTip("Calculate hydraulic conductivity for all loaded samples (Ctrl+K)")
         calculate_action.triggered.connect(self.calculate_all_k_values)
         toolbar.addAction(calculate_action)
 
         toolbar.addSeparator()
 
         # Export actions
-        export_results_action = QAction("📊 Export Results", self)
-        export_results_action.setToolTip("Export calculation results to CSV/Excel")
+        export_results_action = QAction("Export Results", self)
+        export_results_action.setShortcut("Ctrl+E")
+        export_results_action.setToolTip("Export calculation results to CSV/Excel (Ctrl+E)")
         export_results_action.triggered.connect(self.export_results)
         toolbar.addAction(export_results_action)
 
-        export_plot_action = QAction("📈 Export Plot", self)
+        export_plot_action = QAction("Export Plot", self)
         export_plot_action.setToolTip("Export current plot as image")
         export_plot_action.triggered.connect(self.export_plot)
         toolbar.addAction(export_plot_action)
 
         toolbar.addSeparator()
 
-        # Comparison action
-        comparison_action = QAction("🔍 Compare Datasets", self)
-        comparison_action.setToolTip("Switch to comparison view")
-        comparison_action.triggered.connect(lambda: self.top_tabs.setCurrentIndex(1))
-        toolbar.addAction(comparison_action)
+        # Help and About actions
+        help_action = QAction("Help", self)
+        help_action.setShortcut("F1")
+        help_action.setToolTip("Open help documentation (F1)")
+        help_action.triggered.connect(self.show_help)
+        toolbar.addAction(help_action)
+
+        about_action = QAction("About", self)
+        about_action.setToolTip("About this application")
+        about_action.triggered.connect(self.show_about)
+        toolbar.addAction(about_action)
     
     def setup_statusbar(self):
         """Setup status bar with progress indicator"""

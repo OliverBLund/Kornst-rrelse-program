@@ -5,7 +5,7 @@ Dataset tab containing plot workspace, results, and statistics for a single data
 from PyQt6.QtWidgets import (
     QWidget, QVBoxLayout, QTabWidget, QTableWidget, QTableWidgetItem,
     QTextEdit, QGroupBox, QPushButton, QHBoxLayout, QMessageBox,
-    QHeaderView
+    QHeaderView, QLabel, QFrame, QTextBrowser, QSplitter
 )
 from PyQt6.QtGui import QColor
 from PyQt6.QtCore import Qt, pyqtSignal
@@ -95,34 +95,155 @@ class DatasetTab(QWidget):
         # Results table
         results_group = QGroupBox(f"Hydraulic Conductivity Results - {self.dataset.sample_name}")
         results_layout = QVBoxLayout(results_group)
-        
+
+        # Summary statistics bar
+        self.summary_frame = QFrame()
+        self.summary_frame.setFrameStyle(QFrame.Shape.StyledPanel | QFrame.Shadow.Plain)
+        self.summary_frame.setStyleSheet("""
+            QFrame {
+                background-color: #f0f0f0;
+                border: 1px solid #c0c0c0;
+                border-radius: 4px;
+                padding: 6px;
+            }
+        """)
+        summary_layout = QHBoxLayout(self.summary_frame)
+        summary_layout.setContentsMargins(10, 5, 10, 5)
+
+        # Summary labels
+        self.summary_total_label = QLabel("No calculations yet")
+        self.summary_total_label.setStyleSheet("font-weight: bold; color: #333;")
+
+        self.summary_valid_label = QLabel("")
+        self.summary_valid_label.setStyleSheet("color: #006400;")  # Dark green
+
+        self.summary_warning_label = QLabel("")
+        self.summary_warning_label.setStyleSheet("color: #8B6914;")  # Dark yellow
+
+        self.summary_error_label = QLabel("")
+        self.summary_error_label.setStyleSheet("color: #8B0000;")  # Dark red
+
+        self.summary_stats_label = QLabel("")
+        self.summary_stats_label.setStyleSheet("color: #333; margin-left: 20px;")
+
+        summary_layout.addWidget(self.summary_total_label)
+        summary_layout.addWidget(QLabel("|"))
+        summary_layout.addWidget(self.summary_valid_label)
+        summary_layout.addWidget(self.summary_warning_label)
+        summary_layout.addWidget(self.summary_error_label)
+        summary_layout.addWidget(QLabel("|"))
+        summary_layout.addWidget(self.summary_stats_label)
+        summary_layout.addStretch()
+
+        results_layout.addWidget(self.summary_frame)
+        self.summary_frame.setVisible(False)  # Hidden until calculations are done
+
         self.results_table = QTableWidget(0, 6)
         self.results_table.setHorizontalHeaderLabels(["Method", "K (cm/s)", "K (m/s)", "K (m/d)", "Formula", "Status"])
-        
+
+        # Enable sorting
+        self.results_table.setSortingEnabled(True)
+
         # Set header properties
         header = self.results_table.horizontalHeader()
         if header:
             header.setStretchLastSection(True)
+
+        # Improve table appearance
+        self.results_table.setAlternatingRowColors(True)
+        self.results_table.verticalHeader().setVisible(False)  # Hide row numbers
+        self.results_table.setSelectionBehavior(QTableWidget.SelectionBehavior.SelectRows)
+        self.results_table.setStyleSheet("""
+            QTableWidget {
+                gridline-color: #d0d0d0;
+                font-size: 10pt;
+            }
+            QTableWidget::item {
+                padding: 5px;
+            }
+            QHeaderView::section {
+                background-color: #e8e8e8;
+                padding: 6px;
+                border: 1px solid #c0c0c0;
+                font-weight: bold;
+                font-size: 10pt;
+            }
+        """)
         
         results_layout.addWidget(self.results_table)
-        layout.addWidget(results_group)
-        
+
+        # Connect row selection to details panel
+        self.results_table.itemSelectionChanged.connect(self.on_result_row_selected)
+
+        # Method details panel (collapsible)
+        self.details_group = QGroupBox("Method Details")
+        self.details_group.setCheckable(True)
+        self.details_group.setChecked(False)  # Start collapsed
+        self.details_group.setStyleSheet("""
+            QGroupBox {
+                font-weight: bold;
+                border: 2px solid #c0c0c0;
+                border-radius: 5px;
+                margin-top: 10px;
+                padding-top: 10px;
+            }
+            QGroupBox::title {
+                subcontrol-origin: margin;
+                subcontrol-position: top left;
+                padding: 2px 5px;
+                background-color: #e8e8e8;
+            }
+        """)
+        details_layout = QVBoxLayout(self.details_group)
+
+        self.details_browser = QTextBrowser()
+        # Remove fixed height to allow splitter to resize
+        self.details_browser.setMinimumHeight(150)  # Set minimum but allow expansion
+        self.details_browser.setStyleSheet("""
+            QTextBrowser {
+                background-color: #fafafa;
+                border: 1px solid #d0d0d0;
+                padding: 10px;
+                font-family: 'Consolas', 'Courier New', monospace;
+                font-size: 10pt;
+            }
+        """)
+        self.details_browser.setHtml("<p style='color: #999; text-align: center;'>Select a row in the table above to view detailed calculation information</p>")
+
+        details_layout.addWidget(self.details_browser)
+
+        # Create splitter for resizable sections
+        splitter = QSplitter(Qt.Orientation.Vertical)
+        splitter.addWidget(results_group)
+        splitter.addWidget(self.details_group)
+        # Set initial ratio: 60% for results, 40% for details
+        splitter.setStretchFactor(0, 60)
+        splitter.setStretchFactor(1, 40)
+        splitter.setCollapsible(0, False)  # Don't allow results to be collapsed
+        splitter.setCollapsible(1, True)   # Allow details to be collapsed
+
+        layout.addWidget(splitter)
+
         # Control buttons
         button_layout = QHBoxLayout()
-        
-        self.recalculate_btn = QPushButton("🔄 Recalculate")
+
+        self.recalculate_btn = QPushButton("Recalculate")
+        self.recalculate_btn.setToolTip("Recalculate K-values for all methods")
         self.recalculate_btn.clicked.connect(self.calculate_k_values)
-        
-        self.export_btn = QPushButton("📤 Export Results")
+        self.recalculate_btn.setMinimumWidth(120)
+
+        self.export_btn = QPushButton("Export Results")
+        self.export_btn.setToolTip("Export calculation results to CSV/Excel")
         self.export_btn.clicked.connect(self.export_results)
-        
+        self.export_btn.setMinimumWidth(120)
+
         button_layout.addWidget(self.recalculate_btn)
         button_layout.addWidget(self.export_btn)
         button_layout.addStretch()
-        
+
         layout.addLayout(button_layout)
-        layout.addStretch()
-        
+        # Remove addStretch() to allow splitter to expand and use all available space
+
         return widget
     
     def create_statistics_tab(self):
@@ -339,11 +460,15 @@ class DatasetTab(QWidget):
     
     def update_results_table(self):
         """Update the results table with calculation results"""
+        # Temporarily disable sorting while populating
+        self.results_table.setSortingEnabled(False)
+
         self.results_table.setRowCount(len(self.current_results))
-        
+
         for row, result in enumerate(self.current_results):
             # Method name
-            self.results_table.setItem(row, 0, QTableWidgetItem(result.method_name))
+            method_item = QTableWidgetItem(result.method_name)
+            self.results_table.setItem(row, 0, method_item)
 
             # K values in different units
             if result.k_value is not None and result.k_value > 0:
@@ -353,45 +478,314 @@ class DatasetTab(QWidget):
                 k_cm_s = k_m_s * 100.0  # m/s to cm/s
                 k_m_d = k_m_s * 86400.0  # m/s to m/d
 
-                # K (cm/s) column
+                # K (cm/s) column - right aligned with numeric sorting
                 cm_s_item = QTableWidgetItem(f"{k_cm_s:.3e}")
+                cm_s_item.setTextAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
+                cm_s_item.setData(Qt.ItemDataRole.UserRole, k_cm_s)  # Store actual number for sorting
                 self.results_table.setItem(row, 1, cm_s_item)
 
-                # K (m/s) column
+                # K (m/s) column - right aligned with numeric sorting
                 m_s_item = QTableWidgetItem(f"{k_m_s:.2e}")
+                m_s_item.setTextAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
+                m_s_item.setData(Qt.ItemDataRole.UserRole, k_m_s)  # Store actual number for sorting
                 self.results_table.setItem(row, 2, m_s_item)
 
-                # K (m/d) column
+                # K (m/d) column - right aligned with numeric sorting
                 m_d_item = QTableWidgetItem(f"{k_m_d:.1f}")
+                m_d_item.setTextAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
+                m_d_item.setData(Qt.ItemDataRole.UserRole, k_m_d)  # Store actual number for sorting
                 self.results_table.setItem(row, 3, m_d_item)
             else:
                 # N/A for all unit columns
                 for col in [1, 2, 3]:
-                    self.results_table.setItem(row, col, QTableWidgetItem("N/A"))
+                    na_item = QTableWidgetItem("N/A")
+                    na_item.setTextAlignment(Qt.AlignmentFlag.AlignCenter | Qt.AlignmentFlag.AlignVCenter)
+                    na_item.setData(Qt.ItemDataRole.UserRole, -1)  # Sort N/A values to bottom
+                    self.results_table.setItem(row, col, na_item)
 
             # Formula (column 4)
             self.results_table.setItem(row, 4, QTableWidgetItem(result.formula_used))
 
-            # Status with color coding (column 5)
+            # Status with color coding and icons (column 5)
             status = result.status.value if hasattr(result.status, 'value') else str(result.status)
-            status_item = QTableWidgetItem(status)
-            
+
+            # Add icon based on status
+            if "OK" in status:
+                status_icon = "✓"
+                status_color = QColor(220, 255, 220)  # Light green
+                text_color = QColor(0, 100, 0)  # Dark green
+            elif "Warning" in status:
+                status_icon = "⚠"
+                status_color = QColor(255, 250, 205)  # Light yellow
+                text_color = QColor(150, 100, 0)  # Dark orange
+            elif "Error" in status:
+                status_icon = "✗"
+                status_color = QColor(255, 220, 220)  # Light red
+                text_color = QColor(150, 0, 0)  # Dark red
+            else:
+                status_icon = "?"
+                status_color = QColor(240, 240, 240)  # Gray
+                text_color = QColor(100, 100, 100)
+
+            status_text = f"{status_icon} {status}"
+            status_item = QTableWidgetItem(status_text)
+            status_item.setBackground(status_color)
+            status_item.setForeground(text_color)
+            status_item.setTextAlignment(Qt.AlignmentFlag.AlignCenter | Qt.AlignmentFlag.AlignVCenter)
+
             if result.status_message:
                 status_item.setToolTip(result.status_message)
-            
-            # Color code based on status
-            if "OK" in status:
-                status_item.setBackground(QColor(200, 255, 200))
-            elif "Warning" in status:
-                status_item.setBackground(QColor(255, 255, 200))
-            elif "Error" in status:
-                status_item.setBackground(QColor(255, 200, 200))
-            
+
             self.results_table.setItem(row, 5, status_item)
-        
-        # Resize columns
+
+        # Resize columns and re-enable sorting
         self.results_table.resizeColumnsToContents()
-    
+        self.results_table.setSortingEnabled(True)
+
+        # Update summary statistics bar
+        self.update_summary_bar()
+
+    def update_summary_bar(self):
+        """Update the summary statistics bar with calculation overview"""
+        if not self.current_results:
+            self.summary_frame.setVisible(False)
+            return
+
+        self.summary_frame.setVisible(True)
+
+        # Count results by status
+        total = len(self.current_results)
+        ok_count = sum(1 for r in self.current_results if "OK" in (r.status.value if hasattr(r.status, 'value') else str(r.status)))
+        warning_count = sum(1 for r in self.current_results if "Warning" in (r.status.value if hasattr(r.status, 'value') else str(r.status)))
+        error_count = sum(1 for r in self.current_results if "Error" in (r.status.value if hasattr(r.status, 'value') else str(r.status)))
+
+        # Get valid K values for statistics
+        valid_results = [r for r in self.current_results if r.k_value is not None and r.k_value > 0]
+
+        # Update labels
+        self.summary_total_label.setText(f"{total} methods calculated")
+
+        if ok_count > 0:
+            self.summary_valid_label.setText(f"✓ {ok_count} valid")
+        else:
+            self.summary_valid_label.setText("")
+
+        if warning_count > 0:
+            self.summary_warning_label.setText(f"⚠ {warning_count} warnings")
+        else:
+            self.summary_warning_label.setText("")
+
+        if error_count > 0:
+            self.summary_error_label.setText(f"✗ {error_count} errors")
+        else:
+            self.summary_error_label.setText("")
+
+        # Calculate and display mean K-value and range
+        if valid_results:
+            k_values = [r.k_value for r in valid_results]
+            mean_k = np.mean(k_values)
+            min_k = np.min(k_values)
+            max_k = np.max(k_values)
+
+            self.summary_stats_label.setText(
+                f"Mean: {mean_k:.2e} m/s  |  Range: {min_k:.2e} - {max_k:.2e} m/s"
+            )
+        else:
+            self.summary_stats_label.setText("No valid K-values calculated")
+
+    def on_result_row_selected(self):
+        """Handle row selection in results table - show method details"""
+        selected_rows = self.results_table.selectedItems()
+        if not selected_rows or not self.current_results:
+            return
+
+        # Get the row number (all selected items will have same row)
+        row = selected_rows[0].row()
+
+        # Get the method name from the table (column 0) to handle sorted tables correctly
+        method_item = self.results_table.item(row, 0)
+        if not method_item:
+            return
+
+        method_name = method_item.text()
+
+        # Find the matching result by method name
+        result = None
+        for r in self.current_results:
+            if r.method_name == method_name:
+                result = r
+                break
+
+        if not result:
+            return
+
+        # Generate detailed HTML
+        html = self.generate_method_details_html(result)
+
+        # Update details panel
+        self.details_browser.setHtml(html)
+
+        # Auto-expand details panel
+        if not self.details_group.isChecked():
+            self.details_group.setChecked(True)
+
+    def generate_method_details_html(self, result) -> str:
+        """Generate detailed HTML for a calculation result with horizontal layout"""
+        # Status color
+        status = result.status.value if hasattr(result.status, 'value') else str(result.status)
+        if "OK" in status:
+            status_color = "#006400"
+            status_bg = "#d4edda"
+            status_icon = "✓"
+        elif "Warning" in status:
+            status_color = "#856404"
+            status_bg = "#fff3cd"
+            status_icon = "⚠"
+        else:
+            status_color = "#721c24"
+            status_bg = "#f8d7da"
+            status_icon = "✗"
+
+        html = f"""
+        <html>
+        <head>
+            <style>
+                body {{ font-family: 'Segoe UI', Arial, sans-serif; margin: 8px; font-size: 10pt; }}
+                table {{ border-collapse: collapse; width: 100%; }}
+                .header-table {{ width: 100%; background-color: #4a5f7f; color: white; margin-bottom: 8px; }}
+                .method-name {{ font-size: 13pt; font-weight: bold; padding: 8px; }}
+                .status-badge {{ background-color: {status_bg}; color: {status_color}; padding: 4px 10px;
+                               font-weight: bold; font-size: 9pt; border-radius: 3px; }}
+                .section-title {{ font-weight: bold; color: #495057; font-size: 10pt;
+                                 background-color: #e9ecef; padding: 5px 8px; margin-top: 8px; }}
+                .k-value-large {{ font-size: 14pt; font-weight: bold; color: #0066cc; padding: 8px; }}
+                .formula-text {{ font-family: 'Courier New', monospace; font-size: 9pt;
+                               background-color: #f0f8ff; padding: 8px; border-left: 3px solid #0066cc; }}
+                .param-table {{ width: 100%; font-size: 9pt; margin-top: 5px; }}
+                .param-label {{ font-weight: 600; color: #6c757d; padding: 3px 8px; width: 20%; }}
+                .param-value {{ font-family: 'Consolas', monospace; padding: 3px 8px; background-color: #f8f9fa; }}
+                .param-value-warn {{ color: #dc3545; font-weight: bold; background-color: #ffe6e6; }}
+                .alert-box {{ background-color: {status_bg}; border-left: 4px solid {status_color};
+                            padding: 8px; margin: 8px 0; color: {status_color}; font-weight: 500; }}
+                .check-ok {{ color: #28a745; font-weight: bold; }}
+                .check-fail {{ color: #dc3545; font-weight: bold; }}
+            </style>
+        </head>
+        <body>
+        """
+
+        # Header with method name and status
+        html += f"""
+        <table class="header-table">
+            <tr>
+                <td class="method-name">{result.method_name}</td>
+                <td align="right" style="padding: 8px;">
+                    <span class="status-badge">{status_icon} {status}</span>
+                </td>
+            </tr>
+        </table>
+        """
+
+        # Status message alert if present
+        if result.status_message:
+            html += f"""
+            <div class="alert-box">
+                <strong>{status_icon} Issue:</strong> {result.status_message}
+            </div>
+            """
+
+        # K-Value and Formula side-by-side
+        html += '<table style="margin-top: 8px;"><tr>'
+
+        # Left column: K-Value
+        html += '<td style="width: 50%; vertical-align: top; padding-right: 8px;">'
+        html += '<div class="section-title">Calculated K-Value</div>'
+        if result.k_value is not None and result.k_value > 0:
+            k_cm_s = result.k_value * 100.0
+            k_m_d = result.k_value * 86400.0
+            html += f"""
+            <div class="k-value-large">{result.k_value:.2e} m/s</div>
+            <div style="padding: 4px 8px; font-size: 9pt; color: #666;">
+                <strong>cm/s:</strong> {k_cm_s:.3e}<br>
+                <strong>m/d:</strong> {k_m_d:.1f}
+            </div>
+            """
+        else:
+            html += '<div style="color: #dc3545; font-weight: bold; padding: 8px;">No valid K-value</div>'
+        html += '</td>'
+
+        # Right column: Formula
+        html += '<td style="width: 50%; vertical-align: top; padding-left: 8px;">'
+        html += '<div class="section-title">Formula Used</div>'
+        html += f'<div class="formula-text">{result.formula_used}</div>'
+        html += '</td></tr></table>'
+
+        # Input Parameters section
+        d10 = self.dataset.get_d10()
+        d30 = self.dataset.get_d30()
+        d60 = self.dataset.get_d60()
+        d50 = self.dataset.get_d50()
+
+        html += '<div class="section-title" style="margin-top: 10px;">Input Parameters</div>'
+        html += '<table class="param-table">'
+
+        # Build parameter list
+        params = []
+        if d10:
+            params.append(("D₁₀", f"{d10:.3f} mm", False))
+        if d30:
+            params.append(("D₃₀", f"{d30:.3f} mm", False))
+        if d50:
+            params.append(("D₅₀", f"{d50:.3f} mm", False))
+        if d60:
+            params.append(("D₆₀", f"{d60:.3f} mm", False))
+
+        # Cu and Cc
+        if d10 and d60:
+            cu = d60 / d10
+            params.append(("Cu", f"{cu:.2f}", False))
+            if d30:
+                cc = (d30 * d30) / (d10 * d60)
+                params.append(("Cc", f"{cc:.2f}", False))
+
+        params.append(("Temperature", f"{self.temperature}°C", False))
+        params.append(("Porosity", f"{self.porosity:.4f}", False))
+
+        # Render parameters in 4-column table (2 label-value pairs per row)
+        for i in range(0, len(params), 2):
+            html += '<tr>'
+
+            # First parameter
+            label1, value1, warn1 = params[i]
+            value_class1 = "param-value param-value-warn" if warn1 else "param-value"
+            html += f'<td class="param-label">{label1}:</td>'
+            html += f'<td class="{value_class1}">{value1}</td>'
+
+            # Second parameter (if exists)
+            if i + 1 < len(params):
+                label2, value2, warn2 = params[i + 1]
+                value_class2 = "param-value param-value-warn" if warn2 else "param-value"
+                html += f'<td class="param-label">{label2}:</td>'
+                html += f'<td class="{value_class2}">{value2}</td>'
+            else:
+                html += '<td></td><td></td>'
+
+            html += '</tr>'
+
+        html += '</table>'
+
+        # Applicability check
+        conditions_met = result.conditions_met if hasattr(result, 'conditions_met') else True
+        check_symbol = '<span class="check-ok">✓ Conditions Met</span>' if conditions_met else '<span class="check-fail">✗ Conditions NOT Met</span>'
+
+        html += f"""
+        <div class="section-title" style="margin-top: 10px;">Applicability</div>
+        <div style="padding: 8px;">{check_symbol}</div>
+        """
+
+        html += "</body></html>"
+        return html
+
     def update_k_statistics(self):
         """Update K-value statistics"""
         if not self.current_results:

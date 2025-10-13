@@ -39,6 +39,7 @@ class PlotWorkspace(QWidget):
         self.show_grid = True
         self.show_legend = True
         self.show_markers = False
+        self.show_zones = False
         self.log_x_scale = True
         
         self.init_ui()
@@ -125,7 +126,22 @@ class PlotWorkspace(QWidget):
         self.plot_selector.setMaximumWidth(100)
         self.plot_selector.currentTextChanged.connect(self.on_plot_type_changed_toolbar)
         toolbar.addWidget(self.plot_selector)
-        
+
+        toolbar.addSeparator()
+
+        # Style selector
+        style_label = QLabel("Style:")
+        style_label.setStyleSheet("font-size: 9px; padding: 0 4px;")
+        toolbar.addWidget(style_label)
+
+        self.style_selector = QComboBox()
+        from .plot_styles import get_available_style_names
+        self.style_selector.addItems(get_available_style_names())
+        self.style_selector.setCurrentText("Professional")
+        self.style_selector.setMaximumWidth(110)
+        self.style_selector.currentTextChanged.connect(self.on_style_changed)
+        toolbar.addWidget(self.style_selector)
+
         toolbar.addSeparator()
         
         # Quick options
@@ -138,7 +154,13 @@ class PlotWorkspace(QWidget):
         self.legend_check.setChecked(True)
         self.legend_check.stateChanged.connect(self.update_display_options)
         toolbar.addWidget(self.legend_check)
-        
+
+        self.zones_check = QCheckBox("Zones")
+        self.zones_check.setChecked(False)
+        self.zones_check.setToolTip("Show grain size classification zones (clay/silt/sand/gravel)")
+        self.zones_check.stateChanged.connect(self.update_display_options)
+        toolbar.addWidget(self.zones_check)
+
         toolbar.addSeparator()
         
         # Zoom controls
@@ -275,11 +297,26 @@ class PlotWorkspace(QWidget):
         
         export_layout.addWidget(self.export_svg_btn)
         export_layout.addWidget(self.export_data_btn)
-        
+
+        # Custom Styling (Placeholder for future enhancement)
+        custom_style_group = QGroupBox("Custom Styling")
+        custom_style_layout = QVBoxLayout(custom_style_group)
+
+        placeholder_label = QLabel("Advanced styling controls\n(Coming in future update)")
+        placeholder_label.setStyleSheet("color: #999999; font-style: italic; font-size: 8px;")
+        placeholder_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        custom_style_layout.addWidget(placeholder_label)
+
+        customize_btn = QPushButton("Customize Colors & Fonts...")
+        customize_btn.setEnabled(False)  # Disabled placeholder
+        customize_btn.setToolTip("Feature coming soon: Customize individual plot elements")
+        custom_style_layout.addWidget(customize_btn)
+
         # Add all groups to sidebar
         layout.addWidget(axis_group)
         layout.addWidget(display_group)
         layout.addWidget(export_group)
+        layout.addWidget(custom_style_group)
         layout.addStretch()
         
         return sidebar
@@ -299,9 +336,16 @@ class PlotWorkspace(QWidget):
             "Cumulative": "cumulative",
             "Histogram": "histogram"
         }
-        
+
         self.current_plot_type = plot_map.get(text, "distribution")
         self.refresh_plot()
+
+    def on_style_changed(self, style_name: str):
+        """Handle style change from toolbar"""
+        if self.plot_widget:
+            from .plot_styles import get_style
+            self.plot_widget.set_style(get_style(style_name))
+            self.refresh_plot()
     
     def zoom_in(self):
         """Zoom in on the plot"""
@@ -345,6 +389,12 @@ class PlotWorkspace(QWidget):
         self.show_grid = self.grid_check.isChecked()
         self.show_legend = self.legend_check.isChecked()
         self.show_markers = self.markers_check.isChecked() if hasattr(self, 'markers_check') else False
+        self.show_zones = self.zones_check.isChecked() if hasattr(self, 'zones_check') else False
+
+        # Update plot widget setting
+        if self.plot_widget:
+            self.plot_widget.show_classification_zones = self.show_zones
+
         self.refresh_plot()
     
     def update_axis_scale(self, text: str):
@@ -430,22 +480,51 @@ class PlotWorkspace(QWidget):
         
         self.plot_widget.figure.clear()
         ax = self.plot_widget.figure.add_subplot(111)
-        
-        # Create cumulative distribution
+
+        # Draw classification zones if enabled
+        if self.show_zones and self.plot_widget:
+            self.plot_widget.draw_classification_zones(ax)
+
+        # Create cumulative distribution with current style
         cumulative = np.array(self.dataset.percent_passing)
         sizes = np.array(self.dataset.particle_sizes)
-        
-        ax.plot(sizes, cumulative, 'g-', linewidth=2, label=self.dataset.sample_name)
-        ax.set_xlabel('Grain Size (mm)')
-        ax.set_ylabel('Cumulative Percent Passing (%)')
-        ax.set_title(f'Cumulative Distribution - {self.dataset.sample_name}')
-        
-        if self.log_x_scale:
-            ax.set_xscale('log')
-        
-        ax.grid(self.show_grid, which='both', alpha=0.3)
-        if self.show_legend:
-            ax.legend()
+
+        # Get style from plot_widget
+        style = self.plot_widget.current_style if self.plot_widget else None
+        if style:
+            ax.plot(sizes, cumulative, color=style.curve_color, linewidth=style.curve_linewidth,
+                   label=self.dataset.sample_name, marker=style.curve_marker,
+                   markersize=style.curve_markersize, markeredgecolor=style.curve_markeredgecolor,
+                   markeredgewidth=style.curve_markeredgewidth)
+            ax.set_xlabel('Grain Size (mm)', fontsize=style.label_fontsize, fontfamily=style.font_family)
+            ax.set_ylabel('Cumulative Percent Passing (%)', fontsize=style.label_fontsize, fontfamily=style.font_family)
+            ax.set_title(f'Cumulative Distribution - {self.dataset.sample_name}',
+                        fontsize=style.title_fontsize, fontweight=style.title_fontweight, fontfamily=style.font_family)
+
+            if self.log_x_scale:
+                ax.set_xscale('log')
+
+            ax.set_facecolor(style.axes_facecolor)
+            ax.tick_params(labelsize=style.tick_fontsize)
+            if self.show_grid and style.grid_show:
+                ax.grid(True, which='major', alpha=style.grid_alpha, linestyle=style.grid_linestyle,
+                       color=style.grid_color, linewidth=style.grid_linewidth)
+            if self.show_legend:
+                ax.legend(loc=style.legend_loc, fontsize=style.legend_fontsize,
+                         framealpha=style.legend_framealpha, edgecolor=style.legend_edgecolor)
+        else:
+            # Fallback if no style
+            ax.plot(sizes, cumulative, 'g-', linewidth=2, label=self.dataset.sample_name)
+            ax.set_xlabel('Grain Size (mm)')
+            ax.set_ylabel('Cumulative Percent Passing (%)')
+            ax.set_title(f'Cumulative Distribution - {self.dataset.sample_name}')
+
+            if self.log_x_scale:
+                ax.set_xscale('log')
+
+            ax.grid(self.show_grid, which='both', alpha=0.3)
+            if self.show_legend:
+                ax.legend()
         
         self.plot_widget.grain_size_ax = ax
         self.plot_widget.figure.tight_layout()
@@ -462,18 +541,34 @@ class PlotWorkspace(QWidget):
         # Create histogram data
         sizes = np.array(self.dataset.particle_sizes)
         passing = np.array(self.dataset.percent_passing)
-        
+
         # Calculate frequency for each size class
         freq = np.diff(passing, prepend=0)
-        
-        # Create bar plot
-        ax.bar(range(len(sizes)), freq, tick_label=[f"{s:.3f}" for s in sizes])
-        ax.set_xlabel('Grain Size (mm)')
-        ax.set_ylabel('Frequency (%)')
-        ax.set_title(f'Grain Size Histogram - {self.dataset.sample_name}')
-        ax.set_xticklabels(ax.get_xticklabels(), rotation=45, ha='right')
-        
-        ax.grid(self.show_grid, alpha=0.3)
+
+        # Get style from plot_widget
+        style = self.plot_widget.current_style if self.plot_widget else None
+        if style:
+            # Create bar plot with style
+            ax.bar(range(len(sizes)), freq, tick_label=[f"{s:.3f}" for s in sizes],
+                  color=style.curve_color, alpha=0.8, edgecolor='black', linewidth=0.8)
+            ax.set_xlabel('Grain Size (mm)', fontsize=style.label_fontsize, fontfamily=style.font_family)
+            ax.set_ylabel('Frequency (%)', fontsize=style.label_fontsize, fontfamily=style.font_family)
+            ax.set_title(f'Grain Size Histogram - {self.dataset.sample_name}',
+                        fontsize=style.title_fontsize, fontweight=style.title_fontweight, fontfamily=style.font_family)
+            ax.set_xticklabels(ax.get_xticklabels(), rotation=45, ha='right', fontsize=style.tick_fontsize)
+            ax.set_facecolor(style.axes_facecolor)
+            ax.tick_params(labelsize=style.tick_fontsize)
+            if self.show_grid and style.grid_show:
+                ax.grid(True, alpha=style.grid_alpha, linestyle=style.grid_linestyle,
+                       color=style.grid_color, linewidth=style.grid_linewidth)
+        else:
+            # Fallback if no style
+            ax.bar(range(len(sizes)), freq, tick_label=[f"{s:.3f}" for s in sizes])
+            ax.set_xlabel('Grain Size (mm)')
+            ax.set_ylabel('Frequency (%)')
+            ax.set_title(f'Grain Size Histogram - {self.dataset.sample_name}')
+            ax.set_xticklabels(ax.get_xticklabels(), rotation=45, ha='right')
+            ax.grid(self.show_grid, alpha=0.3)
         
         self.plot_widget.grain_size_ax = ax
         self.plot_widget.figure.tight_layout()
