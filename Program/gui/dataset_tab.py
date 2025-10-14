@@ -99,6 +99,7 @@ class DatasetTab(QWidget):
         # Summary statistics bar
         self.summary_frame = QFrame()
         self.summary_frame.setFrameStyle(QFrame.Shape.StyledPanel | QFrame.Shadow.Plain)
+        self.summary_frame.setFixedHeight(40)  # Fixed height to prevent expansion
         self.summary_frame.setStyleSheet("""
             QFrame {
                 background-color: #f0f0f0;
@@ -109,37 +110,57 @@ class DatasetTab(QWidget):
         """)
         summary_layout = QHBoxLayout(self.summary_frame)
         summary_layout.setContentsMargins(10, 5, 10, 5)
+        summary_layout.setSpacing(8)
 
-        # Summary labels
+        # Summary labels with fixed sizing
         self.summary_total_label = QLabel("No calculations yet")
-        self.summary_total_label.setStyleSheet("font-weight: bold; color: #333;")
+        self.summary_total_label.setStyleSheet("font-weight: bold; color: #333; font-size: 10pt;")
 
         self.summary_valid_label = QLabel("")
-        self.summary_valid_label.setStyleSheet("color: #006400;")  # Dark green
+        self.summary_valid_label.setStyleSheet("color: #006400; font-size: 10pt;")  # Dark green
 
         self.summary_warning_label = QLabel("")
-        self.summary_warning_label.setStyleSheet("color: #8B6914;")  # Dark yellow
+        self.summary_warning_label.setStyleSheet("color: #8B6914; font-size: 10pt;")  # Dark yellow
 
         self.summary_error_label = QLabel("")
-        self.summary_error_label.setStyleSheet("color: #8B0000;")  # Dark red
+        self.summary_error_label.setStyleSheet("color: #8B0000; font-size: 10pt;")  # Dark red
 
         self.summary_stats_label = QLabel("")
-        self.summary_stats_label.setStyleSheet("color: #333; margin-left: 20px;")
+        self.summary_stats_label.setStyleSheet("color: #333; font-size: 10pt;")
+
+        # Set size policies to prevent expansion
+        for label in [self.summary_total_label, self.summary_valid_label,
+                      self.summary_warning_label, self.summary_error_label,
+                      self.summary_stats_label]:
+            label.setWordWrap(False)  # Prevent text wrapping
+            label.setSizePolicy(label.sizePolicy().horizontalPolicy(),
+                               label.sizePolicy().verticalPolicy())
+            label.setMaximumHeight(25)
+
+        # Add separator labels with fixed styling
+        separator1 = QLabel("|")
+        separator1.setStyleSheet("color: #999; font-size: 10pt;")
+        separator1.setMaximumHeight(25)
+
+        separator2 = QLabel("|")
+        separator2.setStyleSheet("color: #999; font-size: 10pt;")
+        separator2.setMaximumHeight(25)
 
         summary_layout.addWidget(self.summary_total_label)
-        summary_layout.addWidget(QLabel("|"))
+        summary_layout.addWidget(separator1)
         summary_layout.addWidget(self.summary_valid_label)
         summary_layout.addWidget(self.summary_warning_label)
         summary_layout.addWidget(self.summary_error_label)
-        summary_layout.addWidget(QLabel("|"))
+        summary_layout.addWidget(separator2)
         summary_layout.addWidget(self.summary_stats_label)
         summary_layout.addStretch()
 
         results_layout.addWidget(self.summary_frame)
         self.summary_frame.setVisible(False)  # Hidden until calculations are done
 
-        self.results_table = QTableWidget(0, 6)
-        self.results_table.setHorizontalHeaderLabels(["Method", "K (cm/s)", "K (m/s)", "K (m/d)", "Formula", "Status"])
+        # Results table - removed Formula column (now in details panel)
+        self.results_table = QTableWidget(0, 5)
+        self.results_table.setHorizontalHeaderLabels(["Method", "K (cm/s)", "K (m/s)", "K (m/d)", "Status"])
 
         # Enable sorting
         self.results_table.setSortingEnabled(True)
@@ -169,8 +190,6 @@ class DatasetTab(QWidget):
                 font-size: 10pt;
             }
         """)
-        
-        results_layout.addWidget(self.results_table)
 
         # Connect row selection to details panel
         self.results_table.itemSelectionChanged.connect(self.on_result_row_selected)
@@ -197,7 +216,6 @@ class DatasetTab(QWidget):
         details_layout = QVBoxLayout(self.details_group)
 
         self.details_browser = QTextBrowser()
-        # Remove fixed height to allow splitter to resize
         self.details_browser.setMinimumHeight(150)  # Set minimum but allow expansion
         self.details_browser.setStyleSheet("""
             QTextBrowser {
@@ -212,17 +230,33 @@ class DatasetTab(QWidget):
 
         details_layout.addWidget(self.details_browser)
 
-        # Create splitter for resizable sections
-        splitter = QSplitter(Qt.Orientation.Vertical)
-        splitter.addWidget(results_group)
-        splitter.addWidget(self.details_group)
-        # Set initial ratio: 60% for results, 40% for details
-        splitter.setStretchFactor(0, 60)
-        splitter.setStretchFactor(1, 40)
-        splitter.setCollapsible(0, False)  # Don't allow results to be collapsed
-        splitter.setCollapsible(1, True)   # Allow details to be collapsed
+        # === NEW LAYOUT STRUCTURE ===
+        # Left column: vertical splitter with results table and method details
+        left_column_splitter = QSplitter(Qt.Orientation.Vertical)
+        left_column_splitter.addWidget(self.results_table)
+        left_column_splitter.addWidget(self.details_group)
+        # Set initial ratio: 60% table, 40% details
+        left_column_splitter.setStretchFactor(0, 60)
+        left_column_splitter.setStretchFactor(1, 40)
+        left_column_splitter.setCollapsible(0, False)  # Don't allow table to be collapsed
+        left_column_splitter.setCollapsible(1, True)   # Allow details to be collapsed
 
-        layout.addWidget(splitter)
+        # Right column: Calculated Values Panel (full height)
+        self.calculated_values_panel = self.create_calculated_values_panel()
+
+        # Main horizontal splitter: left column vs calculated values
+        horizontal_splitter = QSplitter(Qt.Orientation.Horizontal)
+        horizontal_splitter.addWidget(left_column_splitter)
+        horizontal_splitter.addWidget(self.calculated_values_panel)
+
+        # Set initial ratio: 30% left column, 70% calculated values
+        # USER CAN ADJUST THESE VALUES (line 205-206)
+        horizontal_splitter.setStretchFactor(0, 50)
+        horizontal_splitter.setStretchFactor(1, 50)
+
+        results_layout.addWidget(horizontal_splitter)
+
+        layout.addWidget(results_group)
 
         # Control buttons
         button_layout = QHBoxLayout()
@@ -245,76 +279,312 @@ class DatasetTab(QWidget):
         # Remove addStretch() to allow splitter to expand and use all available space
 
         return widget
-    
-    def create_statistics_tab(self):
-        """Create the statistics tab"""
-        widget = QWidget()
-        layout = QVBoxLayout(widget)
-        
-        # Grain size statistics
-        grain_group = QGroupBox(f"Grain Size Statistics - {self.dataset.sample_name}")
-        grain_layout = QVBoxLayout(grain_group)
-        
-        self.grain_stats_text = QTextEdit()
-        self.grain_stats_text.setReadOnly(True)
-        self.grain_stats_text.setMaximumHeight(250)
-        
-        grain_layout.addWidget(self.grain_stats_text)
-        layout.addWidget(grain_group)
 
-        # Porosity control section
-        porosity_group = QGroupBox("Porosity Settings")
-        porosity_layout = QVBoxLayout(porosity_group)
+    def create_calculated_values_panel(self):
+        """Create panel showing all calculated grain size and gradation values"""
+        panel = QWidget()
+        layout = QVBoxLayout(panel)
+        layout.setContentsMargins(0, 0, 0, 0)
+        layout.setSpacing(6)
 
-        # Porosity display and edit controls
-        porosity_controls_layout = QHBoxLayout()
+        groupbox_style = """
+            QGroupBox {
+                font-weight: bold;
+                font-size: 10pt;
+                border: 1px solid #c0c0c0;
+                border-radius: 4px;
+                margin-top: 8px;
+                padding-top: 10px;
+            }
+            QGroupBox::title {
+                subcontrol-origin: margin;
+                subcontrol-position: top left;
+                padding: 2px 5px;
+            }
+        """
 
-        # Show calculated vs current porosity
-        from PyQt6.QtWidgets import QLabel, QLineEdit, QPushButton
-        calculated_porosity = self.dataset.calculated_porosity
-        current_text = f"{self.porosity:.4f}" if self.porosity is not None else "N/A"
-        if calculated_porosity is not None:
-            porosity_info = QLabel(f"Calculated: {calculated_porosity:.4f} | Current: {current_text}")
-        else:
-            porosity_info = QLabel(f"Current: {current_text} [Manual]")
+        textedit_style = """
+            QTextEdit {
+                background-color: #fafafa;
+                border: 1px solid #d0d0d0;
+                padding: 8px;
+                font-family: 'Consolas', 'Courier New', monospace;
+                font-size: 9pt;
+            }
+        """
 
-        # Add edit capability
-        self.porosity_edit = QLineEdit()
-        self.porosity_edit.setText(current_text)
-        self.porosity_edit.setMaximumWidth(100)
+        # === GRAIN SIZE PERCENTILES SECTION (side-by-side) ===
+        percentiles_group = QGroupBox("Grain Size Percentiles")
+        percentiles_group.setStyleSheet(groupbox_style)
+        percentiles_main_layout = QHBoxLayout(percentiles_group)
 
-        update_porosity_btn = QPushButton("Update")
-        update_porosity_btn.clicked.connect(self._update_porosity)
+        # Left: Percentiles values
+        self.percentiles_text = QTextEdit()
+        self.percentiles_text.setReadOnly(True)
+        self.percentiles_text.setMinimumHeight(200)
+        self.percentiles_text.setStyleSheet(textedit_style)
+        self.percentiles_text.setPlainText("Calculate K-values to see grain size percentiles")
+        percentiles_main_layout.addWidget(self.percentiles_text, 50)
 
-        reset_porosity_btn = QPushButton("Reset to Calculated")
-        reset_porosity_btn.clicked.connect(self._reset_porosity)
-        if self.dataset.calculated_porosity is None:
-            reset_porosity_btn.setEnabled(False)
+        # Right: Percentile usage reference
+        self.percentile_usage_text = QTextEdit()
+        self.percentile_usage_text.setReadOnly(True)
+        self.percentile_usage_text.setMinimumHeight(200)
+        self.percentile_usage_text.setStyleSheet(textedit_style)
+        # Set static reference content
+        usage_ref = """<pre style='font-family: Consolas, monospace; font-size: 9pt;'>
+<b>Percentile Usage by Methods:</b>
 
-        porosity_controls_layout.addWidget(porosity_info)
-        porosity_controls_layout.addWidget(QLabel("Edit:"))
-        porosity_controls_layout.addWidget(self.porosity_edit)
-        porosity_controls_layout.addWidget(update_porosity_btn)
-        porosity_controls_layout.addWidget(reset_porosity_btn)
-        porosity_controls_layout.addStretch()
+<b>D₅:</b>   Barr
+<b>D₁₀:</b>  Hazen, Hazen_1892, Slichter,
+       Terzaghi, Beyer, Kozeny-Carman,
+       Zunker, Zamarin, Chapuis,
+       Alyamani-Sen
 
-        porosity_layout.addLayout(porosity_controls_layout)
-        layout.addWidget(porosity_group)
+<b>D₁₆:</b>  Sorting Coefficient (σ)
+<b>D₁₇:</b>  Sauerbrei
+<b>D₂₀:</b>  USBR, Beyer (fallback)
+<b>D₃₀:</b>  Cu, Cc calculations
+<b>D₅₀:</b>  Kruger, Alyamani-Sen,
+       Shepherd
 
-        # K-value statistics
-        k_group = QGroupBox("Hydraulic Conductivity Statistics")
-        k_layout = QVBoxLayout(k_group)
-        
-        self.k_stats_text = QTextEdit()
-        self.k_stats_text.setReadOnly(True)
-        self.k_stats_text.setMaximumHeight(250)
-        
-        k_layout.addWidget(self.k_stats_text)
-        layout.addWidget(k_group)
-        
+<b>D₆₀:</b>  Beyer, Barr, Cu calculation
+<b>D₈₄:</b>  Sorting Coefficient (σ),
+       Krumbein-Monk
+<b>D₉₅:</b>  Krumbein-Monk
+</pre>"""
+        self.percentile_usage_text.setHtml(usage_ref)
+        percentiles_main_layout.addWidget(self.percentile_usage_text, 50)
+
+        layout.addWidget(percentiles_group)
+
+        # === GRADATION PARAMETERS SECTION (side-by-side) ===
+        gradation_group = QGroupBox("Gradation Parameters")
+        gradation_group.setStyleSheet(groupbox_style)
+        gradation_main_layout = QHBoxLayout(gradation_group)
+
+        # Left: Parameter values
+        self.gradation_text = QTextEdit()
+        self.gradation_text.setReadOnly(True)
+        self.gradation_text.setMinimumHeight(160)
+        self.gradation_text.setStyleSheet(textedit_style)
+        self.gradation_text.setPlainText("Calculate K-values to see gradation parameters")
+        gradation_main_layout.addWidget(self.gradation_text, 50)
+
+        # Right: Classification criteria reference
+        self.classification_criteria_text = QTextEdit()
+        self.classification_criteria_text.setReadOnly(True)
+        self.classification_criteria_text.setMinimumHeight(160)
+        self.classification_criteria_text.setStyleSheet(textedit_style)
+        # Set static reference content
+        criteria_ref = """<pre style='font-family: Consolas, monospace; font-size: 9pt;'>
+<b>Classification Criteria:</b>
+
+<b>Uniformity Coefficient (Cu):</b>
+  Cu &lt; 4      → Uniform
+  4 ≤ Cu &lt; 6  → Moderately graded
+  Cu ≥ 6      → Well-graded
+
+<b>Coefficient of Curvature (Cc):</b>
+  1 ≤ Cc ≤ 3  → Well-graded range
+  Outside     → Gap/poorly graded
+
+<b>Sorting Coefficient (σ):</b>
+  σ &lt; 2       → Well sorted
+  2 ≤ σ &lt; 4   → Moderately sorted
+  σ ≥ 4       → Poorly sorted
+</pre>"""
+        self.classification_criteria_text.setHtml(criteria_ref)
+        gradation_main_layout.addWidget(self.classification_criteria_text, 50)
+
+        layout.addWidget(gradation_group)
+
+        # === SPECIAL METHOD DIAMETERS & ENVIRONMENTAL PARAMETERS (side-by-side) ===
+        bottom_row_widget = QWidget()
+        bottom_row_layout = QHBoxLayout(bottom_row_widget)
+        bottom_row_layout.setContentsMargins(0, 0, 0, 0)
+        bottom_row_layout.setSpacing(6)
+
+        # Left: Special Method Diameters
+        special_diameters_group = QGroupBox("Special Method Diameters")
+        special_diameters_group.setStyleSheet(groupbox_style)
+        special_diameters_layout = QVBoxLayout(special_diameters_group)
+
+        self.special_diameters_text = QTextEdit()
+        self.special_diameters_text.setReadOnly(True)
+        self.special_diameters_text.setMinimumHeight(120)
+        self.special_diameters_text.setStyleSheet(textedit_style)
+        self.special_diameters_text.setPlainText("Calculate K-values to see special method diameters")
+        special_diameters_layout.addWidget(self.special_diameters_text)
+
+        bottom_row_layout.addWidget(special_diameters_group, 60)  # 60% width
+
+        # Right: Environmental Parameters
+        env_group = QGroupBox("Environmental Parameters")
+        env_group.setStyleSheet(groupbox_style)
+        env_layout = QVBoxLayout(env_group)
+
+        self.env_text = QTextEdit()
+        self.env_text.setReadOnly(True)
+        self.env_text.setMinimumHeight(120)
+        self.env_text.setStyleSheet(textedit_style)
+        env_layout.addWidget(self.env_text)
+
+        # Populate environmental parameters immediately
+        self.update_environmental_parameters()
+
+        bottom_row_layout.addWidget(env_group, 40)  # 40% width
+
+        layout.addWidget(bottom_row_widget)
         layout.addStretch()
-        
-        return widget
+
+        return panel
+
+    def update_environmental_parameters(self):
+        """Update environmental parameters display"""
+        text = f"Temperature: {self.temperature}°C\n"
+        text += f"Porosity: {self.porosity:.4f}"
+        if hasattr(self.dataset, 'calculated_porosity') and self.dataset.calculated_porosity:
+            if abs(self.porosity - self.dataset.calculated_porosity) < 0.001:
+                text += " (calculated)"
+            else:
+                text += f" (modified from {self.dataset.calculated_porosity:.4f})"
+        self.env_text.setPlainText(text)
+
+    def update_calculated_values_panel(self):
+        """Update the calculated values panel with grain size percentiles and gradation"""
+        import math
+        from k_calculations import KCalculator
+        calculator = KCalculator()
+
+        # Prepare grain_data dict for interpolation
+        grain_data = {
+            'particle_sizes': list(self.dataset.particle_sizes),
+            'percent_passing': list(self.dataset.percent_passing)
+        }
+
+        # Calculate all percentiles using k_calculations interpolation (includes D16, D17, D84)
+        percentiles = {}
+        standard_percentiles = [5, 10, 15, 16, 17, 20, 25, 30, 40, 50, 60, 70, 75, 80, 84, 85, 90, 95]
+        for p in standard_percentiles:
+            value = calculator._interpolate_percentile(grain_data, p)
+            if value:
+                percentiles[p] = value
+
+        # === UPDATE PERCENTILES DISPLAY ===
+        html_text = "<pre style='font-family: Consolas, monospace; font-size: 9pt;'>"
+        html_text += "<b>Grain Size Percentiles (Linear Interpolation):</b>\n"
+        html_text += "━" * 45 + "\n\n"
+
+        # Display in 3 columns
+        for i in range(0, len(standard_percentiles), 3):
+            row_percentiles = standard_percentiles[i:i+3]
+            for p in row_percentiles:
+                if p in percentiles:
+                    # Bold for key percentiles used by multiple methods
+                    if p in [10, 20, 30, 50, 60]:
+                        html_text += f"<b>D{p:>2}: {percentiles[p]:>6.3f} mm</b>    "
+                    else:
+                        html_text += f"D{p:>2}: {percentiles[p]:>6.3f} mm    "
+            html_text += "\n"
+
+        html_text += "\n<b>Bold</b> = Critical values used by multiple methods"
+        html_text += "</pre>"
+        self.percentiles_text.setHtml(html_text)
+
+        # === UPDATE GRADATION PARAMETERS DISPLAY ===
+        d5 = percentiles.get(5)
+        d10 = percentiles.get(10)
+        d16 = percentiles.get(16)
+        d30 = percentiles.get(30)
+        d50 = percentiles.get(50)
+        d60 = percentiles.get(60)
+        d84 = percentiles.get(84)
+        d95 = percentiles.get(95)
+
+        gradation_text = "<b>Gradation Parameters:</b>\n"
+        gradation_text += "━" * 35 + "\n\n"
+
+        # Uniformity Coefficient
+        if d10 and d60:
+            cu = d60 / d10
+            gradation_text += f"<b>Uniformity Coefficient (Cu):</b> {cu:.2f}\n"
+            gradation_text += f"  └─ D60/D10 = {d60:.3f}/{d10:.3f}\n"
+            if cu < 4:
+                gradation_text += "  └─ <b>Uniform</b>\n"
+            elif cu < 6:
+                gradation_text += "  └─ <b>Moderately graded</b>\n"
+            else:
+                gradation_text += "  └─ <b>Well-graded</b>\n"
+
+        # Coefficient of Curvature
+        if d10 and d30 and d60:
+            cc = (d30 * d30) / (d10 * d60)
+            gradation_text += f"\n<b>Coefficient of Curvature (Cc):</b> {cc:.2f}\n"
+            gradation_text += f"  └─ D30²/(D10×D60)\n"
+            if 1 <= cc <= 3:
+                gradation_text += "  └─ <b>Well-graded range</b> ✓\n"
+            else:
+                gradation_text += "  └─ Outside typical range\n"
+
+        # Sorting Coefficient
+        if d16 and d84 and d16 > 0 and d84 > 0:
+            sigma = math.sqrt(d84 / d16)
+            gradation_text += f"\n<b>Sorting Coefficient (σ):</b> {sigma:.2f}\n"
+            gradation_text += f"  └─ √(D84/D16) = √({d84:.3f}/{d16:.3f})\n"
+            if sigma < 2:
+                gradation_text += "  └─ <b>Well sorted</b>\n"
+            elif sigma < 4:
+                gradation_text += "  └─ <b>Moderately sorted</b>\n"
+            else:
+                gradation_text += "  └─ <b>Poorly sorted</b>\n"
+
+        # Span Ratio
+        if d5 and d95:
+            span = d95 / d5
+            gradation_text += f"\n<b>Span Ratio:</b> {span:.1f}\n"
+            gradation_text += f"  └─ D95/D5 = {d95:.3f}/{d5:.3f}\n"
+
+        # Wrap in HTML pre tag
+        gradation_html = f"<pre style='font-family: Consolas, monospace; font-size: 9pt;'>{gradation_text}</pre>"
+        self.gradation_text.setHtml(gradation_html)
+
+        # === UPDATE SPECIAL METHOD DIAMETERS DISPLAY ===
+        special_text = "<b>Special Method Diameters:</b>\n"
+        special_text += "━" * 50 + "\n\n"
+
+        # Calculate special diameters
+        kruger_de = calculator._kruger_diameter_cm(grain_data)
+        harmonic_de = calculator._harmonic_mean_diameter_cm(grain_data)
+        zunker_de = calculator._zunker_diameter_cm(grain_data)
+        zamarin_de = calculator._zamarin_diameter_cm(grain_data)
+        geom_mean = calculator._calculate_geometric_mean(grain_data)
+
+        if kruger_de:
+            special_text += f"<b>Kruger dₑ:</b>        {kruger_de:.4f} cm  ({kruger_de*10:.4f} mm)\n"
+        if harmonic_de:
+            special_text += f"<b>Kozeny-Carman dₑ:</b> {harmonic_de:.4f} cm  ({harmonic_de*10:.4f} mm)\n"
+        if zunker_de:
+            special_text += f"<b>Zunker dₑ:</b>        {zunker_de:.4f} cm  ({zunker_de*10:.4f} mm)\n"
+        if zamarin_de:
+            special_text += f"<b>Zamarin dₑ:</b>       {zamarin_de:.4f} cm  ({zamarin_de*10:.4f} mm)\n"
+        if geom_mean:
+            special_text += f"\n<b>Geometric Mean:</b>   {geom_mean:.4f} mm\n"
+
+        if not any([kruger_de, harmonic_de, zunker_de, zamarin_de, geom_mean]):
+            special_text += "No special diameters calculated (insufficient data)\n"
+
+        special_html = f"<pre style='font-family: Consolas, monospace; font-size: 9pt;'>{special_text}</pre>"
+        self.special_diameters_text.setHtml(special_html)
+
+    def create_statistics_tab(self):
+        """Create the enhanced statistics tab"""
+        from .statistics_tab import StatisticsTab
+
+        # Create new modular statistics tab
+        self.statistics_tab = StatisticsTab(self.dataset, parent=self)
+
+        return self.statistics_tab
     
     def load_dataset_data(self):
         """Load and display the dataset data"""
@@ -324,89 +594,34 @@ class DatasetTab(QWidget):
             self.dataset.percent_passing,
             self.dataset.sample_name
         )
-        
-        # Update grain size statistics
-        self.update_grain_statistics()
-        
-        # Clear K statistics (not calculated yet)
-        self.k_stats_text.setPlainText("Click 'Recalculate' in the Results tab to compute K values")
+
+        # Update statistics tab with data
+        if hasattr(self, 'statistics_tab'):
+            self.statistics_tab.update_display()
     
+    # Note: update_grain_statistics() is now handled by StatisticsTab
+    # This method is kept for backward compatibility but delegates to the new tab
     def update_grain_statistics(self):
         """Update the grain size statistics display"""
-        stats_text = f"Sample: {self.dataset.sample_name}\n"
-        stats_text += "=" * 50 + "\n\n"
-        
-        # Basic info
-        stats_text += f"Temperature: {self.temperature}°C\n"
-
-        # Porosity display - show both calculated and current
-        calculated_porosity = self.dataset.calculated_porosity
-        current_porosity = self.porosity
-        if calculated_porosity is not None:
-            stats_text += f"Porosity (Calculated): {calculated_porosity:.4f}\n"
-            if current_porosity is not None:
-                stats_text += f"Porosity (Current): {current_porosity:.4f}"
-                if abs(calculated_porosity - current_porosity) > 0.001:
-                    stats_text += " [Modified]\n"
-                else:
-                    stats_text += "\n"
-            else:
-                stats_text += "Porosity (Current): N/A [Missing]\n"
-        else:
-            current_text = f"{current_porosity:.4f}" if current_porosity is not None else "N/A"
-            stats_text += f"Porosity: {current_text} [Manual]\n"
-
-        stats_text += f"Data Points: {len(self.dataset.particle_sizes)}\n\n"
-        
-        # Grain size statistics
-        stats_text += "Characteristic Grain Sizes:\n"
-        stats_text += "-" * 30 + "\n"
-        
-        d10 = self.dataset.get_d10()
-        d20 = self.dataset.get_d20()
-        d30 = self.dataset.get_d30()
-        d50 = self.dataset.get_d50()
-        d60 = self.dataset.get_d60()
-        
-        stats_text += f"D10: {d10:.3f} mm\n" if d10 else "D10: N/A\n"
-        stats_text += f"D20: {d20:.3f} mm\n" if d20 else "D20: N/A\n"
-        stats_text += f"D30: {d30:.3f} mm\n" if d30 else "D30: N/A\n"
-        stats_text += f"D50: {d50:.3f} mm\n" if d50 else "D50: N/A\n"
-        stats_text += f"D60: {d60:.3f} mm\n" if d60 else "D60: N/A\n"
-        
-        # Calculate uniformity coefficient and add Urumovic info
-        if d10 and d60:
-            cu = d60 / d10
-            stats_text += f"\nUniformity Coefficient (Cu): {cu:.2f}\n"
-
-            # Add geometric mean for Urumovic calculation
-            dgeom = self.dataset._calculate_geometric_mean_grain_size()
-            if dgeom:
-                stats_text += f"Geometric Mean (dgeom): {dgeom:.3f} mm\n"
-
-            # Classification based on Cu
-            if cu < 4:
-                stats_text += "Classification: Uniform\n"
-            elif cu < 6:
-                stats_text += "Classification: Moderately graded\n"
-            else:
-                stats_text += "Classification: Well-graded\n"
-        
-        # Calculate coefficient of curvature
-        if d10 and d30 and d60:
-            cc = (d30 * d30) / (d10 * d60)
-            stats_text += f"Coefficient of Curvature (Cc): {cc:.2f}\n"
-        
-        # Soil classification
-        stats_text += f"\nSoil Type: {self.dataset.classify_soil()}\n"
-        
-        self.grain_stats_text.setPlainText(stats_text)
+        if hasattr(self, 'statistics_tab'):
+            self.statistics_tab.update_display()
     
     def set_parameters(self, temperature: float):
         """Update calculation parameters"""
         self.temperature = temperature
         self.dataset.temperature = temperature
-        self.update_grain_statistics()
+        # Update statistics tab
+        if hasattr(self, 'statistics_tab'):
+            self.statistics_tab.temperature = temperature
+            self.statistics_tab.update_display()
+
+    def set_porosity(self, porosity: float):
+        """Update porosity parameter (called from statistics tab)"""
+        self.porosity = porosity
+        self.dataset.current_porosity = porosity
+        # Recalculate K-values if we have methods selected
+        if self.current_results:
+            self.calculate_k_values()
     
     def calculate_k_values(self, selected_methods: Optional[List[str]] = None):
         """Calculate K values for this dataset"""
@@ -440,10 +655,14 @@ class DatasetTab(QWidget):
         
         # Update results table
         self.update_results_table()
-        
-        # Update K statistics
-        self.update_k_statistics()
-        
+
+        # Update calculated values panel
+        self.update_calculated_values_panel()
+
+        # Update statistics tab with K-results
+        if hasattr(self, 'statistics_tab'):
+            self.statistics_tab.set_k_results(self.current_results)
+
         # Update plot with K results
         if self.current_results:
             k_dict = {}
@@ -503,10 +722,7 @@ class DatasetTab(QWidget):
                     na_item.setData(Qt.ItemDataRole.UserRole, -1)  # Sort N/A values to bottom
                     self.results_table.setItem(row, col, na_item)
 
-            # Formula (column 4)
-            self.results_table.setItem(row, 4, QTableWidgetItem(result.formula_used))
-
-            # Status with color coding and icons (column 5)
+            # Status with color coding and icons (column 4 - Formula column removed)
             status = result.status.value if hasattr(result.status, 'value') else str(result.status)
 
             # Add icon based on status
@@ -536,7 +752,7 @@ class DatasetTab(QWidget):
             if result.status_message:
                 status_item.setToolTip(result.status_message)
 
-            self.results_table.setItem(row, 5, status_item)
+            self.results_table.setItem(row, 4, status_item)
 
         # Resize columns and re-enable sorting
         self.results_table.resizeColumnsToContents()
@@ -629,8 +845,107 @@ class DatasetTab(QWidget):
         if not self.details_group.isChecked():
             self.details_group.setChecked(True)
 
+    def get_method_specific_values(self, method_name: str) -> dict:
+        """Get method-specific calculated values for display"""
+        from k_calculations import KCalculator
+
+        calculator = KCalculator()
+        grain_data = {
+            'particle_sizes': list(self.dataset.particle_sizes),
+            'percent_passing': list(self.dataset.percent_passing)
+        }
+
+        values = {}
+
+        # Methods with special diameter calculations
+        if method_name == "Kruger":
+            de_cm = calculator._kruger_diameter_cm(grain_data)
+            if de_cm:
+                values["Kruger Effective Diameter (dₑ)"] = f"{de_cm:.4f} cm ({de_cm*10:.4f} mm)"
+
+        elif method_name == "Kozeny-Carman":
+            de_cm = calculator._harmonic_mean_diameter_cm(grain_data)
+            if de_cm:
+                values["Harmonic Mean Diameter (dₑ)"] = f"{de_cm:.4f} cm ({de_cm*10:.4f} mm)"
+
+        elif method_name == "Zunker":
+            de_cm = calculator._zunker_diameter_cm(grain_data)
+            if de_cm:
+                values["Zunker Effective Diameter (dₑ)"] = f"{de_cm:.4f} cm ({de_cm*10:.4f} mm)"
+
+        elif method_name == "Zamarin":
+            de_cm = calculator._zamarin_diameter_cm(grain_data)
+            if de_cm:
+                values["Zamarin Effective Diameter (dₑ)"] = f"{de_cm:.4f} cm ({de_cm*10:.4f} mm)"
+
+        elif method_name == "Krumbein-Monk":
+            d_geom = calculator._calculate_geometric_mean(grain_data)
+            if d_geom:
+                values["Geometric Mean Diameter (dgeom)"] = f"{d_geom:.4f} mm"
+            # Also calculate sorting coefficient (sigma_phi)
+            d16 = calculator._interpolate_percentile(grain_data, 16)
+            d84 = calculator._interpolate_percentile(grain_data, 84)
+            if d16 and d84 and d16 > 0 and d84 > 0:
+                import math
+                sigma_phi = math.sqrt(d84 / d16)
+                values["Sorting Coefficient (σφ)"] = f"{sigma_phi:.4f}"
+
+        # Methods using specific percentiles
+        elif method_name in ["Hazen", "Hazen_1892", "Slichter", "Terzaghi", "Chapuis"]:
+            d10 = calculator._interpolate_percentile(grain_data, 10)
+            if d10:
+                values["D₁₀ (Primary)"] = f"{d10:.4f} mm"
+
+        elif method_name == "USBR":
+            d20 = calculator._interpolate_percentile(grain_data, 20)
+            if d20:
+                values["D₂₀ (Primary)"] = f"{d20:.4f} mm"
+
+        elif method_name == "Shepherd":
+            d50 = calculator._interpolate_percentile(grain_data, 50)
+            if d50:
+                values["D₅₀ (Primary)"] = f"{d50:.4f} mm"
+
+        elif method_name == "Sauerbrei":
+            d17 = calculator._interpolate_percentile(grain_data, 17)
+            if d17:
+                values["D₁₇ (Primary)"] = f"{d17:.4f} mm"
+
+        elif method_name == "Alyamani-Sen":
+            d10 = calculator._interpolate_percentile(grain_data, 10)
+            d50 = calculator._interpolate_percentile(grain_data, 50)
+            if d10:
+                values["D₁₀"] = f"{d10:.4f} mm"
+            if d50:
+                values["D₅₀"] = f"{d50:.4f} mm"
+            if d10 and d50:
+                intercept = 1355.3 * (d50**2) + 1.1892 * (d10**2)
+                values["Intercept (I₀)"] = f"{intercept:.2f}"
+
+        elif method_name == "Beyer":
+            d10 = calculator._interpolate_percentile(grain_data, 10)
+            d60 = calculator._interpolate_percentile(grain_data, 60)
+            if d10 and d60:
+                cu = d60 / d10
+                values["D₁₀"] = f"{d10:.4f} mm"
+                values["D₆₀"] = f"{d60:.4f} mm"
+                values["Cu (for log₁₀ factor)"] = f"{cu:.2f}"
+
+        elif method_name == "Barr":
+            d5 = calculator._interpolate_percentile(grain_data, 5)
+            d10 = calculator._interpolate_percentile(grain_data, 10)
+            d60 = calculator._interpolate_percentile(grain_data, 60)
+            if d5:
+                values["D₅"] = f"{d5:.4f} mm"
+            if d10:
+                values["D₁₀"] = f"{d10:.4f} mm"
+            if d60:
+                values["D₆₀"] = f"{d60:.4f} mm"
+
+        return values
+
     def generate_method_details_html(self, result) -> str:
-        """Generate detailed HTML for a calculation result with horizontal layout"""
+        """Generate detailed HTML for a calculation result with improved formatting"""
         # Status color
         status = result.status.value if hasattr(result.status, 'value') else str(result.status)
         if "OK" in status:
@@ -650,75 +965,129 @@ class DatasetTab(QWidget):
         <html>
         <head>
             <style>
-                body {{ font-family: 'Segoe UI', Arial, sans-serif; margin: 8px; font-size: 10pt; }}
+                body {{
+                    font-family: 'Segoe UI', Arial, sans-serif;
+                    margin: 10px;
+                    font-size: 11pt;
+                    background-color: #ffffff;
+                }}
                 table {{ border-collapse: collapse; width: 100%; }}
-                .header-table {{ width: 100%; background-color: #4a5f7f; color: white; margin-bottom: 8px; }}
-                .method-name {{ font-size: 13pt; font-weight: bold; padding: 8px; }}
-                .status-badge {{ background-color: {status_bg}; color: {status_color}; padding: 4px 10px;
-                               font-weight: bold; font-size: 9pt; border-radius: 3px; }}
-                .section-title {{ font-weight: bold; color: #495057; font-size: 10pt;
-                                 background-color: #e9ecef; padding: 5px 8px; margin-top: 8px; }}
-                .k-value-large {{ font-size: 14pt; font-weight: bold; color: #0066cc; padding: 8px; }}
-                .formula-text {{ font-family: 'Courier New', monospace; font-size: 9pt;
-                               background-color: #f0f8ff; padding: 8px; border-left: 3px solid #0066cc; }}
-                .param-table {{ width: 100%; font-size: 9pt; margin-top: 5px; }}
-                .param-label {{ font-weight: 600; color: #6c757d; padding: 3px 8px; width: 20%; }}
-                .param-value {{ font-family: 'Consolas', monospace; padding: 3px 8px; background-color: #f8f9fa; }}
-                .param-value-warn {{ color: #dc3545; font-weight: bold; background-color: #ffe6e6; }}
-                .alert-box {{ background-color: {status_bg}; border-left: 4px solid {status_color};
-                            padding: 8px; margin: 8px 0; color: {status_color}; font-weight: 500; }}
-                .check-ok {{ color: #28a745; font-weight: bold; }}
-                .check-fail {{ color: #dc3545; font-weight: bold; }}
+
+                .section-title {{
+                    font-weight: bold;
+                    color: #2c5282;
+                    font-size: 12pt;
+                    background-color: #e8f0f8;
+                    padding: 8px 10px;
+                    margin-top: 8px;
+                    margin-bottom: 6px;
+                    border-left: 4px solid #4a7fb8;
+                }}
+
+                .k-value-large {{
+                    font-size: 18pt;
+                    font-weight: bold;
+                    color: #0066cc;
+                    padding: 12px;
+                    background-color: #f0f8ff;
+                    border-radius: 4px;
+                    margin-bottom: 6px;
+                }}
+
+                .formula-text {{
+                    font-family: 'Courier New', 'Consolas', monospace;
+                    font-size: 15pt;
+                    background-color: #f8f9fa;
+                    padding: 14px 16px;
+                    border-left: 4px solid #0066cc;
+                    border-radius: 4px;
+                    color: #1a1a1a;
+                    line-height: 1.7;
+                    letter-spacing: 0.3px;
+                }}
+
+                .param-table {{
+                    width: 100%;
+                    font-size: 10pt;
+                    margin-top: 6px;
+                    border-spacing: 0;
+                }}
+
+                .param-label {{
+                    font-weight: 600;
+                    color: #495057;
+                    padding: 6px 10px;
+                    width: 25%;
+                    background-color: #f8f9fa;
+                }}
+
+                .param-value {{
+                    font-family: 'Consolas', monospace;
+                    padding: 6px 10px;
+                    background-color: #ffffff;
+                    color: #212529;
+                    border-bottom: 1px solid #e9ecef;
+                }}
+
+                .param-value-warn {{
+                    color: #dc3545;
+                    font-weight: bold;
+                    background-color: #ffe6e6;
+                }}
+
+                .alert-box {{
+                    background-color: {status_bg};
+                    border-left: 4px solid {status_color};
+                    padding: 10px;
+                    margin: 10px 0;
+                    color: {status_color};
+                    font-weight: 500;
+                    border-radius: 4px;
+                    font-size: 10pt;
+                }}
+
+                .check-ok {{
+                    color: #28a745;
+                    font-weight: bold;
+                    font-size: 11pt;
+                }}
+
+                .check-fail {{
+                    color: #dc3545;
+                    font-weight: bold;
+                    font-size: 11pt;
+                }}
             </style>
         </head>
         <body>
         """
 
-        # Header with method name and status
-        html += f"""
-        <table class="header-table">
-            <tr>
-                <td class="method-name">{result.method_name}</td>
-                <td align="right" style="padding: 8px;">
-                    <span class="status-badge">{status_icon} {status}</span>
-                </td>
-            </tr>
-        </table>
-        """
-
-        # Status message alert if present
+        # Status message alert if present (show at top)
         if result.status_message:
             html += f"""
             <div class="alert-box">
-                <strong>{status_icon} Issue:</strong> {result.status_message}
+                <strong>{status_icon} Note:</strong> {result.status_message}
             </div>
             """
 
-        # K-Value and Formula side-by-side
-        html += '<table style="margin-top: 8px;"><tr>'
-
-        # Left column: K-Value
-        html += '<td style="width: 50%; vertical-align: top; padding-right: 8px;">'
+        # K-Value section (full width)
         html += '<div class="section-title">Calculated K-Value</div>'
         if result.k_value is not None and result.k_value > 0:
             k_cm_s = result.k_value * 100.0
             k_m_d = result.k_value * 86400.0
             html += f"""
-            <div class="k-value-large">{result.k_value:.2e} m/s</div>
-            <div style="padding: 4px 8px; font-size: 9pt; color: #666;">
-                <strong>cm/s:</strong> {k_cm_s:.3e}<br>
-                <strong>m/d:</strong> {k_m_d:.1f}
+            <div class="k-value-large">{result.k_value:.3e} m/s</div>
+            <div style="padding: 8px 12px; font-size: 10pt; color: #555; background-color: #f8f9fa;
+                        border-radius: 4px; margin-bottom: 8px;">
+                <strong>cm/s:</strong> {k_cm_s:.3e} &nbsp;&nbsp;|&nbsp;&nbsp; <strong>m/d:</strong> {k_m_d:.2f}
             </div>
             """
         else:
-            html += '<div style="color: #dc3545; font-weight: bold; padding: 8px;">No valid K-value</div>'
-        html += '</td>'
+            html += '<div style="color: #dc3545; font-weight: bold; padding: 12px; margin-bottom: 8px;">No valid K-value</div>'
 
-        # Right column: Formula
-        html += '<td style="width: 50%; vertical-align: top; padding-left: 8px;">'
+        # Formula section (full width, on its own row)
         html += '<div class="section-title">Formula Used</div>'
         html += f'<div class="formula-text">{result.formula_used}</div>'
-        html += '</td></tr></table>'
 
         # Input Parameters section
         d10 = self.dataset.get_d10()
@@ -774,6 +1143,34 @@ class DatasetTab(QWidget):
 
         html += '</table>'
 
+        # Method-Specific Values section
+        method_values = self.get_method_specific_values(result.method_name)
+        if method_values:
+            html += '<div class="section-title" style="margin-top: 10px;">Method-Specific Values</div>'
+            html += '<table class="param-table">'
+
+            # Convert dict to list of tuples for 2-column layout
+            values_list = list(method_values.items())
+            for i in range(0, len(values_list), 2):
+                html += '<tr>'
+
+                # First value
+                label1, value1 = values_list[i]
+                html += f'<td class="param-label">{label1}:</td>'
+                html += f'<td class="param-value" style="color: #0066cc; font-weight: 600;">{value1}</td>'
+
+                # Second value (if exists)
+                if i + 1 < len(values_list):
+                    label2, value2 = values_list[i + 1]
+                    html += f'<td class="param-label">{label2}:</td>'
+                    html += f'<td class="param-value" style="color: #0066cc; font-weight: 600;">{value2}</td>'
+                else:
+                    html += '<td></td><td></td>'
+
+                html += '</tr>'
+
+            html += '</table>'
+
         # Applicability check
         conditions_met = result.conditions_met if hasattr(result, 'conditions_met') else True
         check_symbol = '<span class="check-ok">✓ Conditions Met</span>' if conditions_met else '<span class="check-fail">✗ Conditions NOT Met</span>'
@@ -786,66 +1183,12 @@ class DatasetTab(QWidget):
         html += "</body></html>"
         return html
 
+    # Note: update_k_statistics() is now handled by StatisticsTab
+    # This method is kept for backward compatibility but delegates to the new tab
     def update_k_statistics(self):
         """Update K-value statistics"""
-        if not self.current_results:
-            self.k_stats_text.setPlainText("No K-value calculations available")
-            return
-        
-        # Get valid K values
-        valid_results = [r for r in self.current_results 
-                        if r.k_value is not None and r.k_value > 0]
-        
-        if not valid_results:
-            self.k_stats_text.setPlainText("No valid K-value calculations")
-            return
-        
-        k_values = [r.k_value for r in valid_results]
-        
-        # Calculate statistics
-        mean_k = np.mean(k_values)
-        median_k = np.median(k_values)
-        std_k = np.std(k_values)
-        min_k = np.min(k_values)
-        max_k = np.max(k_values)
-        
-        # Find methods for min/max
-        min_method = next(r.method_name for r in valid_results if r.k_value == min_k)
-        max_method = next(r.method_name for r in valid_results if r.k_value == max_k)
-        
-        # Create statistics text
-        stats_text = f"""Hydraulic Conductivity Statistics:
-{'='*50}
-
-Sample: {self.dataset.sample_name}
-Temperature: {self.temperature}°C
-Porosity: {self.porosity}
-
-Valid Calculations: {len(valid_results)} / {len(self.current_results)}
-
-Statistical Summary:
-Mean K: {mean_k:.2e} m/s
-Median K: {median_k:.2e} m/s
-Std Dev: {std_k:.2e} m/s
-Min K: {min_k:.2e} m/s ({min_method})
-Max K: {max_k:.2e} m/s ({max_method})
-Variability: {max_k/min_k:.1f}x difference
-
-Permeability Classification:
-"""
-        # Add permeability classification
-        if mean_k > 1e-2:
-            stats_text += "Very High Permeability (Gravel)"
-        elif mean_k > 1e-4:
-            stats_text += "High Permeability (Clean Sand)"
-        elif mean_k > 1e-5:
-            stats_text += "Moderate Permeability (Fine Sand)"
-        elif mean_k > 1e-7:
-            stats_text += "Low Permeability (Silt)"
-        else:
-            stats_text += "Very Low Permeability (Clay)"
-        
-        self.k_stats_text.setPlainText(stats_text)
+        if hasattr(self, 'statistics_tab'):
+            self.statistics_tab.set_k_results(self.current_results)
     
     def export_results(self):
         """Export results to file"""
@@ -865,46 +1208,5 @@ Permeability Classification:
         """Get the current K-calculation results"""
         return self.current_results
 
-    def _update_porosity(self):
-        """Update porosity from user input"""
-        try:
-            new_porosity = float(self.porosity_edit.text())
-
-            # Validate porosity range
-            if new_porosity < 0.01 or new_porosity > 0.99:
-                from PyQt6.QtWidgets import QMessageBox
-                QMessageBox.warning(self, "Invalid Porosity",
-                                  "Porosity must be between 0.01 and 0.99")
-                return
-
-            # Update values
-            self.porosity = new_porosity
-            self.dataset.current_porosity = new_porosity
-
-            # Refresh displays
-            self.update_grain_statistics()
-
-            # Show success message
-            from PyQt6.QtWidgets import QMessageBox
-            QMessageBox.information(self, "Porosity Updated",
-                                  f"Porosity updated to {new_porosity:.4f}")
-
-        except ValueError:
-            from PyQt6.QtWidgets import QMessageBox
-            QMessageBox.warning(self, "Invalid Input",
-                              "Please enter a valid number for porosity")
-
-    def _reset_porosity(self):
-        """Reset porosity to calculated value"""
-        if self.dataset.calculated_porosity is not None:
-            self.porosity = self.dataset.calculated_porosity
-            self.dataset.current_porosity = self.dataset.calculated_porosity
-            self.porosity_edit.setText(f"{self.porosity:.4f}")
-
-            # Refresh displays
-            self.update_grain_statistics()
-
-            # Show success message
-            from PyQt6.QtWidgets import QMessageBox
-            QMessageBox.information(self, "Porosity Reset",
-                                  f"Porosity reset to calculated value: {self.porosity:.4f}")
+    # Note: Porosity management methods are now in StatisticsTab
+    # These have been removed to avoid duplication
