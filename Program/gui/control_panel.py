@@ -8,13 +8,417 @@ from PyQt6.QtWidgets import (QFrame, QVBoxLayout, QHBoxLayout, QGroupBox,
                             QProgressBar, QCheckBox, QSpinBox, QDoubleSpinBox,
                             QListWidget, QListWidgetItem, QSplitter, QWidget,
                             QFileDialog, QMessageBox, QHeaderView, QApplication,
-                            QMenu)
+                            QMenu, QDialog, QDialogButtonBox)
 from PyQt6.QtCore import QThread, QTimer
 from data_loader import DataLoader
 from gui.column_mapper import ColumnMapperDialog
 import os
 from PyQt6.QtCore import Qt, pyqtSignal
 from PyQt6.QtGui import QIcon, QFont, QAction
+
+
+class PorosityDialog(QDialog):
+    """
+    Dialog for managing porosity settings across all datasets
+    Each dataset can have its own porosity value
+    """
+
+    porosity_updated = pyqtSignal(str, float)  # dataset_name, new_porosity
+
+    def __init__(self, main_window, parent=None):
+        super().__init__(parent)
+        self.main_window = main_window
+        self.setWindowTitle("Porosity Settings - Per Dataset")
+        self.setMinimumWidth(700)
+        self.setMinimumHeight(500)
+
+        self.init_ui()
+        self.load_dataset_porosity_values()
+
+    def init_ui(self):
+        """Initialize dialog UI"""
+        layout = QVBoxLayout(self)
+        layout.setSpacing(12)
+
+        # Header with instructions
+        header_label = QLabel(
+            "<b>Manage Porosity for Each Dataset</b><br>"
+            "Porosity affects K-value calculations. Each dataset can have its own porosity value."
+        )
+        header_label.setStyleSheet("""
+            QLabel {
+                font-size: 11pt;
+                color: #2c5530;
+                padding: 10px;
+                background-color: #f5f5f0;
+                border: 1px solid #d4c4a8;
+                border-radius: 4px;
+            }
+        """)
+        header_label.setWordWrap(True)
+        layout.addWidget(header_label)
+
+        # Table showing all datasets and their porosity values
+        self.porosity_table = QTableWidget(0, 5)
+        self.porosity_table.setHorizontalHeaderLabels([
+            "Dataset", "Calculated Porosity", "Current Porosity", "Edit", "Actions"
+        ])
+
+        # Configure table
+        self.porosity_table.setAlternatingRowColors(True)
+        self.porosity_table.verticalHeader().setVisible(False)
+        self.porosity_table.setSelectionBehavior(QTableWidget.SelectionBehavior.SelectRows)
+
+        # Set column widths
+        header = self.porosity_table.horizontalHeader()
+        header.setSectionResizeMode(0, QHeaderView.ResizeMode.Stretch)  # Dataset name
+        header.setSectionResizeMode(1, QHeaderView.ResizeMode.ResizeToContents)  # Calculated
+        header.setSectionResizeMode(2, QHeaderView.ResizeMode.ResizeToContents)  # Current
+        header.setSectionResizeMode(3, QHeaderView.ResizeMode.Fixed)  # Edit field
+        header.setSectionResizeMode(4, QHeaderView.ResizeMode.Fixed)  # Actions
+        self.porosity_table.setColumnWidth(3, 120)
+        self.porosity_table.setColumnWidth(4, 150)
+
+        self.porosity_table.setStyleSheet("""
+            QTableWidget {
+                gridline-color: #d0d0d0;
+                font-size: 10pt;
+                background-color: white;
+            }
+            QTableWidget::item {
+                padding: 6px;
+            }
+            QHeaderView::section {
+                background-color: #e8e8e8;
+                padding: 6px;
+                border: 1px solid #c0c0c0;
+                font-weight: bold;
+                font-size: 10pt;
+            }
+        """)
+
+        layout.addWidget(self.porosity_table)
+
+        # Info label at bottom
+        self.info_label = QLabel("💡 Tip: Use 'Update' to apply changes to individual datasets, or 'Apply All' to save all changes at once.")
+        self.info_label.setStyleSheet("""
+            QLabel {
+                font-size: 9pt;
+                color: #666;
+                font-style: italic;
+                padding: 6px;
+            }
+        """)
+        self.info_label.setWordWrap(True)
+        layout.addWidget(self.info_label)
+
+        # Dialog buttons
+        button_box = QDialogButtonBox()
+
+        apply_all_btn = QPushButton("Apply All Changes")
+        apply_all_btn.clicked.connect(self.apply_all_changes)
+        apply_all_btn.setStyleSheet("""
+            QPushButton {
+                background-color: #6b8e23;
+                color: white;
+                padding: 8px 16px;
+                font-weight: bold;
+                border-radius: 4px;
+            }
+            QPushButton:hover {
+                background-color: #7fa02d;
+            }
+        """)
+
+        close_btn = QPushButton("Close")
+        close_btn.clicked.connect(self.accept)
+        close_btn.setStyleSheet("""
+            QPushButton {
+                background-color: #d2b48c;
+                padding: 8px 16px;
+                border-radius: 4px;
+            }
+            QPushButton:hover {
+                background-color: #ddbf94;
+            }
+        """)
+
+        button_box.addButton(apply_all_btn, QDialogButtonBox.ButtonRole.AcceptRole)
+        button_box.addButton(close_btn, QDialogButtonBox.ButtonRole.RejectRole)
+
+        layout.addWidget(button_box)
+
+    def load_dataset_porosity_values(self):
+        """Load all datasets and their current porosity values"""
+        self.porosity_table.setRowCount(0)
+
+        if not hasattr(self.main_window, 'dataset_tabs_widget'):
+            print(f"DEBUG: main_window does not have dataset_tabs_widget attribute")
+            self.info_label.setText("⚠️ Error: Could not access dataset tabs")
+            return
+
+        tab_count = self.main_window.dataset_tabs_widget.count()
+        print(f"DEBUG: Found {tab_count} tabs in main window")
+        dataset_count = 0
+
+        # Iterate through all tabs
+        for i in range(tab_count):
+            tab = self.main_window.dataset_tabs_widget.widget(i)
+
+            # Skip non-dataset tabs
+            if not hasattr(tab, 'dataset'):
+                print(f"DEBUG: Tab {i} does not have dataset attribute (type: {type(tab).__name__})")
+                continue
+
+            dataset_count += 1
+            print(f"DEBUG: Found dataset tab {dataset_count}: {tab.dataset.sample_name}")
+
+            dataset = tab.dataset
+            dataset_name = dataset.sample_name
+
+            # Get porosity values
+            calculated_porosity = getattr(dataset, 'calculated_porosity', None)
+            current_porosity = getattr(dataset, 'current_porosity', None)
+
+            if current_porosity is None:
+                current_porosity = calculated_porosity if calculated_porosity else 0.40
+
+            # Add row to table
+            row = self.porosity_table.rowCount()
+            self.porosity_table.insertRow(row)
+
+            # Dataset name
+            name_item = QTableWidgetItem(dataset_name)
+            name_item.setFlags(name_item.flags() & ~Qt.ItemFlag.ItemIsEditable)
+            self.porosity_table.setItem(row, 0, name_item)
+
+            # Calculated porosity
+            if calculated_porosity:
+                calc_item = QTableWidgetItem(f"{calculated_porosity:.4f}")
+            else:
+                calc_item = QTableWidgetItem("N/A")
+            calc_item.setFlags(calc_item.flags() & ~Qt.ItemFlag.ItemIsEditable)
+            calc_item.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
+            self.porosity_table.setItem(row, 1, calc_item)
+
+            # Current porosity
+            current_item = QTableWidgetItem(f"{current_porosity:.4f}")
+            current_item.setFlags(current_item.flags() & ~Qt.ItemFlag.ItemIsEditable)
+            current_item.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
+            self.porosity_table.setItem(row, 2, current_item)
+
+            # Edit field
+            edit_field = QLineEdit()
+            edit_field.setText(f"{current_porosity:.4f}")
+            edit_field.setAlignment(Qt.AlignmentFlag.AlignCenter)
+            edit_field.setStyleSheet("""
+                QLineEdit {
+                    padding: 4px;
+                    border: 1px solid #c0c0c0;
+                    border-radius: 3px;
+                    font-family: 'Consolas', monospace;
+                }
+            """)
+            self.porosity_table.setCellWidget(row, 3, edit_field)
+
+            # Action buttons
+            action_widget = QWidget()
+            action_layout = QHBoxLayout(action_widget)
+            action_layout.setContentsMargins(4, 2, 4, 2)
+            action_layout.setSpacing(4)
+
+            update_btn = QPushButton("Update")
+            update_btn.setStyleSheet("""
+                QPushButton {
+                    background-color: #6b8e23;
+                    color: white;
+                    padding: 4px 8px;
+                    font-size: 9pt;
+                    border-radius: 3px;
+                }
+                QPushButton:hover {
+                    background-color: #7fa02d;
+                }
+            """)
+            update_btn.clicked.connect(lambda checked, r=row: self.update_single_dataset(r))
+
+            reset_btn = QPushButton("Reset")
+            reset_btn.setStyleSheet("""
+                QPushButton {
+                    background-color: #d2b48c;
+                    padding: 4px 8px;
+                    font-size: 9pt;
+                    border-radius: 3px;
+                }
+                QPushButton:hover {
+                    background-color: #ddbf94;
+                }
+            """)
+            reset_btn.clicked.connect(lambda checked, r=row: self.reset_single_dataset(r))
+
+            if calculated_porosity is None:
+                reset_btn.setEnabled(False)
+
+            action_layout.addWidget(update_btn)
+            action_layout.addWidget(reset_btn)
+
+            self.porosity_table.setCellWidget(row, 4, action_widget)
+
+        # Update info label with summary
+        if dataset_count == 0:
+            self.info_label.setText("⚠️ No datasets found. Please load some data files first.")
+        else:
+            self.info_label.setText(f"📊 Loaded {dataset_count} dataset(s). Edit porosity values and click 'Update' or 'Apply All'.")
+
+    def update_single_dataset(self, row: int):
+        """Update porosity for a single dataset"""
+        dataset_name = self.porosity_table.item(row, 0).text()
+        edit_field = self.porosity_table.cellWidget(row, 3)
+
+        try:
+            new_porosity = float(edit_field.text())
+
+            if not (0.1 <= new_porosity <= 0.8):
+                QMessageBox.warning(
+                    self,
+                    "Invalid Porosity",
+                    "Porosity must be between 0.1 and 0.8"
+                )
+                return
+
+            # Find the tab and update
+            for i in range(self.main_window.dataset_tabs_widget.count()):
+                tab = self.main_window.dataset_tabs_widget.widget(i)
+                if hasattr(tab, 'dataset') and tab.dataset.sample_name == dataset_name:
+                    # Update dataset porosity
+                    tab.dataset.current_porosity = new_porosity
+                    tab.porosity = new_porosity
+
+                    # Update statistics tab if it exists
+                    if hasattr(tab, 'statistics_tab'):
+                        tab.statistics_tab.porosity = new_porosity
+                        tab.statistics_tab.update_display()
+
+                    # Recalculate K-values
+                    if hasattr(tab, 'calculate_k_values') and hasattr(tab, 'current_results') and tab.current_results:
+                        tab.calculate_k_values()
+
+                    break
+
+            # Update table display
+            current_item = self.porosity_table.item(row, 2)
+            current_item.setText(f"{new_porosity:.4f}")
+
+            self.info_label.setText(f"✅ Updated {dataset_name} to porosity {new_porosity:.4f}")
+
+        except ValueError:
+            QMessageBox.warning(self, "Invalid Input", "Please enter a valid number")
+
+    def reset_single_dataset(self, row: int):
+        """Reset porosity to calculated value for a single dataset"""
+        dataset_name = self.porosity_table.item(row, 0).text()
+        calc_item = self.porosity_table.item(row, 1)
+
+        if calc_item.text() == "N/A":
+            QMessageBox.information(
+                self,
+                "No Calculated Value",
+                "This dataset doesn't have a calculated porosity value."
+            )
+            return
+
+        calculated_porosity = float(calc_item.text())
+
+        # Update the tab
+        for i in range(self.main_window.dataset_tabs_widget.count()):
+            tab = self.main_window.dataset_tabs_widget.widget(i)
+            if hasattr(tab, 'dataset') and tab.dataset.sample_name == dataset_name:
+                tab.dataset.current_porosity = calculated_porosity
+                tab.porosity = calculated_porosity
+
+                # Update statistics tab
+                if hasattr(tab, 'statistics_tab'):
+                    tab.statistics_tab.porosity = calculated_porosity
+                    tab.statistics_tab.update_display()
+
+                # Recalculate K-values
+                if hasattr(tab, 'calculate_k_values') and hasattr(tab, 'current_results') and tab.current_results:
+                    tab.calculate_k_values()
+
+                break
+
+        # Update table display
+        edit_field = self.porosity_table.cellWidget(row, 3)
+        edit_field.setText(f"{calculated_porosity:.4f}")
+
+        current_item = self.porosity_table.item(row, 2)
+        current_item.setText(f"{calculated_porosity:.4f}")
+
+        self.info_label.setText(f"✅ Reset {dataset_name} to calculated value {calculated_porosity:.4f}")
+
+    def apply_all_changes(self):
+        """Apply all porosity changes at once"""
+        changes_made = 0
+
+        for row in range(self.porosity_table.rowCount()):
+            dataset_name = self.porosity_table.item(row, 0).text()
+            edit_field = self.porosity_table.cellWidget(row, 3)
+            current_item = self.porosity_table.item(row, 2)
+
+            try:
+                new_porosity = float(edit_field.text())
+                current_porosity = float(current_item.text())
+
+                # Only update if changed
+                if abs(new_porosity - current_porosity) > 0.0001:
+                    if not (0.1 <= new_porosity <= 0.8):
+                        QMessageBox.warning(
+                            self,
+                            "Invalid Porosity",
+                            f"Porosity for {dataset_name} must be between 0.1 and 0.8"
+                        )
+                        continue
+
+                    # Update the tab
+                    for i in range(self.main_window.dataset_tabs_widget.count()):
+                        tab = self.main_window.dataset_tabs_widget.widget(i)
+                        if hasattr(tab, 'dataset') and tab.dataset.sample_name == dataset_name:
+                            tab.dataset.current_porosity = new_porosity
+                            tab.porosity = new_porosity
+
+                            # Update statistics tab
+                            if hasattr(tab, 'statistics_tab'):
+                                tab.statistics_tab.porosity = new_porosity
+                                tab.statistics_tab.update_display()
+
+                            # Recalculate K-values
+                            if hasattr(tab, 'calculate_k_values') and hasattr(tab, 'current_results') and tab.current_results:
+                                tab.calculate_k_values()
+
+                            changes_made += 1
+                            break
+
+                    # Update table
+                    current_item.setText(f"{new_porosity:.4f}")
+
+            except ValueError:
+                QMessageBox.warning(
+                    self,
+                    "Invalid Input",
+                    f"Invalid porosity value for {dataset_name}"
+                )
+                continue
+
+        if changes_made > 0:
+            QMessageBox.information(
+                self,
+                "Changes Applied",
+                f"Updated porosity for {changes_made} dataset(s).\nK-values have been recalculated."
+            )
+            self.accept()
+        else:
+            self.info_label.setText("ℹ️ No changes detected")
+
 
 class ControlPanel(QFrame):
     # Signals for communication with main window
@@ -25,7 +429,7 @@ class ControlPanel(QFrame):
     dataset_loaded_successfully = pyqtSignal(object, str)  # Emitted when dataset loads successfully (dataset, file_path)
     update_error_tab_message = pyqtSignal(str, str)  # Update existing error tab with new message
     dataset_fix_requested = pyqtSignal(str)  # Emitted when user wants to fix/remap a dataset (file_path)
-    
+
     def __init__(self):
         super().__init__()
         self.loaded_samples = {}  # Dictionary to store sample data
@@ -34,19 +438,19 @@ class ControlPanel(QFrame):
         self.file_statuses = {}  # Track file loading status: 'pending', 'auto', 'failed', 'review', 'loaded'
         self.setup_ui()
         self.setup_validation()
-        
+
     def setup_validation(self):
         """Setup input validation for parameters"""
         # Connect validation to parameter changes
         self.temp_spinbox.valueChanged.connect(self.validate_temperature)
         self.porosity_mode_combo.currentTextChanged.connect(self.on_porosity_mode_changed)
-        
+
     def setup_ui(self):
         """Setup the control panel layout"""
         layout = QVBoxLayout(self)
         layout.setSpacing(12)
         layout.setContentsMargins(10, 10, 10, 10)
-        
+
         # Apply professional geotechnical styling
         self.setStyleSheet("""
             QFrame {
@@ -147,7 +551,7 @@ class ControlPanel(QFrame):
                 border: 1px solid #5d4e37;
             }
         """)
-        
+
         # === SAMPLE MANAGEMENT SECTION ===
         samples_group = QGroupBox("📁 Sample Management")
         samples_layout = QVBoxLayout(samples_group)
@@ -285,7 +689,7 @@ class ControlPanel(QFrame):
 
         samples_layout.addLayout(batch_buttons_layout)
         samples_layout.addWidget(self.sample_info_label)
-        
+
         # === ANALYSIS PARAMETERS (Collapsible) ===
         params_group = QGroupBox("⚙️ Analysis Parameters")
         params_group.setCheckable(True)
@@ -333,7 +737,32 @@ class ControlPanel(QFrame):
 
         params_layout.addLayout(temp_layout)
         params_layout.addLayout(porosity_layout)
-        
+
+        # Porosity Settings Button
+        porosity_settings_layout = QHBoxLayout()
+        porosity_settings_layout.setSpacing(8)
+
+        self.porosity_settings_btn = QPushButton("🕳️ Manage Dataset Porosity...")
+        self.porosity_settings_btn.clicked.connect(self.open_porosity_dialog)
+        self.porosity_settings_btn.setToolTip("Edit porosity values for each dataset individually")
+        self.porosity_settings_btn.setStyleSheet("""
+            QPushButton {
+                background-color: #6b8e23;
+                color: white;
+                padding: 8px 12px;
+                font-size: 10pt;
+                font-weight: bold;
+                border-radius: 4px;
+            }
+            QPushButton:hover {
+                background-color: #7fa02d;
+            }
+        """)
+        porosity_settings_layout.addWidget(self.porosity_settings_btn)
+        porosity_settings_layout.addStretch()
+
+        params_layout.addLayout(porosity_settings_layout)
+
         # Optional: auto-export toggle used by analysis_complete()
         params_layout.addSpacing(6)
         self.export_results_cb = QCheckBox("📤 Auto-export results after analysis")
@@ -341,20 +770,20 @@ class ControlPanel(QFrame):
         self.export_results_cb.setToolTip("If enabled, results will be exported automatically after analysis")
         self.export_results_cb.setStyleSheet("font-size: 10px; color: #5d4e37;")
         params_layout.addWidget(self.export_results_cb)
-        
+
         # Progress Bar
         self.progress_bar = QProgressBar()
         self.progress_bar.setVisible(False)
         self.progress_label = QLabel("")
         self.progress_label.setVisible(False)
-        
+
         # Add all groups to main layout
         layout.addWidget(samples_group)
         layout.addWidget(params_group)
         layout.addWidget(self.progress_label)
         layout.addWidget(self.progress_bar)
         layout.addStretch()  # Push everything to top
-        
+
     def add_files(self):
         """Add multiple files for batch processing"""
         file_paths, _ = QFileDialog.getOpenFileNames(
@@ -792,7 +1221,7 @@ Uniformity Coefficient (Cu): {dataset.get_uniformity_coefficient():.2f if datase
             self.sample_info_label.setText(f"🗑️ Removed: {os.path.basename(file_path)}")
         else:
             self.remove_file_btn.setEnabled(False)
-    
+
     def clear_all_files(self):
         """Clear all loaded files"""
         total_files = len(self.file_statuses)
@@ -809,7 +1238,7 @@ Uniformity Coefficient (Cu): {dataset.get_uniformity_coefficient():.2f if datase
                 self.samples_table.setRowCount(0)
                 self.update_ui_state()
                 self.sample_info_label.setText("🧹 All files cleared")
-    
+
     def on_sample_selection_changed(self):
         """Handle sample selection change"""
         current_row = self.samples_table.currentRow()
@@ -832,8 +1261,8 @@ Uniformity Coefficient (Cu): {dataset.get_uniformity_coefficient():.2f if datase
                 self.sample_selected.emit(sample_name)
         else:
             self.remove_file_btn.setEnabled(False)
-    
-    
+
+
     def extract_sample_name(self, file_path):
         """Extract a clean sample name from file path"""
         import os
@@ -843,7 +1272,7 @@ Uniformity Coefficient (Cu): {dataset.get_uniformity_coefficient():.2f if datase
         # Clean up common prefixes/suffixes
         name = name.replace('_grainsize', '').replace('_sieve', '').replace('_data', '')
         return name if name else base_name
-    
+
     def update_ui_state(self):
         """Update UI state based on loaded samples and file statuses"""
         has_files = len(self.file_statuses) > 0
@@ -875,9 +1304,9 @@ Uniformity Coefficient (Cu): {dataset.get_uniformity_coefficient():.2f if datase
 
         # Trigger validation to determine if analysis buttons should be enabled
         self.perform_full_validation()
-    
-            
-    
+
+
+
     def _is_numeric(self, value: str) -> bool:
         """Check if a string represents a number"""
         try:
@@ -885,35 +1314,35 @@ Uniformity Coefficient (Cu): {dataset.get_uniformity_coefficient():.2f if datase
             return True
         except ValueError:
             return False
-    
+
     def update_analysis_progress(self, current, total, current_sample=""):
         """Update progress bar during analysis"""
         if total > 0:
             progress = int((current / total) * 100)
             self.progress_bar.setValue(progress)
-            
+
             if current_sample:
                 self.progress_label.setText(f"🔄 Analyzing: {current_sample} ({current}/{total})")
             else:
                 self.progress_label.setText(f"🔄 Processing... ({current}/{total})")
-    
+
     def analysis_complete(self, results):
         """Called when analysis is complete"""
         self.show_progress(False)
-        
+
         # Update sample statuses
         for sample_name in results:
             if sample_name in self.loaded_samples:
                 self.loaded_samples[sample_name]['status'] = 'Analyzed'
-        
+
         # Update UI
         success_count = len(results)
         self.progress_label.setText(f"✅ Analysis complete! {success_count} sample(s) processed")
-        
+
         # Auto-export if enabled
         if self.export_results_cb.isChecked():
             self.progress_label.setText(f"✅ Analysis complete! Results exported for {success_count} sample(s)")
-    
+
     def get_analysis_parameters(self):
         """Get current analysis parameters"""
         return {
@@ -921,11 +1350,11 @@ Uniformity Coefficient (Cu): {dataset.get_uniformity_coefficient():.2f if datase
             'porosity_mode': self.porosity_mode_combo.currentText(),
             'auto_export': self.export_results_cb.isChecked()
         }
-    
+
     def get_loaded_samples(self):
         """Get dictionary of loaded samples"""
         return self.loaded_samples.copy()
-    
+
     def set_sample_status(self, sample_name, status):
         """Update the status of a specific sample"""
         if sample_name in self.loaded_samples:
@@ -936,42 +1365,42 @@ Uniformity Coefficient (Cu): {dataset.get_uniformity_coefficient():.2f if datase
             if file_path in self.file_statuses:
                 self.file_statuses[file_path] = status
                 self.update_file_in_table(file_path, status)
-            
+
     def show_progress(self, show=True):
         """Show/hide progress bar"""
         self.progress_bar.setVisible(show)
-        
+
     def set_progress(self, value):
         """Set progress bar value (0-100)"""
         self.progress_bar.setValue(value)
-        
+
     # ================================
     # VALIDATION METHODS
     # ================================
-    
+
     def validate_temperature(self, value):
         """Validate temperature input"""
         self.validation_errors = [err for err in self.validation_errors if 'Temperature' not in err]
-        
+
         if value < 0 or value > 50:
             self.validation_errors.append("🌡️ Temperature should be between 0-50°C for realistic conditions")
         elif value < 5:
             self.validation_errors.append("⚠️ Temperature below 5°C may affect viscosity calculations")
         elif value > 35:
             self.validation_errors.append("⚠️ Temperature above 35°C is unusual for groundwater")
-            
+
         self.update_validation_display()
-    
+
     def on_porosity_mode_changed(self, mode_text):
         """Handle porosity calculation mode change"""
         # Determine which calculation mode is selected
         use_simple_formula = "Simple Formula" in mode_text
 
         # Update all loaded datasets to use the new porosity calculation mode
-        if hasattr(self.parent(), 'tab_widget'):
+        if hasattr(self.parent(), 'dataset_tabs_widget'):
             main_window = self.parent()
-            for i in range(main_window.tab_widget.count()):
-                tab = main_window.tab_widget.widget(i)
+            for i in range(main_window.dataset_tabs_widget.count()):
+                tab = main_window.dataset_tabs_widget.widget(i)
                 if hasattr(tab, 'dataset') and hasattr(tab.dataset, 'recalculate_porosity'):
                     # Recalculate porosity using the selected method
                     if use_simple_formula:
@@ -1001,25 +1430,25 @@ Uniformity Coefficient (Cu): {dataset.get_uniformity_coefficient():.2f if datase
     def validate_column_mapping(self):
         """Column mapping validation - simplified since we auto-detect"""
         pass
-    
+
     def validate_samples(self):
         """Validate that samples are loaded and ready"""
         self.validation_errors = [err for err in self.validation_errors if 'Sample' not in err]
-        
+
         if not self.loaded_samples:
             self.validation_errors.append("📁 Samples: No samples loaded - please add data files")
         else:
             for sample_name, sample_data in self.loaded_samples.items():
                 if sample_data['status'] == 'Error':
                     self.validation_errors.append(f"❌ Sample '{sample_name}': Failed to load properly")
-                    
+
         self.update_validation_display()
-    
+
     def update_validation_display(self):
         """Update the validation status display"""
         if not self.validation_errors:
             pass  # Validation passed
-            
+
             # Enable analysis if we have samples
             if self.loaded_samples:
                 pass  # Samples ready
@@ -1031,15 +1460,15 @@ Uniformity Coefficient (Cu): {dataset.get_uniformity_coefficient():.2f if datase
             error_text = "\n".join(display_errors)
             if len(self.validation_errors) > 3:
                 error_text += f"\n... and {len(self.validation_errors) - 3} more issues"
-                
+
             pass  # Show validation errors in status bar if needed
-            
+
             # Disable analysis if there are critical errors
             critical_errors = [err for err in self.validation_errors if '❌' in err or 'should be' in err]
             if critical_errors:
                 pass  # No samples
                 pass  # No sample selected
-    
+
     def perform_full_validation(self):
         """Perform complete validation of all parameters"""
         self.validation_errors.clear()
@@ -1050,6 +1479,25 @@ Uniformity Coefficient (Cu): {dataset.get_uniformity_coefficient():.2f if datase
         self.validate_samples()
 
         return len([err for err in self.validation_errors if '❌' in err or 'should be' in err]) == 0
+
+    def open_porosity_dialog(self):
+        """Open the porosity management dialog"""
+        # Get reference to main window - traverse up to find the actual main window
+        main_window = self.window()
+
+        # Debug: Check if we found the right window
+        if not hasattr(main_window, 'dataset_tabs_widget'):
+            print(f"Warning: Could not find main window with dataset_tabs_widget. Found: {type(main_window)}")
+            QMessageBox.warning(
+                self,
+                "No Datasets",
+                "No datasets are currently loaded. Please load some data files first."
+            )
+            return
+
+        # Create and show dialog
+        dialog = PorosityDialog(main_window, self)
+        dialog.exec()
 
     # ================================
     # FILE PREVIEW / VALIDATION

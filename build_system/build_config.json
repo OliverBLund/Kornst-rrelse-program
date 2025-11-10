@@ -1,0 +1,30 @@
+{
+  "app_name": "GrainSizeAnalysis",
+  "entry_script": "../Program/main.py",
+  "icon_path": null,
+  "dist_dir": "dist",
+  "build_dir": "build",
+  "spec_dir": ".",
+  "extra_paths": [
+    "../Program"
+  ],
+  "data": [
+    {
+      "source": "../Program/help_content",
+      "target": "Program/help_content"
+    },
+    {
+      "source": "../docs",
+      "target": "docs"
+    },
+    {
+      "source": "../test_data",
+      "target": "Program/test_data"
+    }
+  ],
+  "hidden_imports": [
+    "matplotlib.backends.backend_qt5agg",
+    "matplotlib.backends.backend_qtagg"
+  ],
+  "default_mode": "gui"
+}

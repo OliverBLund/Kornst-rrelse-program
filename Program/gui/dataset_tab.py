@@ -3,9 +3,22 @@ Dataset tab containing plot workspace, results, and statistics for a single data
 """
 
 from PyQt6.QtWidgets import (
-    QWidget, QVBoxLayout, QTabWidget, QTableWidget, QTableWidgetItem,
-    QTextEdit, QGroupBox, QPushButton, QHBoxLayout, QMessageBox,
-    QHeaderView, QLabel, QFrame, QTextBrowser, QSplitter
+    QWidget,
+    QVBoxLayout,
+    QTabWidget,
+    QTableWidget,
+    QTableWidgetItem,
+    QTextEdit,
+    QGroupBox,
+    QPushButton,
+    QHBoxLayout,
+    QMessageBox,
+    QHeaderView,
+    QLabel,
+    QFrame,
+    QTextBrowser,
+    QSplitter,
+    QLineEdit,
 )
 from PyQt6.QtGui import QColor
 from PyQt6.QtCore import Qt, pyqtSignal
@@ -20,11 +33,11 @@ class DatasetTab(QWidget):
     """
     A complete dataset tab with nested tabs for plots, results, and statistics
     """
-    
+
     # Signals
     data_updated = pyqtSignal(str)  # Emitted when dataset data changes
     calculation_complete = pyqtSignal(str, list)  # dataset_name, results
-    
+
     def __init__(self, dataset: GrainSizeData, parent=None):
         super().__init__(parent)
         self.dataset = dataset
@@ -44,18 +57,18 @@ class DatasetTab(QWidget):
         if dataset.current_porosity is None:
             dataset.current_porosity = base_porosity
         self.porosity = base_porosity
-        
+
         self.init_ui()
         self.load_dataset_data()
-    
+
     def init_ui(self):
         """Initialize the UI with nested tabs"""
         layout = QVBoxLayout(self)
         layout.setContentsMargins(2, 2, 2, 2)  # Reduce margins
-        
+
         # Create nested tab widget
         self.nested_tabs = QTabWidget()
-        
+
         # Compact styling for nested tabs
         self.nested_tabs.setStyleSheet("""
             QTabBar::tab {
@@ -69,37 +82,39 @@ class DatasetTab(QWidget):
                 margin-top: -1px;
             }
         """)
-        
+
         # Import here to avoid circular imports
         from .plot_workspace import PlotWorkspace
-        
+
         # Plot Workspace tab
         self.plot_workspace = PlotWorkspace(self.dataset)
         self.nested_tabs.addTab(self.plot_workspace, "Plot")
-        
+
         # Results tab
         self.results_widget = self.create_results_tab()
         self.nested_tabs.addTab(self.results_widget, "Results")
-        
+
         # Statistics tab
         self.statistics_widget = self.create_statistics_tab()
         self.nested_tabs.addTab(self.statistics_widget, "Stats")
-        
+
         layout.addWidget(self.nested_tabs)
-    
+
     def create_results_tab(self):
         """Create the results tab with K-value calculations"""
         widget = QWidget()
         layout = QVBoxLayout(widget)
-        
-        # Results table
-        results_group = QGroupBox(f"Hydraulic Conductivity Results - {self.dataset.sample_name}")
+
+        # Results group box
+        results_group = QGroupBox(
+            f"Hydraulic Conductivity Results - {self.dataset.sample_name}"
+        )
         results_layout = QVBoxLayout(results_group)
 
-        # Summary statistics bar
+        # Summary statistics bar (top)
         self.summary_frame = QFrame()
         self.summary_frame.setFrameStyle(QFrame.Shape.StyledPanel | QFrame.Shadow.Plain)
-        self.summary_frame.setFixedHeight(40)  # Fixed height to prevent expansion
+        self.summary_frame.setFixedHeight(70)
         self.summary_frame.setStyleSheet("""
             QFrame {
                 background-color: #f0f0f0;
@@ -112,32 +127,34 @@ class DatasetTab(QWidget):
         summary_layout.setContentsMargins(10, 5, 10, 5)
         summary_layout.setSpacing(8)
 
-        # Summary labels with fixed sizing
+        # Summary labels
         self.summary_total_label = QLabel("No calculations yet")
-        self.summary_total_label.setStyleSheet("font-weight: bold; color: #333; font-size: 10pt;")
+        self.summary_total_label.setStyleSheet(
+            "font-weight: bold; color: #333; font-size: 10pt;"
+        )
 
         self.summary_valid_label = QLabel("")
-        self.summary_valid_label.setStyleSheet("color: #006400; font-size: 10pt;")  # Dark green
+        self.summary_valid_label.setStyleSheet("color: #006400; font-size: 10pt;")
 
         self.summary_warning_label = QLabel("")
-        self.summary_warning_label.setStyleSheet("color: #8B6914; font-size: 10pt;")  # Dark yellow
+        self.summary_warning_label.setStyleSheet("color: #8B6914; font-size: 10pt;")
 
         self.summary_error_label = QLabel("")
-        self.summary_error_label.setStyleSheet("color: #8B0000; font-size: 10pt;")  # Dark red
+        self.summary_error_label.setStyleSheet("color: #8B0000; font-size: 10pt;")
 
         self.summary_stats_label = QLabel("")
         self.summary_stats_label.setStyleSheet("color: #333; font-size: 10pt;")
 
-        # Set size policies to prevent expansion
-        for label in [self.summary_total_label, self.summary_valid_label,
-                      self.summary_warning_label, self.summary_error_label,
-                      self.summary_stats_label]:
-            label.setWordWrap(False)  # Prevent text wrapping
-            label.setSizePolicy(label.sizePolicy().horizontalPolicy(),
-                               label.sizePolicy().verticalPolicy())
+        for label in [
+            self.summary_total_label,
+            self.summary_valid_label,
+            self.summary_warning_label,
+            self.summary_error_label,
+            self.summary_stats_label,
+        ]:
+            label.setWordWrap(False)
             label.setMaximumHeight(25)
 
-        # Add separator labels with fixed styling
         separator1 = QLabel("|")
         separator1.setStyleSheet("color: #999; font-size: 10pt;")
         separator1.setMaximumHeight(25)
@@ -156,24 +173,27 @@ class DatasetTab(QWidget):
         summary_layout.addStretch()
 
         results_layout.addWidget(self.summary_frame)
-        self.summary_frame.setVisible(False)  # Hidden until calculations are done
+        self.summary_frame.setVisible(False)
 
-        # Results table - removed Formula column (now in details panel)
+        # Middle row: K-values table (left) and Method Details (right)
+        middle_splitter = QSplitter(Qt.Orientation.Horizontal)
+
+        # Left: Results table
         self.results_table = QTableWidget(0, 5)
-        self.results_table.setHorizontalHeaderLabels(["Method", "K (cm/s)", "K (m/s)", "K (m/d)", "Status"])
-
-        # Enable sorting
+        self.results_table.setHorizontalHeaderLabels(
+            ["Method", "K (cm/s)", "K (m/s)", "K (m/d)", "Status"]
+        )
         self.results_table.setSortingEnabled(True)
 
-        # Set header properties
         header = self.results_table.horizontalHeader()
         if header:
             header.setStretchLastSection(True)
 
-        # Improve table appearance
         self.results_table.setAlternatingRowColors(True)
-        self.results_table.verticalHeader().setVisible(False)  # Hide row numbers
-        self.results_table.setSelectionBehavior(QTableWidget.SelectionBehavior.SelectRows)
+        self.results_table.verticalHeader().setVisible(False)
+        self.results_table.setSelectionBehavior(
+            QTableWidget.SelectionBehavior.SelectRows
+        )
         self.results_table.setStyleSheet("""
             QTableWidget {
                 gridline-color: #d0d0d0;
@@ -190,20 +210,16 @@ class DatasetTab(QWidget):
                 font-size: 10pt;
             }
         """)
-
-        # Connect row selection to details panel
         self.results_table.itemSelectionChanged.connect(self.on_result_row_selected)
 
-        # Method details panel (collapsible)
+        # Right: Method details panel
         self.details_group = QGroupBox("Method Details")
-        self.details_group.setCheckable(True)
-        self.details_group.setChecked(False)  # Start collapsed
         self.details_group.setStyleSheet("""
             QGroupBox {
                 font-weight: bold;
                 border: 2px solid #c0c0c0;
                 border-radius: 5px;
-                margin-top: 10px;
+                margin-top: 8px;
                 padding-top: 10px;
             }
             QGroupBox::title {
@@ -216,7 +232,7 @@ class DatasetTab(QWidget):
         details_layout = QVBoxLayout(self.details_group)
 
         self.details_browser = QTextBrowser()
-        self.details_browser.setMinimumHeight(150)  # Set minimum but allow expansion
+        self.details_browser.setMinimumHeight(200)
         self.details_browser.setStyleSheet("""
             QTextBrowser {
                 background-color: #fafafa;
@@ -226,35 +242,20 @@ class DatasetTab(QWidget):
                 font-size: 10pt;
             }
         """)
-        self.details_browser.setHtml("<p style='color: #999; text-align: center;'>Select a row in the table above to view detailed calculation information</p>")
+        self.details_browser.setHtml(
+            "<p style='color: #999; text-align: center;'>Select a row in the table above to view detailed calculation information</p>"
+        )
 
         details_layout.addWidget(self.details_browser)
 
-        # === NEW LAYOUT STRUCTURE ===
-        # Left column: vertical splitter with results table and method details
-        left_column_splitter = QSplitter(Qt.Orientation.Vertical)
-        left_column_splitter.addWidget(self.results_table)
-        left_column_splitter.addWidget(self.details_group)
-        # Set initial ratio: 60% table, 40% details
-        left_column_splitter.setStretchFactor(0, 60)
-        left_column_splitter.setStretchFactor(1, 40)
-        left_column_splitter.setCollapsible(0, False)  # Don't allow table to be collapsed
-        left_column_splitter.setCollapsible(1, True)   # Allow details to be collapsed
+        middle_splitter.addWidget(self.results_table)
+        middle_splitter.addWidget(self.details_group)
+        middle_splitter.setStretchFactor(0, 50)  # 50% for table
+        middle_splitter.setStretchFactor(1, 50)  # 50% for method details
 
-        # Right column: Calculated Values Panel (full height)
-        self.calculated_values_panel = self.create_calculated_values_panel()
-
-        # Main horizontal splitter: left column vs calculated values
-        horizontal_splitter = QSplitter(Qt.Orientation.Horizontal)
-        horizontal_splitter.addWidget(left_column_splitter)
-        horizontal_splitter.addWidget(self.calculated_values_panel)
-
-        # Set initial ratio: 30% left column, 70% calculated values
-        # USER CAN ADJUST THESE VALUES (line 205-206)
-        horizontal_splitter.setStretchFactor(0, 50)
-        horizontal_splitter.setStretchFactor(1, 50)
-
-        results_layout.addWidget(horizontal_splitter)
+        results_layout.addWidget(
+            middle_splitter, 1
+        )  # Stretch factor 1 to take available space
 
         layout.addWidget(results_group)
 
@@ -276,306 +277,14 @@ class DatasetTab(QWidget):
         button_layout.addStretch()
 
         layout.addLayout(button_layout)
-        # Remove addStretch() to allow splitter to expand and use all available space
 
         return widget
 
-    def create_calculated_values_panel(self):
-        """Create panel showing all calculated grain size and gradation values"""
-        panel = QWidget()
-        layout = QVBoxLayout(panel)
-        layout.setContentsMargins(0, 0, 0, 0)
-        layout.setSpacing(6)
 
-        groupbox_style = """
-            QGroupBox {
-                font-weight: bold;
-                font-size: 10pt;
-                border: 1px solid #c0c0c0;
-                border-radius: 4px;
-                margin-top: 8px;
-                padding-top: 10px;
-            }
-            QGroupBox::title {
-                subcontrol-origin: margin;
-                subcontrol-position: top left;
-                padding: 2px 5px;
-            }
-        """
 
-        textedit_style = """
-            QTextEdit {
-                background-color: #fafafa;
-                border: 1px solid #d0d0d0;
-                padding: 8px;
-                font-family: 'Consolas', 'Courier New', monospace;
-                font-size: 9pt;
-            }
-        """
-
-        # === GRAIN SIZE PERCENTILES SECTION (side-by-side) ===
-        percentiles_group = QGroupBox("Grain Size Percentiles")
-        percentiles_group.setStyleSheet(groupbox_style)
-        percentiles_main_layout = QHBoxLayout(percentiles_group)
-
-        # Left: Percentiles values
-        self.percentiles_text = QTextEdit()
-        self.percentiles_text.setReadOnly(True)
-        self.percentiles_text.setMinimumHeight(200)
-        self.percentiles_text.setStyleSheet(textedit_style)
-        self.percentiles_text.setPlainText("Calculate K-values to see grain size percentiles")
-        percentiles_main_layout.addWidget(self.percentiles_text, 50)
-
-        # Right: Percentile usage reference
-        self.percentile_usage_text = QTextEdit()
-        self.percentile_usage_text.setReadOnly(True)
-        self.percentile_usage_text.setMinimumHeight(200)
-        self.percentile_usage_text.setStyleSheet(textedit_style)
-        # Set static reference content
-        usage_ref = """<pre style='font-family: Consolas, monospace; font-size: 9pt;'>
-<b>Percentile Usage by Methods:</b>
-
-<b>D₅:</b>   Barr
-<b>D₁₀:</b>  Hazen, Hazen_1892, Slichter,
-       Terzaghi, Beyer, Kozeny-Carman,
-       Zunker, Zamarin, Chapuis,
-       Alyamani-Sen
-
-<b>D₁₆:</b>  Sorting Coefficient (σ)
-<b>D₁₇:</b>  Sauerbrei
-<b>D₂₀:</b>  USBR, Beyer (fallback)
-<b>D₃₀:</b>  Cu, Cc calculations
-<b>D₅₀:</b>  Kruger, Alyamani-Sen,
-       Shepherd
-
-<b>D₆₀:</b>  Beyer, Barr, Cu calculation
-<b>D₈₄:</b>  Sorting Coefficient (σ),
-       Krumbein-Monk
-<b>D₉₅:</b>  Krumbein-Monk
-</pre>"""
-        self.percentile_usage_text.setHtml(usage_ref)
-        percentiles_main_layout.addWidget(self.percentile_usage_text, 50)
-
-        layout.addWidget(percentiles_group)
-
-        # === GRADATION PARAMETERS SECTION (side-by-side) ===
-        gradation_group = QGroupBox("Gradation Parameters")
-        gradation_group.setStyleSheet(groupbox_style)
-        gradation_main_layout = QHBoxLayout(gradation_group)
-
-        # Left: Parameter values
-        self.gradation_text = QTextEdit()
-        self.gradation_text.setReadOnly(True)
-        self.gradation_text.setMinimumHeight(160)
-        self.gradation_text.setStyleSheet(textedit_style)
-        self.gradation_text.setPlainText("Calculate K-values to see gradation parameters")
-        gradation_main_layout.addWidget(self.gradation_text, 50)
-
-        # Right: Classification criteria reference
-        self.classification_criteria_text = QTextEdit()
-        self.classification_criteria_text.setReadOnly(True)
-        self.classification_criteria_text.setMinimumHeight(160)
-        self.classification_criteria_text.setStyleSheet(textedit_style)
-        # Set static reference content
-        criteria_ref = """<pre style='font-family: Consolas, monospace; font-size: 9pt;'>
-<b>Classification Criteria:</b>
-
-<b>Uniformity Coefficient (Cu):</b>
-  Cu &lt; 4      → Uniform
-  4 ≤ Cu &lt; 6  → Moderately graded
-  Cu ≥ 6      → Well-graded
-
-<b>Coefficient of Curvature (Cc):</b>
-  1 ≤ Cc ≤ 3  → Well-graded range
-  Outside     → Gap/poorly graded
-
-<b>Sorting Coefficient (σ):</b>
-  σ &lt; 2       → Well sorted
-  2 ≤ σ &lt; 4   → Moderately sorted
-  σ ≥ 4       → Poorly sorted
-</pre>"""
-        self.classification_criteria_text.setHtml(criteria_ref)
-        gradation_main_layout.addWidget(self.classification_criteria_text, 50)
-
-        layout.addWidget(gradation_group)
-
-        # === SPECIAL METHOD DIAMETERS & ENVIRONMENTAL PARAMETERS (side-by-side) ===
-        bottom_row_widget = QWidget()
-        bottom_row_layout = QHBoxLayout(bottom_row_widget)
-        bottom_row_layout.setContentsMargins(0, 0, 0, 0)
-        bottom_row_layout.setSpacing(6)
-
-        # Left: Special Method Diameters
-        special_diameters_group = QGroupBox("Special Method Diameters")
-        special_diameters_group.setStyleSheet(groupbox_style)
-        special_diameters_layout = QVBoxLayout(special_diameters_group)
-
-        self.special_diameters_text = QTextEdit()
-        self.special_diameters_text.setReadOnly(True)
-        self.special_diameters_text.setMinimumHeight(120)
-        self.special_diameters_text.setStyleSheet(textedit_style)
-        self.special_diameters_text.setPlainText("Calculate K-values to see special method diameters")
-        special_diameters_layout.addWidget(self.special_diameters_text)
-
-        bottom_row_layout.addWidget(special_diameters_group, 60)  # 60% width
-
-        # Right: Environmental Parameters
-        env_group = QGroupBox("Environmental Parameters")
-        env_group.setStyleSheet(groupbox_style)
-        env_layout = QVBoxLayout(env_group)
-
-        self.env_text = QTextEdit()
-        self.env_text.setReadOnly(True)
-        self.env_text.setMinimumHeight(120)
-        self.env_text.setStyleSheet(textedit_style)
-        env_layout.addWidget(self.env_text)
-
-        # Populate environmental parameters immediately
-        self.update_environmental_parameters()
-
-        bottom_row_layout.addWidget(env_group, 40)  # 40% width
-
-        layout.addWidget(bottom_row_widget)
-        layout.addStretch()
-
-        return panel
-
-    def update_environmental_parameters(self):
-        """Update environmental parameters display"""
-        text = f"Temperature: {self.temperature}°C\n"
-        text += f"Porosity: {self.porosity:.4f}"
-        if hasattr(self.dataset, 'calculated_porosity') and self.dataset.calculated_porosity:
-            if abs(self.porosity - self.dataset.calculated_porosity) < 0.001:
-                text += " (calculated)"
-            else:
-                text += f" (modified from {self.dataset.calculated_porosity:.4f})"
-        self.env_text.setPlainText(text)
-
-    def update_calculated_values_panel(self):
-        """Update the calculated values panel with grain size percentiles and gradation"""
-        import math
-        from k_calculations import KCalculator
-        calculator = KCalculator()
-
-        # Prepare grain_data dict for interpolation
-        grain_data = {
-            'particle_sizes': list(self.dataset.particle_sizes),
-            'percent_passing': list(self.dataset.percent_passing)
-        }
-
-        # Calculate all percentiles using k_calculations interpolation (includes D16, D17, D84)
-        percentiles = {}
-        standard_percentiles = [5, 10, 15, 16, 17, 20, 25, 30, 40, 50, 60, 70, 75, 80, 84, 85, 90, 95]
-        for p in standard_percentiles:
-            value = calculator._interpolate_percentile(grain_data, p)
-            if value:
-                percentiles[p] = value
-
-        # === UPDATE PERCENTILES DISPLAY ===
-        html_text = "<pre style='font-family: Consolas, monospace; font-size: 9pt;'>"
-        html_text += "<b>Grain Size Percentiles (Linear Interpolation):</b>\n"
-        html_text += "━" * 45 + "\n\n"
-
-        # Display in 3 columns
-        for i in range(0, len(standard_percentiles), 3):
-            row_percentiles = standard_percentiles[i:i+3]
-            for p in row_percentiles:
-                if p in percentiles:
-                    # Bold for key percentiles used by multiple methods
-                    if p in [10, 20, 30, 50, 60]:
-                        html_text += f"<b>D{p:>2}: {percentiles[p]:>6.3f} mm</b>    "
-                    else:
-                        html_text += f"D{p:>2}: {percentiles[p]:>6.3f} mm    "
-            html_text += "\n"
-
-        html_text += "\n<b>Bold</b> = Critical values used by multiple methods"
-        html_text += "</pre>"
-        self.percentiles_text.setHtml(html_text)
-
-        # === UPDATE GRADATION PARAMETERS DISPLAY ===
-        d5 = percentiles.get(5)
-        d10 = percentiles.get(10)
-        d16 = percentiles.get(16)
-        d30 = percentiles.get(30)
-        d50 = percentiles.get(50)
-        d60 = percentiles.get(60)
-        d84 = percentiles.get(84)
-        d95 = percentiles.get(95)
-
-        gradation_text = "<b>Gradation Parameters:</b>\n"
-        gradation_text += "━" * 35 + "\n\n"
-
-        # Uniformity Coefficient
-        if d10 and d60:
-            cu = d60 / d10
-            gradation_text += f"<b>Uniformity Coefficient (Cu):</b> {cu:.2f}\n"
-            gradation_text += f"  └─ D60/D10 = {d60:.3f}/{d10:.3f}\n"
-            if cu < 4:
-                gradation_text += "  └─ <b>Uniform</b>\n"
-            elif cu < 6:
-                gradation_text += "  └─ <b>Moderately graded</b>\n"
-            else:
-                gradation_text += "  └─ <b>Well-graded</b>\n"
-
-        # Coefficient of Curvature
-        if d10 and d30 and d60:
-            cc = (d30 * d30) / (d10 * d60)
-            gradation_text += f"\n<b>Coefficient of Curvature (Cc):</b> {cc:.2f}\n"
-            gradation_text += f"  └─ D30²/(D10×D60)\n"
-            if 1 <= cc <= 3:
-                gradation_text += "  └─ <b>Well-graded range</b> ✓\n"
-            else:
-                gradation_text += "  └─ Outside typical range\n"
-
-        # Sorting Coefficient
-        if d16 and d84 and d16 > 0 and d84 > 0:
-            sigma = math.sqrt(d84 / d16)
-            gradation_text += f"\n<b>Sorting Coefficient (σ):</b> {sigma:.2f}\n"
-            gradation_text += f"  └─ √(D84/D16) = √({d84:.3f}/{d16:.3f})\n"
-            if sigma < 2:
-                gradation_text += "  └─ <b>Well sorted</b>\n"
-            elif sigma < 4:
-                gradation_text += "  └─ <b>Moderately sorted</b>\n"
-            else:
-                gradation_text += "  └─ <b>Poorly sorted</b>\n"
-
-        # Span Ratio
-        if d5 and d95:
-            span = d95 / d5
-            gradation_text += f"\n<b>Span Ratio:</b> {span:.1f}\n"
-            gradation_text += f"  └─ D95/D5 = {d95:.3f}/{d5:.3f}\n"
-
-        # Wrap in HTML pre tag
-        gradation_html = f"<pre style='font-family: Consolas, monospace; font-size: 9pt;'>{gradation_text}</pre>"
-        self.gradation_text.setHtml(gradation_html)
-
-        # === UPDATE SPECIAL METHOD DIAMETERS DISPLAY ===
-        special_text = "<b>Special Method Diameters:</b>\n"
-        special_text += "━" * 50 + "\n\n"
-
-        # Calculate special diameters
-        kruger_de = calculator._kruger_diameter_cm(grain_data)
-        harmonic_de = calculator._harmonic_mean_diameter_cm(grain_data)
-        zunker_de = calculator._zunker_diameter_cm(grain_data)
-        zamarin_de = calculator._zamarin_diameter_cm(grain_data)
-        geom_mean = calculator._calculate_geometric_mean(grain_data)
-
-        if kruger_de:
-            special_text += f"<b>Kruger dₑ:</b>        {kruger_de:.4f} cm  ({kruger_de*10:.4f} mm)\n"
-        if harmonic_de:
-            special_text += f"<b>Kozeny-Carman dₑ:</b> {harmonic_de:.4f} cm  ({harmonic_de*10:.4f} mm)\n"
-        if zunker_de:
-            special_text += f"<b>Zunker dₑ:</b>        {zunker_de:.4f} cm  ({zunker_de*10:.4f} mm)\n"
-        if zamarin_de:
-            special_text += f"<b>Zamarin dₑ:</b>       {zamarin_de:.4f} cm  ({zamarin_de*10:.4f} mm)\n"
-        if geom_mean:
-            special_text += f"\n<b>Geometric Mean:</b>   {geom_mean:.4f} mm\n"
-
-        if not any([kruger_de, harmonic_de, zunker_de, zamarin_de, geom_mean]):
-            special_text += "No special diameters calculated (insufficient data)\n"
-
-        special_html = f"<pre style='font-family: Consolas, monospace; font-size: 9pt;'>{special_text}</pre>"
-        self.special_diameters_text.setHtml(special_html)
+    # NOTE: Grain analysis panels (percentiles, gradation, special diameters, environmental params)
+    # have been moved to the Statistics Tab for better organization.
+    # See statistics_tab.py for these components.
 
     def create_statistics_tab(self):
         """Create the enhanced statistics tab"""
@@ -585,33 +294,33 @@ class DatasetTab(QWidget):
         self.statistics_tab = StatisticsTab(self.dataset, parent=self)
 
         return self.statistics_tab
-    
+
     def load_dataset_data(self):
         """Load and display the dataset data"""
         # Update plot
         self.plot_workspace.update_plot(
             self.dataset.particle_sizes,
             self.dataset.percent_passing,
-            self.dataset.sample_name
+            self.dataset.sample_name,
         )
 
         # Update statistics tab with data
-        if hasattr(self, 'statistics_tab'):
+        if hasattr(self, "statistics_tab"):
             self.statistics_tab.update_display()
-    
+
     # Note: update_grain_statistics() is now handled by StatisticsTab
     # This method is kept for backward compatibility but delegates to the new tab
     def update_grain_statistics(self):
         """Update the grain size statistics display"""
-        if hasattr(self, 'statistics_tab'):
+        if hasattr(self, "statistics_tab"):
             self.statistics_tab.update_display()
-    
+
     def set_parameters(self, temperature: float):
         """Update calculation parameters"""
         self.temperature = temperature
         self.dataset.temperature = temperature
         # Update statistics tab
-        if hasattr(self, 'statistics_tab'):
+        if hasattr(self, "statistics_tab"):
             self.statistics_tab.temperature = temperature
             self.statistics_tab.update_display()
 
@@ -622,45 +331,42 @@ class DatasetTab(QWidget):
         # Recalculate K-values if we have methods selected
         if self.current_results:
             self.calculate_k_values()
-    
+
     def calculate_k_values(self, selected_methods: Optional[List[str]] = None):
         """Calculate K values for this dataset"""
         if selected_methods is None:
             # Get all available methods from calculator
             selected_methods = self.k_calculator.get_all_method_names()
-        
+
         # Prepare grain data
         grain_data = {}
         for key, value in {
-            'D10': self.dataset.get_d10(),
-            'D20': self.dataset.get_d20(),
-            'D30': self.dataset.get_d30(),
-            'D50': self.dataset.get_d50(),
-            'D60': self.dataset.get_d60()
+            "D10": self.dataset.get_d10(),
+            "D20": self.dataset.get_d20(),
+            "D30": self.dataset.get_d30(),
+            "D50": self.dataset.get_d50(),
+            "D60": self.dataset.get_d60(),
         }.items():
             if value is not None:
                 grain_data[key] = value
 
         # Provide full grain size distribution for methods that need fraction data
-        grain_data['particle_sizes'] = list(self.dataset.particle_sizes)
-        grain_data['percent_passing'] = list(self.dataset.percent_passing)
+        grain_data["particle_sizes"] = list(self.dataset.particle_sizes)
+        grain_data["percent_passing"] = list(self.dataset.percent_passing)
 
         # Calculate K values
         self.current_results = self.k_calculator.calculate_all_methods(
             grain_data,
             temperature=self.temperature,
             porosity=self.porosity,
-            selected_methods=selected_methods
+            selected_methods=selected_methods,
         )
-        
+
         # Update results table
         self.update_results_table()
 
-        # Update calculated values panel
-        self.update_calculated_values_panel()
-
-        # Update statistics tab with K-results
-        if hasattr(self, 'statistics_tab'):
+        # Update statistics tab with K-results (now includes grain analysis panels)
+        if hasattr(self, "statistics_tab"):
             self.statistics_tab.set_k_results(self.current_results)
 
         # Update plot with K results
@@ -673,10 +379,10 @@ class DatasetTab(QWidget):
                 if result.status != CalculationStatus.OK or not result.conditions_met:
                     flagged_methods.add(result.method_name)
             self.plot_workspace.add_k_results(k_dict, flagged_methods)
-        
+
         # Emit signal
         self.calculation_complete.emit(self.dataset.sample_name, self.current_results)
-    
+
     def update_results_table(self):
         """Update the results table with calculation results"""
         # Temporarily disable sorting while populating
@@ -699,31 +405,51 @@ class DatasetTab(QWidget):
 
                 # K (cm/s) column - right aligned with numeric sorting
                 cm_s_item = QTableWidgetItem(f"{k_cm_s:.3e}")
-                cm_s_item.setTextAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
-                cm_s_item.setData(Qt.ItemDataRole.UserRole, k_cm_s)  # Store actual number for sorting
+                cm_s_item.setTextAlignment(
+                    Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter
+                )
+                cm_s_item.setData(
+                    Qt.ItemDataRole.UserRole, k_cm_s
+                )  # Store actual number for sorting
                 self.results_table.setItem(row, 1, cm_s_item)
 
                 # K (m/s) column - right aligned with numeric sorting
                 m_s_item = QTableWidgetItem(f"{k_m_s:.2e}")
-                m_s_item.setTextAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
-                m_s_item.setData(Qt.ItemDataRole.UserRole, k_m_s)  # Store actual number for sorting
+                m_s_item.setTextAlignment(
+                    Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter
+                )
+                m_s_item.setData(
+                    Qt.ItemDataRole.UserRole, k_m_s
+                )  # Store actual number for sorting
                 self.results_table.setItem(row, 2, m_s_item)
 
                 # K (m/d) column - right aligned with numeric sorting
                 m_d_item = QTableWidgetItem(f"{k_m_d:.1f}")
-                m_d_item.setTextAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
-                m_d_item.setData(Qt.ItemDataRole.UserRole, k_m_d)  # Store actual number for sorting
+                m_d_item.setTextAlignment(
+                    Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter
+                )
+                m_d_item.setData(
+                    Qt.ItemDataRole.UserRole, k_m_d
+                )  # Store actual number for sorting
                 self.results_table.setItem(row, 3, m_d_item)
             else:
                 # N/A for all unit columns
                 for col in [1, 2, 3]:
                     na_item = QTableWidgetItem("N/A")
-                    na_item.setTextAlignment(Qt.AlignmentFlag.AlignCenter | Qt.AlignmentFlag.AlignVCenter)
-                    na_item.setData(Qt.ItemDataRole.UserRole, -1)  # Sort N/A values to bottom
+                    na_item.setTextAlignment(
+                        Qt.AlignmentFlag.AlignCenter | Qt.AlignmentFlag.AlignVCenter
+                    )
+                    na_item.setData(
+                        Qt.ItemDataRole.UserRole, -1
+                    )  # Sort N/A values to bottom
                     self.results_table.setItem(row, col, na_item)
 
             # Status with color coding and icons (column 4 - Formula column removed)
-            status = result.status.value if hasattr(result.status, 'value') else str(result.status)
+            status = (
+                result.status.value
+                if hasattr(result.status, "value")
+                else str(result.status)
+            )
 
             # Add icon based on status
             if "OK" in status:
@@ -747,7 +473,9 @@ class DatasetTab(QWidget):
             status_item = QTableWidgetItem(status_text)
             status_item.setBackground(status_color)
             status_item.setForeground(text_color)
-            status_item.setTextAlignment(Qt.AlignmentFlag.AlignCenter | Qt.AlignmentFlag.AlignVCenter)
+            status_item.setTextAlignment(
+                Qt.AlignmentFlag.AlignCenter | Qt.AlignmentFlag.AlignVCenter
+            )
 
             if result.status_message:
                 status_item.setToolTip(result.status_message)
@@ -771,12 +499,28 @@ class DatasetTab(QWidget):
 
         # Count results by status
         total = len(self.current_results)
-        ok_count = sum(1 for r in self.current_results if "OK" in (r.status.value if hasattr(r.status, 'value') else str(r.status)))
-        warning_count = sum(1 for r in self.current_results if "Warning" in (r.status.value if hasattr(r.status, 'value') else str(r.status)))
-        error_count = sum(1 for r in self.current_results if "Error" in (r.status.value if hasattr(r.status, 'value') else str(r.status)))
+        ok_count = sum(
+            1
+            for r in self.current_results
+            if "OK" in (r.status.value if hasattr(r.status, "value") else str(r.status))
+        )
+        warning_count = sum(
+            1
+            for r in self.current_results
+            if "Warning"
+            in (r.status.value if hasattr(r.status, "value") else str(r.status))
+        )
+        error_count = sum(
+            1
+            for r in self.current_results
+            if "Error"
+            in (r.status.value if hasattr(r.status, "value") else str(r.status))
+        )
 
         # Get valid K values for statistics
-        valid_results = [r for r in self.current_results if r.k_value is not None and r.k_value > 0]
+        valid_results = [
+            r for r in self.current_results if r.k_value is not None and r.k_value > 0
+        ]
 
         # Update labels
         self.summary_total_label.setText(f"{total} methods calculated")
@@ -841,18 +585,14 @@ class DatasetTab(QWidget):
         # Update details panel
         self.details_browser.setHtml(html)
 
-        # Auto-expand details panel
-        if not self.details_group.isChecked():
-            self.details_group.setChecked(True)
-
     def get_method_specific_values(self, method_name: str) -> dict:
         """Get method-specific calculated values for display"""
         from k_calculations import KCalculator
 
         calculator = KCalculator()
         grain_data = {
-            'particle_sizes': list(self.dataset.particle_sizes),
-            'percent_passing': list(self.dataset.percent_passing)
+            "particle_sizes": list(self.dataset.particle_sizes),
+            "percent_passing": list(self.dataset.percent_passing),
         }
 
         values = {}
@@ -861,22 +601,30 @@ class DatasetTab(QWidget):
         if method_name == "Kruger":
             de_cm = calculator._kruger_diameter_cm(grain_data)
             if de_cm:
-                values["Kruger Effective Diameter (dₑ)"] = f"{de_cm:.4f} cm ({de_cm*10:.4f} mm)"
+                values["Kruger Effective Diameter (dₑ)"] = (
+                    f"{de_cm:.4f} cm ({de_cm * 10:.4f} mm)"
+                )
 
         elif method_name == "Kozeny-Carman":
             de_cm = calculator._harmonic_mean_diameter_cm(grain_data)
             if de_cm:
-                values["Harmonic Mean Diameter (dₑ)"] = f"{de_cm:.4f} cm ({de_cm*10:.4f} mm)"
+                values["Harmonic Mean Diameter (dₑ)"] = (
+                    f"{de_cm:.4f} cm ({de_cm * 10:.4f} mm)"
+                )
 
         elif method_name == "Zunker":
             de_cm = calculator._zunker_diameter_cm(grain_data)
             if de_cm:
-                values["Zunker Effective Diameter (dₑ)"] = f"{de_cm:.4f} cm ({de_cm*10:.4f} mm)"
+                values["Zunker Effective Diameter (dₑ)"] = (
+                    f"{de_cm:.4f} cm ({de_cm * 10:.4f} mm)"
+                )
 
         elif method_name == "Zamarin":
             de_cm = calculator._zamarin_diameter_cm(grain_data)
             if de_cm:
-                values["Zamarin Effective Diameter (dₑ)"] = f"{de_cm:.4f} cm ({de_cm*10:.4f} mm)"
+                values["Zamarin Effective Diameter (dₑ)"] = (
+                    f"{de_cm:.4f} cm ({de_cm * 10:.4f} mm)"
+                )
 
         elif method_name == "Krumbein-Monk":
             d_geom = calculator._calculate_geometric_mean(grain_data)
@@ -887,6 +635,7 @@ class DatasetTab(QWidget):
             d84 = calculator._interpolate_percentile(grain_data, 84)
             if d16 and d84 and d16 > 0 and d84 > 0:
                 import math
+
                 sigma_phi = math.sqrt(d84 / d16)
                 values["Sorting Coefficient (σφ)"] = f"{sigma_phi:.4f}"
 
@@ -947,7 +696,11 @@ class DatasetTab(QWidget):
     def generate_method_details_html(self, result) -> str:
         """Generate detailed HTML for a calculation result with improved formatting"""
         # Status color
-        status = result.status.value if hasattr(result.status, 'value') else str(result.status)
+        status = (
+            result.status.value
+            if hasattr(result.status, "value")
+            else str(result.status)
+        )
         if "OK" in status:
             status_color = "#006400"
             status_bg = "#d4edda"
@@ -1122,7 +875,7 @@ class DatasetTab(QWidget):
 
         # Render parameters in 4-column table (2 label-value pairs per row)
         for i in range(0, len(params), 2):
-            html += '<tr>'
+            html += "<tr>"
 
             # First parameter
             label1, value1, warn1 = params[i]
@@ -1133,15 +886,17 @@ class DatasetTab(QWidget):
             # Second parameter (if exists)
             if i + 1 < len(params):
                 label2, value2, warn2 = params[i + 1]
-                value_class2 = "param-value param-value-warn" if warn2 else "param-value"
+                value_class2 = (
+                    "param-value param-value-warn" if warn2 else "param-value"
+                )
                 html += f'<td class="param-label">{label2}:</td>'
                 html += f'<td class="{value_class2}">{value2}</td>'
             else:
-                html += '<td></td><td></td>'
+                html += "<td></td><td></td>"
 
-            html += '</tr>'
+            html += "</tr>"
 
-        html += '</table>'
+        html += "</table>"
 
         # Method-Specific Values section
         method_values = self.get_method_specific_values(result.method_name)
@@ -1152,7 +907,7 @@ class DatasetTab(QWidget):
             # Convert dict to list of tuples for 2-column layout
             values_list = list(method_values.items())
             for i in range(0, len(values_list), 2):
-                html += '<tr>'
+                html += "<tr>"
 
                 # First value
                 label1, value1 = values_list[i]
@@ -1165,15 +920,21 @@ class DatasetTab(QWidget):
                     html += f'<td class="param-label">{label2}:</td>'
                     html += f'<td class="param-value" style="color: #0066cc; font-weight: 600;">{value2}</td>'
                 else:
-                    html += '<td></td><td></td>'
+                    html += "<td></td><td></td>"
 
-                html += '</tr>'
+                html += "</tr>"
 
-            html += '</table>'
+            html += "</table>"
 
         # Applicability check
-        conditions_met = result.conditions_met if hasattr(result, 'conditions_met') else True
-        check_symbol = '<span class="check-ok">✓ Conditions Met</span>' if conditions_met else '<span class="check-fail">✗ Conditions NOT Met</span>'
+        conditions_met = (
+            result.conditions_met if hasattr(result, "conditions_met") else True
+        )
+        check_symbol = (
+            '<span class="check-ok">✓ Conditions Met</span>'
+            if conditions_met
+            else '<span class="check-fail">✗ Conditions NOT Met</span>'
+        )
 
         html += f"""
         <div class="section-title" style="margin-top: 10px;">Applicability</div>
@@ -1187,23 +948,26 @@ class DatasetTab(QWidget):
     # This method is kept for backward compatibility but delegates to the new tab
     def update_k_statistics(self):
         """Update K-value statistics"""
-        if hasattr(self, 'statistics_tab'):
+        if hasattr(self, "statistics_tab"):
             self.statistics_tab.set_k_results(self.current_results)
-    
+
     def export_results(self):
         """Export results to file"""
         # TODO: Implement export functionality
-        QMessageBox.information(self, "Export", 
-                              f"Export functionality for {self.dataset.sample_name} will be implemented")
-    
+        QMessageBox.information(
+            self,
+            "Export",
+            f"Export functionality for {self.dataset.sample_name} will be implemented",
+        )
+
     def get_dataset_name(self) -> str:
         """Get the dataset name"""
         return self.dataset.sample_name
-    
+
     def get_dataset(self) -> GrainSizeData:
         """Get the dataset object"""
         return self.dataset
-    
+
     def get_results(self) -> List[KCalculationResult]:
         """Get the current K-calculation results"""
         return self.current_results

@@ -9,9 +9,20 @@ Phase 1: Layout and visual structure
 """
 
 from PyQt6.QtWidgets import (
-    QWidget, QVBoxLayout, QHBoxLayout, QLabel, QFrame, QGroupBox,
-    QPushButton, QTableWidget, QTableWidgetItem, QTextEdit, QLineEdit,
-    QSplitter, QHeaderView, QMessageBox
+    QWidget,
+    QVBoxLayout,
+    QHBoxLayout,
+    QLabel,
+    QFrame,
+    QGroupBox,
+    QPushButton,
+    QTableWidget,
+    QTableWidgetItem,
+    QTextEdit,
+    QLineEdit,
+    QSplitter,
+    QHeaderView,
+    QMessageBox,
 )
 from PyQt6.QtCore import Qt, pyqtSignal
 from PyQt6.QtGui import QColor, QFont
@@ -61,8 +72,14 @@ class CompactInfoBar(QFrame):
         layout.addWidget(self.info_label)
         layout.addStretch()
 
-    def update_info(self, sample_name: str, d50: float = None, cu: float = None,
-                   mean_k: float = None, soil_type: str = "N/A"):
+    def update_info(
+        self,
+        sample_name: str,
+        d50: float = None,
+        cu: float = None,
+        mean_k: float = None,
+        soil_type: str = "N/A",
+    ):
         """Update the info bar with current statistics"""
         parts = []
 
@@ -209,7 +226,9 @@ class PercentileTableWidget(QGroupBox):
 
             # Size column
             size_item = QTableWidgetItem(f"{size:.3f}")
-            size_item.setTextAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
+            size_item.setTextAlignment(
+                Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter
+            )
             self.table.setItem(row, 1, size_item)
 
             # Visual bar column
@@ -372,7 +391,9 @@ class KStatisticsWidget(QGroupBox):
         layout.addWidget(self.agreement_text)
 
         # Permeability classification
-        self.classification_label = QLabel("Permeability Classification: Not calculated")
+        self.classification_label = QLabel(
+            "Permeability Classification: Not calculated"
+        )
         self.classification_label.setStyleSheet("""
             font-size: 10pt;
             font-weight: bold;
@@ -508,12 +529,16 @@ class StatisticsTab(QWidget):
 
         # Get temperature and porosity from dataset
         self.temperature = dataset.temperature
-        self.porosity = dataset.current_porosity if hasattr(dataset, 'current_porosity') else dataset.porosity
+        self.porosity = (
+            dataset.current_porosity
+            if hasattr(dataset, "current_porosity")
+            else dataset.porosity
+        )
 
         self.init_ui()
 
     def init_ui(self):
-        """Initialize the statistics tab UI"""
+        """Initialize the statistics tab UI with comprehensive grain analysis panels"""
         layout = QVBoxLayout(self)
         layout.setContentsMargins(8, 8, 8, 8)
         layout.setSpacing(8)
@@ -522,36 +547,19 @@ class StatisticsTab(QWidget):
         info_bar = self.create_summary_bar()
         layout.addWidget(info_bar)
 
-        # 2. MAIN CONTENT (Two columns with splitter)
-        main_splitter = QSplitter(Qt.Orientation.Horizontal)
+        # 2. GRAIN SIZE ANALYSIS SECTION (2x2 grid)
+        grain_analysis_section = self.create_grain_analysis_section()
+        layout.addWidget(grain_analysis_section)
 
-        # Left panel: Grain size distribution + Gradation + Porosity
-        left_panel = self.create_left_panel()
+        # 3. SPECIAL DIAMETERS & ENVIRONMENTAL PARAMETERS (side-by-side)
+        special_env_section = self.create_special_env_section()
+        layout.addWidget(special_env_section)
 
-        # Right panel: K-statistics (larger)
-        right_panel = self.create_right_panel()
+        # 4. K-STATISTICS & CLASSIFICATION (side-by-side)
+        k_stats_section = self.create_k_stats_section()
+        layout.addWidget(k_stats_section)
 
-        main_splitter.addWidget(left_panel)
-        main_splitter.addWidget(right_panel)
-        main_splitter.setStretchFactor(0, 35)  # 35% width
-        main_splitter.setStretchFactor(1, 65)  # 65% width
-
-        layout.addWidget(main_splitter, 1)  # stretch factor = 1
-
-        # 3. BOTTOM ROW (Quality + Classification)
-        bottom_splitter = QSplitter(Qt.Orientation.Horizontal)
-
-        self.quality_widget = DataQualityWidget()
-        self.classification_widget = SoilClassificationWidget()
-
-        bottom_splitter.addWidget(self.quality_widget)
-        bottom_splitter.addWidget(self.classification_widget)
-        bottom_splitter.setStretchFactor(0, 40)
-        bottom_splitter.setStretchFactor(1, 60)
-
-        layout.addWidget(bottom_splitter)
-
-        # 4. EXPORT BUTTONS
+        # 5. EXPORT BUTTONS
         button_layout = self.create_export_buttons()
         layout.addLayout(button_layout)
 
@@ -562,6 +570,245 @@ class StatisticsTab(QWidget):
         """Create compact single-line info bar"""
         self.info_bar = CompactInfoBar()
         return self.info_bar
+
+    def create_grain_analysis_section(self) -> QWidget:
+        """Create 2x2 grid with grain size percentiles and gradation parameters"""
+        widget = QWidget()
+        main_layout = QHBoxLayout(widget)
+        main_layout.setSpacing(8)
+
+        groupbox_style = """
+            QGroupBox {
+                font-weight: bold;
+                font-size: 10pt;
+                border: 2px solid #d4c4a8;
+                border-radius: 5px;
+                margin-top: 8px;
+                padding-top: 12px;
+            }
+            QGroupBox::title {
+                subcontrol-origin: margin;
+                subcontrol-position: top left;
+                padding: 2px 8px;
+                color: #2c5530;
+            }
+        """
+
+        textedit_style = """
+            QTextEdit {
+                background-color: #fafafa;
+                border: 1px solid #d0d0d0;
+                padding: 8px;
+                font-family: 'Consolas', 'Courier New', monospace;
+                font-size: 9pt;
+            }
+        """
+
+        # Left side: Grain Size Percentiles + Percentile Usage Reference
+        left_side = QWidget()
+        left_layout = QHBoxLayout(left_side)
+        left_layout.setSpacing(8)
+
+        # Percentiles values
+        percentiles_group = QGroupBox("Grain Size Percentiles")
+        percentiles_group.setStyleSheet(groupbox_style)
+        percentiles_layout = QVBoxLayout(percentiles_group)
+
+        self.percentiles_text = QTextEdit()
+        self.percentiles_text.setReadOnly(True)
+        self.percentiles_text.setMinimumHeight(200)
+        self.percentiles_text.setStyleSheet(textedit_style)
+        self.percentiles_text.setPlainText(
+            "Calculate K-values to see grain size percentiles"
+        )
+        percentiles_layout.addWidget(self.percentiles_text)
+
+        left_layout.addWidget(percentiles_group, 50)
+
+        # Percentile usage reference
+        usage_group = QGroupBox("Percentile Usage by Methods")
+        usage_group.setStyleSheet(groupbox_style)
+        usage_layout = QVBoxLayout(usage_group)
+
+        self.percentile_usage_text = QTextEdit()
+        self.percentile_usage_text.setReadOnly(True)
+        self.percentile_usage_text.setMinimumHeight(200)
+        self.percentile_usage_text.setStyleSheet(textedit_style)
+        usage_ref = """<pre style='font-family: Consolas, monospace; font-size: 9pt;'>
+<b>Percentile Usage by Methods:</b>
+
+<b>D₅:</b>   Barr
+<b>D₁₀:</b>  Hazen, Hazen_1892, Slichter,
+       Terzaghi, Beyer, Kozeny-Carman,
+       Zunker, Zamarin, Chapuis,
+       Alyamani-Sen
+
+<b>D₁₆:</b>  Sorting Coefficient (σ)
+<b>D₁₇:</b>  Sauerbrei
+<b>D₂₀:</b>  USBR, Beyer (fallback)
+<b>D₃₀:</b>  Cu, Cc calculations
+<b>D₅₀:</b>  Kruger, Alyamani-Sen,
+       Shepherd
+
+<b>D₆₀:</b>  Beyer, Barr, Cu calculation
+<b>D₈₄:</b>  Sorting Coefficient (σ),
+       Krumbein-Monk
+<b>D₉₅:</b>  Krumbein-Monk
+</pre>"""
+        self.percentile_usage_text.setHtml(usage_ref)
+        usage_layout.addWidget(self.percentile_usage_text)
+
+        left_layout.addWidget(usage_group, 50)
+
+        main_layout.addWidget(left_side, 50)
+
+        # Right side: Gradation Parameters + Classification Criteria
+        right_side = QWidget()
+        right_layout = QHBoxLayout(right_side)
+        right_layout.setSpacing(8)
+
+        # Gradation parameters
+        gradation_group = QGroupBox("Gradation Parameters")
+        gradation_group.setStyleSheet(groupbox_style)
+        gradation_layout = QVBoxLayout(gradation_group)
+
+        self.gradation_text = QTextEdit()
+        self.gradation_text.setReadOnly(True)
+        self.gradation_text.setMinimumHeight(200)
+        self.gradation_text.setStyleSheet(textedit_style)
+        self.gradation_text.setPlainText(
+            "Calculate K-values to see gradation parameters"
+        )
+        gradation_layout.addWidget(self.gradation_text)
+
+        right_layout.addWidget(gradation_group, 50)
+
+        # Classification criteria
+        criteria_group = QGroupBox("Classification Criteria")
+        criteria_group.setStyleSheet(groupbox_style)
+        criteria_layout = QVBoxLayout(criteria_group)
+
+        self.classification_criteria_text = QTextEdit()
+        self.classification_criteria_text.setReadOnly(True)
+        self.classification_criteria_text.setMinimumHeight(200)
+        self.classification_criteria_text.setStyleSheet(textedit_style)
+        criteria_ref = """<pre style='font-family: Consolas, monospace; font-size: 9pt;'>
+<b>Classification Criteria:</b>
+
+<b>Uniformity Coefficient (Cu):</b>
+  Cu &lt; 4      → Uniform
+  4 ≤ Cu &lt; 6  → Moderately graded
+  Cu ≥ 6      → Well-graded
+
+<b>Coefficient of Curvature (Cc):</b>
+  1 ≤ Cc ≤ 3  → Well-graded range
+  Outside     → Gap/poorly graded
+
+<b>Sorting Coefficient (σ):</b>
+  σ &lt; 2       → Well sorted
+  2 ≤ σ &lt; 4   → Moderately sorted
+  σ ≥ 4       → Poorly sorted
+</pre>"""
+        self.classification_criteria_text.setHtml(criteria_ref)
+        criteria_layout.addWidget(self.classification_criteria_text)
+
+        right_layout.addWidget(criteria_group, 50)
+
+        main_layout.addWidget(right_side, 50)
+
+        return widget
+
+    def create_special_env_section(self) -> QWidget:
+        """Create section with special method diameters and environmental parameters"""
+        widget = QWidget()
+        layout = QHBoxLayout(widget)
+        layout.setSpacing(8)
+
+        groupbox_style = """
+            QGroupBox {
+                font-weight: bold;
+                font-size: 10pt;
+                border: 2px solid #d4c4a8;
+                border-radius: 5px;
+                margin-top: 8px;
+                padding-top: 12px;
+            }
+            QGroupBox::title {
+                subcontrol-origin: margin;
+                subcontrol-position: top left;
+                padding: 2px 8px;
+                color: #2c5530;
+            }
+        """
+
+        textedit_style = """
+            QTextEdit {
+                background-color: #fafafa;
+                border: 1px solid #d0d0d0;
+                padding: 8px;
+                font-family: 'Consolas', 'Courier New', monospace;
+                font-size: 9pt;
+            }
+        """
+
+        # Special Method Diameters
+        special_group = QGroupBox("Special Method Diameters")
+        special_group.setStyleSheet(groupbox_style)
+        special_layout = QVBoxLayout(special_group)
+
+        self.special_diameters_text = QTextEdit()
+        self.special_diameters_text.setReadOnly(True)
+        self.special_diameters_text.setMinimumHeight(120)
+        self.special_diameters_text.setStyleSheet(textedit_style)
+        self.special_diameters_text.setPlainText(
+            "Calculate K-values to see special method diameters"
+        )
+        special_layout.addWidget(self.special_diameters_text)
+
+        layout.addWidget(special_group, 60)
+
+        # Environmental Parameters (READ-ONLY)
+        env_group = QGroupBox("Environmental Parameters")
+        env_group.setStyleSheet(groupbox_style)
+        env_layout = QVBoxLayout(env_group)
+
+        self.env_text = QTextEdit()
+        self.env_text.setReadOnly(True)
+        self.env_text.setMinimumHeight(120)
+        self.env_text.setStyleSheet(textedit_style)
+        env_layout.addWidget(self.env_text)
+
+        # Populate environmental parameters immediately
+        self.update_environmental_parameters()
+
+        layout.addWidget(env_group, 40)
+
+        return widget
+
+    def create_k_stats_section(self) -> QWidget:
+        """Create K-statistics and classification section"""
+        widget = QWidget()
+        layout = QHBoxLayout(widget)
+        layout.setSpacing(8)
+
+        # K-Statistics Widget
+        self.k_stats_widget = KStatisticsWidget()
+        layout.addWidget(self.k_stats_widget, 60)
+
+        # Right side: Quality + Classification stacked
+        right_side = QWidget()
+        right_layout = QVBoxLayout(right_side)
+        right_layout.setSpacing(8)
+
+        self.quality_widget = DataQualityWidget()
+        self.classification_widget = SoilClassificationWidget()
+
+        right_layout.addWidget(self.quality_widget)
+        right_layout.addWidget(self.classification_widget)
+
+        layout.addWidget(right_side, 40)
+
+        return widget
 
     def create_left_panel(self) -> QWidget:
         """Create left panel with grain size statistics"""
@@ -578,95 +825,8 @@ class StatisticsTab(QWidget):
         self.gradation_widget = GradationAnalysisWidget()
         layout.addWidget(self.gradation_widget)
 
-        # ===== IMPORTANT: PRESERVE EXISTING POROSITY SETTINGS =====
-        # Porosity control section - MUST BE KEPT
-        porosity_group = QGroupBox("Porosity Settings")
-        porosity_group.setStyleSheet("""
-            QGroupBox {
-                font-weight: bold;
-                font-size: 11pt;
-                border: 2px solid #d4c4a8;
-                border-radius: 5px;
-                margin-top: 8px;
-                padding-top: 12px;
-            }
-            QGroupBox::title {
-                subcontrol-origin: margin;
-                subcontrol-position: top left;
-                padding: 2px 8px;
-                color: #2c5530;
-            }
-        """)
-        porosity_layout = QVBoxLayout(porosity_group)
-
-        # Porosity display and edit controls
-        porosity_controls_layout = QHBoxLayout()
-
-        # Show calculated vs current porosity
-        calculated_porosity = self.dataset.calculated_porosity if hasattr(self.dataset, 'calculated_porosity') else None
-        current_text = f"{self.porosity:.4f}" if self.porosity is not None else "N/A"
-
-        if calculated_porosity is not None:
-            porosity_info = QLabel(f"Calculated: {calculated_porosity:.4f} | Current: {current_text}")
-        else:
-            porosity_info = QLabel(f"Current: {current_text} [Manual]")
-        porosity_info.setStyleSheet("font-size: 9pt; color: #333;")
-
-        # Add edit capability
-        self.porosity_edit = QLineEdit()
-        self.porosity_edit.setText(current_text)
-        self.porosity_edit.setMaximumWidth(100)
-        self.porosity_edit.setStyleSheet("""
-            QLineEdit {
-                padding: 4px;
-                border: 1px solid #c0c0c0;
-                border-radius: 3px;
-                font-size: 9pt;
-            }
-        """)
-
-        update_porosity_btn = QPushButton("Update")
-        update_porosity_btn.clicked.connect(self._update_porosity)
-        update_porosity_btn.setStyleSheet("""
-            QPushButton {
-                background-color: #6b8e23;
-                color: white;
-                padding: 4px 12px;
-                border-radius: 3px;
-                font-size: 9pt;
-            }
-            QPushButton:hover {
-                background-color: #7fa02d;
-            }
-        """)
-
-        reset_porosity_btn = QPushButton("Reset to Calculated")
-        reset_porosity_btn.clicked.connect(self._reset_porosity)
-        reset_porosity_btn.setStyleSheet("""
-            QPushButton {
-                background-color: #d2b48c;
-                padding: 4px 12px;
-                border-radius: 3px;
-                font-size: 9pt;
-            }
-            QPushButton:hover {
-                background-color: #ddbf94;
-            }
-        """)
-
-        if calculated_porosity is None:
-            reset_porosity_btn.setEnabled(False)
-
-        porosity_controls_layout.addWidget(porosity_info)
-        porosity_controls_layout.addWidget(QLabel("Edit:"))
-        porosity_controls_layout.addWidget(self.porosity_edit)
-        porosity_controls_layout.addWidget(update_porosity_btn)
-        porosity_controls_layout.addWidget(reset_porosity_btn)
-        porosity_controls_layout.addStretch()
-
-        porosity_layout.addLayout(porosity_controls_layout)
-        layout.addWidget(porosity_group)
-        # ===== END POROSITY SETTINGS =====
+        # NOTE: Porosity Settings have been moved to the Results tab
+        # for better UX (edit porosity next to K-value calculations)
 
         layout.addStretch()
 
@@ -743,11 +903,8 @@ class StatisticsTab(QWidget):
         # Update info bar
         self.update_summary_bar()
 
-        # Update percentile table
-        self.update_percentile_table()
-
-        # Update gradation
-        self.update_gradation()
+        # Update comprehensive grain analysis panels
+        self.update_grain_analysis_panels()
 
         # Update K-statistics if available
         if self.k_results:
@@ -783,38 +940,11 @@ class StatisticsTab(QWidget):
             d50=d50,
             cu=cu,
             mean_k=mean_k,
-            soil_type=soil_type
+            soil_type=soil_type,
         )
 
-    def update_percentile_table(self):
-        """Update percentile table"""
-        percentiles = {}
-        for p in [5, 10, 20, 25, 30, 40, 50, 60, 70, 75, 80, 85, 90, 95]:
-            value = self.dataset._interpolate_grain_size(p)
-            if value:
-                percentiles[p] = value
-
-        self.percentile_table.set_percentile_data(percentiles)
-
-    def update_gradation(self):
-        """Update gradation display"""
-        d10 = self.dataset.get_d10()
-        d30 = self.dataset.get_d30()
-        d60 = self.dataset.get_d60()
-
-        if d10 and d60 and d10 > 0:
-            cu = d60 / d10
-
-            if cu < 4:
-                cu_class = "Uniform (Cu < 4)"
-            elif cu < 6:
-                cu_class = "Moderately graded (4 ≤ Cu < 6)"
-            else:
-                cu_class = "Well-graded (Cu ≥ 6)"
-
-            if d30:
-                cc = (d30 * d30) / (d10 * d60)
-                self.gradation_widget.set_gradation_data(cu, cc, cu_class)
+    # NOTE: update_percentile_table() and update_gradation() have been replaced
+    # by update_grain_analysis_panels() which handles all grain analysis updates
 
     def update_k_statistics(self):
         """Update K-statistics display"""
@@ -847,8 +977,8 @@ class StatisticsTab(QWidget):
 
             table.setItem(row, 0, QTableWidgetItem(metric_name))
             table.setItem(row, 1, QTableWidgetItem(f"{value:.2e}"))
-            table.setItem(row, 2, QTableWidgetItem(f"{value*100:.3e}"))
-            table.setItem(row, 3, QTableWidgetItem(f"{value*86400:.1f}"))
+            table.setItem(row, 2, QTableWidgetItem(f"{value * 100:.3e}"))
+            table.setItem(row, 3, QTableWidgetItem(f"{value * 86400:.1f}"))
 
         # Update classification
         mean_k = np.mean(k_values)
@@ -863,7 +993,9 @@ class StatisticsTab(QWidget):
         else:
             classification = "Very Low Permeability (Clay)"
 
-        self.k_stats_widget.classification_label.setText(f"Permeability: {classification}")
+        self.k_stats_widget.classification_label.setText(
+            f"Permeability: {classification}"
+        )
 
     def update_soil_classification(self):
         """Update soil classification display"""
@@ -884,61 +1016,191 @@ Classification based on:
     def set_k_results(self, results: List[KCalculationResult]):
         """Set K-calculation results and update display"""
         self.k_results = results
+        self.update_grain_analysis_panels()  # Update comprehensive grain analysis panels
         self.update_display()
 
-    # ===== POROSITY MANAGEMENT (PRESERVE EXISTING FUNCTIONALITY) =====
+    # NOTE: Porosity management methods have been moved to DatasetTab (Results tab)
+    # where they can directly trigger K-value recalculation
 
-    def _update_porosity(self):
-        """
-        Update porosity value when user edits it
-        IMPORTANT: This triggers K-value recalculation in parent DatasetTab
-        """
-        try:
-            new_porosity = float(self.porosity_edit.text())
-            if 0.1 <= new_porosity <= 0.8:
-                self.porosity = new_porosity
-                self.dataset.current_porosity = new_porosity
-                # Trigger recalculation in parent
-                if self.parent():
-                    self.parent().set_porosity(new_porosity)
-                QMessageBox.information(self, "Porosity Updated",
-                                      f"Porosity set to {new_porosity:.4f}\n"
-                                      "K-values will be recalculated.")
+    # ===== GRAIN ANALYSIS UPDATE METHODS =====
+
+    def update_environmental_parameters(self):
+        """Update environmental parameters display (READ-ONLY)"""
+        text = f"Temperature: {self.temperature}°C\n"
+        text += f"Porosity: {self.porosity:.4f}"
+        if (
+            hasattr(self.dataset, "calculated_porosity")
+            and self.dataset.calculated_porosity
+        ):
+            if abs(self.porosity - self.dataset.calculated_porosity) < 0.001:
+                text += " (calculated)"
             else:
-                QMessageBox.warning(self, "Invalid Porosity",
-                                  "Porosity must be between 0.1 and 0.8")
-        except ValueError:
-            QMessageBox.warning(self, "Invalid Input",
-                              "Please enter a valid number")
+                text += f" (modified from {self.dataset.calculated_porosity:.4f})"
+        text += "\n\nNote: Edit porosity in the Results tab"
+        self.env_text.setPlainText(text)
 
-    def _reset_porosity(self):
-        """Reset porosity to calculated value"""
-        calculated_porosity = self.dataset.calculated_porosity if hasattr(self.dataset, 'calculated_porosity') else None
+    def update_grain_analysis_panels(self):
+        """Update all grain analysis panels with calculated values"""
+        import math
+        from k_calculations import KCalculator
 
-        if calculated_porosity is not None:
-            self.porosity = calculated_porosity
-            self.dataset.current_porosity = calculated_porosity
-            self.porosity_edit.setText(f"{self.porosity:.4f}")
-            # Trigger recalculation in parent
-            if self.parent():
-                self.parent().set_porosity(self.porosity)
-            QMessageBox.information(self, "Porosity Reset",
-                                  f"Porosity reset to calculated value: {calculated_porosity:.4f}\n"
-                                  "K-values will be recalculated.")
+        calculator = KCalculator()
+
+        # Prepare grain_data dict for interpolation
+        grain_data = {
+            "particle_sizes": list(self.dataset.particle_sizes),
+            "percent_passing": list(self.dataset.percent_passing),
+        }
+
+        # Calculate all percentiles
+        percentiles = {}
+        standard_percentiles = [
+            5,
+            10,
+            15,
+            16,
+            17,
+            20,
+            25,
+            30,
+            40,
+            50,
+            60,
+            70,
+            75,
+            80,
+            84,
+            85,
+            90,
+            95,
+        ]
+        for p in standard_percentiles:
+            value = calculator._interpolate_percentile(grain_data, p)
+            if value:
+                percentiles[p] = value
+
+        # === UPDATE PERCENTILES DISPLAY ===
+        html_text = "<pre style='font-family: Consolas, monospace; font-size: 9pt;'>"
+        html_text += "<b>Grain Size Percentiles (Linear Interpolation):</b>\n"
+        html_text += "━" * 45 + "\n\n"
+
+        # Display in 3 columns
+        for i in range(0, len(standard_percentiles), 3):
+            row_percentiles = standard_percentiles[i : i + 3]
+            for p in row_percentiles:
+                if p in percentiles:
+                    # Bold for key percentiles used by multiple methods
+                    if p in [10, 20, 30, 50, 60]:
+                        html_text += f"<b>D{p:>2}: {percentiles[p]:>6.3f} mm</b>    "
+                    else:
+                        html_text += f"D{p:>2}: {percentiles[p]:>6.3f} mm    "
+            html_text += "\n"
+
+        html_text += "\n<b>Bold</b> = Critical values used by multiple methods"
+        html_text += "</pre>"
+        self.percentiles_text.setHtml(html_text)
+
+        # === UPDATE GRADATION PARAMETERS DISPLAY ===
+        d5 = percentiles.get(5)
+        d10 = percentiles.get(10)
+        d16 = percentiles.get(16)
+        d30 = percentiles.get(30)
+        d50 = percentiles.get(50)
+        d60 = percentiles.get(60)
+        d84 = percentiles.get(84)
+        d95 = percentiles.get(95)
+
+        gradation_text = "<b>Gradation Parameters:</b>\n"
+        gradation_text += "━" * 35 + "\n\n"
+
+        # Uniformity Coefficient
+        if d10 and d60:
+            cu = d60 / d10
+            gradation_text += f"<b>Uniformity Coefficient (Cu):</b> {cu:.2f}\n"
+            gradation_text += f"  └─ D60/D10 = {d60:.3f}/{d10:.3f}\n"
+            if cu < 4:
+                gradation_text += "  └─ <b>Uniform</b>\n"
+            elif cu < 6:
+                gradation_text += "  └─ <b>Moderately graded</b>\n"
+            else:
+                gradation_text += "  └─ <b>Well-graded</b>\n"
+
+        # Coefficient of Curvature
+        if d10 and d30 and d60:
+            cc = (d30 * d30) / (d10 * d60)
+            gradation_text += f"\n<b>Coefficient of Curvature (Cc):</b> {cc:.2f}\n"
+            gradation_text += f"  └─ D30²/(D10×D60)\n"
+            if 1 <= cc <= 3:
+                gradation_text += "  └─ <b>Well-graded range</b> ✓\n"
+            else:
+                gradation_text += "  └─ Outside typical range\n"
+
+        # Sorting Coefficient
+        if d16 and d84 and d16 > 0 and d84 > 0:
+            sigma = math.sqrt(d84 / d16)
+            gradation_text += f"\n<b>Sorting Coefficient (σ):</b> {sigma:.2f}\n"
+            gradation_text += f"  └─ √(D84/D16) = √({d84:.3f}/{d16:.3f})\n"
+            if sigma < 2:
+                gradation_text += "  └─ <b>Well sorted</b>\n"
+            elif sigma < 4:
+                gradation_text += "  └─ <b>Moderately sorted</b>\n"
+            else:
+                gradation_text += "  └─ <b>Poorly sorted</b>\n"
+
+        # Span Ratio
+        if d5 and d95:
+            span = d95 / d5
+            gradation_text += f"\n<b>Span Ratio:</b> {span:.1f}\n"
+            gradation_text += f"  └─ D95/D5 = {d95:.3f}/{d5:.3f}\n"
+
+        # Wrap in HTML pre tag
+        gradation_html = f"<pre style='font-family: Consolas, monospace; font-size: 9pt;'>{gradation_text}</pre>"
+        self.gradation_text.setHtml(gradation_html)
+
+        # === UPDATE SPECIAL METHOD DIAMETERS DISPLAY ===
+        special_text = "<b>Special Method Diameters:</b>\n"
+        special_text += "━" * 50 + "\n\n"
+
+        # Calculate special diameters
+        kruger_de = calculator._kruger_diameter_cm(grain_data)
+        harmonic_de = calculator._harmonic_mean_diameter_cm(grain_data)
+        zunker_de = calculator._zunker_diameter_cm(grain_data)
+        zamarin_de = calculator._zamarin_diameter_cm(grain_data)
+        geom_mean = calculator._calculate_geometric_mean(grain_data)
+
+        if kruger_de:
+            special_text += f"<b>Kruger dₑ:</b>        {kruger_de:.4f} cm  ({kruger_de * 10:.4f} mm)\n"
+        if harmonic_de:
+            special_text += f"<b>Kozeny-Carman dₑ:</b> {harmonic_de:.4f} cm  ({harmonic_de * 10:.4f} mm)\n"
+        if zunker_de:
+            special_text += f"<b>Zunker dₑ:</b>        {zunker_de:.4f} cm  ({zunker_de * 10:.4f} mm)\n"
+        if zamarin_de:
+            special_text += f"<b>Zamarin dₑ:</b>       {zamarin_de:.4f} cm  ({zamarin_de * 10:.4f} mm)\n"
+        if geom_mean:
+            special_text += f"\n<b>Geometric Mean:</b>   {geom_mean:.4f} mm\n"
+
+        if not any([kruger_de, harmonic_de, zunker_de, zamarin_de, geom_mean]):
+            special_text += "No special diameters calculated (insufficient data)\n"
+
+        special_html = f"<pre style='font-family: Consolas, monospace; font-size: 9pt;'>{special_text}</pre>"
+        self.special_diameters_text.setHtml(special_html)
 
     # ===== EXPORT METHODS (Placeholders for now) =====
 
     def export_to_excel(self):
         """Export statistics to formatted Excel file"""
-        QMessageBox.information(self, "Export to Excel",
-                              "Excel export will be implemented in Phase 5")
+        QMessageBox.information(
+            self, "Export to Excel", "Excel export will be implemented in Phase 5"
+        )
 
     def export_to_csv(self):
         """Export statistics to CSV"""
-        QMessageBox.information(self, "Export to CSV",
-                              "CSV export will be implemented in Phase 5")
+        QMessageBox.information(
+            self, "Export to CSV", "CSV export will be implemented in Phase 5"
+        )
 
     def copy_to_clipboard(self):
         """Copy formatted statistics to clipboard"""
-        QMessageBox.information(self, "Copy to Clipboard",
-                              "Clipboard copy will be implemented in Phase 5")
+        QMessageBox.information(
+            self, "Copy to Clipboard", "Clipboard copy will be implemented in Phase 5"
+        )
