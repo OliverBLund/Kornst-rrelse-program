@@ -168,6 +168,30 @@ class ReportingTab(QWidget):
 
         layout.addWidget(type_group)
 
+        # Report Template/Style selection (NEW)
+        template_group = QGroupBox("Report Template")
+        template_layout = QVBoxLayout(template_group)
+
+        self.template_combo = QComboBox()
+        self.template_combo.addItems([
+            "Standard - Balanced report with all sections",
+            "Executive - Summary focused, minimal details",
+            "Technical - Comprehensive with methodology",
+            "Appendix - Data tables and charts only"
+        ])
+        self.template_combo.setToolTip("Choose the report style that best fits your needs")
+        template_layout.addWidget(self.template_combo)
+
+        # Add template description label
+        self.template_desc_label = QLabel()
+        self.template_desc_label.setWordWrap(True)
+        self.template_desc_label.setStyleSheet("color: #666; font-size: 9px; padding: 5px;")
+        self.update_template_description()
+        self.template_combo.currentTextChanged.connect(self.update_template_description)
+        template_layout.addWidget(self.template_desc_label)
+
+        layout.addWidget(template_group)
+
         # Sample selection
         self.sample_group = QGroupBox("Sample Selection")
         sample_layout = QVBoxLayout(self.sample_group)
@@ -356,6 +380,21 @@ class ReportingTab(QWidget):
 
         self.generate_btn.setEnabled(True)
 
+    def update_template_description(self):
+        """Update the template description based on selection"""
+        template = self.template_combo.currentText()
+        descriptions = {
+            "Standard": "Includes executive summary, methodology, results with charts, and interpretation. Good for general reporting.",
+            "Executive": "Focused on key findings and visualizations. Perfect for presentations and quick reviews.",
+            "Technical": "Comprehensive report with detailed methodology, all data tables, and quality assessments. Best for technical documentation.",
+            "Appendix": "Minimal narrative, maximum data. Contains only charts, tables, and raw data. Ideal for supplementary materials."
+        }
+
+        # Extract template name (before dash)
+        template_name = template.split(" -")[0]
+        desc = descriptions.get(template_name, "")
+        self.template_desc_label.setText(desc)
+
     def on_report_type_changed(self, text: str):
         """Handle report type change"""
         # Show/hide sample selection based on report type
@@ -408,6 +447,10 @@ class ReportingTab(QWidget):
         dataset_tab = self.dataset_tabs[sample_index]
         dataset = dataset_tab.get_dataset()
 
+        # Get selected template
+        template_text = self.template_combo.currentText()
+        template = template_text.split(" -")[0].lower()  # Extract: "standard", "executive", "technical", "appendix"
+
         # Collect metadata
         metadata = {
             'project_name': self.project_name_edit.text(),
@@ -417,8 +460,9 @@ class ReportingTab(QWidget):
             'notes': self.notes_edit.toPlainText()
         }
 
-        # Collect section options
+        # Collect section options (only if not using template defaults)
         sections = {
+            'cover_page': template in ['executive', 'technical'],  # Auto cover for exec/tech
             'executive_summary': self.include_executive_summary_check.isChecked(),
             'methodology': self.include_methodology_check.isChecked(),
             'results': self.include_results_check.isChecked(),
@@ -435,7 +479,8 @@ class ReportingTab(QWidget):
             html = self.report_generator.generate_grain_size_report(
                 dataset,
                 metadata=metadata,
-                sections=sections
+                sections=sections,
+                report_template=template
             )
         elif "K-Values" in report_type:
             k_results = dataset_tab.get_results()
@@ -445,7 +490,8 @@ class ReportingTab(QWidget):
                 dataset_tab.temperature,
                 dataset_tab.porosity,
                 metadata=metadata,
-                sections=sections
+                sections=sections,
+                report_template=template
             )
         else:  # Combined
             k_results = dataset_tab.get_results()

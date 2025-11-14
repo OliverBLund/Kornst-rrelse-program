@@ -22,253 +22,532 @@ class ReportGenerator:
     """
 
     def __init__(self):
+        # Ultra-clean minimalistic styling - Professional engineering report format
         self.report_style = """
         <style>
+            /* ============================================
+               PROFESSIONAL REPORT STYLING - VERSION 3.0
+               Ultra-clean minimalistic design
+               Inspired by ASTM/ISO standard reports
+               ============================================ */
+
             * {
                 box-sizing: border-box;
+                margin: 0;
+                padding: 0;
+            }
+
+            @media print {
+                body {
+                    margin: 0;
+                    padding: 20mm;
+                }
+
+                .page-break {
+                    page-break-before: always;
+                }
+
+                .no-break {
+                    page-break-inside: avoid;
+                }
+
+                h1, h2 {
+                    page-break-after: avoid;
+                }
+
+                table {
+                    page-break-inside: avoid;
+                }
             }
 
             body {
-                font-family: 'Segoe UI', 'Helvetica Neue', Arial, sans-serif;
-                line-height: 1.7;
-                color: #2c3e50;
-                max-width: 900px;
-                margin: 0 auto;
-                padding: 40px 30px;
+                font-family: 'Calibri', 'Arial', sans-serif;
+                line-height: 1.5;
+                color: #000000;
                 background-color: #ffffff;
+                max-width: 800px;
+                margin: 0 auto;
+                padding: 40px 50px;
+                font-size: 11pt;
             }
 
-            /* Typography Hierarchy */
+            /* ==================== COVER PAGE ==================== */
+            .cover-page {
+                text-align: center;
+                padding: 80px 40px;
+                min-height: 600px;
+                display: flex;
+                flex-direction: column;
+                justify-content: center;
+                border-bottom: 3px solid #2c3e50;
+                margin-bottom: 40px;
+            }
+
+            .cover-title {
+                font-size: 42px;
+                font-weight: 300;
+                color: #2c3e50;
+                margin-bottom: 20px;
+                letter-spacing: -1px;
+                text-transform: uppercase;
+            }
+
+            .cover-subtitle {
+                font-size: 20px;
+                color: #7f8c8d;
+                font-weight: 300;
+                margin-bottom: 60px;
+            }
+
+            .cover-meta {
+                font-size: 14px;
+                color: #34495e;
+                line-height: 2;
+                margin-top: 40px;
+            }
+
+            /* ==================== TYPOGRAPHY ==================== */
             h1 {
-                color: #2c5530;
-                font-size: 32px;
-                font-weight: 700;
-                margin: 40px 0 25px 0;
-                padding-bottom: 15px;
-                border-bottom: 4px solid #6b8e23;
-                letter-spacing: -0.5px;
+                font-size: 20pt;
+                font-weight: bold;
+                color: #000000;
+                margin: 0 0 30px 0;
+                padding: 0;
+                border: none;
+                letter-spacing: 0;
+                text-transform: none;
             }
 
             h2 {
-                color: #5d4e37;
-                font-size: 24px;
-                font-weight: 600;
-                margin: 35px 0 20px 0;
-                padding: 12px 0 12px 15px;
-                border-left: 5px solid #8b7355;
-                background: linear-gradient(to right, #f5f5f0 0%, transparent 100%);
-            }
-
-            h3 {
-                color: #6b5b47;
-                font-size: 18px;
-                font-weight: 600;
-                margin: 25px 0 15px 0;
-                padding-bottom: 8px;
-                border-bottom: 2px solid #e0d8cd;
-            }
-
-            p {
-                margin: 12px 0;
-                line-height: 1.8;
-            }
-
-            /* Metadata Sections */
-            .metadata {
-                background: linear-gradient(135deg, #fafaf7 0%, #f5f5f0 100%);
-                border: 1px solid #d4c4a8;
-                border-radius: 8px;
-                padding: 20px 25px;
-                margin: 25px 0;
-                box-shadow: 0 2px 8px rgba(0,0,0,0.08);
-            }
-
-            .metadata p {
-                margin: 10px 0;
-                font-size: 14px;
-                line-height: 1.6;
-            }
-
-            .metadata strong {
-                color: #5d4e37;
-                font-weight: 600;
-                min-width: 140px;
-                display: inline-block;
-            }
-
-            /* Info Boxes */
-            .info-box {
-                background-color: #f8f9fa;
-                border-left: 5px solid #6b8e23;
-                padding: 20px 25px;
-                margin: 25px 0;
-                border-radius: 0 6px 6px 0;
-                box-shadow: 0 2px 6px rgba(0,0,0,0.06);
-            }
-
-            .info-box h3 {
-                margin-top: 0;
-                color: #2c5530;
+                font-size: 14pt;
+                font-weight: bold;
+                color: #000000;
+                margin: 30px 0 15px 0;
+                padding: 0;
                 border: none;
             }
 
-            .info-box p {
-                margin: 10px 0;
-                color: #34495e;
+            h3 {
+                font-size: 12pt;
+                font-weight: bold;
+                color: #000000;
+                margin: 20px 0 10px 0;
             }
 
-            .warning-box {
-                background-color: #fffbf0;
-                border-left: 5px solid #ffc107;
-                padding: 20px 25px;
-                margin: 25px 0;
-                border-radius: 0 6px 6px 0;
-                box-shadow: 0 2px 6px rgba(255,193,7,0.15);
+            h4 {
+                font-size: 11pt;
+                font-weight: bold;
+                color: #000000;
+                margin: 15px 0 8px 0;
             }
 
-            .success-box {
-                background-color: #f0f9f4;
-                border-left: 5px solid #4caf50;
-                padding: 20px 25px;
-                margin: 25px 0;
-                border-radius: 0 6px 6px 0;
-                box-shadow: 0 2px 6px rgba(76,175,80,0.15);
-            }
-
-            /* Tables */
-            table {
-                border-collapse: collapse;
-                width: 100%;
-                margin: 25px 0;
-                background-color: #fff;
-                box-shadow: 0 2px 8px rgba(0,0,0,0.1);
-                border-radius: 6px;
-                overflow: hidden;
-            }
-
-            thead {
-                background: linear-gradient(135deg, #8b7355 0%, #6b5b47 100%);
-            }
-
-            th {
-                color: white;
-                padding: 14px 12px;
+            p {
+                margin: 8px 0;
+                line-height: 1.5;
                 text-align: left;
+            }
+
+            /* ==================== APPENDIX STYLING ==================== */
+            .appendix-section {
+                margin-top: 50px;
+                padding-top: 30px;
+                border-top: 3px double #95a5a6;
+            }
+
+            .appendix-title {
+                font-size: 24px;
+                font-weight: 300;
+                color: #2c3e50;
+                margin-bottom: 15px;
+                text-transform: uppercase;
+                letter-spacing: 1px;
+            }
+
+            .appendix-item {
+                margin: 30px 0;
+                padding: 20px;
+                background-color: #fafafa;
+                border-left: 3px solid #3498db;
+                border-radius: 3px;
+            }
+
+            .appendix-item-title {
+                font-size: 14px;
                 font-weight: 600;
-                font-size: 13px;
+                color: #34495e;
+                margin-bottom: 15px;
                 text-transform: uppercase;
                 letter-spacing: 0.5px;
             }
 
+            /* ==================== METADATA & INFO BOXES ==================== */
+            .metadata {
+                background-color: #ffffff;
+                border: 1px solid #000000;
+                border-radius: 0;
+                padding: 15px;
+                margin: 20px 0;
+                font-size: 10pt;
+            }
+
+            .metadata-grid {
+                display: grid;
+                grid-template-columns: 140px 1fr;
+                gap: 8px 15px;
+                line-height: 1.6;
+            }
+
+            .metadata-label {
+                font-weight: bold;
+                color: #000000;
+            }
+
+            .metadata-value {
+                color: #000000;
+            }
+
+            .info-box {
+                background-color: #f5f5f5;
+                border: 1px solid #cccccc;
+                padding: 15px;
+                margin: 15px 0;
+                border-radius: 0;
+            }
+
+            .info-box h3 {
+                margin-top: 0;
+                color: #000000;
+                font-size: 11pt;
+            }
+
+            .info-box p {
+                margin: 6px 0;
+                color: #000000;
+            }
+
+            .warning-box {
+                background-color: #fff9e6;
+                border: 1px solid #ffcc00;
+                padding: 15px;
+                margin: 15px 0;
+                border-radius: 0;
+            }
+
+            .success-box {
+                background-color: #f0f8f0;
+                border: 1px solid #66cc66;
+                padding: 15px;
+                margin: 15px 0;
+                border-radius: 0;
+            }
+
+            .error-box {
+                background-color: #fff0f0;
+                border: 1px solid #cc6666;
+                padding: 15px;
+                margin: 15px 0;
+                border-radius: 0;
+            }
+
+            /* ==================== TABLES ==================== */
+            table {
+                border-collapse: collapse;
+                width: 100%;
+                margin: 15px 0;
+                background-color: #ffffff;
+                border: none;
+                font-size: 10pt;
+            }
+
+            thead {
+                background-color: #ffffff;
+                border-bottom: 2px solid #000000;
+            }
+
+            th {
+                color: #000000;
+                padding: 8px 10px;
+                text-align: left;
+                font-weight: bold;
+                font-size: 10pt;
+                text-transform: none;
+                letter-spacing: 0;
+                border-bottom: 2px solid #000000;
+            }
+
             td {
-                padding: 12px;
-                border-bottom: 1px solid #e8e4df;
-                font-size: 14px;
-                vertical-align: middle;
+                padding: 6px 10px;
+                border-bottom: 1px solid #cccccc;
+                font-size: 10pt;
+                vertical-align: top;
             }
 
             tr:nth-child(even) {
-                background-color: #fafaf7;
+                background-color: #ffffff;
             }
 
-            tr:last-child td {
-                border-bottom: none;
+            tr:hover {
+                background-color: #f9f9f9;
             }
 
-            tbody tr:hover {
-                background-color: #f0ebe5;
-                transition: background-color 0.2s ease;
+            tbody tr:last-child td {
+                border-bottom: 1px solid #000000;
             }
 
-            /* Stat Cards */
+            /* Compact table style for appendix */
+            .table-compact {
+                font-size: 9pt;
+            }
+
+            .table-compact th {
+                padding: 6px 8px;
+                font-size: 9pt;
+            }
+
+            .table-compact td {
+                padding: 4px 8px;
+            }
+
+            /* ==================== STAT CARDS ==================== */
             .summary-stats {
                 display: grid;
-                grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
-                gap: 20px;
-                margin: 30px 0;
+                grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
+                gap: 10px;
+                margin: 20px 0;
             }
 
             .stat-card {
-                background: linear-gradient(135deg, #ffffff 0%, #fafaf7 100%);
-                padding: 20px;
-                border-radius: 10px;
-                border: 2px solid #d4c4a8;
+                background-color: #ffffff;
+                padding: 12px;
+                border: 1px solid #000000;
+                border-radius: 0;
                 text-align: center;
-                box-shadow: 0 4px 10px rgba(0,0,0,0.08);
-                transition: transform 0.2s ease, box-shadow 0.2s ease;
+                box-shadow: none;
             }
 
             .stat-card:hover {
-                transform: translateY(-2px);
-                box-shadow: 0 6px 16px rgba(0,0,0,0.12);
+                box-shadow: none;
             }
 
             .stat-label {
-                font-size: 11px;
-                color: #7f8c8d;
-                text-transform: uppercase;
-                letter-spacing: 1.2px;
-                font-weight: 600;
-                margin-bottom: 8px;
+                font-size: 9pt;
+                color: #000000;
+                text-transform: none;
+                letter-spacing: 0;
+                font-weight: bold;
+                margin-bottom: 6px;
             }
 
             .stat-value {
-                font-size: 28px;
-                font-weight: 700;
-                color: #2c5530;
-                margin-top: 8px;
-                line-height: 1.2;
+                font-size: 18pt;
+                font-weight: bold;
+                color: #000000;
+                margin-top: 4px;
+                font-family: 'Calibri', 'Arial', sans-serif;
             }
 
-            /* Plot Container */
+            .stat-unit {
+                font-size: 9pt;
+                color: #666666;
+                margin-top: 2px;
+            }
+
+            /* ==================== PLOTS & FIGURES ==================== */
             .plot-container {
                 text-align: center;
-                margin: 30px 0;
-                padding: 20px;
+                margin: 25px 0;
+                padding: 15px;
                 background-color: #ffffff;
-                border: 1px solid #d4c4a8;
-                border-radius: 8px;
-                box-shadow: 0 2px 10px rgba(0,0,0,0.08);
+                border: 1px solid #dee2e6;
+                border-radius: 4px;
             }
 
             .plot-container img {
                 max-width: 100%;
                 height: auto;
-                border-radius: 4px;
+                border-radius: 2px;
             }
 
-            /* Footer */
-            .footer {
-                margin-top: 60px;
-                padding-top: 25px;
-                border-top: 2px solid #e0d8cd;
+            .figure-caption {
+                font-size: 10pt;
+                color: #6c757d;
+                font-style: italic;
+                margin-top: 10px;
                 text-align: center;
-                color: #95a5a6;
-                font-size: 12px;
+            }
+
+            /* ==================== LISTS ==================== */
+            ul, ol {
+                margin: 12px 0;
+                padding-left: 25px;
+            }
+
+            li {
+                margin: 6px 0;
                 line-height: 1.6;
             }
 
-            /* Section Dividers */
+            /* ==================== FOOTER & HEADERS ==================== */
+            .footer {
+                margin-top: 60px;
+                padding-top: 20px;
+                border-top: 1px solid #dee2e6;
+                text-align: center;
+                color: #6c757d;
+                font-size: 9pt;
+                line-height: 1.5;
+            }
+
+            .page-header {
+                display: none; /* Hidden in web view, shown in print */
+                font-size: 9pt;
+                color: #6c757d;
+                padding-bottom: 10px;
+                border-bottom: 1px solid #dee2e6;
+                margin-bottom: 20px;
+            }
+
+            @media print {
+                .page-header {
+                    display: block;
+                }
+            }
+
+            /* ==================== DIVIDERS ==================== */
             .section-divider {
-                height: 2px;
-                background: linear-gradient(to right, transparent, #d4c4a8, transparent);
-                margin: 40px 0;
+                height: 1px;
+                background-color: #dee2e6;
+                margin: 35px 0;
                 border: none;
             }
 
-            /* Utility Classes */
-            .highlight {
-                background-color: #fff9e6;
-                padding: 2px 6px;
-                border-radius: 3px;
+            hr {
+                border: none;
+                height: 1px;
+                background-color: #dee2e6;
+                margin: 20px 0;
             }
 
-            strong {
+            /* ==================== UTILITY CLASSES ==================== */
+            .text-center {
+                text-align: center;
+            }
+
+            .text-right {
+                text-align: right;
+            }
+
+            .text-muted {
+                color: #6c757d;
+            }
+
+            .highlight {
+                background-color: #fff3cd;
+                padding: 2px 5px;
+                border-radius: 2px;
+            }
+
+            .badge {
+                display: inline-block;
+                padding: 2px 6px;
+                font-size: 9pt;
+                font-weight: normal;
+                border-radius: 0;
+                text-transform: none;
+                letter-spacing: 0;
+                border: 1px solid #000000;
+                background-color: #ffffff;
+            }
+
+            .badge-success {
+                background-color: #ffffff;
+                color: #000000;
+                border: 1px solid #000000;
+            }
+
+            .badge-warning {
+                background-color: #ffffff;
+                color: #000000;
+                border: 1px solid #000000;
+            }
+
+            .badge-danger {
+                background-color: #ffffff;
+                color: #000000;
+                border: 1px solid #000000;
+            }
+
+            .badge-info {
+                background-color: #ffffff;
+                color: #000000;
+                border: 1px solid #000000;
+            }
+
+            .badge-secondary {
+                background-color: #ffffff;
+                color: #000000;
+                border: 1px solid #000000;
+            }
+
+            strong, b {
                 font-weight: 600;
-                color: #2c3e50;
+                color: #212529;
+            }
+
+            code {
+                font-family: 'Roboto Mono', 'Courier New', monospace;
+                background-color: #f8f9fa;
+                padding: 2px 6px;
+                border-radius: 3px;
+                font-size: 10pt;
+            }
+
+            /* ==================== RESPONSIVE ==================== */
+            @media (max-width: 768px) {
+                body {
+                    padding: 15px;
+                }
+
+                .summary-stats {
+                    grid-template-columns: repeat(auto-fit, minmax(120px, 1fr));
+                    gap: 10px;
+                }
+
+                .stat-value {
+                    font-size: 20px;
+                }
+
+                h1 {
+                    font-size: 24px;
+                }
+
+                h2 {
+                    font-size: 18px;
+                }
             }
         </style>
         """
+
+    def _create_cover_page(self, title: str, subtitle: str, metadata: Dict[str, str]) -> str:
+        """Create a professional cover page"""
+        html = '<div class="cover-page page-break">'
+        html += f'<div class="cover-title">{title}</div>'
+        html += f'<div class="cover-subtitle">{subtitle}</div>'
+
+        html += '<div class="cover-meta">'
+        if metadata.get('project_name'):
+            html += f'<div><strong>Project:</strong> {metadata["project_name"]}</div>'
+        if metadata.get('location'):
+            html += f'<div><strong>Location:</strong> {metadata["location"]}</div>'
+        if metadata.get('client'):
+            html += f'<div><strong>Client:</strong> {metadata["client"]}</div>'
+        if metadata.get('analyst'):
+            html += f'<div><strong>Analyst:</strong> {metadata["analyst"]}</div>'
+        html += f'<div><strong>Date:</strong> {datetime.now().strftime("%B %d, %Y")}</div>'
+        html += '</div>'
+        html += '</div>'
+
+        return html
 
     def _fig_to_base64(self, fig: Figure) -> str:
         """Convert a matplotlib figure to base64 encoded PNG"""
@@ -530,43 +809,102 @@ class ReportGenerator:
         return self._fig_to_base64(fig)
 
     def _format_metadata_section(self, metadata: Dict[str, str]) -> str:
-        """Format project metadata section"""
-        html = '<div class="metadata">'
+        """Format project metadata section with modern grid layout"""
+        html = '<div class="metadata"><div class="metadata-grid">'
 
         if metadata.get('project_name'):
-            html += f'<p><strong>Project:</strong> {metadata["project_name"]}</p>'
+            html += '<div class="metadata-label">Project:</div>'
+            html += f'<div class="metadata-value">{metadata["project_name"]}</div>'
         if metadata.get('location'):
-            html += f'<p><strong>Location:</strong> {metadata["location"]}</p>'
+            html += '<div class="metadata-label">Location:</div>'
+            html += f'<div class="metadata-value">{metadata["location"]}</div>'
         if metadata.get('client'):
-            html += f'<p><strong>Client:</strong> {metadata["client"]}</p>'
+            html += '<div class="metadata-label">Client:</div>'
+            html += f'<div class="metadata-value">{metadata["client"]}</div>'
         if metadata.get('analyst'):
-            html += f'<p><strong>Analyst:</strong> {metadata["analyst"]}</p>'
+            html += '<div class="metadata-label">Analyst:</div>'
+            html += f'<div class="metadata-value">{metadata["analyst"]}</div>'
 
-        html += f'<p><strong>Report Date:</strong> {datetime.now().strftime("%Y-%m-%d %H:%M")}</p>'
-        html += '</div>'
+        html += '<div class="metadata-label">Report Date:</div>'
+        html += f'<div class="metadata-value">{datetime.now().strftime("%B %d, %Y at %H:%M")}</div>'
+        html += '</div></div>'
 
         return html
 
     def generate_grain_size_report(self, dataset: GrainSizeData,
                                   metadata: Optional[Dict[str, str]] = None,
-                                  sections: Optional[Dict[str, bool]] = None) -> str:
-        """Generate a grain size analysis report for a single sample"""
+                                  sections: Optional[Dict[str, bool]] = None,
+                                  report_template: str = "standard") -> str:
+        """
+        Generate a grain size analysis report for a single sample
+
+        Args:
+            dataset: GrainSizeData object containing the sample data
+            metadata: Dictionary with project metadata (project_name, location, client, analyst, notes)
+            sections: Dictionary controlling which sections to include
+            report_template: Template style - "standard", "executive", "technical", "appendix"
+
+        Returns:
+            HTML string of the complete report
+        """
 
         # Set defaults
         if metadata is None:
             metadata = {}
         if sections is None:
-            sections = {
-                'executive_summary': True,
-                'methodology': True,
-                'results': True,
-                'plots': True,
-                'raw_data': False,
-                'interpretation': True,
-                'percentiles': True,
-                'gradation': True,
-                'data_quality': False
-            }
+            # Default sections based on template
+            if report_template == "executive":
+                sections = {
+                    'cover_page': True,
+                    'executive_summary': True,
+                    'methodology': False,
+                    'results': True,
+                    'plots': True,
+                    'raw_data': False,
+                    'interpretation': True,
+                    'percentiles': False,
+                    'gradation': True,
+                    'data_quality': False
+                }
+            elif report_template == "technical":
+                sections = {
+                    'cover_page': True,
+                    'executive_summary': True,
+                    'methodology': True,
+                    'results': True,
+                    'plots': True,
+                    'raw_data': False,
+                    'interpretation': True,
+                    'percentiles': True,
+                    'gradation': True,
+                    'data_quality': True
+                }
+            elif report_template == "appendix":
+                sections = {
+                    'cover_page': False,
+                    'executive_summary': False,
+                    'methodology': False,
+                    'results': False,
+                    'plots': True,
+                    'raw_data': True,
+                    'interpretation': False,
+                    'percentiles': True,
+                    'gradation': True,
+                    'data_quality': True
+                }
+            else:  # standard
+                sections = {
+                    'cover_page': False,
+                    'executive_summary': True,
+                    'methodology': True,
+                    'results': True,
+                    'plots': True,
+                    'raw_data': False,
+                    'interpretation': True,
+                    'percentiles': True,
+                    'gradation': True,
+                    'data_quality': False
+                }
 
         # Get characteristic grain sizes
         d10 = dataset.get_d10()
@@ -576,126 +914,175 @@ class ReportGenerator:
         d60 = dataset.get_d60()
 
         # Calculate coefficients
-        cu = (d60 / d10) if (d10 and d60) else None
-        cc = ((d30 * d30) / (d10 * d60)) if (d10 and d30 and d60) else None
+        cu = (d60 / d10) if (d10 and d60 and d10 > 0) else None
+        cc = ((d30 * d30) / (d10 * d60)) if (d10 and d30 and d60 and d10 > 0 and d60 > 0) else None
 
         # Start HTML report
-        html = f"""
-        <!DOCTYPE html>
-        <html>
-        <head>
-            <title>Grain Size Analysis Report - {dataset.sample_name}</title>
-            {self.report_style}
-        </head>
-        <body>
-            <h1>Grain Size Analysis Report</h1>
+        html = f"""<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Grain Size Analysis Report - {dataset.sample_name}</title>
+    {self.report_style}
+</head>
+<body>
+"""
 
-            {self._format_metadata_section(metadata)}
+        # Cover Page (optional)
+        if sections.get('cover_page', False):
+            html += self._create_cover_page(
+                "Grain Size Analysis",
+                f"Sample: {dataset.sample_name}",
+                metadata
+            )
 
-            <div class="metadata">
-                <p><strong>Sample Name:</strong> {dataset.sample_name}</p>
-                <p><strong>Temperature:</strong> {dataset.temperature}°C</p>
-                <p><strong>Porosity:</strong> {dataset.porosity}</p>
-                <p><strong>Data Points:</strong> {len(dataset.particle_sizes)}</p>
-            </div>
-        """
+        # Main Title (if no cover page)
+        if not sections.get('cover_page', False):
+            html += f'<h1>Grain Size Analysis Report</h1>'
+            html += self._format_metadata_section(metadata)
+
+        # Sample Information
+        html += f"""
+<div class="metadata">
+    <div class="metadata-grid">
+        <div class="metadata-label">Sample Name:</div>
+        <div class="metadata-value">{dataset.sample_name}</div>
+        <div class="metadata-label">Soil Classification:</div>
+        <div class="metadata-value"><strong>{dataset.classify_soil()}</strong></div>
+        <div class="metadata-label">Temperature:</div>
+        <div class="metadata-value">{dataset.temperature}°C</div>
+        <div class="metadata-label">Porosity:</div>
+        <div class="metadata-value">{dataset.porosity}</div>
+        <div class="metadata-label">Data Points:</div>
+        <div class="metadata-value">{len(dataset.particle_sizes)}</div>
+    </div>
+</div>
+"""
 
         # Executive Summary
         if sections.get('executive_summary', True):
             html += f"""
-            <div style="page-break-before: auto;">
-            <h2>Executive Summary</h2>
-            <div class="info-box">
-                <p><strong>Sample:</strong> {dataset.sample_name} has been classified as <strong>{dataset.classify_soil()}</strong>.</p>
-                <p><strong>Key Parameters:</strong> D₅₀ = {f'{d50:.3f} mm' if d50 else 'N/A'},
-                Cu = {f'{cu:.2f}' if cu else 'N/A'}, Cc = {f'{cc:.2f}' if cc else 'N/A'}</p>
-                <p><strong>Gradation:</strong> {self._classify_uniformity(cu)}</p>
-            </div>
-            </div>
-            """
+<div class="no-break">
+<h2>Executive Summary</h2>
+<div class="success-box">
+    <p>Sample <strong>{dataset.sample_name}</strong> has been analyzed and classified as <strong>{dataset.classify_soil()}</strong>.</p>
+</div>
+<div class="summary-stats">
+    <div class="stat-card">
+        <div class="stat-label">Median Size (D₅₀)</div>
+        <div class="stat-value">{f'{d50:.3f}' if d50 else 'N/A'}</div>
+        <div class="stat-unit">mm</div>
+    </div>
+    <div class="stat-card">
+        <div class="stat-label">Uniformity (Cu)</div>
+        <div class="stat-value">{f'{cu:.2f}' if cu else 'N/A'}</div>
+        <div class="stat-unit">{self._classify_uniformity(cu)}</div>
+    </div>
+    <div class="stat-card">
+        <div class="stat-label">Curvature (Cc)</div>
+        <div class="stat-value">{f'{cc:.2f}' if cc else 'N/A'}</div>
+        <div class="stat-unit">{self._classify_curvature(cc)}</div>
+    </div>
+</div>
+</div>
+"""
 
         # Methodology
         if sections.get('methodology', True):
             html += """
-            <div style="page-break-before: auto;">
-            <h2>Methodology</h2>
-            <div class="info-box">
-                <h3>Grain Size Analysis</h3>
-                <p>Grain size distribution analysis was performed using sieve analysis and/or sedimentation methods.
-                The particle size distribution curve represents the cumulative percent passing versus grain size on a
-                semi-logarithmic scale.</p>
-                <h3>Characteristic Diameters</h3>
-                <p>Characteristic grain sizes (D₁₀, D₃₀, D₅₀, D₆₀) represent the grain diameter at which 10%, 30%, 50%,
-                and 60% of the soil mass is finer, respectively. These values are fundamental for soil classification
-                and hydraulic conductivity estimation.</p>
-                <h3>Gradation Coefficients</h3>
-                <p><strong>Uniformity Coefficient (Cu):</strong> Cu = D₆₀/D₁₀. Values &lt; 4 indicate uniform gradation,
-                4-6 indicate moderate gradation, and &gt; 6 indicate well-graded soil.</p>
-                <p><strong>Coefficient of Curvature (Cc):</strong> Cc = (D₃₀)²/(D₁₀ × D₆₀). Values between 1-3 indicate
-                well-graded soil with good particle size distribution.</p>
-            </div>
-            </div>
-            """
+<div class="page-break">
+<h2>Methodology</h2>
+<div class="info-box">
+    <h3>Grain Size Distribution Analysis</h3>
+    <p>Grain size distribution was determined using sieve analysis and/or sedimentation methods following standard geotechnical procedures. The cumulative distribution curve plots percent passing versus grain size on a semi-logarithmic scale.</p>
+</div>
+<div class="info-box">
+    <h3>Characteristic Diameters</h3>
+    <p>Characteristic grain sizes represent specific percentiles of the grain size distribution:</p>
+    <ul>
+        <li><strong>D₁₀, D₃₀, D₅₀, D₆₀:</strong> Grain diameters at which 10%, 30%, 50%, and 60% of the soil mass is finer</li>
+        <li><strong>D₅₀ (Median):</strong> The median grain size, representing the center of the distribution</li>
+        <li>These values are fundamental for soil classification and hydraulic conductivity estimation</li>
+    </ul>
+</div>
+<div class="info-box">
+    <h3>Gradation Parameters</h3>
+    <p><strong>Uniformity Coefficient:</strong> <code>Cu = D₆₀ / D₁₀</code></p>
+    <ul>
+        <li>Cu &lt; 4: Uniform gradation (narrow size range)</li>
+        <li>4 ≤ Cu &lt; 6: Moderate gradation</li>
+        <li>Cu ≥ 6: Well-graded soil (wide size range)</li>
+    </ul>
+    <p><strong>Coefficient of Curvature:</strong> <code>Cc = (D₃₀)² / (D₁₀ × D₆₀)</code></p>
+    <ul>
+        <li>1 ≤ Cc ≤ 3: Well-graded with good particle size distribution</li>
+        <li>Outside this range: Gap-graded or uniform distribution</li>
+    </ul>
+</div>
+</div>
+"""
 
         # Results
         if sections.get('results', True):
             html += f"""
-            <div style="page-break-before: auto;">
-            <h2>Results & Analysis</h2>
+<div class="page-break">
+<h2>Results & Analysis</h2>
 
-            <h3>Characteristic Grain Sizes</h3>
-            <div class="summary-stats">
-                <div class="stat-card">
-                    <div class="stat-label">D10</div>
-                    <div class="stat-value">{f'{d10:.3f} mm' if d10 else 'N/A'}</div>
-                </div>
-                <div class="stat-card">
-                    <div class="stat-label">D30</div>
-                    <div class="stat-value">{f'{d30:.3f} mm' if d30 else 'N/A'}</div>
-                </div>
-                <div class="stat-card">
-                    <div class="stat-label">D50 (Median)</div>
-                    <div class="stat-value">{f'{d50:.3f} mm' if d50 else 'N/A'}</div>
-                </div>
-                <div class="stat-card">
-                    <div class="stat-label">D60</div>
-                    <div class="stat-value">{f'{d60:.3f} mm' if d60 else 'N/A'}</div>
-                </div>
-            </div>
+<h3>Characteristic Grain Sizes</h3>
+<div class="summary-stats">
+    <div class="stat-card">
+        <div class="stat-label">D₁₀</div>
+        <div class="stat-value">{f'{d10:.3f}' if d10 else 'N/A'}</div>
+        <div class="stat-unit">mm</div>
+    </div>
+    <div class="stat-card">
+        <div class="stat-label">D₃₀</div>
+        <div class="stat-value">{f'{d30:.3f}' if d30 else 'N/A'}</div>
+        <div class="stat-unit">mm</div>
+    </div>
+    <div class="stat-card">
+        <div class="stat-label">D₅₀</div>
+        <div class="stat-value">{f'{d50:.3f}' if d50 else 'N/A'}</div>
+        <div class="stat-unit">mm</div>
+    </div>
+    <div class="stat-card">
+        <div class="stat-label">D₆₀</div>
+        <div class="stat-value">{f'{d60:.3f}' if d60 else 'N/A'}</div>
+        <div class="stat-unit">mm</div>
+    </div>
+</div>
 
-            <h3>Soil Classification Parameters</h3>
-            <table>
-                <tr>
-                    <th>Parameter</th>
-                    <th>Value</th>
-                    <th>Classification</th>
-                </tr>
-                <tr>
-                    <td>Uniformity Coefficient (Cu)</td>
-                    <td>{f'{cu:.2f}' if cu else 'N/A'}</td>
-                    <td>{self._classify_uniformity(cu)}</td>
-                </tr>
-                <tr>
-                    <td>Coefficient of Curvature (Cc)</td>
-                    <td>{f'{cc:.2f}' if cc else 'N/A'}</td>
-                    <td>{self._classify_curvature(cc)}</td>
-                </tr>
-                <tr>
-                    <td>Soil Type</td>
-                    <td colspan="2">{dataset.classify_soil()}</td>
-                </tr>
-            </table>
-            """
-
-            # Add detailed statistics sections
-            if sections.get('percentiles', True):
-                html += f"<h3>Detailed Percentiles</h3>{self._create_percentiles_table(dataset)}"
+<h3>Soil Classification Parameters</h3>
+<table>
+    <thead>
+        <tr>
+            <th>Parameter</th>
+            <th>Value</th>
+            <th>Classification</th>
+        </tr>
+    </thead>
+    <tbody>
+        <tr>
+            <td><strong>Uniformity Coefficient</strong> (Cu = D₆₀/D₁₀)</td>
+            <td class="text-center">{f'{cu:.2f}' if cu else 'N/A'}</td>
+            <td><span class="badge badge-info">{self._classify_uniformity(cu)}</span></td>
+        </tr>
+        <tr>
+            <td><strong>Coefficient of Curvature</strong> (Cc = D₃₀²/D₁₀·D₆₀)</td>
+            <td class="text-center">{f'{cc:.2f}' if cc else 'N/A'}</td>
+            <td><span class="badge badge-info">{self._classify_curvature(cc)}</span></td>
+        </tr>
+        <tr>
+            <td><strong>Soil Classification</strong></td>
+            <td colspan="2"><span class="badge badge-success">{dataset.classify_soil()}</span></td>
+        </tr>
+    </tbody>
+</table>
+"""
 
             if sections.get('gradation', True):
-                html += f"<h3>Gradation Breakdown</h3>{self._create_gradation_table(dataset)}"
-
-            if sections.get('data_quality', False):
-                html += f"<h3>Data Quality Assessment</h3>{self._create_data_quality_table(dataset)}"
+                html += f"<h3>Gradation Analysis</h3>{self._create_gradation_table(dataset)}"
 
             html += "</div>"
 
@@ -703,79 +1090,71 @@ class ReportGenerator:
         if sections.get('plots', True):
             grain_plot = self._create_grain_size_plot(dataset)
             html += f"""
-            <div style="page-break-before: auto;">
-            <h2>Grain Size Distribution Curve</h2>
-            <div class="plot-container">
-                <img src="{grain_plot}" alt="Grain Size Distribution" style="max-width: 100%; height: auto;">
-            </div>
-            </div>
-            """
-
-        # Raw data table
-        if sections.get('raw_data', False):
-            html += """
-            <div style="page-break-before: always;">
-            <h2>Appendix A: Raw Data</h2>
-            <table>
-                <tr>
-                    <th>Grain Size (mm)</th>
-                    <th>Percent Passing (%)</th>
-                    <th>Percent Retained (%)</th>
-                </tr>
-            """
-
-            for i, (size, passing) in enumerate(zip(dataset.particle_sizes, dataset.percent_passing)):
-                retained = 100 - passing
-                html += f"""
-                <tr>
-                    <td>{size:.4f}</td>
-                    <td>{passing:.2f}</td>
-                    <td>{retained:.2f}</td>
-                </tr>
-                """
-
-            html += "</table>"
-
-            # Add comprehensive comparison tables
-            if sections.get('grain_comparison', True):
-                html += f"<h3>Grain Parameters Comparison</h3>{self._create_grain_parameters_comparison_table(datasets)}"
-
-            if sections.get('k_statistics', True) and k_results_dict:
-                html += f"<h3>Permeability Classification Summary</h3>{self._create_permeability_classification_table(k_results_dict)}"
-
-            html += "</div>"
+<div class="page-break">
+<h2>Grain Size Distribution Curve</h2>
+<div class="plot-container">
+    <img src="{grain_plot}" alt="Grain Size Distribution" />
+    <div class="figure-caption">Figure 1: Cumulative grain size distribution curve for {dataset.sample_name}</div>
+</div>
+</div>
+"""
 
         # Interpretation
         if sections.get('interpretation', True):
             html += f"""
-            <div style="page-break-before: auto;">
-            <h2>Interpretation & Discussion</h2>
-            <div class="info-box">
-                <h3>Grain Size Distribution Analysis</h3>
-                <p>{self._interpret_grain_distribution(dataset, cu, cc)}</p>
-            </div>
-            """
-
-            # Add custom notes if provided
+<div class="page-break">
+<h2>Interpretation & Discussion</h2>
+<div class="info-box">
+    <h3>Grain Size Distribution Analysis</h3>
+    <p>{self._interpret_grain_distribution(dataset, cu, cc)}</p>
+</div>
+"""
             if metadata.get('notes'):
                 html += f"""
-                <div class="info-box">
-                    <h3>Additional Notes</h3>
-                    <p>{metadata['notes'].replace(chr(10), '<br>')}</p>
-                </div>
-                """
-
+<div class="info-box">
+    <h3>Additional Notes</h3>
+    <p>{metadata['notes'].replace(chr(10), '<br>')}</p>
+</div>
+"""
             html += "</div>"
 
-        # Add footer
+        # APPENDIX SECTION - Clean, organized appendix
+        appendix_items = []
+        if sections.get('percentiles', True):
+            appendix_items.append(('A', 'Detailed Percentile Data', self._create_percentiles_table(dataset)))
+        if sections.get('data_quality', False):
+            appendix_items.append(('B', 'Data Quality Assessment', self._create_data_quality_table(dataset)))
+        if sections.get('raw_data', False):
+            raw_data_table = '<table class="table-compact"><thead><tr><th>Grain Size (mm)</th><th>Percent Passing (%)</th><th>Percent Retained (%)</th></tr></thead><tbody>'
+            for size, passing in zip(dataset.particle_sizes, dataset.percent_passing):
+                retained = 100 - passing
+                raw_data_table += f'<tr><td>{size:.4f}</td><td>{passing:.2f}</td><td>{retained:.2f}</td></tr>'
+            raw_data_table += '</tbody></table>'
+            appendix_items.append(('C', 'Raw Measurement Data', raw_data_table))
+
+        if appendix_items:
+            html += '<div class="appendix-section page-break">'
+            html += '<h1 class="appendix-title">Appendices</h1>'
+
+            for letter, title, content in appendix_items:
+                html += f'''
+<div class="appendix-item">
+    <h3 class="appendix-item-title">Appendix {letter}: {title}</h3>
+    {content}
+</div>
+'''
+            html += '</div>'
+
+        # Footer
         html += """
-            <div class="footer">
-                <p>Generated by Grain Size Analysis Tool - Hydraulic Conductivity Calculator</p>
-                <p>© 2024 - Geotechnical Analysis Suite</p>
-            </div>
-        </body>
-        </html>
-        """
+<div class="footer">
+    <p><strong>Grain Size Analysis Report</strong></p>
+    <p>Generated by Grain Size Analysis Tool - Hydraulic Conductivity Calculator</p>
+    <p>© 2024 - Geotechnical Analysis Suite</p>
+</div>
+</body>
+</html>
+"""
 
         return html
 
@@ -784,21 +1163,68 @@ class ReportGenerator:
                                temperature: float,
                                porosity: float,
                                metadata: Optional[Dict[str, str]] = None,
-                               sections: Optional[Dict[str, bool]] = None) -> str:
-        """Generate a K-value calculation report for a single sample"""
+                               sections: Optional[Dict[str, bool]] = None,
+                               report_template: str = "standard") -> str:
+        """
+        Generate a hydraulic conductivity (K-value) report for a single sample
+
+        Args:
+            dataset: GrainSizeData object
+            k_results: List of KCalculationResult objects from different methods
+            temperature: Water temperature in °C
+            porosity: Soil porosity
+            metadata: Project metadata dictionary
+            sections: Dictionary controlling which sections to include
+            report_template: Template style - "standard", "executive", "technical", "appendix"
+
+        Returns:
+            HTML string of the complete report
+        """
 
         # Set defaults
         if metadata is None:
             metadata = {}
         if sections is None:
-            sections = {
-                'executive_summary': True,
-                'methodology': True,
-                'results': True,
-                'plots': True,
-                'interpretation': True,
-                'k_statistics': True
-            }
+            if report_template == "executive":
+                sections = {
+                    'cover_page': True,
+                    'executive_summary': True,
+                    'methodology': False,
+                    'results': True,
+                    'plots': True,
+                    'interpretation': True,
+                    'k_statistics': False
+                }
+            elif report_template == "technical":
+                sections = {
+                    'cover_page': True,
+                    'executive_summary': True,
+                    'methodology': True,
+                    'results': True,
+                    'plots': True,
+                    'interpretation': True,
+                    'k_statistics': True
+                }
+            elif report_template == "appendix":
+                sections = {
+                    'cover_page': False,
+                    'executive_summary': False,
+                    'methodology': False,
+                    'results': False,
+                    'plots': True,
+                    'interpretation': False,
+                    'k_statistics': True
+                }
+            else:  # standard
+                sections = {
+                    'cover_page': False,
+                    'executive_summary': True,
+                    'methodology': True,
+                    'results': True,
+                    'plots': True,
+                    'interpretation': True,
+                    'k_statistics': True
+                }
 
         # Filter valid results
         valid_results = [r for r in k_results if r.k_value is not None and r.k_value > 0]
@@ -813,27 +1239,50 @@ class ReportGenerator:
         std_k = np.std(k_values)
         min_k = np.min(k_values)
         max_k = np.max(k_values)
+        variability_ratio = max_k / min_k if min_k > 0 else 0
 
         # Start HTML report
-        html = f"""
-        <!DOCTYPE html>
-        <html>
-        <head>
-            <title>Hydraulic Conductivity Report - {dataset.sample_name}</title>
-            {self.report_style}
-        </head>
-        <body>
-            <h1>Hydraulic Conductivity Analysis Report</h1>
+        html = f"""<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Hydraulic Conductivity Report - {dataset.sample_name}</title>
+    {self.report_style}
+</head>
+<body>
+"""
 
-            {self._format_metadata_section(metadata)}
+        # Cover Page (optional)
+        if sections.get('cover_page', False):
+            html += self._create_cover_page(
+                "Hydraulic Conductivity Analysis",
+                f"Sample: {dataset.sample_name}",
+                metadata
+            )
 
-            <div class="metadata">
-                <p><strong>Sample Name:</strong> {dataset.sample_name}</p>
-                <p><strong>Temperature:</strong> {temperature}°C</p>
-                <p><strong>Porosity:</strong> {porosity}</p>
-                <p><strong>Valid Calculations:</strong> {len(valid_results)} / {len(k_results)}</p>
-            </div>
-        """
+        # Main Title (if no cover page)
+        if not sections.get('cover_page', False):
+            html += f'<h1>Hydraulic Conductivity Analysis Report</h1>'
+            html += self._format_metadata_section(metadata)
+
+        # Sample Information
+        html += f"""
+<div class="metadata">
+    <div class="metadata-grid">
+        <div class="metadata-label">Sample Name:</div>
+        <div class="metadata-value">{dataset.sample_name}</div>
+        <div class="metadata-label">Temperature:</div>
+        <div class="metadata-value">{temperature}°C</div>
+        <div class="metadata-label">Porosity:</div>
+        <div class="metadata-value">{porosity}</div>
+        <div class="metadata-label">Methods Evaluated:</div>
+        <div class="metadata-value">{len(k_results)} empirical methods</div>
+        <div class="metadata-label">Valid Results:</div>
+        <div class="metadata-value"><span class="badge badge-success">{len(valid_results)} / {len(k_results)}</span></div>
+    </div>
+</div>
+"""
 
         # Executive Summary
         if sections.get('executive_summary', True):
@@ -1338,33 +1787,32 @@ class ReportGenerator:
 
         html = """
         <table>
-            <tr>
-                <th>Percentile</th>
-                <th>Size (mm)</th>
-                <th>Visual Distribution</th>
-            </tr>
+            <thead>
+                <tr>
+                    <th>Percentile</th>
+                    <th>Size (mm)</th>
+                    <th>Relative (%)</th>
+                </tr>
+            </thead>
+            <tbody>
         """
 
         for p in percentiles_list:
             val = percentiles_dict[p]
             bar_width = int((val / max_val) * 100) if max_val > 0 else 0
 
-            # Highlight key percentiles
-            row_style = ""
-            if p in [10, 30, 50, 60]:
-                row_style = ' style="background-color: #fffacd;"'
+            # Highlight key percentiles (D10, D30, D50, D60)
+            is_key = p in [10, 30, 50, 60]
 
             html += f"""
-            <tr{row_style}>
-                <td style="text-align: center;"><strong>D{p}</strong></td>
+            <tr>
+                <td style="text-align: center;"><strong>D{p}{'*' if is_key else ''}</strong></td>
                 <td style="text-align: right;">{val:.3f}</td>
-                <td>
-                    <div style="background-color: #6b8e23; width: {bar_width}%; height: 15px; border-radius: 3px;"></div>
-                </td>
+                <td style="text-align: right;">{bar_width}%</td>
             </tr>
             """
 
-        html += "</table>"
+        html += "</tbody></table>"
         return html
 
     def _create_gradation_table(self, dataset: GrainSizeData) -> str:
@@ -1411,34 +1859,32 @@ class ReportGenerator:
 
         html = """
         <table>
-            <tr>
-                <th>Fraction</th>
-                <th>Size Range</th>
-                <th>Percentage</th>
-                <th>Visual</th>
-            </tr>
+            <thead>
+                <tr>
+                    <th>Fraction</th>
+                    <th>Size Range</th>
+                    <th>Percentage</th>
+                </tr>
+            </thead>
+            <tbody>
         """
 
         gradations = [
-            ("Gravel", "> 2 mm", gravel_percent, "#8b7355"),
-            ("Sand", "0.063 - 2 mm", sand_percent, "#daa520"),
-            ("Fines", "< 0.063 mm", fines_percent, "#cd853f")
+            ("Gravel", "> 2 mm", gravel_percent),
+            ("Sand", "0.063 - 2 mm", sand_percent),
+            ("Fines", "< 0.063 mm", fines_percent)
         ]
 
-        for name, size_range, percent, color in gradations:
-            bar_width = int(percent)
+        for name, size_range, percent in gradations:
             html += f"""
             <tr>
-                <td style="font-weight: bold;">{name}</td>
+                <td><strong>{name}</strong></td>
                 <td>{size_range}</td>
-                <td style="text-align: right;">{percent:.1f}%</td>
-                <td>
-                    <div style="background-color: {color}; width: {bar_width}%; height: 20px; border-radius: 3px; display: inline-block;"></div>
-                </td>
+                <td style="text-align: right;"><strong>{percent:.1f}%</strong></td>
             </tr>
             """
 
-        html += "</table>"
+        html += "</tbody></table>"
         return html
 
     def _create_k_statistics_table(self, k_results: List[KCalculationResult]) -> str:
@@ -1454,18 +1900,15 @@ class ReportGenerator:
         """
 
         for result in k_results:
-            # Determine status color
+            # Determine status text
             status_str = str(result.status) if hasattr(result.status, 'value') else str(result.status)
 
             if "OK" in status_str or "WITHIN_RANGE" in status_str:
-                status_color = "#e8f5e9"  # Light green
-                status_text = "✓ OK"
+                status_text = "OK"
             elif "WARNING" in status_str or "OUTSIDE_RANGE" in status_str:
-                status_color = "#fff9e6"  # Light yellow
-                status_text = "⚠ Warning"
+                status_text = "Warning"
             else:
-                status_color = "#ffebee"  # Light red
-                status_text = "✗ Error"
+                status_text = "Error"
 
             k_display = f"{result.k_value:.2e}" if result.k_value else "N/A"
 
@@ -1474,10 +1917,10 @@ class ReportGenerator:
 
             html += f"""
             <tr>
-                <td style="font-weight: bold;">{result.method_name}</td>
-                <td style="text-align: right; font-family: monospace;">{k_display}</td>
-                <td style="background-color: {status_color}; text-align: center;">{status_text}</td>
-                <td style="font-size: 9pt;">{notes}</td>
+                <td><strong>{result.method_name}</strong></td>
+                <td style="text-align: right;">{k_display}</td>
+                <td style="text-align: center;">{status_text}</td>
+                <td>{notes}</td>
             </tr>
             """
 
@@ -1607,42 +2050,23 @@ class ReportGenerator:
             else:
                 min_val = max_val = val_range = 0
 
-            # Add cells with color-coding
+            # Add cells without color-coding (clean and simple)
             for val in values:
                 if val is None:
-                    html += "<td style='text-align: center; color: #999;'>N/A</td>"
+                    html += "<td style='text-align: center;'>—</td>"
                 else:
-                    # Normalize value for color coding
-                    if val_range > 0:
-                        normalized = (val - min_val) / val_range
-                    else:
-                        normalized = 0.5
-
-                    # Color interpolation: green (low) -> yellow (mid) -> red (high)
-                    if normalized < 0.5:
-                        r = int(255 * (normalized * 2))
-                        g = 200
-                        b = 100
-                    else:
-                        r = 255
-                        g = int(200 * (1 - (normalized - 0.5) * 2))
-                        b = 100
-
-                    color = f"rgba({r}, {g}, {b}, 0.31)"  # 0.31 ≈ 80/255 for transparency
-
                     display_val = f"{val:.3f}" if param.endswith("(mm)") else f"{val:.2f}"
-                    html += f"<td style='text-align: center; background-color: {color};'>{display_val}</td>"
+                    html += f"<td style='text-align: center;'>{display_val}</td>"
 
             # Add statistics column
             if valid_values:
                 mean = np.mean(valid_values)
                 std = np.std(valid_values)
-                cv = (std / mean * 100) if mean > 0 else 0
 
-                stats_text = f"μ={mean:.2f}<br>σ={std:.2f}<br>CV={cv:.1f}%"
-                html += f"<td style='background-color: #f0f0f0; text-align: center; font-size: 9pt;'>{stats_text}</td>"
+                stats_text = f"Mean: {mean:.2f}<br>Std: {std:.2f}"
+                html += f"<td style='text-align: center; font-size: 9pt;'>{stats_text}</td>"
             else:
-                html += "<td style='text-align: center; color: #999;'>N/A</td>"
+                html += "<td style='text-align: center;'>—</td>"
 
             html += "</tr>"
 
@@ -1670,36 +2094,31 @@ class ReportGenerator:
             if valid_k:
                 mean_k = np.mean(valid_k)
 
-                # Classify and color-code
+                # Classify without color-coding
                 if mean_k > 1e-2:
                     classification = "Very High (Gravel)"
-                    color = "rgba(76, 175, 80, 0.39)"  # Green, 0.39 ≈ 100/255
                 elif mean_k > 1e-4:
                     classification = "High (Clean Sand)"
-                    color = "rgba(139, 195, 74, 0.39)"  # Light green
                 elif mean_k > 1e-5:
                     classification = "Moderate (Fine Sand)"
-                    color = "rgba(255, 235, 59, 0.39)"  # Yellow
                 elif mean_k > 1e-7:
                     classification = "Low (Silt)"
-                    color = "rgba(255, 152, 0, 0.39)"  # Orange
                 else:
                     classification = "Very Low (Clay)"
-                    color = "rgba(244, 67, 54, 0.39)"  # Red
 
                 html += f"""
-                <tr style="background-color: {color};">
-                    <td style="font-weight: bold;">{sample_name}</td>
-                    <td style="text-align: right; font-family: monospace;">{mean_k:.2e}</td>
+                <tr>
+                    <td><strong>{sample_name}</strong></td>
+                    <td style="text-align: right;">{mean_k:.2e}</td>
                     <td>{classification}</td>
                 </tr>
                 """
             else:
                 html += f"""
-                <tr style="background-color: #e0e0e0;">
-                    <td style="font-weight: bold;">{sample_name}</td>
-                    <td style="text-align: center; color: #999;">Not calculated</td>
-                    <td style="text-align: center; color: #999;">N/A</td>
+                <tr>
+                    <td><strong>{sample_name}</strong></td>
+                    <td style="text-align: center;">—</td>
+                    <td style="text-align: center;">—</td>
                 </tr>
                 """
 
