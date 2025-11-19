@@ -76,8 +76,8 @@ class PorosityDialog(QDialog):
         header.setSectionResizeMode(2, QHeaderView.ResizeMode.ResizeToContents)  # Current
         header.setSectionResizeMode(3, QHeaderView.ResizeMode.Fixed)  # Edit field
         header.setSectionResizeMode(4, QHeaderView.ResizeMode.Fixed)  # Actions
-        self.porosity_table.setColumnWidth(3, 120)
-        self.porosity_table.setColumnWidth(4, 150)
+        self.porosity_table.setColumnWidth(3, 180)  # Increased from 120 for better input widget display
+        self.porosity_table.setColumnWidth(4, 200)  # Increased from 150 for button spacing
 
         self.porosity_table.setStyleSheet("""
             QTableWidget {
@@ -997,6 +997,15 @@ class ControlPanel(QFrame):
         if sample_name in self.loaded_samples:
             dataset = self.loaded_samples[sample_name]['data']
 
+            d10 = dataset.get_d10()
+            d30 = dataset.get_d30()
+            d50 = dataset.get_d50()
+            d60 = dataset.get_d60()
+            cu = dataset.get_uniformity_coefficient()
+
+            def fmt(value, fmt_str):
+                return format(value, fmt_str) if value is not None else 'N/A'
+
             # Create comprehensive file information
             info_text = f"""File Analysis Report
 {'='*40}
@@ -1012,13 +1021,13 @@ Grain Size Range:
   Smallest: {min(dataset.particle_sizes):.3f} mm
 
 Characteristic Sizes:
-  D10: {dataset.get_d10():.3f if dataset.get_d10() else 'N/A'} mm (Used by: Hazen, Terzaghi, Beyer, etc.)
-  D30: {dataset.get_d30():.3f if dataset.get_d30() else 'N/A'} mm (Used for uniformity calculations)
-  D50: {dataset.get_d50():.3f if dataset.get_d50() else 'N/A'} mm (Median grain size)
-  D60: {dataset.get_d60():.3f if dataset.get_d60() else 'N/A'} mm (Used for uniformity coefficient)
+  D10: {fmt(d10, '.3f')} mm (Used by: Hazen, Terzaghi, Beyer, etc.)
+  D30: {fmt(d30, '.3f')} mm (Used for uniformity calculations)
+  D50: {fmt(d50, '.3f')} mm (Median grain size)
+  D60: {fmt(d60, '.3f')} mm (Used for uniformity coefficient)
 
 Soil Classification: {dataset.classify_soil()}
-Uniformity Coefficient (Cu): {dataset.get_uniformity_coefficient():.2f if dataset.get_uniformity_coefficient() else 'N/A'}
+Uniformity Coefficient (Cu): {fmt(cu, '.2f')}
 
 {'='*40}
 {dataset.get_detailed_validation_report()}"""

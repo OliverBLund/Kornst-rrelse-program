@@ -4,8 +4,8 @@ Grain Size Analysis Program - PyQt6 entry point with startup splash screen.
 """
 
 import sys
-
 from PyQt6.QtWidgets import QApplication
+from PyQt6.QtCore import QTimer
 
 from Splash.simple_splash import SimpleSplash
 from gui.main_window import MainWindow
@@ -14,30 +14,55 @@ from gui.main_window import MainWindow
 def main() -> None:
     app = QApplication(sys.argv)
     app.setApplicationName("Grain Size Analysis")
-    app.setApplicationVersion("0.1.0")
+    app.setApplicationVersion("1.0.0")
+    app.setOrganizationName("Geotechnical Engineering")
+    app.setOrganizationDomain("grainsize.app")
 
+    # Create and show splash screen
     splash = SimpleSplash()
-    splash.set_message("Loading Grain Size Analysis...")
+    splash.set_message("Initializing Grain Size Analysis...")
     splash.show()
     app.processEvents()
 
-    try:
-        splash.set_message("Initializing modules...")
+    # Initialize main window in stages with progress updates
+    def init_step_1():
+        """Load core modules"""
+        splash.set_message("Loading analysis modules...")
         app.processEvents()
-        window = MainWindow()
-        splash.set_message("Preparing user interface...")
+        QTimer.singleShot(100, init_step_2)
+
+    def init_step_2():
+        """Create main window"""
+        try:
+            splash.set_message("Building user interface...")
+            app.processEvents()
+
+            global window
+            window = MainWindow()
+
+            QTimer.singleShot(100, init_step_3)
+        except Exception as e:
+            splash.set_message("Startup failed")
+            splash.finish_with_fade("Error")
+            raise
+
+    def init_step_3():
+        """Finalize and show window"""
+        splash.set_message("Finalizing...")
         app.processEvents()
-    except Exception:
-        splash.set_message("Startup failed")
-        splash.finish_with_fade("Error")
-        raise
 
-    window.show()
-    app.processEvents()
-    splash.finish_with_fade("Ready!")
+        # Show main window
+        window.show()
+        app.processEvents()
 
-    # Keep the splash alive until the fade-out animation completes.
-    window._startup_splash = splash  # type: ignore[attr-defined]
+        # Close splash with fade
+        splash.finish_with_fade("Ready!")
+
+        # Keep splash reference to prevent garbage collection during fade
+        window._startup_splash = splash  # type: ignore[attr-defined]
+
+    # Start initialization sequence
+    QTimer.singleShot(50, init_step_1)
 
     sys.exit(app.exec())
 

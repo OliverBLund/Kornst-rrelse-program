@@ -1511,7 +1511,6 @@ class ReportGenerator:
             metadata = {}
         if sections is None:
             sections = {
-                'cover_page': True,
                 'executive_summary': True,
                 'methodology': True,
                 'results': True,
@@ -1537,17 +1536,6 @@ class ReportGenerator:
             {self.report_style}
         </head>
         <body>
-        """
-
-        # Add cover page if requested
-        if sections.get('cover_page', True):
-            html += self._create_cover_page(
-                title="Multi-Sample Comparison Report",
-                subtitle=f"Hydraulic Conductivity Analysis - {len(datasets)} Samples",
-                metadata=metadata
-            )
-
-        html += f"""
             <h1>Multi-Sample Comparison Report</h1>
 
             {self._format_metadata_section(metadata)}
