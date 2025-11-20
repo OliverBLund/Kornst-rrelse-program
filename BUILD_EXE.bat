@@ -6,18 +6,20 @@ echo Grain Size Analysis - Build Script
 echo ==========================================
 echo.
 
-REM Check if version parameter is provided
+REM Get version number (from parameter or prompt)
 if "%~1"=="" (
-    echo ERROR: Version number required!
+    echo No version specified. Please enter a version number.
+    echo Examples: 1.0.0, 1.2.3, 2.0.0-beta
     echo.
-    echo Usage: BUILD_EXE.bat [version]
-    echo Example: BUILD_EXE.bat 1.0.0
-    echo.
-    pause
-    exit /b 1
+    set /p VERSION="Enter version number: "
+    if "!VERSION!"=="" (
+        echo ERROR: Version number cannot be empty!
+        pause
+        exit /b 1
+    )
+) else (
+    set VERSION=%~1
 )
-
-set VERSION=%~1
 set RELEASE_DIR=releases\v%VERSION%
 set APP_NAME=GrainSizeAnalysis
 set ENTRY_SCRIPT=Program\main.py
