@@ -32,6 +32,9 @@ MANIFEST
 *.manifest
 *.spec
 
+# Build releases (versioned builds from BUILD_EXE.bat)
+releases/
+
 # Installer logs
 pip-log.txt
 pip-delete-this-directory.txt

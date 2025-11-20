@@ -1,34 +1,144 @@
 @echo off
-setlocal
-REM Quick launcher for the Grain Size Analysis build system
+setlocal ENABLEDELAYEDEXPANSION
 
 echo ==========================================
-echo Grain Size Analysis - Build Launcher
+echo Grain Size Analysis - Build Script
 echo ==========================================
 echo.
 
-if not exist "build_system" (
-    echo ERROR: build_system folder not found!
-    echo Make sure you are running this from the project root.
+REM Check if version parameter is provided
+if "%~1"=="" (
+    echo ERROR: Version number required!
+    echo.
+    echo Usage: BUILD_EXE.bat [version]
+    echo Example: BUILD_EXE.bat 1.0.0
+    echo.
     pause
     exit /b 1
 )
 
-echo Opening build menu...
+set VERSION=%~1
+set RELEASE_DIR=releases\v%VERSION%
+set APP_NAME=GrainSizeAnalysis
+set ENTRY_SCRIPT=Program\main.py
+
+echo Build Configuration:
+echo   Version: %VERSION%
+echo   Output:  %RELEASE_DIR%
+echo   App:     %APP_NAME%
 echo.
 
-pushd build_system
-call build.bat
-set BUILD_ERROR=%ERRORLEVEL%
-popd
-
-if NOT "%BUILD_ERROR%"=="0" (
-    echo.
-    echo Build encountered an error! (code %BUILD_ERROR%)
+REM Check if Python is available
+python --version >NUL 2>&1
+if ERRORLEVEL 1 (
+    echo ERROR: Python 3 is not installed or not in PATH.
+    echo Please install Python 3.8 or newer.
     pause
-    exit /b %BUILD_ERROR%
+    exit /b 1
+)
+
+REM Check if entry script exists
+if not exist "%ENTRY_SCRIPT%" (
+    echo ERROR: Entry script not found: %ENTRY_SCRIPT%
+    pause
+    exit /b 1
+)
+
+REM Check if version already exists
+if exist "%RELEASE_DIR%" (
+    echo.
+    echo WARNING: Version %VERSION% already exists in %RELEASE_DIR%
+    echo This will overwrite the existing build.
+    set /p CONTINUE="Continue? (y/n): "
+    if /i not "!CONTINUE!"=="y" (
+        echo Build cancelled.
+        pause
+        exit /b 0
+    )
+    echo.
+)
+
+REM Ensure PyInstaller is installed
+echo [1/4] Checking PyInstaller...
+python -c "import PyInstaller" 2>NUL
+if ERRORLEVEL 1 (
+    echo PyInstaller not found. Installing...
+    python -m pip install PyInstaller>=6.0.0
+    if ERRORLEVEL 1 (
+        echo ERROR: Failed to install PyInstaller
+        pause
+        exit /b 1
+    )
+)
+echo PyInstaller ready.
+echo.
+
+REM Create release directory
+echo [2/4] Creating release directory...
+if not exist "%RELEASE_DIR%" mkdir "%RELEASE_DIR%"
+echo.
+
+REM Build with PyInstaller
+echo [3/4] Building executable...
+echo This may take a few minutes...
+echo.
+
+python -m PyInstaller ^
+    "%ENTRY_SCRIPT%" ^
+    --name "%APP_NAME%" ^
+    --distpath "%RELEASE_DIR%\dist" ^
+    --workpath "%RELEASE_DIR%\build" ^
+    --specpath "%RELEASE_DIR%" ^
+    --onedir ^
+    --noconsole ^
+    --noconfirm ^
+    --paths "Program" ^
+    --add-data "Program\help_content;Program\help_content" ^
+    --add-data "docs;docs" ^
+    --add-data "test_data;Program\test_data" ^
+    --hidden-import "matplotlib.backends.backend_qt5agg" ^
+    --hidden-import "matplotlib.backends.backend_qtagg"
+
+if ERRORLEVEL 1 (
+    echo.
+    echo ERROR: Build failed! See messages above.
+    pause
+    exit /b 1
 )
 
 echo.
-echo Build workflow completed.
+echo Build completed successfully!
+echo.
+
+REM Create ZIP archive
+echo [4/4] Creating ZIP archive...
+
+set ZIP_NAME=%APP_NAME%_v%VERSION%.zip
+set ZIP_PATH=%RELEASE_DIR%\%ZIP_NAME%
+
+REM Use PowerShell to create ZIP (built into Windows 10+)
+powershell -command "Compress-Archive -Path '%RELEASE_DIR%\dist\%APP_NAME%' -DestinationPath '%ZIP_PATH%' -Force"
+
+if ERRORLEVEL 1 (
+    echo WARNING: Failed to create ZIP archive.
+    echo You can manually zip the folder: %RELEASE_DIR%\dist\%APP_NAME%
+) else (
+    echo ZIP archive created: %ZIP_PATH%
+)
+
+echo.
+echo ==========================================
+echo BUILD COMPLETE!
+echo ==========================================
+echo.
+echo Version:    %VERSION%
+echo Location:   %RELEASE_DIR%\dist\%APP_NAME%
+echo Archive:    %ZIP_PATH%
+echo.
+echo The executable and all dependencies are in:
+echo   %RELEASE_DIR%\dist\%APP_NAME%\
+echo.
+echo The ZIP archive is ready for distribution:
+echo   %ZIP_PATH%
+echo.
 pause
