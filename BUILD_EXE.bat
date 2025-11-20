@@ -56,16 +56,50 @@ if not exist "%ENTRY_SCRIPT%" (
     exit /b 1
 )
 
-REM Check if version already exists
-if exist "%RELEASE_DIR%\%APP_NAME%.exe" (
+REM Check if version already exists and try to clean up
+if exist "%RELEASE_DIR%\%APP_NAME%" (
     echo.
-    echo WARNING: Version %VERSION% already exists!
-    echo This will overwrite: %RELEASE_DIR%\%APP_NAME%.exe
-    set /p CONTINUE="Continue? (y/n): "
+    echo WARNING: Build folder already exists: %RELEASE_DIR%\%APP_NAME%
+    echo This may be from a previous build.
+    echo.
+    echo Please ensure:
+    echo   1. The .exe is NOT running
+    echo   2. No File Explorer windows are open in that folder
+    echo   3. Close any programs that might be using those files
+    echo.
+    set /p CONTINUE="Continue and try to overwrite? (y/n): "
     if /i not "!CONTINUE!"=="y" (
         echo Build cancelled.
         pause
         exit /b 0
+    )
+
+    echo Attempting to clean up old build folder...
+    rmdir /s /q "%RELEASE_DIR%\%APP_NAME%" 2>nul
+
+    REM Check if cleanup succeeded
+    if exist "%RELEASE_DIR%\%APP_NAME%" (
+        echo.
+        echo ERROR: Could not delete old build folder - files may be locked!
+        echo Please manually delete: %RELEASE_DIR%\%APP_NAME%
+        echo Or use a different version number.
+        pause
+        exit /b 1
+    )
+    echo Old build folder cleaned up successfully.
+    echo.
+)
+
+if exist "%RELEASE_DIR%\%APP_NAME%.exe" (
+    echo.
+    echo WARNING: Single-file .exe already exists: %RELEASE_DIR%\%APP_NAME%.exe
+    echo Attempting to delete...
+    del /f "%RELEASE_DIR%\%APP_NAME%.exe" 2>nul
+    if exist "%RELEASE_DIR%\%APP_NAME%.exe" (
+        echo ERROR: Could not delete old .exe - it may be running!
+        echo Please close the program or use a different version number.
+        pause
+        exit /b 1
     )
     echo.
 )
