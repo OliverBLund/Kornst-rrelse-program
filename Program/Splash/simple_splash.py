@@ -1,5 +1,5 @@
 """
-Professional splash screen for DataMerger startup - using the same beautiful layout as QGIS launch splash.
+Professional splash screen for Grain Size Analysis startup.
 """
 
 from PyQt6.QtCore import Qt, QTimer, QPropertyAnimation, QEasingCurve
@@ -11,8 +11,8 @@ import os
 
 
 class SimpleSplash(QWidget):
-    """Professional splash screen for DataMerger startup using the same layout as QGIS launch splash."""
-    
+    """Professional splash screen for Grain Size Analysis startup."""
+
     def __init__(self, backdrop_path: Optional[str] = None, parent=None):
         super().__init__(parent)
         self.setWindowFlags(
@@ -23,7 +23,7 @@ class SimpleSplash(QWidget):
         self.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground, False)
         self.setFixedSize(560, 320)
         self._corner_radius = 14
-        
+
         # Add subtle gradient overlay
         gradient_overlay = QWidget(self)
         gradient_overlay.setObjectName("gradientOverlay")
@@ -37,18 +37,18 @@ class SimpleSplash(QWidget):
         )
         gradient_overlay.lower()  # Put behind other widgets
         gradient_overlay.resize(self.size())  # Ensure it covers the full widget
-        
+
         # Window shadow
         shadow = QGraphicsDropShadowEffect(self)
         shadow.setBlurRadius(30)
         shadow.setOffset(0, 8)
         shadow.setColor(QColor(0, 0, 0, 80))
         self.setGraphicsEffect(shadow)
-        
+
         # Add subtle particle effect
         self.particles = []
         self._setup_particles()
-        
+
         # Backdrop (optional) - try provided path, else discover common assets
         self.backdrop_pixmap = None
         if not backdrop_path:
@@ -71,10 +71,10 @@ class SimpleSplash(QWidget):
             img = QImage(backdrop_path)
             self.backdrop_pixmap = QPixmap.fromImage(img) if not img.isNull() else None
         self._backdrop_path = backdrop_path
-        
+
         self._setup_ui()
         self._center_on_screen()
-        
+
         self.fade_animation = None
         self.fade_in = QPropertyAnimation(self, b"windowOpacity")
         self.fade_in.setDuration(200)
@@ -82,19 +82,19 @@ class SimpleSplash(QWidget):
         self.fade_in.setEndValue(1.0)
         self.fade_in.setEasingCurve(QEasingCurve.Type.OutQuad)
         self.setWindowOpacity(1.0)
-        
+
         # Start particle animation
         self.particle_timer = QTimer(self)
         self.particle_timer.setInterval(50)  # 20 FPS
         self.particle_timer.timeout.connect(self._update_particles)
         self.particle_timer.start()
-    
+
     def _center_on_screen(self):
         screen = QApplication.primaryScreen()
         if screen:
             geo = screen.availableGeometry()
             self.move(geo.center().x() - self.width() // 2, geo.center().y() - self.height() // 2)
-    
+
     def paintEvent(self, event):
         painter = QPainter(self)
         painter.setRenderHint(QPainter.RenderHint.Antialiasing)
@@ -102,39 +102,39 @@ class SimpleSplash(QWidget):
         path = QPainterPath()
         path.addRoundedRect(QRectF(self.rect()), self._corner_radius, self._corner_radius)
         painter.setClipPath(path)
-        
+
         if self.backdrop_pixmap:
             # Draw backdrop prominently
             scaled = self.backdrop_pixmap.scaled(self.size(), Qt.AspectRatioMode.KeepAspectRatioByExpanding, Qt.TransformationMode.SmoothTransformation)
             x = (self.width() - scaled.width()) // 2
             y = (self.height() - scaled.height()) // 2
             painter.drawPixmap(x, y, scaled)
-            
+
             # Add a subtle darkening vignette to improve text contrast
             vignette = QLinearGradient(0, 0, self.width(), self.height())
             vignette.setColorAt(0.0, QColor(0, 0, 0, 30))
             vignette.setColorAt(1.0, QColor(0, 0, 0, 60))
             painter.fillRect(self.rect(), QBrush(vignette))
-        
-        # Blue gradient overlay (different from QGIS green→orange)
+
+        # Earth/sand gradient overlay (grain size analysis theme)
         grad = QLinearGradient(0, 0, self.width(), self.height())
-        grad.setColorAt(0.0, QColor(33, 150, 243, 160))   # blue-500 ~ alpha 160
-        grad.setColorAt(1.0, QColor(30, 58, 138, 160))    # blue-900 ~ alpha 160
+        grad.setColorAt(0.0, QColor(139, 115, 85, 160))   # Tan/brown
+        grad.setColorAt(1.0, QColor(107, 142, 35, 160))    # Olive green (geotechnical)
         painter.fillRect(self.rect(), QBrush(grad))
-        
+
         # Border uses the exact same radius for perfect alignment
         painter.setPen(QPen(QColor(255, 255, 255, 220), 2))
         painter.setBrush(Qt.BrushStyle.NoBrush)
         painter.drawRoundedRect(self.rect().adjusted(1, 1, -1, -1), self._corner_radius, self._corner_radius)
-        
+
         # Draw particles
         self._draw_particles(painter)
-    
+
     def _setup_ui(self):
         layout = QVBoxLayout(self)
         layout.setContentsMargins(32, 32, 32, 24)
         layout.setSpacing(16)
-        
+
         # Glass card container for logo/title/subtitles
         card = QWidget(self)
         card.setObjectName("glassCard")
@@ -154,7 +154,7 @@ class SimpleSplash(QWidget):
         card_shadow.setOffset(0, 6)
         card_shadow.setColor(QColor(0, 0, 0, 120))
         card.setGraphicsEffect(card_shadow)
-        
+
         # Add highlight line to card
         highlight = QWidget(card)
         highlight.setObjectName("cardHighlight")
@@ -173,26 +173,26 @@ class SimpleSplash(QWidget):
 
         header = QVBoxLayout()
         header.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        
+
         # Logo - different from QGIS (data/analytics themed)
         #logo = QLabel("📊")
         #logo.setAlignment(Qt.AlignmentFlag.AlignCenter)
         #logo.setFont(QFont("Segoe UI Emoji", 56))
         #logo.setStyleSheet("color: white;")
         #card_layout.addWidget(logo, 0, Qt.AlignmentFlag.AlignCenter)
-        
-        # Title - DataMerger instead of DataPal
-        title = QLabel("DataMerger")
+
+        # Title
+        title = QLabel("Grain Size Analysis")
         title.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        f = QFont("Segoe UI", 36, QFont.Weight.Bold)
+        f = QFont("Calibri", 34, QFont.Weight.Bold)
         f.setLetterSpacing(QFont.SpacingType.AbsoluteSpacing, 1)
         title.setFont(f)
         title.setObjectName("titleLabel")
         title.setStyleSheet(
             "QLabel#titleLabel {"
             "  color: white;"
-            "  font-size: 42px;"
-            "  font-weight: 800;"
+            "  font-size: 38px;"
+            "  font-weight: 700;"
             "  letter-spacing: 1px;"
             "}"
         )
@@ -203,19 +203,19 @@ class SimpleSplash(QWidget):
         title_shadow.setColor(QColor(0, 0, 0, 140))
         title.setGraphicsEffect(title_shadow)
         card_layout.addWidget(title, 0, Qt.AlignmentFlag.AlignCenter)
-        
-        # Subtitle - different from QGIS
-        subtitle_main = QLabel("Advanced Data Analysis & Visualization")
+
+        # Subtitle
+        subtitle_main = QLabel("Hydraulic Conductivity Calculator")
         subtitle_main.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        sub_font = QFont("Segoe UI", 14)
-        sub_font.setItalic(True)
+        sub_font = QFont("Calibri", 14)
+        sub_font.setItalic(False)
         subtitle_main.setFont(sub_font)
         subtitle_main.setObjectName("subtitleMain")
         subtitle_main.setStyleSheet(
             "QLabel#subtitleMain {"
-            "  color: rgba(255,255,255,0.92);"
-            "  font-size: 18px;"
-            "  font-style: italic;"
+            "  color: rgba(255,255,255,0.95);"
+            "  font-size: 16px;"
+            "  font-style: normal;"
             "  font-weight: 600;"
             "}"
         )
@@ -243,11 +243,11 @@ class SimpleSplash(QWidget):
         sub2_shadow.setColor(QColor(0, 0, 0, 110))
         subtitle_startup.setGraphicsEffect(sub2_shadow)
         card_layout.addWidget(subtitle_startup, 0, Qt.AlignmentFlag.AlignCenter)
-        
+
         header.addWidget(card)
         layout.addLayout(header)
         layout.addStretch(1)
-        
+
         # Detail label for status descriptions beneath the bar
         self.detail_label = QLabel("")
         self.detail_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
@@ -265,23 +265,23 @@ class SimpleSplash(QWidget):
         # Animated progress bar with text inside
         self.progress_bar = _AnimatedAccentBar(self)
         layout.addWidget(self.progress_bar)
-        
-        # Add powered by footer - different branding
-        footer = QLabel("Powered by DataMerger • Advanced Analytics Platform")
+
+        # Add footer
+        footer = QLabel("Geotechnical Engineering • Soil Mechanics Analysis")
         footer.setObjectName("footerLabel")
         footer.setAlignment(Qt.AlignmentFlag.AlignCenter)
         footer.setStyleSheet(
             "#footerLabel {"
-            "  color: rgba(255, 255, 255, 0.7);"
+            "  color: rgba(255, 255, 255, 0.75);"
             "  font-size: 10px;"
             "  font-weight: 400;"
             "  letter-spacing: 0.5px;"
             "}"
         )
         layout.addWidget(footer)
-        
+
         self.progress_bar.start()
-    
+
     def resizeEvent(self, event):
         super().resizeEvent(event)
         # Apply a rounded mask to the whole window to guarantee rounded corners
@@ -289,12 +289,12 @@ class SimpleSplash(QWidget):
         path.addRoundedRect(QRectF(self.rect()), self._corner_radius, self._corner_radius)
         region = QRegion(path.toFillPolygon().toPolygon())
         self.setMask(region)
-        
+
         # Ensure gradient overlay covers the full widget
         gradient_overlay = self.findChild(QWidget, "gradientOverlay")
         if gradient_overlay:
             gradient_overlay.resize(self.size())
-    
+
     def set_backdrop(self, image_path: str):
         """Dynamically set/update the backdrop image and repaint."""
         try:
@@ -306,7 +306,7 @@ class SimpleSplash(QWidget):
                     self.update()
         except Exception:
             pass
-    
+
     def set_message(self, message: str):
         try:
             display = message or ""
@@ -334,7 +334,7 @@ class SimpleSplash(QWidget):
     def finish_with_fade(self, message: str = "Ready!"):
         self.set_message(message)
         QTimer.singleShot(300, self._start_fade_out)
-    
+
     def _start_fade_out(self):
         try:
             if self.fade_animation:
@@ -348,7 +348,7 @@ class SimpleSplash(QWidget):
             self.fade_animation.start()
         except Exception:
             self.close()
-    
+
     def _setup_particles(self):
         """Initialize floating particles for background effect."""
         import random
@@ -363,7 +363,7 @@ class SimpleSplash(QWidget):
                 'life': random.uniform(0, 1.0)
             }
             self.particles.append(particle)
-    
+
     def _update_particles(self):
         """Update particle positions and life."""
         import random
@@ -371,7 +371,7 @@ class SimpleSplash(QWidget):
             # Update position
             particle['x'] += particle['vx']
             particle['y'] += particle['vy']
-            
+
             # Wrap around edges
             if particle['x'] < -10:
                 particle['x'] = self.width() + 10
@@ -381,28 +381,28 @@ class SimpleSplash(QWidget):
                 particle['y'] = self.height() + 10
             elif particle['y'] > self.height() + 10:
                 particle['y'] = -10
-            
+
             # Update life cycle
             particle['life'] += 0.01
             if particle['life'] > 1.0:
                 particle['life'] = 0.0
                 particle['alpha'] = random.uniform(0.3, 0.7)
-        
+
         self.update()
-    
+
     def _draw_particles(self, painter):
         """Draw floating particles."""
         for particle in self.particles:
             # Calculate alpha based on life cycle
             alpha = particle['alpha'] * (0.5 + 0.5 * abs(particle['life'] - 0.5))
-            
+
             # Draw particle
             painter.setPen(Qt.PenStyle.NoPen)
             painter.setBrush(QBrush(QColor(255, 255, 255, int(alpha * 255))))
             painter.drawEllipse(
-                int(particle['x']), 
-                int(particle['y']), 
-                int(particle['size']), 
+                int(particle['x']),
+                int(particle['y']),
+                int(particle['size']),
                 int(particle['size'])
             )
 
@@ -471,7 +471,7 @@ class _AnimatedAccentBar(QWidget):
         painter.setPen(QPen(QColor(255, 255, 255, 220)))
         font = QFont("Segoe UI", 12, QFont.Weight.Bold)
         painter.setFont(font)
-        
+
         # Center the text
         text_rect = rect
         painter.drawText(text_rect, Qt.AlignmentFlag.AlignCenter, self._text)

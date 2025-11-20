@@ -213,9 +213,7 @@ marimo/_static/
 marimo/_lsp/
 __marimo__/
 
-#Data files
+# Data files
 *.csv
 *.xls
-*.cpython-312.pyc
-Program/gui/__pycache__/column_mapper.cpython-312.pyc
 Grainsize K/HydrogeoSieveXL2-3-2.xlsm

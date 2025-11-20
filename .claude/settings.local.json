@@ -1,0 +1,10 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(if not exist resources mkdir resources)",
+      "Bash(del background.png)"
+    ],
+    "deny": [],
+    "ask": []
+  }
+}

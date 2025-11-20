@@ -10,11 +10,11 @@ K = a × D₁₀^b × D₅₀^c
 
 <p>Where:</p>
 <ul>
-    <li><strong>K</strong> = Hydraulic conductivity (cm/s)</li>
-    <li><strong>a</strong> = 24.5 (coefficient)</li>
-    <li><strong>b</strong> = 0.783 (exponent for D₁₀)</li>
-    <li><strong>c</strong> = 1.177 (exponent for D₅₀)</li>
-    <li><strong>D₁₀, D₅₀</strong> = Grain sizes in cm</li>
+ <li><strong>K</strong> = Hydraulic conductivity (cm/s)</li>
+ <li><strong>a</strong> = 24.5 (coefficient)</li>
+ <li><strong>b</strong> = 0.783 (exponent for D₁₀)</li>
+ <li><strong>c</strong> = 1.177 (exponent for D₅₀)</li>
+ <li><strong>D₁₀, D₅₀</strong> = Grain sizes in cm</li>
 </ul>
 
 <div class="note">
@@ -24,29 +24,29 @@ K = a × D₁₀^b × D₅₀^c
 <h2>Required Parameters</h2>
 
 <ul>
-    <li>D₁₀ (10% passing)</li>
-    <li>D₅₀ (50% passing - median grain size)</li>
+ <li>D₁₀ (10% passing)</li>
+ <li>D₅₀ (50% passing - median grain size)</li>
 </ul>
 
 <h2>Applicability</h2>
 
 <table>
-    <tr>
-        <th>Parameter</th>
-        <th>Range</th>
-    </tr>
-    <tr>
-        <td>D₁₀</td>
-        <td>0.01 - 1.0 mm</td>
-    </tr>
-    <tr>
-        <td>D₅₀</td>
-        <td>0.05 - 2.0 mm</td>
-    </tr>
-    <tr>
-        <td>Soil type</td>
-        <td>Sands and gravels</td>
-    </tr>
+ <tr>
+ <th>Parameter</th>
+ <th>Range</th>
+ </tr>
+ <tr>
+ <td>D₁₀</td>
+ <td>0.01 - 1.0 mm</td>
+ </tr>
+ <tr>
+ <td>D₅₀</td>
+ <td>0.05 - 2.0 mm</td>
+ </tr>
+ <tr>
+ <td>Soil type</td>
+ <td>Sands and gravels</td>
+ </tr>
 </table>
 
 <h2>Example Calculation</h2>
@@ -70,55 +70,55 @@ K = 11.2 m/d
 <h2>Advantages</h2>
 
 <ul>
-    <li>Uses both D₁₀ and D₅₀ (more information than D₁₀-only methods)</li>
-    <li>Based on actual permeability measurements</li>
-    <li>Good accuracy for sands and gravels</li>
-    <li>Simple power-law formula</li>
-    <li>Well-documented validation</li>
+ <li>Uses both D₁₀ and D₅₀ (more information than D₁₀-only methods)</li>
+ <li>Based on actual permeability measurements</li>
+ <li>Good accuracy for sands and gravels</li>
+ <li>Simple power-law formula</li>
+ <li>Well-documented validation</li>
 </ul>
 
 <h2>Limitations</h2>
 
 <ul>
-    <li>No temperature correction (assumes 20°C)</li>
-    <li>Requires reliable D₅₀ determination</li>
-    <li>Limited to unconsolidated granular materials</li>
-    <li>Not suitable for fine-grained soils</li>
+ <li>No temperature correction (assumes 20°C)</li>
+ <li>Requires reliable D₅₀ determination</li>
+ <li>Limited to unconsolidated granular materials</li>
+ <li>Not suitable for fine-grained soils</li>
 </ul>
 
 <h2>Comparison with Other Methods</h2>
 
 <table>
-    <tr>
-        <th>Method</th>
-        <th>Parameters Used</th>
-        <th>Temperature Correction</th>
-    </tr>
-    <tr>
-        <td>Hazen</td>
-        <td>D₁₀ only</td>
-        <td>Yes</td>
-    </tr>
-    <tr>
-        <td>Shepherd</td>
-        <td>D₁₀ + D₅₀</td>
-        <td>No</td>
-    </tr>
-    <tr>
-        <td>Beyer</td>
-        <td>D₁₀ + Cu</td>
-        <td>Yes</td>
-    </tr>
+ <tr>
+ <th>Method</th>
+ <th>Parameters Used</th>
+ <th>Temperature Correction</th>
+ </tr>
+ <tr>
+ <td>Hazen</td>
+ <td>D₁₀ only</td>
+ <td>Yes</td>
+ </tr>
+ <tr>
+ <td>Shepherd</td>
+ <td>D₁₀ + D₅₀</td>
+ <td>No</td>
+ </tr>
+ <tr>
+ <td>Beyer</td>
+ <td>D₁₀ + Cu</td>
+ <td>Yes</td>
+ </tr>
 </table>
 
 <h2>When to Use</h2>
 
 <p>Shepherd is recommended when:</p>
 <ul>
-    <li>Working with sands and gravels</li>
-    <li>D₅₀ is reliably determined</li>
-    <li>Grain size distribution is complete</li>
-    <li>Temperature is close to standard conditions (15-25°C)</li>
+ <li>Working with sands and gravels</li>
+ <li>D₅₀ is reliably determined</li>
+ <li>Grain size distribution is complete</li>
+ <li>Temperature is close to standard conditions (15-25°C)</li>
 </ul>
 
 <h2>Reference</h2>
@@ -128,7 +128,7 @@ K = 11.2 m/d
 <h2>See Also</h2>
 
 <ul>
-    <li><a href="method_hazen.html">Hazen Method</a> - D₁₀-only approach</li>
-    <li><a href="method_alyamani_sen.html">Alyamani-Sen Method</a> - Uses intercepts with D₅₀</li>
-    <li><a href="methods_overview.html">All Methods</a></li>
+ <li><a href="method_hazen.html">Hazen Method</a> - D₁₀-only approach</li>
+ <li><a href="method_alyamani_sen.html">Alyamani-Sen Method</a> - Uses intercepts with D₅₀</li>
+ <li><a href="methods_overview.html">All Methods</a></li>
 </ul>

@@ -10,11 +10,11 @@ K = (ρg/μ) × (1/C) × (n³/(1-n)²) × d²ₑ
 
 <p>Where:</p>
 <ul>
-    <li><strong>K</strong> = Hydraulic conductivity (cm/s)</li>
-    <li><strong>ρg/μ</strong> = Fluid property term (temperature-dependent)</li>
-    <li><strong>C</strong> = Kozeny constant ≈ 5.0 (dimensionless)</li>
-    <li><strong>n</strong> = Porosity (dimensionless)</li>
-    <li><strong>dₑ</strong> = Effective (harmonic mean) grain diameter (cm)</li>
+ <li><strong>K</strong> = Hydraulic conductivity (cm/s)</li>
+ <li><strong>ρg/μ</strong> = Fluid property term (temperature-dependent)</li>
+ <li><strong>C</strong> = Kozeny constant ≈ 5.0 (dimensionless)</li>
+ <li><strong>n</strong> = Porosity (dimensionless)</li>
+ <li><strong>dₑ</strong> = Effective (harmonic mean) grain diameter (cm)</li>
 </ul>
 
 <h2>Harmonic Mean Diameter</h2>
@@ -27,8 +27,8 @@ K = (ρg/μ) × (1/C) × (n³/(1-n)²) × d²ₑ
 
 <p>Where:</p>
 <ul>
-    <li><strong>Δmᵢ</strong> = Mass fraction retained between sieves</li>
-    <li><strong>dᵢ</strong> = Mean diameter of size fraction</li>
+ <li><strong>Δmᵢ</strong> = Mass fraction retained between sieves</li>
+ <li><strong>dᵢ</strong> = Mean diameter of size fraction</li>
 </ul>
 
 <p>This accounts for the entire grain size distribution, not just a single percentile.</p>
@@ -36,51 +36,51 @@ K = (ρg/μ) × (1/C) × (n³/(1-n)²) × d²ₑ
 <h2>Required Parameters</h2>
 
 <table>
-    <tr>
-        <th>Parameter</th>
-        <th>Symbol</th>
-        <th>How Obtained</th>
-    </tr>
-    <tr>
-        <td>Grain size distribution</td>
-        <td>Full curve</td>
-        <td>Complete sieve analysis required</td>
-    </tr>
-    <tr>
-        <td>Porosity</td>
-        <td>n</td>
-        <td>Calculated or measured</td>
-    </tr>
-    <tr>
-        <td>Temperature</td>
-        <td>T</td>
-        <td>User-specified</td>
-    </tr>
+ <tr>
+ <th>Parameter</th>
+ <th>Symbol</th>
+ <th>How Obtained</th>
+ </tr>
+ <tr>
+ <td>Grain size distribution</td>
+ <td>Full curve</td>
+ <td>Complete sieve analysis required</td>
+ </tr>
+ <tr>
+ <td>Porosity</td>
+ <td>n</td>
+ <td>Calculated or measured</td>
+ </tr>
+ <tr>
+ <td>Temperature</td>
+ <td>T</td>
+ <td>User-specified</td>
+ </tr>
 </table>
 
 <h2>Applicability Ranges</h2>
 
 <table>
-    <tr>
-        <th>Parameter</th>
-        <th>Range</th>
-        <th>Notes</th>
-    </tr>
-    <tr>
-        <td>Grain size</td>
-        <td>0.05 - 20 mm</td>
-        <td>Silts to gravels</td>
-    </tr>
-    <tr>
-        <td>Porosity</td>
-        <td>0.25 - 0.70</td>
-        <td>Wide range acceptable</td>
-    </tr>
-    <tr>
-        <td>Soil type</td>
-        <td>Any granular</td>
-        <td>Not for pure clays</td>
-    </tr>
+ <tr>
+ <th>Parameter</th>
+ <th>Range</th>
+ <th>Notes</th>
+ </tr>
+ <tr>
+ <td>Grain size</td>
+ <td>0.05 - 20 mm</td>
+ <td>Silts to gravels</td>
+ </tr>
+ <tr>
+ <td>Porosity</td>
+ <td>0.25 - 0.70</td>
+ <td>Wide range acceptable</td>
+ </tr>
+ <tr>
+ <td>Soil type</td>
+ <td>Any granular</td>
+ <td>Not for pure clays</td>
+ </tr>
 </table>
 
 <div class="note">
@@ -92,10 +92,10 @@ K = (ρg/μ) × (1/C) × (n³/(1-n)²) × d²ₑ
 <p>The Kozeny-Carman equation is derived from:</p>
 
 <ol>
-    <li><strong>Darcy's Law:</strong> K = k × (ρg/μ)</li>
-    <li><strong>Capillary model:</strong> Soil treated as bundle of capillary tubes</li>
-    <li><strong>Specific surface:</strong> Flow resistance related to particle surface area</li>
-    <li><strong>Tortuosity:</strong> Actual flow path length > straight-line distance</li>
+ <li><strong>Darcy's Law:</strong> K = k × (ρg/μ)</li>
+ <li><strong>Capillary model:</strong> Soil treated as bundle of capillary tubes</li>
+ <li><strong>Specific surface:</strong> Flow resistance related to particle surface area</li>
+ <li><strong>Tortuosity:</strong> Actual flow path length > straight-line distance</li>
 </ol>
 
 <p>This theoretical foundation makes it more robust than purely empirical correlations.</p>
@@ -104,13 +104,13 @@ K = (ρg/μ) × (1/C) × (n³/(1-n)²) × d²ₑ
 
 <h3>Given Data</h3>
 <pre><code>Grain Size Distribution:
-Sieve (mm)  | % Passing | % Retained
-2.0         | 100       | 0
-1.0         | 85        | 15
-0.5         | 60        | 25
-0.25        | 30        | 30
-0.125       | 10        | 20
-< 0.125     | 0         | 10
+Sieve (mm) | % Passing | % Retained
+2.0 | 100 | 0
+1.0 | 85 | 15
+0.5 | 60 | 25
+0.25 | 30 | 30
+0.125 | 10 | 20
+< 0.125 | 0 | 10
 
 Porosity = 0.35
 Temperature = 20°C
@@ -134,8 +134,8 @@ dₑ = 0.256 mm = 0.0256 cm
 
 <h3>Step 2: Calculate Porosity Term</h3>
 <pre><code>n³/(1-n)² = (0.35)³/(1-0.35)²
-          = 0.0429 / 0.4225
-          = 0.102
+ = 0.0429 / 0.4225
+ = 0.102
 </code></pre>
 
 <h3>Step 3: Apply Formula</h3>
@@ -152,26 +152,26 @@ K = 11.2 m/d
 <p>The value C ≈ 5.0 is theoretical. In practice:</p>
 
 <table>
-    <tr>
-        <th>Soil Type</th>
-        <th>Typical C Value</th>
-    </tr>
-    <tr>
-        <td>Uniform spheres (theoretical)</td>
-        <td>5.0</td>
-    </tr>
-    <tr>
-        <td>Uniform sands</td>
-        <td>5.0 - 6.0</td>
-    </tr>
-    <tr>
-        <td>Well-graded sands</td>
-        <td>6.0 - 8.0</td>
-    </tr>
-    <tr>
-        <td>Angular particles</td>
-        <td>7.0 - 10.0</td>
-    </tr>
+ <tr>
+ <th>Soil Type</th>
+ <th>Typical C Value</th>
+ </tr>
+ <tr>
+ <td>Uniform spheres (theoretical)</td>
+ <td>5.0</td>
+ </tr>
+ <tr>
+ <td>Uniform sands</td>
+ <td>5.0 - 6.0</td>
+ </tr>
+ <tr>
+ <td>Well-graded sands</td>
+ <td>6.0 - 8.0</td>
+ </tr>
+ <tr>
+ <td>Angular particles</td>
+ <td>7.0 - 10.0</td>
+ </tr>
 </table>
 
 <div class="note">
@@ -182,76 +182,76 @@ K = 11.2 m/d
 
 <p>The application's implementation has been validated against:</p>
 <ul>
-    <li>Excel VBA reference: 0.0-0.6% error</li>
-    <li>Theoretical predictions: Excellent agreement</li>
-    <li>Laboratory measurements: Good correlation (within factor of 2-3)</li>
+ <li>Excel VBA reference: 0.0-0.6% error</li>
+ <li>Theoretical predictions: Excellent agreement</li>
+ <li>Laboratory measurements: Good correlation (within factor of 2-3)</li>
 </ul>
 
 <h2>Advantages</h2>
 
 <ul>
-    <li>Theoretical foundation (not purely empirical)</li>
-    <li>Uses full grain size distribution</li>
-    <li>Explicitly accounts for porosity</li>
-    <li>Wide applicability range</li>
-    <li>Good for complex grain size distributions</li>
-    <li>Temperature correction included</li>
+ <li>Theoretical foundation (not purely empirical)</li>
+ <li>Uses full grain size distribution</li>
+ <li>Explicitly accounts for porosity</li>
+ <li>Wide applicability range</li>
+ <li>Good for complex grain size distributions</li>
+ <li>Temperature correction included</li>
 </ul>
 
 <h2>Limitations</h2>
 
 <ul>
-    <li>Requires complete sieve analysis</li>
-    <li>Sensitive to porosity value</li>
-    <li>Kozeny constant may vary with soil type</li>
-    <li>Assumes uniform pore structure</li>
-    <li>Less accurate for very fine or very coarse materials</li>
+ <li>Requires complete sieve analysis</li>
+ <li>Sensitive to porosity value</li>
+ <li>Kozeny constant may vary with soil type</li>
+ <li>Assumes uniform pore structure</li>
+ <li>Less accurate for very fine or very coarse materials</li>
 </ul>
 
 <h2>Comparison with Empirical Methods</h2>
 
 <table>
-    <tr>
-        <th>Aspect</th>
-        <th>Kozeny-Carman</th>
-        <th>Hazen/Terzaghi</th>
-    </tr>
-    <tr>
-        <td>Basis</td>
-        <td>Theoretical</td>
-        <td>Empirical</td>
-    </tr>
-    <tr>
-        <td>Input</td>
-        <td>Full distribution</td>
-        <td>Single percentile (D₁₀)</td>
-    </tr>
-    <tr>
-        <td>Porosity</td>
-        <td>Explicit</td>
-        <td>Implicit or absent</td>
-    </tr>
-    <tr>
-        <td>Applicability</td>
-        <td>Broad</td>
-        <td>Uniform sands</td>
-    </tr>
+ <tr>
+ <th>Aspect</th>
+ <th>Kozeny-Carman</th>
+ <th>Hazen/Terzaghi</th>
+ </tr>
+ <tr>
+ <td>Basis</td>
+ <td>Theoretical</td>
+ <td>Empirical</td>
+ </tr>
+ <tr>
+ <td>Input</td>
+ <td>Full distribution</td>
+ <td>Single percentile (D₁₀)</td>
+ </tr>
+ <tr>
+ <td>Porosity</td>
+ <td>Explicit</td>
+ <td>Implicit or absent</td>
+ </tr>
+ <tr>
+ <td>Applicability</td>
+ <td>Broad</td>
+ <td>Uniform sands</td>
+ </tr>
 </table>
 
 <h2>Historical Background</h2>
 
 <p>Developed independently by:</p>
 <ul>
-    <li><strong>Josef Kozeny (1927):</strong> Austrian researcher who derived the theoretical relationship</li>
-    <li><strong>Philip C. Carman (1937):</strong> British chemist who extended and validated the theory</li>
+ <li><strong>Josef Kozeny (1927):</strong> Austrian researcher who derived the theoretical relationship</li>
+ <li><strong>Philip C. Carman (1937):</strong> British chemist who extended and validated the theory</li>
 </ul>
 
 <p>The combined Kozeny-Carman equation has become one of the most important theoretical tools in porous media flow analysis.</p>
 
 <h3>References</h3>
 <ul>
-    <li>Kozeny, J. (1927). "Über kapillare Leitung des Wassers im Boden." Sitzungsber Akad. Wiss., Wien, 136(2a): 271-306.</li>
-    <li>Carman, P.C. (1937). "Fluid flow through granular beds." Transactions of the Institution of Chemical Engineers, 15: 150-166.</li>
+ <li>Kozeny, J. (1927). "Über kapillare Leitung des Wassers im Boden." Sitzungsber Akad. Wiss., Wien, 136(2a): 271-306.</li>
+ <li>Carman, P.C. (1937). "Fluid flow through granular beds." Transactions of the Institution of Chemical Engineers, 15: 150-166.</li>
 </ul>
 
 <h2>Practical Tips</h2>
@@ -259,19 +259,19 @@ K = 11.2 m/d
 <div class="tip">
 <strong>For Best Results:</strong>
 <ul>
-    <li>Use complete sieve analysis (at least 6-8 sieves)</li>
-    <li>Measure porosity if possible (don't rely on calculation)</li>
-    <li>Compare with simpler methods (Hazen, Terzaghi) for validation</li>
-    <li>Consider adjusting C if results consistently over/under-predict</li>
-    <li>Use for well-graded soils where D₁₀ methods may be less accurate</li>
+ <li>Use complete sieve analysis (at least 6-8 sieves)</li>
+ <li>Measure porosity if possible (don't rely on calculation)</li>
+ <li>Compare with simpler methods (Hazen, Terzaghi) for validation</li>
+ <li>Consider adjusting C if results consistently over/under-predict</li>
+ <li>Use for well-graded soils where D₁₀ methods may be less accurate</li>
 </ul>
 </div>
 
 <h2>See Also</h2>
 
 <ul>
-    <li><a href="method_hazen.html">Hazen Method</a> - Simpler D₁₀-based approach</li>
-    <li><a href="method_kruger.html">Kruger Method</a> - Alternative harmonic mean approach</li>
-    <li><a href="parameters.html">Parameters Guide</a> - Porosity calculation details</li>
-    <li><a href="methods_overview.html">All Methods</a> - Method comparison</li>
+ <li><a href="method_hazen.html">Hazen Method</a> - Simpler D₁₀-based approach</li>
+ <li><a href="method_kruger.html">Kruger Method</a> - Alternative harmonic mean approach</li>
+ <li><a href="parameters.html">Parameters Guide</a> - Porosity calculation details</li>
+ <li><a href="methods_overview.html">All Methods</a> - Method comparison</li>
 </ul>

@@ -34,8 +34,8 @@ DEFAULT_CONFIG: Dict[str, Any] = {
     ],
     "data": [
         {"source": "../Program/help_content", "target": "Program/help_content"},
-        {"source": "../docs", "target": "docs"},
-        {"source": "../test_data", "target": "Program/test_data"}
+        {"source": "../Program/resources", "target": "Program/resources"},
+        {"source": "../docs", "target": "docs"}
     ],
     "hidden_imports": [
         "matplotlib.backends.backend_qt5agg",
@@ -129,12 +129,56 @@ class BuildEnvironment:
             return path_str
 
     def _remove_path(self, path: Path) -> None:
+        """Remove a file or directory, handling Windows long paths."""
         if not path.exists():
             return
+
         if path.is_file():
             path.unlink()
         else:
-            shutil.rmtree(path)
+            # On Windows, use extended-length path syntax to handle paths > 260 chars
+            if os.name == "nt":
+                resolved_path = path.resolve()
+                path_str = str(resolved_path)
+
+                # Add \\?\ prefix if not already present and path is long
+                if len(path_str) > 200 and not path_str.startswith("\\\\?\\"):
+                    # Convert to extended-length path syntax
+                    if path_str.startswith("\\\\"):
+                        # UNC path: \\server\share -> \\?\UNC\server\share
+                        path_str = "\\\\?\\UNC\\" + path_str[2:]
+                    else:
+                        # Regular path: C:\... -> \\?\C:\...
+                        path_str = "\\\\?\\" + path_str
+
+                # Use rmdir /s /q for robustness with long paths and locked files
+                try:
+                    # Use Windows rmdir command which handles locked files better
+                    result = subprocess.run(
+                        ["cmd", "/c", "rmdir", "/s", "/q", f'"{path_str}"'],
+                        shell=True,
+                        capture_output=True,
+                        text=True
+                    )
+
+                    # If path no longer exists, we're done
+                    if not path.exists():
+                        return
+
+                    # If path still exists, wait briefly and try shutil with ignore_errors
+                    import time
+                    time.sleep(0.5)
+
+                    if path.exists():
+                        print(f"[WARN] Using fallback removal for {path.name}")
+                        shutil.rmtree(path, ignore_errors=True)
+
+                except Exception as e:
+                    # If all else fails, use ignore_errors to skip locked files
+                    print(f"[WARN] Error removing {path}: {e}")
+                    shutil.rmtree(path, ignore_errors=True)
+            else:
+                shutil.rmtree(path)
 
     # ------------------------------------------------------------------ #
     # High-level operations
@@ -227,6 +271,19 @@ class BuildEnvironment:
             if not source.exists():
                 print(f"[WARN] Data source missing, skipping: {source}")
                 continue
+
+            # Check if this mapping should exclude certain patterns
+            exclude_patterns = mapping.get("exclude", [])
+
+            # If there are exclusions and source is a directory, we need special handling
+            if exclude_patterns and source.is_dir():
+                # For test_data, we want to exclude the 'test' subdirectory with results
+                # PyInstaller doesn't support exclude patterns in --add-data, so we skip
+                # directories that need filtering and warn the user
+                print(f"[INFO] Skipping {source} due to exclude patterns: {exclude_patterns}")
+                print(f"       Users can load test data from the repository directly")
+                continue
+
             target = mapping.get("target", ".")
             add_data_arg = f"{self._to_cmd_path(source)}{os.pathsep}{target}"
             command.extend(["--add-data", add_data_arg])

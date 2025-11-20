@@ -76,8 +76,8 @@ class PorosityDialog(QDialog):
         header.setSectionResizeMode(2, QHeaderView.ResizeMode.ResizeToContents)  # Current
         header.setSectionResizeMode(3, QHeaderView.ResizeMode.Fixed)  # Edit field
         header.setSectionResizeMode(4, QHeaderView.ResizeMode.Fixed)  # Actions
-        self.porosity_table.setColumnWidth(3, 120)
-        self.porosity_table.setColumnWidth(4, 150)
+        self.porosity_table.setColumnWidth(3, 180)  # Increased from 120 for better input widget display
+        self.porosity_table.setColumnWidth(4, 200)  # Increased from 150 for button spacing
 
         self.porosity_table.setStyleSheet("""
             QTableWidget {
@@ -436,6 +436,13 @@ class ControlPanel(QFrame):
         self.validation_errors = []  # Track validation issues
         self.data_loader = DataLoader()  # Data loading engine
         self.file_statuses = {}  # Track file loading status: 'pending', 'auto', 'failed', 'review', 'loaded'
+
+        # Temperature change debouncing timer
+        self.temp_change_timer = QTimer()
+        self.temp_change_timer.setSingleShot(True)
+        self.temp_change_timer.timeout.connect(self._apply_temperature_change)
+        self.pending_temperature = None
+
         self.setup_ui()
         self.setup_validation()
 
@@ -690,10 +697,8 @@ class ControlPanel(QFrame):
         samples_layout.addLayout(batch_buttons_layout)
         samples_layout.addWidget(self.sample_info_label)
 
-        # === ANALYSIS PARAMETERS (Collapsible) ===
+        # === ANALYSIS PARAMETERS ===
         params_group = QGroupBox("⚙️ Analysis Parameters")
-        params_group.setCheckable(True)
-        params_group.setChecked(False)  # Collapsed by default
         params_layout = QVBoxLayout(params_group)
         params_layout.setSpacing(8)
         params_layout.setContentsMargins(8, 8, 8, 8)
@@ -704,7 +709,7 @@ class ControlPanel(QFrame):
         global_params_label.setStyleSheet("color: #5d4e37; margin-bottom: 6px;")
         params_layout.addWidget(global_params_label)
 
-        # Temperature for viscosity calculations
+        # Temperature for density and viscosity calculations
         temp_layout = QHBoxLayout()
         temp_layout.setSpacing(8)
         temp_label = QLabel("🌡️ Temperature:")
@@ -714,7 +719,7 @@ class ControlPanel(QFrame):
         self.temp_spinbox.setRange(0, 50)
         self.temp_spinbox.setValue(20)
         self.temp_spinbox.setSuffix(" °C")
-        self.temp_spinbox.setToolTip("Temperature affects water viscosity in calculations")
+        self.temp_spinbox.setToolTip("Temperature affects both water density and viscosity in K-value calculations (Vuković & Soro, 1992)")
         self.temp_spinbox.setMinimumWidth(80)
         temp_layout.addWidget(self.temp_spinbox)
         temp_layout.addStretch()
@@ -763,13 +768,46 @@ class ControlPanel(QFrame):
 
         params_layout.addLayout(porosity_settings_layout)
 
-        # Optional: auto-export toggle used by analysis_complete()
-        params_layout.addSpacing(6)
-        self.export_results_cb = QCheckBox("📤 Auto-export results after analysis")
-        self.export_results_cb.setChecked(False)
-        self.export_results_cb.setToolTip("If enabled, results will be exported automatically after analysis")
-        self.export_results_cb.setStyleSheet("font-size: 10px; color: #5d4e37;")
-        params_layout.addWidget(self.export_results_cb)
+        # === SENSITIVITY ANALYSIS (Placeholder for future feature) ===
+        params_layout.addSpacing(10)
+        sensitivity_separator = QFrame()
+        sensitivity_separator.setFrameShape(QFrame.Shape.HLine)
+        sensitivity_separator.setStyleSheet("background-color: #d4c4a8; max-height: 1px;")
+        params_layout.addWidget(sensitivity_separator)
+
+        sensitivity_label = QLabel("<b>🔬 Sensitivity Analysis</b>")
+        sensitivity_label.setStyleSheet("font-size: 10px; color: #5d4e37; margin-top: 6px;")
+        params_layout.addWidget(sensitivity_label)
+
+        # Placeholder button
+        self.sensitivity_analysis_btn = QPushButton("📊 Run Sensitivity Analysis (Coming Soon)")
+        self.sensitivity_analysis_btn.setToolTip(
+            "Future feature: Run K calculations with varying temperature and porosity ranges\n"
+            "to analyze parameter sensitivity\n\n"
+            "Click to learn more about this planned feature"
+        )
+        self.sensitivity_analysis_btn.setStyleSheet("""
+            QPushButton {
+                background-color: #e8e8e5;
+                color: #777777;
+                padding: 6px 12px;
+                font-size: 9px;
+                border-radius: 4px;
+            }
+            QPushButton:hover {
+                background-color: #ddbf94;
+                color: #5d4e37;
+            }
+        """)
+        self.sensitivity_analysis_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.sensitivity_analysis_btn.clicked.connect(self.show_sensitivity_placeholder)
+        params_layout.addWidget(self.sensitivity_analysis_btn)
+
+        # Info text
+        sensitivity_info = QLabel("Analyze how temperature and porosity variations affect K values")
+        sensitivity_info.setStyleSheet("font-size: 8px; color: #999999; font-style: italic; margin-left: 4px;")
+        sensitivity_info.setWordWrap(True)
+        params_layout.addWidget(sensitivity_info)
 
         # Progress Bar
         self.progress_bar = QProgressBar()
@@ -783,6 +821,101 @@ class ControlPanel(QFrame):
         layout.addWidget(self.progress_label)
         layout.addWidget(self.progress_bar)
         layout.addStretch()  # Push everything to top
+
+        # === HELP & ABOUT SECTION (Bottom of sidebar) ===
+        help_about_group = QGroupBox("ℹ️ Help & Information")
+        help_about_layout = QVBoxLayout(help_about_group)
+        help_about_layout.setSpacing(6)
+        help_about_layout.setContentsMargins(8, 8, 8, 8)
+
+        # Help and About buttons
+        buttons_layout = QHBoxLayout()
+        buttons_layout.setSpacing(8)
+
+        help_btn = QPushButton("📚 Help")
+        help_btn.setToolTip("Open help documentation (F1)")
+        help_btn.setStyleSheet("""
+            QPushButton {
+                background-color: #6b8e23;
+                color: white;
+                padding: 6px 12px;
+                font-weight: bold;
+                border-radius: 4px;
+            }
+            QPushButton:hover {
+                background-color: #7fa02d;
+            }
+        """)
+        help_btn.clicked.connect(self.show_help)
+
+        about_btn = QPushButton("ℹ️ About")
+        about_btn.setToolTip("About this application")
+        about_btn.setStyleSheet("""
+            QPushButton {
+                background-color: #d2b48c;
+                padding: 6px 12px;
+                font-weight: bold;
+                border-radius: 4px;
+            }
+            QPushButton:hover {
+                background-color: #ddbf94;
+            }
+        """)
+        about_btn.clicked.connect(self.show_about)
+
+        buttons_layout.addWidget(help_btn)
+        buttons_layout.addWidget(about_btn)
+        help_about_layout.addLayout(buttons_layout)
+
+        layout.addWidget(help_about_group)
+
+        # === PROGRAM INFORMATION (Logo + Text footer-style) ===
+        # Add a subtle separator line
+        separator = QFrame()
+        separator.setFrameShape(QFrame.Shape.HLine)
+        separator.setStyleSheet("background-color: #d4c4a8; max-height: 1px;")
+        layout.addWidget(separator)
+
+        # Horizontal layout: Logo on left, text on right
+        info_container = QWidget()
+        info_container.setStyleSheet("background-color: transparent;")
+        info_h_layout = QHBoxLayout(info_container)
+        info_h_layout.setSpacing(15)
+        info_h_layout.setContentsMargins(15, 12, 15, 12)
+
+        # Logo on the left
+        logo_label = QLabel()
+        import os
+        logo_path = os.path.join(os.path.dirname(os.path.dirname(__file__)), "resources", "DTU_logo.png")
+
+        if os.path.exists(logo_path):
+            from PyQt6.QtGui import QPixmap
+            pixmap = QPixmap(logo_path)
+            # Scale logo to appropriate size (e.g., 60x60)
+            scaled_pixmap = pixmap.scaled(60, 60, Qt.AspectRatioMode.KeepAspectRatio, Qt.TransformationMode.SmoothTransformation)
+            logo_label.setPixmap(scaled_pixmap)
+        else:
+            # Placeholder if no logo exists
+            logo_label.setText("🔬")
+            logo_label.setStyleSheet("font-size: 40px;")
+
+        logo_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        logo_label.setFixedSize(60, 60)
+        info_h_layout.addWidget(logo_label)
+
+        # Text on the right (single label with word wrap)
+        info_text = QLabel(
+            "<b>Grain Size Analysis v0.9.0-beta</b><br>"
+            "Developed by Oliver Lund, DTU Environment, with supervision from Prof. Poul Løgstrup Bjerg.<br>"
+            "Program inspired by the work of J.F. Devlin and his HydroSieveXL Excel program.<br>"
+            "January 2025"
+        )
+        info_text.setStyleSheet("font-size: 10px; color: #666666; line-height: 1.4;")
+        info_text.setWordWrap(True)
+        info_text.setAlignment(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter)
+        info_h_layout.addWidget(info_text, 1)  # Stretch factor 1 to take remaining space
+
+        layout.addWidget(info_container)
 
     def add_files(self):
         """Add multiple files for batch processing"""
@@ -997,6 +1130,15 @@ class ControlPanel(QFrame):
         if sample_name in self.loaded_samples:
             dataset = self.loaded_samples[sample_name]['data']
 
+            d10 = dataset.get_d10()
+            d30 = dataset.get_d30()
+            d50 = dataset.get_d50()
+            d60 = dataset.get_d60()
+            cu = dataset.get_uniformity_coefficient()
+
+            def fmt(value, fmt_str):
+                return format(value, fmt_str) if value is not None else 'N/A'
+
             # Create comprehensive file information
             info_text = f"""File Analysis Report
 {'='*40}
@@ -1012,13 +1154,13 @@ Grain Size Range:
   Smallest: {min(dataset.particle_sizes):.3f} mm
 
 Characteristic Sizes:
-  D10: {dataset.get_d10():.3f if dataset.get_d10() else 'N/A'} mm (Used by: Hazen, Terzaghi, Beyer, etc.)
-  D30: {dataset.get_d30():.3f if dataset.get_d30() else 'N/A'} mm (Used for uniformity calculations)
-  D50: {dataset.get_d50():.3f if dataset.get_d50() else 'N/A'} mm (Median grain size)
-  D60: {dataset.get_d60():.3f if dataset.get_d60() else 'N/A'} mm (Used for uniformity coefficient)
+  D10: {fmt(d10, '.3f')} mm (Used by: Hazen, Terzaghi, Beyer, etc.)
+  D30: {fmt(d30, '.3f')} mm (Used for uniformity calculations)
+  D50: {fmt(d50, '.3f')} mm (Median grain size)
+  D60: {fmt(d60, '.3f')} mm (Used for uniformity coefficient)
 
 Soil Classification: {dataset.classify_soil()}
-Uniformity Coefficient (Cu): {dataset.get_uniformity_coefficient():.2f if dataset.get_uniformity_coefficient() else 'N/A'}
+Uniformity Coefficient (Cu): {fmt(cu, '.2f')}
 
 {'='*40}
 {dataset.get_detailed_validation_report()}"""
@@ -1142,6 +1284,28 @@ Uniformity Coefficient (Cu): {dataset.get_uniformity_coefficient():.2f if datase
                 status_item.setData(Qt.ItemDataRole.UserRole, status)
                 status_item.setToolTip(self.get_status_tooltip(status))
                 break
+
+    def register_external_file(self, file_path: str, dataset):
+        """Register a file that was loaded externally (e.g., from recent files/sessions)"""
+        # Check if already in the list
+        if file_path in self.file_statuses:
+            # Already tracked, just update status
+            self.file_statuses[file_path] = 'loaded'
+            self.update_file_in_table(file_path, 'loaded')
+        else:
+            # New file, add to tracking
+            self.file_statuses[file_path] = 'loaded'
+            sample_name = self.extract_sample_name(file_path)
+            self.loaded_samples[sample_name] = {
+                'file_path': file_path,
+                'data': dataset,
+                'status': 'loaded'
+            }
+            # Add to table
+            self.add_file_to_table(file_path, 'loaded')
+
+        self.update_ui_state()
+        self.sample_info_label.setText(f"{len(self.loaded_samples)} sample(s) loaded")
 
     def load_auto_files(self):
         """Load all successfully auto-processed files into the analysis"""
@@ -1379,7 +1543,7 @@ Uniformity Coefficient (Cu): {dataset.get_uniformity_coefficient():.2f if datase
     # ================================
 
     def validate_temperature(self, value):
-        """Validate temperature input"""
+        """Validate temperature input and recalculate K values"""
         self.validation_errors = [err for err in self.validation_errors if 'Temperature' not in err]
 
         if value < 0 or value > 50:
@@ -1391,14 +1555,48 @@ Uniformity Coefficient (Cu): {dataset.get_uniformity_coefficient():.2f if datase
 
         self.update_validation_display()
 
+        # Debounce: only recalculate after user stops changing value for 500ms
+        self.pending_temperature = value
+        self.temp_change_timer.stop()
+        self.temp_change_timer.start(500)  # 500ms delay
+
+    def _apply_temperature_change(self):
+        """Apply temperature change after debounce delay"""
+        if self.pending_temperature is not None:
+            self.on_temperature_changed(self.pending_temperature)
+            self.pending_temperature = None
+
+    def on_temperature_changed(self, new_temperature):
+        """Handle temperature change and recalculate K values for all datasets"""
+        if hasattr(self.parent(), 'dataset_tabs_widget'):
+            main_window = self.parent()
+            recalculated_count = 0
+
+            for i in range(main_window.dataset_tabs_widget.count()):
+                tab = main_window.dataset_tabs_widget.widget(i)
+                if hasattr(tab, 'dataset') and hasattr(tab, 'calculate_k_values'):
+                    # Update temperature in the dataset tab
+                    tab.temperature = new_temperature
+                    tab.dataset.temperature = new_temperature
+
+                    # Recalculate K-values if they've been calculated before
+                    if hasattr(tab, 'current_results') and tab.current_results:
+                        tab.calculate_k_values()
+                        recalculated_count += 1
+
+            if recalculated_count > 0:
+                self.sample_info_label.setText(f"🌡️ Temperature updated to {new_temperature}°C - {recalculated_count} dataset(s) recalculated")
+
     def on_porosity_mode_changed(self, mode_text):
-        """Handle porosity calculation mode change"""
+        """Handle porosity calculation mode change and recalculate K values"""
         # Determine which calculation mode is selected
         use_simple_formula = "Simple Formula" in mode_text
 
         # Update all loaded datasets to use the new porosity calculation mode
         if hasattr(self.parent(), 'dataset_tabs_widget'):
             main_window = self.parent()
+            recalculated_count = 0
+
             for i in range(main_window.dataset_tabs_widget.count()):
                 tab = main_window.dataset_tabs_widget.widget(i)
                 if hasattr(tab, 'dataset') and hasattr(tab.dataset, 'recalculate_porosity'):
@@ -1410,12 +1608,23 @@ Uniformity Coefficient (Cu): {dataset.get_uniformity_coefficient():.2f if datase
 
                     if new_porosity is not None:
                         tab.dataset.current_porosity = new_porosity
+                        tab.porosity = new_porosity
+
                         # Update the dataset tab UI if it has porosity controls
                         if hasattr(tab, 'update_grain_statistics'):
                             tab.update_grain_statistics()
-                        if hasattr(tab, 'porosity_edit'):
-                            tab.porosity_edit.setText(f"{new_porosity:.3f}")
-                            tab.porosity = new_porosity
+                        if hasattr(tab, 'statistics_tab'):
+                            tab.statistics_tab.porosity = new_porosity
+                            tab.statistics_tab.update_display()
+
+                        # Recalculate K-values if they've been calculated before
+                        if hasattr(tab, 'calculate_k_values') and hasattr(tab, 'current_results') and tab.current_results:
+                            tab.calculate_k_values()
+                            recalculated_count += 1
+
+            if recalculated_count > 0:
+                mode_name = "Simple Formula" if use_simple_formula else "Urumovic Polynomial"
+                self.sample_info_label.setText(f"🕳️ Porosity mode changed to {mode_name} - {recalculated_count} dataset(s) recalculated")
 
     def validate_porosity_mode(self):
         """Validate porosity calculation mode selection"""
@@ -1602,3 +1811,73 @@ Uniformity Coefficient (Cu): {dataset.get_uniformity_coefficient():.2f if datase
         time.sleep(0.5)  # Brief pause to show completion
         self.progress_bar.setVisible(False)
         self.progress_label.setVisible(False)
+
+    # ================================
+    # SENSITIVITY ANALYSIS
+    # ================================
+
+    def show_sensitivity_placeholder(self):
+        """Show placeholder dialog for sensitivity analysis feature"""
+        QMessageBox.information(
+            self,
+            "Sensitivity Analysis - Coming Soon",
+            """<h3>🔬 Sensitivity Analysis Feature</h3>
+
+            <p>This feature will allow you to:</p>
+            <ul>
+            <li><b>Vary Temperature:</b> Run calculations across a range of temperatures (e.g., 5-30°C)</li>
+            <li><b>Vary Porosity:</b> Test different porosity values or calculation methods</li>
+            <li><b>Multiple Parameters:</b> Combine temperature and porosity variations</li>
+            <li><b>Visualize Results:</b> See how K values change with parameter variations</li>
+            <li><b>Export Analysis:</b> Export sensitivity analysis results to Excel/CSV</li>
+            </ul>
+
+            <p><b>Use Cases:</b></p>
+            <ul>
+            <li>Understand uncertainty in K calculations due to parameter variations</li>
+            <li>Identify which parameters have the most influence on results</li>
+            <li>Generate confidence intervals for K value predictions</li>
+            </ul>
+
+            <p><i>This feature is planned for a future release.</i></p>"""
+        )
+
+    # ================================
+    # HELP & ABOUT METHODS
+    # ================================
+
+    def show_help(self):
+        """Show comprehensive help dialog"""
+        from gui.help_dialog import HelpDialog
+        help_dialog = HelpDialog(self.parent())
+        help_dialog.exec()
+
+    def show_about(self):
+        """Show about dialog"""
+        QMessageBox.about(self, "About Grain Size Analysis Tool",
+            """<h3>Grain Size Analysis Tool</h3>
+            <p><b>Version 0.9.0-beta</b></p>
+            <p>Released: January 2025</p>
+
+            <p>A comprehensive tool for grain size distribution analysis
+            and hydraulic conductivity calculations.</p>
+
+            <p><b>Features:</b></p>
+            <ul>
+            <li>Multiple dataset management</li>
+            <li>14+ K-calculation methods</li>
+            <li>Interactive plots with controls</li>
+            <li>Dataset comparison tools</li>
+            <li>Statistical analysis</li>
+            <li>Comprehensive help system</li>
+            </ul>
+
+            <p><b>Developed by:</b><br>
+            Oliver Lund<br>
+            DTU Environment</p>
+
+            <p><b>Supervised by:</b><br>
+            Prof. Poul Løgstrup Bjerg</p>
+
+            <p>© 2025 - DTU Environment</p>
+            <p><em>Press F1 for detailed help topics</em></p>""")

@@ -176,19 +176,19 @@ class HelpDialog(QDialog):
     def load_help_topics(self):
         """Populate the navigation tree with help topics"""
         # Getting Started
-        getting_started = QTreeWidgetItem(self.nav_tree, ["🚀 Getting Started"])
+        getting_started = QTreeWidgetItem(self.nav_tree, ["Getting Started"])
         getting_started.setData(0, Qt.ItemDataRole.UserRole, "getting_started.html")
 
         # File Formats
-        file_formats = QTreeWidgetItem(self.nav_tree, ["📄 File Formats"])
+        file_formats = QTreeWidgetItem(self.nav_tree, ["File Formats"])
         file_formats.setData(0, Qt.ItemDataRole.UserRole, "file_formats.html")
 
         # Parameters Guide
-        parameters = QTreeWidgetItem(self.nav_tree, ["⚙️ Parameters Guide"])
+        parameters = QTreeWidgetItem(self.nav_tree, ["Parameters Guide"])
         parameters.setData(0, Qt.ItemDataRole.UserRole, "parameters.html")
 
         # K-Calculation Methods
-        methods = QTreeWidgetItem(self.nav_tree, ["🔬 K-Calculation Methods"])
+        methods = QTreeWidgetItem(self.nav_tree, ["K-Calculation Methods"])
         methods.setData(0, Qt.ItemDataRole.UserRole, "methods_overview.html")
 
         # Add individual methods as children
@@ -216,15 +216,15 @@ class HelpDialog(QDialog):
         methods.setExpanded(False)  # Collapsed by default
 
         # Understanding Results
-        results = QTreeWidgetItem(self.nav_tree, ["📊 Understanding Results"])
+        results = QTreeWidgetItem(self.nav_tree, ["Understanding Results"])
         results.setData(0, Qt.ItemDataRole.UserRole, "results.html")
 
         # Troubleshooting
-        troubleshooting = QTreeWidgetItem(self.nav_tree, ["🔧 Troubleshooting"])
+        troubleshooting = QTreeWidgetItem(self.nav_tree, ["Troubleshooting"])
         troubleshooting.setData(0, Qt.ItemDataRole.UserRole, "troubleshooting.html")
 
         # About
-        about = QTreeWidgetItem(self.nav_tree, ["ℹ️ About & References"])
+        about = QTreeWidgetItem(self.nav_tree, ["About & References"])
         about.setData(0, Qt.ItemDataRole.UserRole, "about.html")
 
         # Select first item

@@ -259,24 +259,7 @@ class DatasetTab(QWidget):
 
         layout.addWidget(results_group)
 
-        # Control buttons
-        button_layout = QHBoxLayout()
-
-        self.recalculate_btn = QPushButton("Recalculate")
-        self.recalculate_btn.setToolTip("Recalculate K-values for all methods")
-        self.recalculate_btn.clicked.connect(self.calculate_k_values)
-        self.recalculate_btn.setMinimumWidth(120)
-
-        self.export_btn = QPushButton("Export Results")
-        self.export_btn.setToolTip("Export calculation results to CSV/Excel")
-        self.export_btn.clicked.connect(self.export_results)
-        self.export_btn.setMinimumWidth(120)
-
-        button_layout.addWidget(self.recalculate_btn)
-        button_layout.addWidget(self.export_btn)
-        button_layout.addStretch()
-
-        layout.addLayout(button_layout)
+        # Buttons removed - calculations are automatic, export is done via Export tab
 
         return widget
 

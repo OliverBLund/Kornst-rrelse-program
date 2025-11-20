@@ -1,5 +1,0 @@
-This is not a CSV file
-It has no grain size data
-Just plain text that will fail to parse
-No numbers, no columns, no structure
-This should definitely trigger the error tab system
