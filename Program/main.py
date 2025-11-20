@@ -8,7 +8,7 @@ from PyQt6.QtWidgets import QApplication
 from PyQt6.QtCore import QTimer
 
 from Splash.simple_splash import SimpleSplash
-from gui.main_window import MainWindow
+# MainWindow imported later to speed up splash appearance
 
 
 def main() -> None:
@@ -18,7 +18,7 @@ def main() -> None:
     app.setOrganizationName("Geotechnical Engineering")
     app.setOrganizationDomain("grainsize.app")
 
-    # Create and show splash screen
+    # Create and show splash screen IMMEDIATELY (before heavy imports)
     splash = SimpleSplash()
     splash.set_message("Initializing Grain Size Analysis...")
     splash.show()
@@ -32,10 +32,13 @@ def main() -> None:
         QTimer.singleShot(100, init_step_2)
 
     def init_step_2():
-        """Create main window"""
+        """Create main window - Import MainWindow HERE (after splash is visible)"""
         try:
             splash.set_message("Building user interface...")
             app.processEvents()
+
+            # Import MainWindow here so splash shows first
+            from gui.main_window import MainWindow
 
             global window
             window = MainWindow()
