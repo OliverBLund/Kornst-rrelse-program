@@ -55,7 +55,19 @@ class WelcomeWidget(QWidget):
 
         # Try to load background image
         import os
-        image_path = os.path.join(os.path.dirname(os.path.dirname(__file__)), "resources", "soil_layers.png")
+        import sys
+
+        # Get resource path (works for both script and PyInstaller bundle)
+        def get_resource_path(relative_path):
+            """Get absolute path to resource, works for dev and for PyInstaller"""
+            try:
+                # PyInstaller creates a temp folder and stores path in _MEIPASS
+                base_path = sys._MEIPASS
+            except AttributeError:
+                base_path = os.path.dirname(os.path.dirname(__file__))
+            return os.path.join(base_path, relative_path)
+
+        image_path = get_resource_path(os.path.join("Program", "resources", "soil_layers.png"))
 
         if os.path.exists(image_path):
             # Load and draw background image (scaled to fit)

@@ -886,7 +886,19 @@ class ControlPanel(QFrame):
         # Logo on the left
         logo_label = QLabel()
         import os
-        logo_path = os.path.join(os.path.dirname(os.path.dirname(__file__)), "resources", "DTU_logo.png")
+        import sys
+
+        # Get resource path (works for both script and PyInstaller bundle)
+        def get_resource_path(relative_path):
+            """Get absolute path to resource, works for dev and for PyInstaller"""
+            try:
+                # PyInstaller creates a temp folder and stores path in _MEIPASS
+                base_path = sys._MEIPASS
+            except AttributeError:
+                base_path = os.path.dirname(os.path.dirname(__file__))
+            return os.path.join(base_path, relative_path)
+
+        logo_path = get_resource_path(os.path.join("Program", "resources", "DTU_logo.png"))
 
         if os.path.exists(logo_path):
             from PyQt6.QtGui import QPixmap
