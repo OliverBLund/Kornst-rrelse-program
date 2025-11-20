@@ -5,10 +5,30 @@ Grain Size Analysis Program - PyQt6 entry point with startup splash screen.
 
 import sys
 from PyQt6.QtWidgets import QApplication
-from PyQt6.QtCore import QTimer
+from PyQt6.QtCore import QTimer, QThread, pyqtSignal
 
 from Splash.simple_splash import SimpleSplash
 # MainWindow imported later to speed up splash appearance
+
+
+class LoaderThread(QThread):
+    """Background thread to load heavy modules without freezing the splash"""
+    finished = pyqtSignal(object)  # Sends the MainWindow class when done
+    progress = pyqtSignal(str)     # Progress messages
+
+    def run(self):
+        """Load MainWindow in background thread"""
+        try:
+            self.progress.emit("Loading analysis modules...")
+
+            # Import MainWindow here (loads matplotlib, numpy, pandas, etc.)
+            from gui.main_window import MainWindow
+
+            self.progress.emit("Building user interface...")
+            self.finished.emit(MainWindow)
+        except Exception as e:
+            self.progress.emit(f"Error: {e}")
+            self.finished.emit(None)
 
 
 def main() -> None:
@@ -24,48 +44,48 @@ def main() -> None:
     splash.show()
     app.processEvents()
 
-    # Initialize main window in stages with progress updates
-    def init_step_1():
-        """Load core modules"""
-        splash.set_message("Loading analysis modules...")
+    # Create loader thread
+    loader = LoaderThread()
+
+    def on_progress(message: str):
+        """Update splash with progress messages"""
+        splash.set_message(message)
         app.processEvents()
-        QTimer.singleShot(100, init_step_2)
 
-    def init_step_2():
-        """Create main window - Import MainWindow HERE (after splash is visible)"""
-        try:
-            splash.set_message("Building user interface...")
-            app.processEvents()
-
-            # Import MainWindow here so splash shows first
-            from gui.main_window import MainWindow
-
-            global window
-            window = MainWindow()
-
-            QTimer.singleShot(100, init_step_3)
-        except Exception as e:
-            splash.set_message("Startup failed")
+    def on_loaded(MainWindow):
+        """Called when MainWindow class is loaded"""
+        if MainWindow is None:
+            splash.set_message("Startup failed!")
             splash.finish_with_fade("Error")
-            raise
+            QTimer.singleShot(2000, app.quit)
+            return
 
-    def init_step_3():
-        """Finalize and show window"""
         splash.set_message("Finalizing...")
         app.processEvents()
 
-        # Show main window
-        window.show()
-        app.processEvents()
+        # Create and show main window
+        try:
+            window = MainWindow()
+            window.show()
+            app.processEvents()
 
-        # Close splash with fade
-        splash.finish_with_fade("Ready!")
+            # Close splash with fade
+            splash.finish_with_fade("Ready!")
 
-        # Keep splash reference to prevent garbage collection during fade
-        window._startup_splash = splash  # type: ignore[attr-defined]
+            # Keep references
+            window._startup_splash = splash  # type: ignore[attr-defined]
+            app._main_window = window  # type: ignore[attr-defined]
+        except Exception as e:
+            splash.set_message(f"Error: {e}")
+            splash.finish_with_fade("Failed")
+            QTimer.singleShot(2000, app.quit)
 
-    # Start initialization sequence
-    QTimer.singleShot(50, init_step_1)
+    # Connect signals
+    loader.progress.connect(on_progress)
+    loader.finished.connect(on_loaded)
+
+    # Start loading in background
+    QTimer.singleShot(100, loader.start)
 
     sys.exit(app.exec())
 

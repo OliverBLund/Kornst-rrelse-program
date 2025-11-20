@@ -21,6 +21,15 @@ if "%~1"=="" (
     set VERSION=%~1
 )
 
+REM Ask for clean build option
+echo.
+echo Build Environment:
+echo   1. Use current Python environment (faster build)
+echo   2. Create clean virtual environment (smaller .exe, recommended)
+echo.
+set /p USE_CLEAN_ENV="Select option (1 or 2) [default: 1]: "
+if "!USE_CLEAN_ENV!"=="" set USE_CLEAN_ENV=1
+
 REM Ask for build mode
 echo.
 echo Build Mode:
@@ -104,28 +113,65 @@ if exist "%RELEASE_DIR%\%APP_NAME%.exe" (
     echo.
 )
 
-REM Ensure PyInstaller is installed
-echo [1/4] Checking PyInstaller...
-python -c "import PyInstaller" 2>NUL
-if ERRORLEVEL 1 (
-    echo PyInstaller not found. Installing...
-    python -m pip install PyInstaller>=6.0.0
+REM Setup build environment
+if "%USE_CLEAN_ENV%"=="2" (
+    echo [1/5] Creating clean virtual environment...
+    set VENV_DIR=%RELEASE_DIR%\venv_temp
+
+    REM Remove old venv if exists
+    if exist "!VENV_DIR!" (
+        rmdir /s /q "!VENV_DIR!" 2>nul
+    )
+
+    REM Create venv
+    python -m venv "!VENV_DIR!"
     if ERRORLEVEL 1 (
-        echo ERROR: Failed to install PyInstaller
+        echo ERROR: Failed to create virtual environment
         pause
         exit /b 1
     )
+
+    echo Installing dependencies from requirements.txt...
+    call "!VENV_DIR!\Scripts\activate.bat"
+    python -m pip install --upgrade pip
+    python -m pip install PyInstaller>=6.0.0
+
+    if exist "requirements.txt" (
+        python -m pip install -r requirements.txt
+    ) else (
+        echo WARNING: requirements.txt not found!
+        pause
+    )
+
+    echo Clean environment ready.
+    echo.
+    set PYTHON_CMD=!VENV_DIR!\Scripts\python.exe
+) else (
+    echo [1/5] Using current Python environment...
+
+    REM Ensure PyInstaller is installed
+    python -c "import PyInstaller" 2>NUL
+    if ERRORLEVEL 1 (
+        echo PyInstaller not found. Installing...
+        python -m pip install PyInstaller>=6.0.0
+        if ERRORLEVEL 1 (
+            echo ERROR: Failed to install PyInstaller
+            pause
+            exit /b 1
+        )
+    )
+    echo Environment ready.
+    echo.
+    set PYTHON_CMD=python
 )
-echo PyInstaller ready.
-echo.
 
 REM Create release directory
-echo [2/4] Creating release directory...
+echo [2/5] Creating release directory...
 if not exist "%RELEASE_DIR%" mkdir "%RELEASE_DIR%"
 echo.
 
 REM Build with PyInstaller
-echo [3/4] Building executable...
+echo [3/5] Building executable...
 echo This may take a few minutes...
 echo.
 
@@ -141,7 +187,7 @@ if "%BUILD_MODE%"=="1" (
     set DIST_SUBDIR=\%APP_NAME%
 )
 
-python -m PyInstaller ^
+%PYTHON_CMD% -m PyInstaller ^
     "%PROJECT_DIR%\%ENTRY_SCRIPT%" ^
     --name "%APP_NAME%" ^
     --distpath "%PROJECT_DIR%\%RELEASE_DIR%" ^
@@ -168,8 +214,17 @@ echo.
 echo Build completed successfully!
 echo.
 
+REM Cleanup temporary venv if created
+if "%USE_CLEAN_ENV%"=="2" (
+    echo [4/5] Cleaning up temporary virtual environment...
+    if exist "%VENV_DIR%" (
+        rmdir /s /q "%VENV_DIR%" 2>nul
+    )
+    echo.
+)
+
 REM Create ZIP archive
-echo [4/4] Creating ZIP archive...
+echo [5/5] Creating ZIP archive...
 
 set ZIP_NAME=%APP_NAME%_%VERSION%.zip
 set ZIP_PATH=%RELEASE_DIR%\%ZIP_NAME%
