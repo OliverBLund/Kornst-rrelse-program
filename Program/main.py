@@ -12,13 +12,6 @@ from gui.main_window import MainWindow
 
 
 def main() -> None:
-    # Close PyInstaller's native splash screen if present
-    try:
-        import pyi_splash  # type: ignore
-        pyi_splash.close()
-    except ImportError:
-        pass  # Not running as PyInstaller bundle
-
     app = QApplication(sys.argv)
     app.setApplicationName("Grain Size Analysis")
     app.setApplicationVersion("1.0.0")

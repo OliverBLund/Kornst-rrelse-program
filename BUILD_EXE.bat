@@ -97,7 +97,6 @@ python -m PyInstaller ^
     --onefile ^
     --noconsole ^
     --noconfirm ^
-    --splash "%PROJECT_DIR%\Program\resources\DTU_logo.png" ^
     --paths "%PROJECT_DIR%\Program" ^
     --add-data "%PROJECT_DIR%\Program\help_content;Program\help_content" ^
     --add-data "%PROJECT_DIR%\Program\resources;Program\resources" ^
