@@ -85,19 +85,22 @@ echo [3/4] Building executable...
 echo This may take a few minutes...
 echo.
 
+REM Use absolute paths to avoid path resolution issues
+set PROJECT_DIR=%CD%
+
 python -m PyInstaller ^
-    "%ENTRY_SCRIPT%" ^
+    "%PROJECT_DIR%\%ENTRY_SCRIPT%" ^
     --name "%APP_NAME%" ^
-    --distpath "%RELEASE_DIR%\dist" ^
-    --workpath "%RELEASE_DIR%\build" ^
-    --specpath "%RELEASE_DIR%" ^
+    --distpath "%PROJECT_DIR%\%RELEASE_DIR%\dist" ^
+    --workpath "%PROJECT_DIR%\%RELEASE_DIR%\build" ^
+    --specpath "%PROJECT_DIR%\%RELEASE_DIR%" ^
     --onedir ^
     --noconsole ^
     --noconfirm ^
-    --paths "Program" ^
-    --add-data "Program\help_content;Program\help_content" ^
-    --add-data "docs;docs" ^
-    --add-data "test_data;Program\test_data" ^
+    --paths "%PROJECT_DIR%\Program" ^
+    --add-data "%PROJECT_DIR%\Program\help_content;Program\help_content" ^
+    --add-data "%PROJECT_DIR%\docs;docs" ^
+    --add-data "%PROJECT_DIR%\test_data;Program\test_data" ^
     --hidden-import "matplotlib.backends.backend_qt5agg" ^
     --hidden-import "matplotlib.backends.backend_qtagg"
 
