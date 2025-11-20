@@ -1,4 +1,4 @@
-<h1> Getting Started</h1>
+<h1>🚀 Getting Started</h1>
 
 <p>Welcome to the Grain Size Analysis application! This guide will help you get started with analyzing your grain size distribution data and calculating hydraulic conductivity values.</p>
 
@@ -7,133 +7,210 @@
 <p>Follow these steps to analyze your first sample:</p>
 
 <ol>
- <li><strong>Add Files</strong> - Click the " Add Files" button in the sidebar</li>
- <li><strong>Select Data</strong> - Choose one or more CSV files containing grain size distribution data</li>
- <li><strong>Review Status</strong> - Files will be automatically loaded and validated</li>
- <li><strong>Calculate K Values</strong> - Click " Calculate All Samples" in the toolbar</li>
- <li><strong>View Results</strong> - Explore the plots, results tables, and statistics</li>
+    <li><strong>Add Files</strong> - Click the "➕ Add Files" button in the sidebar</li>
+    <li><strong>Select Data</strong> - Choose one or more CSV/Excel files containing grain size distribution data</li>
+    <li><strong>Automatic Loading</strong> - Files are automatically loaded, validated, and K-values are calculated</li>
+    <li><strong>View Results</strong> - Explore the plots, results tables, and statistics for each dataset</li>
+    <li><strong>Export</strong> - Use the 💾 Export tab to save your results in multiple formats</li>
 </ol>
+
+<div class="tip">
+<strong>💡 New in v0.9:</strong> Calculations happen automatically! When you load files or change parameters (temperature, porosity), K-values are recalculated automatically.
+</div>
 
 <h2>Understanding the Interface</h2>
 
-<h3>Sidebar (Control Panel)</h3>
-<p>The left sidebar contains:</p>
+<h3>Welcome Screen</h3>
+<p>When you first launch the application, you'll see a welcome screen with:</p>
 <ul>
- <li><strong>Sample Management</strong> - Add, remove, and view loaded files</li>
- <li><strong>File Status</strong> - Monitor loading progress ( Auto-loaded, ️ Needs Review, Failed)</li>
- <li><strong>Batch Actions</strong> - Load all auto-detected files or review failed files</li>
- <li><strong>Analysis Parameters</strong> - Set temperature and porosity calculation mode (collapsible section)</li>
+    <li><strong>📂 Recent Sessions</strong> - Quickly reload previously analyzed datasets</li>
+    <li><strong>📝 What's New</strong> - Latest features and updates</li>
+    <li><strong>📚 Quick Help</strong> - Links to documentation topics</li>
+    <li><strong>🚀 Quick Actions</strong> - Load Files or Load Sample Data buttons</li>
+</ul>
+
+<h3>Sidebar (Control Panel)</h3>
+<p>The left sidebar is scrollable and contains:</p>
+<ul>
+    <li><strong>📁 Sample Management</strong> - Add, remove, and view loaded files</li>
+    <li><strong>File Status Indicators:</strong>
+        <ul>
+            <li>✅ <strong>Auto-loaded</strong> - Successfully loaded and ready</li>
+            <li>⚠️ <strong>Needs Review</strong> - Requires manual column mapping</li>
+            <li>❌ <strong>Failed</strong> - Contains validation errors</li>
+        </ul>
+    </li>
+    <li><strong>Batch Actions</strong> - Load all auto-detected files or review failed files</li>
+    <li><strong>⚙️ Analysis Parameters</strong> - Always visible section with:
+        <ul>
+            <li>Temperature setting (affects viscosity in calculations)</li>
+            <li>Porosity calculation mode (Simple Formula or Urumovic Polynomial)</li>
+            <li>Manage Dataset Porosity button (set individual porosity values)</li>
+            <li>🔬 Sensitivity Analysis placeholder (coming soon)</li>
+        </ul>
+    </li>
+    <li><strong>ℹ️ Help & Information</strong> - Quick access to Help and About dialogs</li>
+    <li><strong>📋 Program Information</strong> - Version, developer, and credits</li>
 </ul>
 
 <h3>Main Tab Area</h3>
-<p>The main area has three top-level tabs:</p>
+<p>The main area has four top-level tabs:</p>
 <ul>
- <li><strong> Individual Samples</strong> - View each dataset with plot, results, and statistics</li>
- <li><strong> Comparison</strong> - Compare multiple datasets side-by-side</li>
- <li><strong> Reports</strong> - Generate professional reports</li>
-</ul>
-
-<h3>Toolbar</h3>
-<p>Quick access to common actions:</p>
-<ul>
- <li><strong> Calculate All Samples</strong> - Run calculations on all loaded datasets</li>
- <li><strong> Export Results</strong> - Save results to CSV/Excel</li>
- <li><strong> Export Plot</strong> - Save current plot as image</li>
- <li><strong> Compare Datasets</strong> - Switch to comparison view</li>
+    <li><strong>📊 Individual Samples</strong> - View each dataset with:
+        <ul>
+            <li>🏠 <strong>Welcome tab</strong> - Returns to welcome screen</li>
+            <li><strong>Dataset tabs</strong> - Each loaded file gets its own tab with Plot, Results, and Stats sub-tabs</li>
+        </ul>
+    </li>
+    <li><strong>🔍 Comparison</strong> - Compare multiple datasets side-by-side</li>
+    <li><strong>📝 Reports</strong> - Generate professional reports</li>
+    <li><strong>💾 Export</strong> - Unified export interface for all results</li>
 </ul>
 
 <h2>Your First Analysis</h2>
 
 <div class="tip">
-<strong> Tip:</strong> Try loading the included <code>test_sample.csv</code> file to familiarize yourself with the interface before analyzing your own data.
+<strong>💡 Tip:</strong> Try loading sample data using the "📊 Load Sample Data" button on the welcome screen to familiarize yourself with the interface.
 </div>
 
 <h3>Step 1: Load Sample Data</h3>
 <ol>
- <li>Click " Add Files" in the control panel</li>
- <li>Select your CSV file(s) containing grain size data</li>
- <li>The application will automatically:
- <ul>
- <li>Detect the file format and column structure</li>
- <li>Validate the data for common issues</li>
- <li>Create a dataset tab for each file</li>
- </ul>
- </li>
- <li>Check the status column:
- <ul>
- <li> <strong>Auto-loaded</strong> - File loaded successfully, ready for analysis</li>
- <li>️ <strong>Needs Review</strong> - Requires manual column mapping</li>
- <li> <strong>Failed</strong> - Contains validation errors</li>
- </ul>
- </li>
+    <li>Click "➕ Add Files" in the control panel</li>
+    <li>Select your CSV or Excel file(s) containing grain size data</li>
+    <li>The application will automatically:
+        <ul>
+            <li>Detect the file format and column structure</li>
+            <li>Validate the data for common issues</li>
+            <li>Create a dataset tab for each file</li>
+            <li><strong>Calculate K-values using all 14+ methods</strong> ✨</li>
+        </ul>
+    </li>
+    <li>Check the status column:
+        <ul>
+            <li>✅ <strong>Auto-loaded</strong> - File loaded successfully, calculations complete</li>
+            <li>⚠️ <strong>Needs Review</strong> - Requires manual column mapping</li>
+            <li>❌ <strong>Failed</strong> - Contains validation errors</li>
+        </ul>
+    </li>
 </ol>
 
 <div class="note">
-<strong> Note:</strong> If files fail to auto-load, right-click on them and select "Map Columns" to manually specify which columns contain particle sizes and percent passing values.
+<strong>📌 Note:</strong> If files fail to auto-load, right-click on them and select "🗺️ Map Columns" to manually specify which columns contain particle sizes and percent passing values.
 </div>
 
 <h3>Step 2: Review Sample Data</h3>
 <ol>
- <li>Click on a dataset tab to view its details</li>
- <li>The "Plot" sub-tab shows the grain size distribution curve</li>
- <li>The "Stats" sub-tab displays:
- <ul>
- <li>Characteristic grain sizes (D10, D30, D50, D60)</li>
- <li>Uniformity coefficient (Cu)</li>
- <li>Soil classification</li>
- <li>Calculated porosity</li>
- </ul>
- </li>
+    <li>Click on a dataset tab to view its details</li>
+    <li>The <strong>"Plot"</strong> sub-tab shows:
+        <ul>
+            <li>Grain size distribution curve</li>
+            <li>Interactive plot controls (zoom, pan, save)</li>
+        </ul>
+    </li>
+    <li>The <strong>"Results"</strong> sub-tab displays:
+        <ul>
+            <li>K values from all methods in multiple units (cm/s, m/s, m/d)</li>
+            <li>Formula used for each method</li>
+            <li>Color-coded status indicators (🟢 OK, 🟡 Warning, 🔴 Error)</li>
+        </ul>
+    </li>
+    <li>The <strong>"Stats"</strong> sub-tab shows:
+        <ul>
+            <li>Characteristic grain sizes (D10, D20, D30, D50, D60)</li>
+            <li>Uniformity coefficient (Cu) and Curvature coefficient (Cc)</li>
+            <li>Soil classification</li>
+            <li>Calculated porosity</li>
+        </ul>
+    </li>
 </ol>
 
 <h3>Step 3: Adjust Parameters (Optional)</h3>
-<p>Click to expand the "️ Analysis Parameters" section in the sidebar:</p>
+<p>The "⚙️ Analysis Parameters" section in the sidebar is always visible. You can adjust:</p>
 <ul>
- <li><strong>Temperature</strong> - Set the water temperature (°C) for viscosity corrections</li>
- <li><strong>Porosity Mode</strong> - Choose between:
- <ul>
- <li><em>Simple Formula</em> - Excel-compatible calculation: n = 0.255 × (1 + 0.83^U)</li>
- <li><em>Urumovic Polynomial</em> - Research-grade calculation based on grain size distribution</li>
- </ul>
- </li>
+    <li><strong>🌡️ Temperature</strong> - Set the water temperature (°C) for density and viscosity corrections
+        <ul>
+            <li>Affects both water density (ρ) and dynamic viscosity (μ) using Vuković & Soro (1992) formulas</li>
+            <li>Changes are applied automatically after 500ms (prevents excessive recalculation)</li>
+            <li>Default: 20°C</li>
+        </ul>
+    </li>
+    <li><strong>🕳️ Porosity Mode</strong> - Choose between:
+        <ul>
+            <li><em>Simple Formula (Excel Compatible)</em> - n = 0.255 × (1 + 0.83^U)</li>
+            <li><em>Urumovic Polynomial (Research)</em> - Complex calculation based on grain size distribution</li>
+        </ul>
+    </li>
+    <li><strong>🕳️ Manage Dataset Porosity</strong> - Set individual porosity values for each dataset
+        <ul>
+            <li>View calculated vs. current porosity</li>
+            <li>Update or reset porosity for specific datasets</li>
+            <li>Changes trigger automatic recalculation</li>
+        </ul>
+    </li>
 </ul>
 
-<h3>Step 4: Calculate K Values</h3>
+<div class="warning">
+<strong>⚡ Automatic Recalculation:</strong> When you change temperature, porosity mode, or dataset porosity, K-values are automatically recalculated for all affected datasets!
+</div>
+
+<h3>Step 4: Interpret Results</h3>
+<p>View results in the "Results" sub-tab with:</p>
+<ul>
+    <li><strong>Color-coded status</strong>:
+        <ul>
+            <li><span style="color: green;">🟢 Green (OK)</span> - Method applicable, reliable result</li>
+            <li><span style="color: orange;">🟡 Yellow (Warning)</span> - Result may be outside method's recommended range</li>
+            <li><span style="color: red;">🔴 Red (Error)</span> - Method not applicable for this sample</li>
+        </ul>
+    </li>
+    <li><strong>Multiple units</strong> - K values shown in cm/s, m/s, and m/d</li>
+    <li><strong>Formula reference</strong> - See the actual equation used</li>
+</ul>
+
+<h3>Step 5: Export Results</h3>
+<p>Switch to the <strong>💾 Export</strong> tab to save your results:</p>
 <ol>
- <li>Click " Calculate All Samples" in the toolbar</li>
- <li>The application will calculate hydraulic conductivity using 14+ empirical methods</li>
- <li>Results appear in the "Results" sub-tab with:
- <ul>
- <li>K values in multiple units (cm/s, m/s, m/d)</li>
- <li>Formula used for each method</li>
- <li>Status indicators (OK, Warning, Error)</li>
- </ul>
- </li>
+    <li>Choose <strong>export scope</strong>: All datasets or Current dataset</li>
+    <li>Select <strong>output directory</strong> using the Browse button</li>
+    <li>Pick <strong>export formats</strong> from the cards on the left:
+        <ul>
+            <li>📊 CSV Long - One row per K-value result</li>
+            <li>📈 CSV Wide - One row per dataset, columns for each method</li>
+            <li>📗 Excel - Multi-sheet workbooks</li>
+            <li>📋 JSON - Structured data export</li>
+            <li>🖼️ PNG - High-resolution plot images</li>
+            <li>🎨 SVG - Vector graphics plots</li>
+            <li>📄 PDF - Publication-ready plots</li>
+        </ul>
+    </li>
+    <li>Review the <strong>file tree preview</strong> showing what will be created</li>
+    <li>Click <strong>🚀 Export Now</strong></li>
 </ol>
 
-<h3>Step 5: Interpret Results</h3>
-<p>Switch to the "Results" tab to view:</p>
+<h2>Interface Features</h2>
+
+<h3>No More Manual Actions!</h3>
+<p>The interface has been streamlined - calculations happen automatically when:</p>
 <ul>
- <li><strong>Color-coded status</strong>:
- <ul>
- <li><span style="color: green;">Green (OK)</span> - Method applicable, reliable result</li>
- <li><span style="color: orange;">Yellow (Warning)</span> - Result may be outside method's recommended range</li>
- <li><span style="color: red;">Red (Error)</span> - Method not applicable for this sample</li>
- </ul>
- </li>
- <li><strong>Statistical summary</strong> - Mean, median, min/max K values across all methods</li>
+    <li>✅ Files are loaded (instant calculation)</li>
+    <li>✅ Temperature is changed (500ms debounce)</li>
+    <li>✅ Porosity mode is changed</li>
+    <li>✅ Individual dataset porosity is updated</li>
 </ul>
+
+<h3>Scrollable Sidebar</h3>
+<p>The control panel sidebar is scrollable, perfect for smaller screens or when you have many options visible.</p>
 
 <h2>Next Steps</h2>
 
 <p>Now that you've completed your first analysis, explore these features:</p>
 <ul>
- <li><a href="file_formats.html">File Formats</a> - Learn about supported data formats</li>
- <li><a href="methods_overview.html">K-Calculation Methods</a> - Understand the different calculation methods</li>
- <li><a href="parameters.html">Parameters Guide</a> - Deep dive into temperature and porosity settings</li>
- <li><a href="results.html">Understanding Results</a> - Interpret K values and comparison plots</li>
+    <li><a href="file_formats.html">📁 File Formats</a> - Learn about supported data formats</li>
+    <li><a href="methods_overview.html">🔬 K-Calculation Methods</a> - Understand the different calculation methods</li>
+    <li><a href="parameters.html">⚙️ Parameters Guide</a> - Deep dive into temperature and porosity settings</li>
+    <li><a href="results.html">📊 Understanding Results</a> - Interpret K values and comparison plots</li>
 </ul>
 
 <div class="tip">
-<strong> Pro Tip:</strong> Right-click on files in the sample table for quick access to options like "Show Info", "Edit Mapping", or "Remove from List".
+<strong>💡 Pro Tip:</strong> Right-click on files in the sample table for quick access to options like "ℹ️ Show Info", "✏️ Edit Mapping", or "🗑️ Remove from List".
 </div>

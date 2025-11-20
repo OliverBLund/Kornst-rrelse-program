@@ -101,9 +101,10 @@ class ComparisonTab(QWidget):
         return self.comparison_plot_widget
 
     def create_comparison_table_tab(self):
-        """Create the enhanced comparison table tab with multiple sections"""
+        """Create the enhanced comparison table tab with 2x2 grid layout"""
         widget = QWidget()
-        layout = QVBoxLayout(widget)
+        from PyQt6.QtWidgets import QGridLayout
+        layout = QGridLayout(widget)
         layout.setSpacing(8)
         layout.setContentsMargins(8, 8, 8, 8)
 
@@ -130,7 +131,6 @@ class ComparisonTab(QWidget):
         self.overview_table = QTableWidget()
         self.overview_table.setStyleSheet(self._get_table_style())
         overview_layout.addWidget(self.overview_table)
-        layout.addWidget(overview_group)
 
         # Section B: Grain Size Parameters
         grain_group = QGroupBox("🔬 Grain Size Parameters")
@@ -155,7 +155,6 @@ class ComparisonTab(QWidget):
         self.grain_comparison_table = QTableWidget()
         self.grain_comparison_table.setStyleSheet(self._get_table_style())
         grain_layout.addWidget(self.grain_comparison_table)
-        layout.addWidget(grain_group)
 
         # Section C: K-values comparison table
         k_group = QGroupBox("💧 Hydraulic Conductivity Comparison")
@@ -180,7 +179,6 @@ class ComparisonTab(QWidget):
         self.k_comparison_table = QTableWidget()
         self.k_comparison_table.setStyleSheet(self._get_table_style())
         k_layout.addWidget(self.k_comparison_table)
-        layout.addWidget(k_group)
 
         # Section D: Permeability Classification
         perm_group = QGroupBox("📊 Permeability Classification")
@@ -205,7 +203,12 @@ class ComparisonTab(QWidget):
         self.permeability_table = QTableWidget()
         self.permeability_table.setStyleSheet(self._get_table_style())
         perm_layout.addWidget(self.permeability_table)
-        layout.addWidget(perm_group)
+
+        # Add all sections to 2x2 grid layout
+        layout.addWidget(overview_group, 0, 0)  # Top-left
+        layout.addWidget(grain_group, 0, 1)     # Top-right
+        layout.addWidget(k_group, 1, 0)         # Bottom-left
+        layout.addWidget(perm_group, 1, 1)      # Bottom-right
 
         return widget
 
@@ -231,7 +234,7 @@ class ComparisonTab(QWidget):
         """
 
     def create_statistical_analysis_tab(self):
-        """Create the enhanced visual statistical analysis tab"""
+        """Create the enhanced visual statistical analysis tab with side-by-side plots"""
         widget = QWidget()
         layout = QVBoxLayout(widget)
         layout.setSpacing(8)
@@ -243,7 +246,11 @@ class ComparisonTab(QWidget):
         from matplotlib.backends.backend_qt5agg import FigureCanvasQTAgg as FigureCanvas
         from matplotlib.figure import Figure
 
-        # Top section: K-Value Distribution Box Plot
+        # Top section: Side-by-side plots
+        plots_layout = QHBoxLayout()
+        plots_layout.setSpacing(8)
+
+        # Left plot: K-Value Distribution Box Plot
         k_dist_group = QGroupBox("💧 K-Value Distribution Analysis")
         k_dist_group.setStyleSheet("""
             QGroupBox {
@@ -263,14 +270,12 @@ class ComparisonTab(QWidget):
         """)
         k_dist_layout = QVBoxLayout(k_dist_group)
 
-        self.k_boxplot_figure = Figure(figsize=(10, 4))
+        self.k_boxplot_figure = Figure(figsize=(6, 5))
         self.k_boxplot_figure.patch.set_facecolor('#fafaf7')
         self.k_boxplot_canvas = FigureCanvas(self.k_boxplot_figure)
         k_dist_layout.addWidget(self.k_boxplot_canvas)
 
-        layout.addWidget(k_dist_group)
-
-        # Middle section: Method Performance Heatmap
+        # Right plot: Method Performance Heatmap
         method_perf_group = QGroupBox("🎯 Method Applicability Matrix")
         method_perf_group.setStyleSheet("""
             QGroupBox {
@@ -290,12 +295,16 @@ class ComparisonTab(QWidget):
         """)
         method_perf_layout = QVBoxLayout(method_perf_group)
 
-        self.method_heatmap_figure = Figure(figsize=(10, 4))
+        self.method_heatmap_figure = Figure(figsize=(6, 5))
         self.method_heatmap_figure.patch.set_facecolor('#fafaf7')
         self.method_heatmap_canvas = FigureCanvas(self.method_heatmap_figure)
         method_perf_layout.addWidget(self.method_heatmap_canvas)
 
-        layout.addWidget(method_perf_group)
+        # Add plots side by side
+        plots_layout.addWidget(k_dist_group)
+        plots_layout.addWidget(method_perf_group)
+
+        layout.addLayout(plots_layout, stretch=1)
 
         # Bottom section: Statistical Summary Text
         summary_group = QGroupBox("📊 Statistical Summary")
@@ -319,7 +328,8 @@ class ComparisonTab(QWidget):
 
         self.stats_text = QTextEdit()
         self.stats_text.setReadOnly(True)
-        self.stats_text.setMaximumHeight(200)
+        self.stats_text.setMinimumHeight(150)
+        self.stats_text.setMaximumHeight(250)
         self.stats_text.setStyleSheet("""
             QTextEdit {
                 background-color: #fafafa;
@@ -331,7 +341,7 @@ class ComparisonTab(QWidget):
         """)
 
         summary_layout.addWidget(self.stats_text)
-        layout.addWidget(summary_group)
+        layout.addWidget(summary_group, stretch=0)
 
         return widget
 

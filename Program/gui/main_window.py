@@ -6,7 +6,7 @@ from PyQt6.QtWidgets import (
     QMainWindow, QWidget, QHBoxLayout, QVBoxLayout,
     QMenuBar, QToolBar, QStatusBar, QSplitter,
     QTabWidget, QMessageBox, QProgressBar,
-    QFileDialog, QDialog
+    QFileDialog, QDialog, QScrollArea, QFrame
 )
 from PyQt6.QtCore import Qt, pyqtSignal, QSettings
 from PyQt6.QtGui import QAction, QColor
@@ -68,8 +68,7 @@ class MainWindow(QMainWindow):
         """)
 
         self.setup_ui()
-        # Menu bar removed - all actions in toolbar
-        self.setup_toolbar()
+        # Toolbar removed - Help and About moved to sidebar
         self.setup_statusbar()
 
         # Set initial state
@@ -85,10 +84,41 @@ class MainWindow(QMainWindow):
         # Create splitter
         splitter = QSplitter(Qt.Orientation.Horizontal)
 
-        # Control panel (simplified)
+        # Control panel wrapped in scroll area for small screens
         self.control_panel = ControlPanel()
-        self.control_panel.setMaximumWidth(400)
-        self.control_panel.setMinimumWidth(350)
+
+        # Create scroll area for control panel
+        control_scroll = QScrollArea()
+        control_scroll.setWidget(self.control_panel)
+        control_scroll.setWidgetResizable(True)
+        control_scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+        control_scroll.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAsNeeded)
+        control_scroll.setMaximumWidth(400)
+        control_scroll.setMinimumWidth(350)
+        control_scroll.setFrameShape(QFrame.Shape.NoFrame)
+        control_scroll.setStyleSheet("""
+            QScrollArea {
+                border: none;
+                background-color: #f5f5f0;
+            }
+            QScrollBar:vertical {
+                border: none;
+                background: #e8e8e5;
+                width: 10px;
+                border-radius: 5px;
+            }
+            QScrollBar::handle:vertical {
+                background: #c4a574;
+                border-radius: 5px;
+                min-height: 20px;
+            }
+            QScrollBar::handle:vertical:hover {
+                background: #b89560;
+            }
+            QScrollBar::add-line:vertical, QScrollBar::sub-line:vertical {
+                height: 0px;
+            }
+        """)
 
         # Connect control panel signals
         self.control_panel.files_loaded.connect(self.on_files_loaded)
@@ -128,6 +158,7 @@ class MainWindow(QMainWindow):
         self.welcome_widget.open_recent_file_requested.connect(self.on_welcome_open_recent)
         self.welcome_widget.open_help_topic_requested.connect(self.on_welcome_open_help)
         self.welcome_widget.dont_show_again_changed.connect(self.on_welcome_dont_show_again)
+        self.welcome_widget.clear_sessions_requested.connect(self.on_clear_sessions)
 
         self.dataset_tabs_widget.addTab(self.welcome_widget, "🏠 Welcome")
         # Make welcome tab non-closable
@@ -177,7 +208,7 @@ class MainWindow(QMainWindow):
         self.top_tabs.currentChanged.connect(self.on_top_tab_changed)
 
         # Add to splitter
-        splitter.addWidget(self.control_panel)
+        splitter.addWidget(control_scroll)
         splitter.addWidget(self.top_tabs)
 
         # Set splitter proportions
@@ -239,68 +270,8 @@ class MainWindow(QMainWindow):
             about_action.triggered.connect(self.show_about)
             help_menu.addAction(about_action)
 
-    def setup_toolbar(self):
-        """Setup simplified toolbar with clear actions"""
-        toolbar = QToolBar("Main Tools")
-        toolbar.setMovable(False)
-        toolbar.setStyleSheet("""
-            QToolBar {
-                background-color: #f5f5f0;
-                border-bottom: 2px solid #d4c4a8;
-                padding: 4px;
-                spacing: 8px;
-            }
-            QToolButton {
-                background-color: #d2b48c;
-                border: 1px solid #8b7355;
-                border-radius: 4px;
-                padding: 4px 8px;
-                font-weight: normal;
-                font-size: 10px;
-            }
-            QToolButton:hover {
-                background-color: #ddbf94;
-            }
-            QToolButton:pressed {
-                background-color: #c4a574;
-            }
-        """)
-        self.addToolBar(toolbar)
-
-        # Primary action: Calculate all samples
-        calculate_action = QAction("Calculate All", self)
-        calculate_action.setShortcut("Ctrl+K")
-        calculate_action.setToolTip("Calculate hydraulic conductivity for all loaded samples (Ctrl+K)")
-        calculate_action.triggered.connect(self.calculate_all_k_values)
-        toolbar.addAction(calculate_action)
-
-        toolbar.addSeparator()
-
-        # Export actions
-        export_results_action = QAction("Export Results", self)
-        export_results_action.setShortcut("Ctrl+E")
-        export_results_action.setToolTip("Export calculation results to CSV/Excel (Ctrl+E)")
-        export_results_action.triggered.connect(self.export_results)
-        toolbar.addAction(export_results_action)
-
-        export_plot_action = QAction("Export Plot", self)
-        export_plot_action.setToolTip("Export current plot as image")
-        export_plot_action.triggered.connect(self.export_plot)
-        toolbar.addAction(export_plot_action)
-
-        toolbar.addSeparator()
-
-        # Help and About actions
-        help_action = QAction("Help", self)
-        help_action.setShortcut("F1")
-        help_action.setToolTip("Open help documentation (F1)")
-        help_action.triggered.connect(self.show_help)
-        toolbar.addAction(help_action)
-
-        about_action = QAction("About", self)
-        about_action.setToolTip("About this application")
-        about_action.triggered.connect(self.show_about)
-        toolbar.addAction(about_action)
+    # Toolbar removed - Help and About buttons are now in the sidebar
+    # The setup_toolbar method is no longer used
 
     def setup_statusbar(self):
         """Setup status bar with progress indicator"""
@@ -350,7 +321,12 @@ class MainWindow(QMainWindow):
         try:
             if os.path.exists(file_path):
                 dataset = self.data_loader.load_file(file_path)
+                dataset.file_path = file_path  # Store the file path in dataset
                 self.add_dataset_tab(dataset)
+
+                # Register with control panel so it shows in Sample Management
+                self.control_panel.register_external_file(file_path, dataset)
+
                 self._save_recent_file(file_path)
                 self._update_welcome_recent_files()
                 self._show_status_message(f"Opened: {os.path.basename(file_path)}")
@@ -377,6 +353,24 @@ class MainWindow(QMainWindow):
         if dont_show:
             self._show_status_message("Welcome screen will be hidden on next startup")
 
+    def on_clear_sessions(self):
+        """Clear all saved sessions"""
+        reply = QMessageBox.question(
+            self,
+            "Clear Sessions",
+            "Are you sure you want to clear all saved sessions?",
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No
+        )
+
+        if reply == QMessageBox.StandardButton.Yes:
+            settings = QSettings("GrainSizeAnalysis", "MainWindow")
+            settings.setValue("recent_sessions", [])
+
+            # Recreate welcome widget to reflect changes
+            self._refresh_welcome_widget()
+
+            self._show_status_message("All sessions cleared")
+
     def _load_recent_files(self) -> List[str]:
         """Load recent files from settings"""
         settings = QSettings("GrainSizeAnalysis", "MainWindow")
@@ -402,6 +396,54 @@ class MainWindow(QMainWindow):
 
         settings.setValue("recent_files", recent)
 
+    def _save_current_session(self):
+        """Save current loaded files as a session"""
+        if not self.dataset_tabs:
+            return
+
+        settings = QSettings("GrainSizeAnalysis", "MainWindow")
+
+        # Get all currently loaded files
+        current_files = []
+        for tab in self.dataset_tabs:
+            dataset = tab.get_dataset()
+            if hasattr(dataset, 'file_path') and dataset.file_path:
+                current_files.append(dataset.file_path)
+
+        if not current_files:
+            return
+
+        # Create session entry
+        from datetime import datetime
+        session = {
+            'name': f"Session {datetime.now().strftime('%Y-%m-%d %H:%M')}",
+            'date': datetime.now().strftime('%Y-%m-%d'),
+            'files': current_files,
+            'timestamp': datetime.now().isoformat()
+        }
+
+        # Load existing sessions
+        recent_sessions = settings.value("recent_sessions", [])
+        if not isinstance(recent_sessions, list):
+            recent_sessions = []
+
+        # Check if this exact session already exists
+        session_exists = False
+        for existing in recent_sessions:
+            if set(existing.get('files', [])) == set(current_files):
+                session_exists = True
+                break
+
+        if not session_exists:
+            # Add to beginning
+            recent_sessions.insert(0, session)
+
+            # Keep only last 10 sessions
+            recent_sessions = recent_sessions[:10]
+
+            settings.setValue("recent_sessions", recent_sessions)
+            self._update_welcome_recent_files()
+
     def _remove_recent_file(self, file_path: str):
         """Remove file from recent files list"""
         settings = QSettings("GrainSizeAnalysis", "MainWindow")
@@ -415,6 +457,32 @@ class MainWindow(QMainWindow):
         """Update welcome widget with current recent files"""
         recent_files = self._load_recent_files()
         self.welcome_widget.update_recent_files(recent_files)
+
+    def _refresh_welcome_widget(self):
+        """Refresh the welcome widget to reflect updated data"""
+        # Remove old welcome widget
+        self.dataset_tabs_widget.removeTab(0)
+
+        # Create new welcome widget with updated data
+        recent_files = self._load_recent_files()
+        self.welcome_widget = WelcomeWidget(recent_files=recent_files)
+
+        # Reconnect signals
+        self.welcome_widget.load_files_requested.connect(self.on_welcome_load_files)
+        self.welcome_widget.load_sample_data_requested.connect(self.on_welcome_load_sample)
+        self.welcome_widget.open_recent_file_requested.connect(self.on_welcome_open_recent)
+        self.welcome_widget.open_help_topic_requested.connect(self.on_welcome_open_help)
+        self.welcome_widget.dont_show_again_changed.connect(self.on_welcome_dont_show_again)
+        self.welcome_widget.clear_sessions_requested.connect(self.on_clear_sessions)
+
+        # Insert at index 0
+        self.dataset_tabs_widget.insertTab(0, self.welcome_widget, "🏠 Welcome")
+
+        # Make welcome tab non-closable
+        self.dataset_tabs_widget.tabBar().setTabButton(0, self.dataset_tabs_widget.tabBar().ButtonPosition.RightSide, None)
+
+        # Switch to welcome tab
+        self.dataset_tabs_widget.setCurrentIndex(0)
 
     def on_files_loaded(self, sample_names: List[str]):
         """Handle files loaded from control panel"""
@@ -515,9 +583,12 @@ class MainWindow(QMainWindow):
         # Add to recent files if it has a file path
         if hasattr(dataset, 'file_path') and dataset.file_path:
             self._save_recent_file(dataset.file_path)
-            self._update_welcome_recent_files()
 
-        self._show_status_message(f"Added dataset: {dataset.sample_name}")
+        # Automatically calculate K values for all methods when dataset is added
+        selected_methods = self.k_calculator.get_all_method_names()
+        dataset_tab.calculate_k_values(selected_methods)
+
+        self._show_status_message(f"Added dataset: {dataset.sample_name} - K values calculated")
 
     def add_error_tab(self, file_path: str, error_message: str):
         """Add an error tab for a failed dataset"""
@@ -588,10 +659,18 @@ class MainWindow(QMainWindow):
 
     def close_dataset_tab(self, index: int):
         """Close a dataset tab"""
+        # Prevent closing the welcome tab (always at index 0)
+        if index == 0:
+            return
+
         if self.dataset_tabs_widget.count() > 0:
+            # Adjust index for dataset_tabs list (welcome tab is not in the list)
+            # Widget index 1 = dataset_tabs[0], widget index 2 = dataset_tabs[1], etc.
+            dataset_index = index - 1
+
             # Remove from list
-            if index < len(self.dataset_tabs):
-                removed_tab = self.dataset_tabs.pop(index)
+            if dataset_index >= 0 and dataset_index < len(self.dataset_tabs):
+                removed_tab = self.dataset_tabs.pop(dataset_index)
 
             # Remove from widget
             self.dataset_tabs_widget.removeTab(index)
@@ -712,7 +791,7 @@ class MainWindow(QMainWindow):
         """Show about dialog"""
         QMessageBox.about(self, "About",
             """<h3>Grain Size Analysis Tool</h3>
-            <p>Version 2.0 - New Architecture</p>
+            <p>Version 0.9.0-beta</p>
             <p>A comprehensive tool for grain size distribution analysis
             and hydraulic conductivity calculations.</p>
             <p>Features:</p>
@@ -730,6 +809,15 @@ class MainWindow(QMainWindow):
     def _show_status_message(self, message: str, timeout: int = 0):
         """Show a message in the status bar"""
         self.statusBar().showMessage(message, timeout)
+
+    def closeEvent(self, event):
+        """Handle window close event - save current session before closing"""
+        # Save the current session if there are loaded datasets
+        if self.dataset_tabs:
+            self._save_current_session()
+
+        # Accept the close event
+        event.accept()
 
     def _on_calculation_complete(self, sample_name: str, results):
         """Handle calculation complete signal from dataset tab"""
