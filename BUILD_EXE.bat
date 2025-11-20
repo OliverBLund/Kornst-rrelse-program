@@ -20,7 +20,7 @@ if "%~1"=="" (
 ) else (
     set VERSION=%~1
 )
-set RELEASE_DIR=releases\v%VERSION%
+set RELEASE_DIR=releases\%VERSION%
 set APP_NAME=GrainSizeAnalysis
 set ENTRY_SCRIPT=Program\main.py
 
@@ -47,10 +47,10 @@ if not exist "%ENTRY_SCRIPT%" (
 )
 
 REM Check if version already exists
-if exist "%RELEASE_DIR%" (
+if exist "%RELEASE_DIR%\%APP_NAME%.exe" (
     echo.
-    echo WARNING: Version %VERSION% already exists in %RELEASE_DIR%
-    echo This will overwrite the existing build.
+    echo WARNING: Version %VERSION% already exists!
+    echo This will overwrite: %RELEASE_DIR%\%APP_NAME%.exe
     set /p CONTINUE="Continue? (y/n): "
     if /i not "!CONTINUE!"=="y" (
         echo Build cancelled.
@@ -91,10 +91,10 @@ set PROJECT_DIR=%CD%
 python -m PyInstaller ^
     "%PROJECT_DIR%\%ENTRY_SCRIPT%" ^
     --name "%APP_NAME%" ^
-    --distpath "%PROJECT_DIR%\%RELEASE_DIR%\dist" ^
+    --distpath "%PROJECT_DIR%\%RELEASE_DIR%" ^
     --workpath "%PROJECT_DIR%\%RELEASE_DIR%\build" ^
     --specpath "%PROJECT_DIR%\%RELEASE_DIR%" ^
-    --onedir ^
+    --onefile ^
     --noconsole ^
     --noconfirm ^
     --paths "%PROJECT_DIR%\Program" ^
@@ -118,15 +118,16 @@ echo.
 REM Create ZIP archive
 echo [4/4] Creating ZIP archive...
 
-set ZIP_NAME=%APP_NAME%_v%VERSION%.zip
+set ZIP_NAME=%APP_NAME%_%VERSION%.zip
 set ZIP_PATH=%RELEASE_DIR%\%ZIP_NAME%
+set EXE_PATH=%RELEASE_DIR%\%APP_NAME%.exe
 
 REM Use PowerShell to create ZIP (built into Windows 10+)
-powershell -command "Compress-Archive -Path '%RELEASE_DIR%\dist\%APP_NAME%' -DestinationPath '%ZIP_PATH%' -Force"
+powershell -command "Compress-Archive -Path '%EXE_PATH%' -DestinationPath '%ZIP_PATH%' -Force"
 
 if ERRORLEVEL 1 (
     echo WARNING: Failed to create ZIP archive.
-    echo You can manually zip the folder: %RELEASE_DIR%\dist\%APP_NAME%
+    echo You can manually zip the file: %EXE_PATH%
 ) else (
     echo ZIP archive created: %ZIP_PATH%
 )
@@ -136,14 +137,17 @@ echo ==========================================
 echo BUILD COMPLETE!
 echo ==========================================
 echo.
-echo Version:    %VERSION%
-echo Location:   %RELEASE_DIR%\dist\%APP_NAME%
-echo Archive:    %ZIP_PATH%
+echo Version:     %VERSION%
+echo Executable:  %EXE_PATH%
+echo Archive:     %ZIP_PATH%
 echo.
-echo The executable and all dependencies are in:
-echo   %RELEASE_DIR%\dist\%APP_NAME%\
+echo The single-file executable is ready:
+echo   %EXE_PATH%
 echo.
 echo The ZIP archive is ready for distribution:
 echo   %ZIP_PATH%
+echo.
+echo NOTE: First startup may be slower as the executable extracts
+echo       temporary files. Subsequent runs will be faster.
 echo.
 pause
