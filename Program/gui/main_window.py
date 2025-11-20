@@ -32,9 +32,6 @@ class MainWindow(QMainWindow):
         super().__init__()
         self.setWindowTitle("Grain Size Analysis - Hydraulic Conductivity Calculator")
 
-        # Open in fullscreen (maximized)
-        self.showMaximized()
-
         # Initialize data structures
         self.data_loader = DataLoader()
         self.k_calculator = KCalculator()

@@ -66,8 +66,8 @@ def main() -> None:
         # Create and show main window
         try:
             window = MainWindow()
-            # MainWindow calls showMaximized() in __init__, but we still need to ensure it's shown
-            window.show()
+            # Show window maximized (fullscreen)
+            window.showMaximized()
             app.processEvents()
 
             # Close splash with fade
