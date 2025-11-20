@@ -64,10 +64,16 @@ class WelcomeWidget(QWidget):
                 # PyInstaller creates a temp folder and stores path in _MEIPASS
                 base_path = sys._MEIPASS
             except AttributeError:
+                # In dev mode, go up from gui/ to Program/
                 base_path = os.path.dirname(os.path.dirname(__file__))
             return os.path.join(base_path, relative_path)
 
-        image_path = get_resource_path(os.path.join("Program", "resources", "soil_layers.png"))
+        # In PyInstaller: sys._MEIPASS/Program/resources/soil_layers.png
+        # In dev mode: Program/resources/soil_layers.png
+        if hasattr(sys, '_MEIPASS'):
+            image_path = get_resource_path(os.path.join("Program", "resources", "soil_layers.png"))
+        else:
+            image_path = get_resource_path(os.path.join("resources", "soil_layers.png"))
 
         if os.path.exists(image_path):
             # Load and draw background image (scaled to fit)

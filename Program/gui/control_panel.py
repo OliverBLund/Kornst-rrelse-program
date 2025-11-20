@@ -895,10 +895,16 @@ class ControlPanel(QFrame):
                 # PyInstaller creates a temp folder and stores path in _MEIPASS
                 base_path = sys._MEIPASS
             except AttributeError:
+                # In dev mode, go up from gui/ to Program/
                 base_path = os.path.dirname(os.path.dirname(__file__))
             return os.path.join(base_path, relative_path)
 
-        logo_path = get_resource_path(os.path.join("Program", "resources", "DTU_logo.png"))
+        # In PyInstaller: sys._MEIPASS/Program/resources/DTU_logo.png
+        # In dev mode: Program/resources/DTU_logo.png
+        if hasattr(sys, '_MEIPASS'):
+            logo_path = get_resource_path(os.path.join("Program", "resources", "DTU_logo.png"))
+        else:
+            logo_path = get_resource_path(os.path.join("resources", "DTU_logo.png"))
 
         if os.path.exists(logo_path):
             from PyQt6.QtGui import QPixmap
