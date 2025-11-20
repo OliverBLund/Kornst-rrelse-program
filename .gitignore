@@ -34,6 +34,7 @@ MANIFEST
 
 # Build releases (versioned builds from BUILD_EXE.bat)
 releases/
+.build_venv_temp/
 
 # Installer logs
 pip-log.txt

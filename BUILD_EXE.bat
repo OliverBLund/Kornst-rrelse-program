@@ -116,14 +116,17 @@ if exist "%RELEASE_DIR%\%APP_NAME%.exe" (
 REM Setup build environment
 if "%USE_CLEAN_ENV%"=="2" (
     echo [1/5] Creating clean virtual environment...
-    set VENV_DIR=%RELEASE_DIR%\venv_temp
+
+    REM Use short path to avoid Windows path length limits
+    set VENV_DIR=.build_venv_temp
 
     REM Remove old venv if exists
     if exist "!VENV_DIR!" (
+        echo Cleaning up old venv...
         rmdir /s /q "!VENV_DIR!" 2>nul
     )
 
-    REM Create venv
+    REM Create venv in project root (shorter path)
     python -m venv "!VENV_DIR!"
     if ERRORLEVEL 1 (
         echo ERROR: Failed to create virtual environment
@@ -133,7 +136,7 @@ if "%USE_CLEAN_ENV%"=="2" (
 
     echo Installing dependencies from requirements.txt...
     call "!VENV_DIR!\Scripts\activate.bat"
-    python -m pip install --upgrade pip
+    python -m pip install --upgrade pip >nul 2>&1
     python -m pip install PyInstaller>=6.0.0
 
     if exist "requirements.txt" (
@@ -217,8 +220,8 @@ echo.
 REM Cleanup temporary venv if created
 if "%USE_CLEAN_ENV%"=="2" (
     echo [4/5] Cleaning up temporary virtual environment...
-    if exist "%VENV_DIR%" (
-        rmdir /s /q "%VENV_DIR%" 2>nul
+    if exist ".build_venv_temp" (
+        rmdir /s /q ".build_venv_temp" 2>nul
     )
     echo.
 )
