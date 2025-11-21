@@ -1,0 +1,23 @@
+Collecting PyInstaller
+  Using cached pyinstaller-6.16.0-py3-none-win_amd64.whl.metadata (8.5 kB)
+Collecting altgraph (from PyInstaller)
+  Using cached altgraph-0.17.4-py2.py3-none-any.whl.metadata (7.3 kB)
+Collecting packaging>=22.0 (from PyInstaller)
+  Using cached packaging-25.0-py3-none-any.whl.metadata (3.3 kB)
+Collecting pefile!=2024.8.26,>=2022.5.30 (from PyInstaller)
+  Using cached pefile-2023.2.7-py3-none-any.whl.metadata (1.4 kB)
+Collecting pyinstaller-hooks-contrib>=2025.8 (from PyInstaller)
+  Using cached pyinstaller_hooks_contrib-2025.9-py3-none-any.whl.metadata (16 kB)
+Collecting pywin32-ctypes>=0.2.1 (from PyInstaller)
+  Using cached pywin32_ctypes-0.2.3-py3-none-any.whl.metadata (3.9 kB)
+Collecting setuptools>=42.0.0 (from PyInstaller)
+  Using cached setuptools-80.9.0-py3-none-any.whl.metadata (6.6 kB)
+Using cached pyinstaller-6.16.0-py3-none-win_amd64.whl (1.4 MB)
+Using cached packaging-25.0-py3-none-any.whl (66 kB)
+Using cached pefile-2023.2.7-py3-none-any.whl (71 kB)
+Using cached pyinstaller_hooks_contrib-2025.9-py3-none-any.whl (444 kB)
+Using cached pywin32_ctypes-0.2.3-py3-none-any.whl (30 kB)
+Using cached setuptools-80.9.0-py3-none-any.whl (1.2 MB)
+Using cached altgraph-0.17.4-py2.py3-none-any.whl (21 kB)
+Installing collected packages: altgraph, setuptools, pywin32-ctypes, pefile, packaging, pyinstaller-hooks-contrib, PyInstaller
+

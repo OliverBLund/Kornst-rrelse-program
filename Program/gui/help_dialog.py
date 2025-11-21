@@ -27,8 +27,15 @@ class HelpDialog(QDialog):
             y = parent_geo.y() + (parent_geo.height() - 700) // 2
             self.move(x, y)
 
-        # Get help content directory
-        self.help_dir = os.path.join(os.path.dirname(os.path.dirname(__file__)), "help_content")
+        # Get help content directory (works for both dev and PyInstaller)
+        import sys
+        try:
+            # PyInstaller creates a temp folder and stores path in _MEIPASS
+            base_path = sys._MEIPASS
+            self.help_dir = os.path.join(base_path, "Program", "help_content")
+        except AttributeError:
+            # In dev mode
+            self.help_dir = os.path.join(os.path.dirname(os.path.dirname(__file__)), "help_content")
 
         self.setup_ui()
         self.load_help_topics()

@@ -181,6 +181,13 @@ echo.
 REM Use absolute paths to avoid path resolution issues
 set PROJECT_DIR=%CD%
 
+REM Use a temporary short build path to avoid Windows MAX_PATH (260 char) issues
+REM This is especially important with long OneDrive paths
+set TEMP_BUILD_DIR=C:\temp_build_%RANDOM%
+echo Building in temporary location to avoid path length issues...
+echo Temp path: %TEMP_BUILD_DIR%
+echo.
+
 REM Set build type based on mode
 if "%BUILD_MODE%"=="1" (
     set BUILD_TYPE=--onefile
@@ -193,9 +200,9 @@ if "%BUILD_MODE%"=="1" (
 %PYTHON_CMD% -m PyInstaller ^
     "%PROJECT_DIR%\%ENTRY_SCRIPT%" ^
     --name "%APP_NAME%" ^
-    --distpath "%PROJECT_DIR%\%RELEASE_DIR%" ^
-    --workpath "%PROJECT_DIR%\%RELEASE_DIR%\build" ^
-    --specpath "%PROJECT_DIR%\%RELEASE_DIR%" ^
+    --distpath "%TEMP_BUILD_DIR%" ^
+    --workpath "%TEMP_BUILD_DIR%\build" ^
+    --specpath "%TEMP_BUILD_DIR%" ^
     %BUILD_TYPE% ^
     --noconsole ^
     --noconfirm ^
@@ -203,18 +210,50 @@ if "%BUILD_MODE%"=="1" (
     --add-data "%PROJECT_DIR%\Program\help_content;Program\help_content" ^
     --add-data "%PROJECT_DIR%\Program\resources;Program\resources" ^
     --add-data "%PROJECT_DIR%\docs;docs" ^
+    --hidden-import "PyQt6.QtWidgets" ^
+    --hidden-import "PyQt6.QtCore" ^
+    --hidden-import "PyQt6.QtGui" ^
     --hidden-import "matplotlib.backends.backend_qt5agg" ^
     --hidden-import "matplotlib.backends.backend_qtagg"
 
 if ERRORLEVEL 1 (
     echo.
     echo ERROR: Build failed! See messages above.
+
+    REM Clean up temp directory on failure
+    if exist "%TEMP_BUILD_DIR%" (
+        rmdir /s /q "%TEMP_BUILD_DIR%" 2>nul
+    )
+
     pause
     exit /b 1
 )
 
 echo.
 echo Build completed successfully!
+echo.
+
+REM Copy build output to final location
+echo Copying build output to: %RELEASE_DIR%
+if "%BUILD_MODE%"=="1" (
+    REM Single file mode - copy the .exe
+    copy "%TEMP_BUILD_DIR%\%APP_NAME%.exe" "%RELEASE_DIR%\%APP_NAME%.exe" >nul
+    set PACKAGE_PATH=%RELEASE_DIR%\%APP_NAME%.exe
+) else (
+    REM Folder mode - copy the entire folder
+    xcopy "%TEMP_BUILD_DIR%\%APP_NAME%" "%RELEASE_DIR%\%APP_NAME%\" /E /I /Y >nul
+    set PACKAGE_PATH=%RELEASE_DIR%\%APP_NAME%
+)
+
+REM Copy spec file for reference
+copy "%TEMP_BUILD_DIR%\%APP_NAME%.spec" "%RELEASE_DIR%\%APP_NAME%.spec" >nul 2>&1
+
+echo Files copied to release directory.
+echo.
+
+REM Clean up temporary build directory
+echo Cleaning up temporary build files...
+rmdir /s /q "%TEMP_BUILD_DIR%" 2>nul
 echo.
 
 REM Cleanup temporary venv if created
@@ -231,12 +270,6 @@ echo [5/5] Creating ZIP archive...
 
 set ZIP_NAME=%APP_NAME%_%VERSION%.zip
 set ZIP_PATH=%RELEASE_DIR%\%ZIP_NAME%
-
-if "%BUILD_MODE%"=="1" (
-    set PACKAGE_PATH=%RELEASE_DIR%\%APP_NAME%.exe
-) else (
-    set PACKAGE_PATH=%RELEASE_DIR%\%APP_NAME%
-)
 
 REM Use PowerShell to create ZIP (built into Windows 10+)
 powershell -command "Compress-Archive -Path '%PACKAGE_PATH%' -DestinationPath '%ZIP_PATH%' -Force"
