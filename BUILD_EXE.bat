@@ -39,7 +39,10 @@ echo.
 set /p BUILD_MODE="Select mode (1 or 2) [default: 2]: "
 if "!BUILD_MODE!"=="" set BUILD_MODE=2
 
-set RELEASE_DIR=releases\%VERSION%
+REM Use a short release path to avoid MAX_PATH and OneDrive sync issues
+set BASE_RELEASE_DIR=C:\gsa_build
+if not exist "%BASE_RELEASE_DIR%" mkdir "%BASE_RELEASE_DIR%"
+set RELEASE_DIR=%BASE_RELEASE_DIR%\%VERSION%
 set APP_NAME=GrainSizeAnalysis
 set ENTRY_SCRIPT=Program\main.py
 
@@ -213,6 +216,8 @@ if "%BUILD_MODE%"=="1" (
     --hidden-import "PyQt6.QtWidgets" ^
     --hidden-import "PyQt6.QtCore" ^
     --hidden-import "PyQt6.QtGui" ^
+    --collect-all PyQt6 ^
+    --collect-data matplotlib ^
     --hidden-import "matplotlib.backends.backend_qt5agg" ^
     --hidden-import "matplotlib.backends.backend_qtagg"
 
@@ -242,6 +247,12 @@ if "%BUILD_MODE%"=="1" (
 ) else (
     REM Folder mode - copy the entire folder
     xcopy "%TEMP_BUILD_DIR%\%APP_NAME%" "%RELEASE_DIR%\%APP_NAME%\" /E /I /Y >nul
+
+    REM Ensure matplotlib stylelib (seaborn styles) is present
+    for /f "usebackq delims=" %%p in (`%PYTHON_CMD% -c "import matplotlib, pathlib; print(pathlib.Path(matplotlib.get_data_path())/'stylelib')"`) do set "MPL_STYLE_SRC=%%p"
+    if defined MPL_STYLE_SRC if exist "!MPL_STYLE_SRC!" (
+        robocopy "!MPL_STYLE_SRC!" "%RELEASE_DIR%\%APP_NAME%\_internal\matplotlib\mpl-data\stylelib" /E /R:2 /W:2 >nul
+    )
     set PACKAGE_PATH=%RELEASE_DIR%\%APP_NAME%
 )
 
@@ -265,22 +276,6 @@ if "%USE_CLEAN_ENV%"=="2" (
     echo.
 )
 
-REM Create ZIP archive
-echo [5/5] Creating ZIP archive...
-
-set ZIP_NAME=%APP_NAME%_%VERSION%.zip
-set ZIP_PATH=%RELEASE_DIR%\%ZIP_NAME%
-
-REM Use PowerShell to create ZIP (built into Windows 10+)
-powershell -command "Compress-Archive -Path '%PACKAGE_PATH%' -DestinationPath '%ZIP_PATH%' -Force"
-
-if ERRORLEVEL 1 (
-    echo WARNING: Failed to create ZIP archive.
-    echo You can manually zip: %PACKAGE_PATH%
-) else (
-    echo ZIP archive created: %ZIP_PATH%
-)
-
 echo.
 echo ==========================================
 echo BUILD COMPLETE!
@@ -288,7 +283,6 @@ echo ==========================================
 echo.
 echo Version:     %VERSION%
 echo Location:    %PACKAGE_PATH%
-echo Archive:     %ZIP_PATH%
 echo.
 if "%BUILD_MODE%"=="1" (
     echo Single-file executable created.
@@ -297,8 +291,5 @@ if "%BUILD_MODE%"=="1" (
     echo Folder-based build created - FAST startup ~2s!
     echo Distribute the entire %APP_NAME% folder.
 )
-echo.
-echo The ZIP archive is ready for distribution:
-echo   %ZIP_PATH%
 echo.
 pause

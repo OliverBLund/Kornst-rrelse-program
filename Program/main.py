@@ -4,11 +4,29 @@ Grain Size Analysis Program - PyQt6 entry point with startup splash screen.
 """
 
 import sys
+import traceback
+from datetime import datetime
+from pathlib import Path
+import tempfile
+
 from PyQt6.QtWidgets import QApplication
 from PyQt6.QtCore import QTimer, QThread, pyqtSignal
 
 from Splash.simple_splash import SimpleSplash
 # MainWindow imported later to speed up splash appearance
+
+
+def _log_startup_error(source: str, exc: Exception) -> None:
+    """Write startup exceptions to a temp file for debugging packaged builds."""
+    try:
+        log_path = Path(tempfile.gettempdir()) / "grain_startup_error.log"
+        with log_path.open("a", encoding="utf-8") as f:
+            f.write(f"[{datetime.now().isoformat()}] {source}: {exc}\n")
+            f.write("".join(traceback.format_exception(type(exc), exc, exc.__traceback__)))
+            f.write("\n")
+    except Exception:
+        # Best-effort only
+        pass
 
 
 class LoaderThread(QThread):
@@ -27,6 +45,7 @@ class LoaderThread(QThread):
             self.progress.emit("Building user interface...")
             self.finished.emit(MainWindow)
         except Exception as e:
+            _log_startup_error("LoaderThread", e)
             self.progress.emit(f"Error: {e}")
             self.finished.emit(None)
 
@@ -77,6 +96,7 @@ def main() -> None:
             window._startup_splash = splash  # type: ignore[attr-defined]
             app._main_window = window  # type: ignore[attr-defined]
         except Exception as e:
+            _log_startup_error("MainWindow init", e)
             splash.set_message(f"Error: {e}")
             splash.finish_with_fade("Failed")
             QTimer.singleShot(2000, app.quit)
