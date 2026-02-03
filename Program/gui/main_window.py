@@ -508,9 +508,10 @@ class MainWindow(QMainWindow):
                     except Exception as e:
                         print(f"Failed to load {file_path}: {e}")
                         # Try with column mapper as fallback
-                        dataset = self.load_file_with_mapper(file_path)
-                        if dataset:
-                            self.add_dataset_tab(dataset)
+                        datasets = self.load_file_with_mapper(file_path)
+                        if datasets:
+                            for dataset in datasets:
+                                self.add_dataset_tab(dataset)
                             self.control_panel.set_sample_status(sample_name, "✅ Loaded")
                         else:
                             self.control_panel.set_sample_status(sample_name, "❌ Failed")
@@ -525,31 +526,34 @@ class MainWindow(QMainWindow):
         finally:
             self.progress_bar.setVisible(False)
 
-    def load_file_with_mapper(self, file_path: str) -> Optional[GrainSizeData]:
+    def load_file_with_mapper(self, file_path: str) -> List[GrainSizeData]:
         """Load a file using the column mapper dialog"""
         from gui.column_mapper import ColumnMapperDialog
 
         dialog = ColumnMapperDialog(file_path, self)
         if dialog.exec() == QDialog.DialogCode.Accepted:
             try:
-                mapping_result = dialog.get_mapping_result()
+                mapping_results = dialog.get_mapping_results()
+                datasets: List[GrainSizeData] = []
 
-                # Create GrainSizeData object from mapped data
-                dataset = GrainSizeData(
-                    sample_name=mapping_result['sample_name'],
-                    particle_sizes=mapping_result['particle_sizes'],
-                    percent_passing=mapping_result['percent_passing'],
-                    temperature=mapping_result.get('temperature', 20.0),
-                    porosity=mapping_result.get('porosity', 0.4)
-                )
+                for mapping in mapping_results:
+                    dataset = GrainSizeData(
+                        sample_name=mapping['sample_name'],
+                        particle_sizes=mapping['particle_sizes'],
+                        percent_passing=mapping['percent_passing'],
+                        temperature=mapping.get('temperature', 20.0),
+                        porosity=mapping.get('porosity', 0.4),
+                        file_path=file_path
+                    )
+                    datasets.append(dataset)
 
-                return dataset
+                return datasets
 
             except Exception as e:
                 QMessageBox.critical(self, "Mapping Error", f"Error creating dataset:\n{str(e)}")
-                return None
+                return []
 
-        return None
+        return []
 
     def add_dataset_tab(self, dataset: GrainSizeData):
         """Add a new dataset tab"""
@@ -611,31 +615,45 @@ class MainWindow(QMainWindow):
 
         self._show_status_message(f"Error loading: {file_name} - click tab to fix")
 
-    def on_dataset_fixed(self, dataset: GrainSizeData, original_file_path: str):
-        """Handle when an error tab successfully fixes a dataset"""
-        # Find and remove the error tab
-        for i in range(self.dataset_tabs_widget.count()):
-            widget = self.dataset_tabs_widget.widget(i)
-            if isinstance(widget, ErrorTab) and widget.file_path == original_file_path:
-                self.dataset_tabs_widget.removeTab(i)
-                break
-
-        # Add the fixed dataset as a normal tab
-        self.add_dataset_tab(dataset)
-
-        self._show_status_message(f"Fixed and loaded: {dataset.sample_name}")
-
-    def replace_error_tab_with_dataset(self, dataset: GrainSizeData, file_path: str):
-        """Replace an error tab with a successful dataset tab"""
-        # Find the error tab with this file path
+    def _remove_error_tab(self, file_path: str) -> bool:
+        """Remove error tab by file path, returns True if removed"""
         for i in range(self.dataset_tabs_widget.count()):
             widget = self.dataset_tabs_widget.widget(i)
             if isinstance(widget, ErrorTab) and widget.file_path == file_path:
-                # Remove the error tab
                 self.dataset_tabs_widget.removeTab(i)
-                # Add the dataset tab
-                self.add_dataset_tab(dataset)
-                break
+                return True
+        return False
+
+    def _ensure_dataset_list(self, dataset_input) -> List[GrainSizeData]:
+        """Normalize dataset input to a list"""
+        if isinstance(dataset_input, list):
+            return dataset_input
+        return [dataset_input]
+
+    def on_dataset_fixed(self, dataset_input, original_file_path: str):
+        """Handle when an error tab successfully fixes one or more datasets"""
+        datasets = self._ensure_dataset_list(dataset_input)
+
+        self._remove_error_tab(original_file_path)
+
+        for dataset in datasets:
+            self.add_dataset_tab(dataset)
+
+        if len(datasets) == 1:
+            self._show_status_message(f"Fixed and loaded: {datasets[0].sample_name}")
+        else:
+            self._show_status_message(f"Fixed and loaded {len(datasets)} datasets from {os.path.basename(original_file_path)}")
+
+    def replace_error_tab_with_dataset(self, dataset_input, file_path: str):
+        """Replace an error tab with one or more successful dataset tabs"""
+        datasets = self._ensure_dataset_list(dataset_input)
+        removed = self._remove_error_tab(file_path)
+
+        for dataset in datasets:
+            self.add_dataset_tab(dataset)
+
+        if not removed:
+            self._show_status_message(f"Loaded dataset(s) from {os.path.basename(file_path)}")
 
     def update_error_tab_message(self, file_path: str, error_message: str):
         """Update an existing error tab with a new error message"""

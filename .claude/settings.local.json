@@ -2,7 +2,9 @@
   "permissions": {
     "allow": [
       "Bash(if not exist resources mkdir resources)",
-      "Bash(del background.png)"
+      "Bash(del background.png)",
+      "mcp__acp__Bash",
+      "mcp__acp__Edit"
     ],
     "deny": [],
     "ask": []

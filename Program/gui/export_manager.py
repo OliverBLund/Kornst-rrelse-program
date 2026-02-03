@@ -224,12 +224,8 @@ class ExportManager:
             ])
 
             # Write data for each dataset
-            # DEBUG
-            print(f"[DEBUG] _export_csv_combined: Processing {len(datasets)} datasets")
             for name, dataset, results in datasets:
-                print(f"[DEBUG] Dataset: {name}, Results count: {len(results) if results else 0}")
                 if results:
-                    print(f"[DEBUG] First result: {results[0].method_name if results else 'None'}")
                     for result in results:
                         if result.k_value is not None:
                             k_cm_s = result.k_value * 100
@@ -268,18 +264,12 @@ class ExportManager:
         filename = self._format_filename(template, 'wide_format_all_datasets', '.csv')
         filepath = os.path.join(output_dir, filename)
 
-        # Get all unique method names from results (dynamically) - DO THIS FIRST!
-        # DEBUG
-        print(f"[DEBUG] _export_csv_wide_format: Processing {len(datasets)} datasets")
+        # Get all unique method names from results (dynamically)
         all_method_names = set()
-        for idx, (name, dataset, results) in enumerate(datasets):
-            print(f"[DEBUG] Dataset {idx}: name={name}, has_results={results is not None}, results_count={len(results) if results else 0}")
+        for name, dataset, results in datasets:
             if results:
-                print(f"[DEBUG]   First few results: {[r.method_name for r in results[:3]]}")
                 for result in results:
                     all_method_names.add(result.method_name)
-
-        print(f"[DEBUG] Found {len(all_method_names)} unique methods: {sorted(all_method_names)}")
 
         # Sort method names for consistent ordering
         method_names = sorted(all_method_names)
@@ -297,20 +287,32 @@ class ExportManager:
             writer = csv.writer(f)
 
             # Build header DYNAMICALLY based on actual method names
+            # Get selected percentiles from config (or use defaults)
+            selected_percentiles = config.get('selected_percentiles', ['d10', 'd20', 'd30', 'd50', 'd60'])
+            percentile_mapping = {
+                'd5': 5, 'd10': 10, 'd16': 16, 'd17': 17, 'd20': 20,
+                'd30': 30, 'd50': 50, 'd60': 60, 'd84': 84, 'd95': 95
+            }
+
             header = [
                 # Sample info
                 'Sample_Name',
                 'Temperature_C',
                 'Porosity',
-
-                # Grain size percentiles
-                'D5_mm', 'D10_mm', 'D16_mm', 'D17_mm', 'D20_mm', 'D30_mm',
-                'D50_mm', 'D60_mm', 'D84_mm', 'D95_mm',
-
-                # Gradation parameters
-                'Cu_Uniformity_Coefficient',
-                'Cc_Curvature_Coefficient',
             ]
+
+            # Add only selected grain size percentiles
+            for p_key in selected_percentiles:
+                p_num = percentile_mapping.get(p_key, 0)
+                if p_num > 0:
+                    header.append(f'D{p_num}_mm')
+
+            # Gradation parameters
+            if config.get('gradation', True):
+                header.extend([
+                    'Cu_Uniformity_Coefficient',
+                    'Cc_Curvature_Coefficient',
+                ])
 
             # Add K-values for each method in m/s
             for method in method_names:
@@ -352,23 +354,24 @@ class ExportManager:
                 row.append(dataset.temperature)
                 row.append(dataset.current_porosity or dataset.porosity)
 
-                # Grain size percentiles
-                percentiles = [5, 10, 16, 17, 20, 30, 50, 60, 84, 95]
-                for p in percentiles:
-                    if hasattr(dataset, '_interpolate_grain_size'):
-                        value = dataset._interpolate_grain_size(p)
+                # Grain size percentiles - only selected ones
+                for p_key in selected_percentiles:
+                    p_num = percentile_mapping.get(p_key, 0)
+                    if p_num > 0 and hasattr(dataset, '_interpolate_grain_size'):
+                        value = dataset._interpolate_grain_size(p_num)
                         row.append(f"{value:.4f}" if value is not None else '')
-                    elif hasattr(dataset, f'get_d{p}'):
-                        value = getattr(dataset, f'get_d{p}')()
+                    elif hasattr(dataset, f'get_d{p_num}'):
+                        value = getattr(dataset, f'get_d{p_num}')()
                         row.append(f"{value:.4f}" if value is not None else '')
                     else:
                         row.append('')
 
-                # Gradation parameters
-                cu = dataset.get_uniformity_coefficient() if hasattr(dataset, 'get_uniformity_coefficient') else None
-                cc = dataset.get_coefficient_of_curvature() if hasattr(dataset, 'get_coefficient_of_curvature') else None
-                row.append(f"{cu:.2f}" if cu is not None else '')
-                row.append(f"{cc:.2f}" if cc is not None else '')
+                # Gradation parameters (if enabled in config)
+                if config.get('gradation', True):
+                    cu = dataset.get_uniformity_coefficient() if hasattr(dataset, 'get_uniformity_coefficient') else None
+                    cc = dataset.get_coefficient_of_curvature() if hasattr(dataset, 'get_coefficient_of_curvature') else None
+                    row.append(f"{cu:.2f}" if cu is not None else '')
+                    row.append(f"{cc:.2f}" if cc is not None else '')
 
                 # Build method -> result mapping
                 method_results = {}

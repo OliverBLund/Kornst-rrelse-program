@@ -945,29 +945,52 @@ class ControlPanel(QFrame):
         )
 
         if file_paths:
-            newly_added = []
+            # Expand Excel files with multiple sheets
+            expanded_files = []
             already_added = []
 
-            for file_path in file_paths:
-                if file_path not in self.file_statuses:
-                    # Add to file tracking
-                    self.file_statuses[file_path] = 'pending'
-                    newly_added.append(file_path)
-                else:
-                    already_added.append(os.path.basename(file_path))
+            # Separate Excel files from others for batch processing
+            excel_files = [f for f in file_paths if f.endswith(('.xlsx', '.xls')) and f not in self.file_statuses]
+            other_files = [f for f in file_paths if not f.endswith(('.xlsx', '.xls')) and f not in self.file_statuses]
+            already_added = [os.path.basename(f) for f in file_paths if f in self.file_statuses]
 
-            if newly_added:
+            # Handle Excel files with smart batch detection
+            if excel_files:
+                excel_expanded = self.handle_batch_multisheet_excel(excel_files)
+                if excel_expanded is None:  # User cancelled entire batch
+                    return
+                expanded_files.extend(excel_expanded)
+
+            # Add other files directly
+            expanded_files.extend(other_files)
+
+            if expanded_files:
+                # Add files to tracking
+                for file_entry in expanded_files:
+                    if isinstance(file_entry, tuple):
+                        file_path, sheet_name = file_entry
+                        sheet_key = f"{file_path}:::{sheet_name}"
+                        self.file_statuses[sheet_key] = 'pending'
+                    else:
+                        file_path = file_entry
+                        self.file_statuses[file_path] = 'pending'
+
                 # Add files to table
-                for file_path in newly_added:
-                    self.add_file_to_table(file_path, 'pending')
+                for file_entry in expanded_files:
+                    if isinstance(file_entry, tuple):
+                        file_path, sheet_name = file_entry
+                        sheet_key = f"{file_path}:::{sheet_name}"
+                        self.add_file_to_table(sheet_key, 'pending', display_name=f"{os.path.basename(file_path)} [{sheet_name}]")
+                    else:
+                        self.add_file_to_table(file_entry, 'pending')
 
                 # Create tabs immediately for all files, then try to load them
-                self.process_files_with_immediate_tabs(newly_added)
+                self.process_files_with_immediate_tabs(expanded_files)
 
                 self.update_ui_state()
 
                 # Provide feedback on what was processed
-                message = f"Processing {len(newly_added)} new file(s)..."
+                message = f"Processing {len(expanded_files)} file(s)/sheet(s)..."
                 if already_added:
                     if len(already_added) <= 3:
                         message += f" (Skipped: {', '.join(already_added)})"
@@ -978,18 +1001,126 @@ class ControlPanel(QFrame):
             else:
                 if len(already_added) == 1:
                     QMessageBox.information(self, "No New Files", f"'{already_added[0]}' is already in the list.")
-                else:
+                elif already_added:
                     QMessageBox.information(self, "No New Files", f"All {len(already_added)} selected files are already in the list.")
 
-    def add_file_to_table(self, file_path: str, status: str):
+    def handle_batch_multisheet_excel(self, excel_files: list):
+        """
+        Smart batch handler for Excel files with multiple sheets.
+        Groups files by sheet structure and shows one dialog per group.
+        Returns: List of file entries (paths or tuples), or None if cancelled
+        """
+        import pandas as pd
+        from collections import defaultdict
+
+        # Group files by their sheet structure
+        sheet_structure_groups = defaultdict(list)
+        single_sheet_files = []
+        error_files = []
+
+        for file_path in excel_files:
+            try:
+                excel_file = pd.ExcelFile(file_path)
+                sheet_names = tuple(excel_file.sheet_names)  # Tuple for hashability
+
+                if len(sheet_names) == 1:
+                    single_sheet_files.append(file_path)
+                else:
+                    sheet_structure_groups[sheet_names].append(file_path)
+            except Exception as e:
+                error_files.append(file_path)
+
+        expanded_files = []
+
+        # Handle single-sheet files (no dialog needed)
+        expanded_files.extend(single_sheet_files)
+
+        # Handle each group of multi-sheet files
+        for sheet_names, group_files in sheet_structure_groups.items():
+            if len(group_files) == 1:
+                # Only one file with this structure - use individual dialog
+                result = self.handle_multisheet_excel(group_files[0])
+                if result is None:
+                    expanded_files.append(group_files[0])
+                elif result:
+                    expanded_files.extend(result)
+                else:  # User cancelled
+                    return None
+            else:
+                # Multiple files with same structure - show batch dialog
+                from gui.sheet_selector import SheetSelectorDialog
+
+                # Create dialog with info about the batch
+                first_file = group_files[0]
+                dialog = SheetSelectorDialog(first_file, self)
+                dialog.setWindowTitle(f"Select Sheets for {len(group_files)} Similar Workbooks")
+
+                # Update info label to show batch context
+                dialog.info_label.setText(
+                    f"📊 Found {len(group_files)} workbooks with identical sheet structure.\n"
+                    f"Sheets: {', '.join(sheet_names)}\n\n"
+                    f"💡 Select which sheets to import from ALL {len(group_files)} workbooks.\n"
+                    f"This selection will apply to all files in this batch."
+                )
+
+                if dialog.exec() == QDialog.DialogCode.Accepted:
+                    selected_sheets = dialog.get_selected_sheets()
+                    if not selected_sheets:
+                        return None  # User cancelled
+
+                    # Apply selection to all files in this group
+                    for file_path in group_files:
+                        for sheet in selected_sheets:
+                            expanded_files.append((file_path, sheet))
+                else:
+                    return None  # User cancelled
+
+        # Handle error files (treat as normal)
+        expanded_files.extend(error_files)
+
+        return expanded_files
+
+    def handle_multisheet_excel(self, file_path: str):
+        """
+        Handle single multi-sheet Excel file by letting user select sheets.
+        Returns: List of (file_path, sheet_name) tuples, or None for single sheet, or [] for cancelled
+        """
+        try:
+            import pandas as pd
+            excel_file = pd.ExcelFile(file_path)
+            sheet_names = excel_file.sheet_names
+
+            # If only one sheet, treat as normal file
+            if len(sheet_names) == 1:
+                return None  # Signal to treat as normal file
+
+            # Multiple sheets - show selector dialog
+            from gui.sheet_selector import SheetSelectorDialog
+            dialog = SheetSelectorDialog(file_path, self)
+
+            if dialog.exec() == QDialog.DialogCode.Accepted:
+                selected_sheets = dialog.get_selected_sheets()
+                if not selected_sheets:
+                    return []  # User cancelled or selected none
+
+                # Return list of (file_path, sheet_name) tuples
+                return [(file_path, sheet) for sheet in selected_sheets]
+            else:
+                return []  # User cancelled
+
+        except Exception as e:
+            # Error reading Excel file, treat as normal file
+            return None
+
+    def add_file_to_table(self, file_path: str, status: str, display_name: str = None):
         """Add a file to the samples table"""
         row = self.samples_table.rowCount()
         self.samples_table.insertRow(row)
 
-        # File name
-        file_name = os.path.basename(file_path)
+        # File name (use custom display name if provided)
+        file_name = display_name or os.path.basename(file_path)
         file_item = QTableWidgetItem(file_name)
-        file_item.setData(Qt.ItemDataRole.UserRole, file_path)  # Store full path
+        file_item.setData(Qt.ItemDataRole.UserRole, file_path)  # Store full path/key
         file_item.setToolTip(file_path)
         self.samples_table.setItem(row, 0, file_item)
 
@@ -1111,33 +1242,47 @@ class ControlPanel(QFrame):
         try:
             dialog = ColumnMapperDialog(file_path, self)
             if dialog.exec() == QMessageBox.StandardButton.Ok.value:
-                # Get mapped data
-                result = dialog.get_mapping_result()
+                mapping_results = dialog.get_mapping_results()
+                if not mapping_results:
+                    QMessageBox.warning(self, "No Data", "No sheet data was extracted.")
+                    return
 
-                # Create dataset
                 from data_loader import GrainSizeData
-                dataset = GrainSizeData(
-                    sample_name=result['sample_name'],
-                    temperature=result['temperature'],
-                    porosity=result['porosity'],
-                    particle_sizes=result['particle_sizes'],
-                    percent_passing=result['percent_passing'],
-                    file_path=file_path
-                )
+                created_datasets = []
 
-                # Store as loaded
-                sample_name = result['sample_name']
-                self.loaded_samples[sample_name] = {
+                for mapping in mapping_results:
+                    dataset = GrainSizeData(
+                        sample_name=mapping['sample_name'],
+                        temperature=mapping['temperature'],
+                        porosity=mapping['porosity'],
+                        particle_sizes=mapping['particle_sizes'],
+                        percent_passing=mapping['percent_passing'],
+                        file_path=file_path
+                    )
+                    created_datasets.append(dataset)
+
+                base_sample_name = self.extract_sample_name(file_path)
+                sheet_names = [mapping.get('sheet_name', '') or '' for mapping in mapping_results]
+                entry = {
                     'file_path': file_path,
-                    'data': dataset,
-                    'status': 'loaded'
+                    'data': created_datasets[0],
+                    'datasets': created_datasets,
+                    'status': 'loaded',
+                    'sheet_names': sheet_names
                 }
+                self.loaded_samples[base_sample_name] = entry
 
-                # Update status
                 self.file_statuses[file_path] = 'loaded'
                 self.update_file_in_table(file_path, 'loaded')
 
-                self.sample_info_label.setText(f"✅ Updated: {os.path.basename(file_path)}")
+                for dataset in created_datasets:
+                    self.dataset_loaded_successfully.emit(dataset, file_path)
+
+                if sheet_names:
+                    summary = ", ".join(sheet_names)
+                    self.sample_info_label.setText(f"✅ Loaded {len(created_datasets)} sheet(s): {summary}")
+                else:
+                    self.sample_info_label.setText(f"✅ Loaded {len(created_datasets)} sheet(s)")
 
         except Exception as e:
             QMessageBox.warning(self, "Error", f"Failed to edit {os.path.basename(file_path)}:\n{str(e)}")
@@ -1240,6 +1385,7 @@ Uniformity Coefficient (Cu): {fmt(cu, '.2f')}
                 self.loaded_samples[sample_name] = {
                     'file_path': file_path,
                     'data': dataset,
+                    'datasets': [dataset],
                     'status': status
                 }
 
@@ -1317,6 +1463,7 @@ Uniformity Coefficient (Cu): {fmt(cu, '.2f')}
             self.loaded_samples[sample_name] = {
                 'file_path': file_path,
                 'data': dataset,
+                'datasets': [dataset],
                 'status': 'loaded'
             }
             # Add to table
@@ -1333,7 +1480,9 @@ Uniformity Coefficient (Cu): {fmt(cu, '.2f')}
             for file_path in auto_files:
                 sample_name = self.extract_sample_name(file_path)
                 if sample_name in self.loaded_samples:
-                    loaded_datasets.append(self.loaded_samples[sample_name]['data'])
+                    entry = self.loaded_samples[sample_name]
+                    datasets = entry.get('datasets') or ([entry['data']] if entry.get('data') else [])
+                    loaded_datasets.extend(datasets)
 
             if loaded_datasets:
                 self.files_loaded.emit([ds.sample_name for ds in loaded_datasets])
@@ -1345,32 +1494,39 @@ Uniformity Coefficient (Cu): {fmt(cu, '.2f')}
 
         for file_path in review_files:
             try:
-                # Open column mapper dialog
                 dialog = ColumnMapperDialog(file_path, self)
                 if dialog.exec() == QMessageBox.StandardButton.Ok.value:
-                    # Get mapped data
-                    result = dialog.get_mapping_result()
+                    mapping_results = dialog.get_mapping_results()
+                    if not mapping_results:
+                        continue
 
-                    # Create dataset
                     from data_loader import GrainSizeData
-                    dataset = GrainSizeData(
-                        sample_name=result['sample_name'],
-                        temperature=result['temperature'],
-                        porosity=result['porosity'],
-                        particle_sizes=result['particle_sizes'],
-                        percent_passing=result['percent_passing'],
-                        file_path=file_path
-                    )
+                    created_datasets = []
+                    for mapping in mapping_results:
+                        dataset = GrainSizeData(
+                            sample_name=mapping['sample_name'],
+                            temperature=mapping['temperature'],
+                            porosity=mapping['porosity'],
+                            particle_sizes=mapping['particle_sizes'],
+                            percent_passing=mapping['percent_passing'],
+                            file_path=file_path
+                        )
+                        created_datasets.append(dataset)
 
-                    # Store as loaded
-                    sample_name = result['sample_name']
-                    self.loaded_samples[sample_name] = {
+                    base_sample_name = self.extract_sample_name(file_path)
+                    sheet_names = [mapping.get('sheet_name', '') or '' for mapping in mapping_results]
+                    entry = {
                         'file_path': file_path,
-                        'data': dataset,
-                        'status': 'loaded'
+                        'data': created_datasets[0],
+                        'datasets': created_datasets,
+                        'status': 'loaded',
+                        'sheet_names': sheet_names
                     }
+                    self.loaded_samples[base_sample_name] = entry
 
-                    # Update status
+                    for dataset in created_datasets:
+                        self.dataset_loaded_successfully.emit(dataset, file_path)
+
                     self.file_statuses[file_path] = 'loaded'
                     self.update_file_in_table(file_path, 'loaded')
 
@@ -1759,69 +1915,95 @@ Uniformity Coefficient (Cu): {fmt(cu, '.2f')}
             # Best-effort UI update on unexpected errors
             self.sample_info_label.setText(f"Preview failed: {e}")
 
-    def process_files_with_immediate_tabs(self, file_paths: list):
-        """Process files by creating tabs immediately, then attempting to load data"""
+    def process_files_with_immediate_tabs(self, file_entries: list):
+        """Process files by creating tabs immediately, then attempting to load data
+
+        Args:
+            file_entries: List of file paths or (file_path, sheet_name) tuples
+        """
         self.progress_bar.setVisible(True)
         self.progress_label.setVisible(True)
-        self.progress_bar.setMaximum(len(file_paths))
+        self.progress_bar.setMaximum(len(file_entries))
 
-        for i, file_path in enumerate(file_paths):
-            file_name = os.path.basename(file_path)
+        for i, file_entry in enumerate(file_entries):
+            # Extract file path and sheet name if applicable
+            if isinstance(file_entry, tuple):
+                file_path, sheet_name = file_entry
+                file_key = f"{file_path}:::{sheet_name}"
+                display_name = f"{os.path.basename(file_path)} [{sheet_name}]"
+            else:
+                file_path = file_entry
+                sheet_name = None
+                file_key = file_path
+                display_name = os.path.basename(file_path)
 
             # Update progress
             self.progress_bar.setValue(i)
-            self.progress_label.setText(f"Processing {file_name}...")
+            self.progress_label.setText(f"Processing {display_name}...")
             QApplication.processEvents()  # Update UI
 
             # Step 1: Create tab immediately for visual feedback
-            self.error_dataset.emit(file_path, "Loading...")
+            self.error_dataset.emit(file_key, "Loading...")
 
             # Step 2: Try to load the data
             try:
-                dataset = self.data_loader.load_file(file_path)
+                # Load data from specific sheet if provided
+                if sheet_name:
+                    import pandas as pd
+                    from data_loader import GrainSizeData
+
+                    # Try to auto-load the specific sheet
+                    df = pd.read_excel(file_path, sheet_name=sheet_name, header=None, nrows=100)
+                    # This will likely fail auto-detection, triggering manual mapping
+                    raise ValueError(f"Excel sheet requires manual column mapping")
+                else:
+                    dataset = self.data_loader.load_file(file_path)
 
                 # Success! Replace error tab with dataset tab
-                sample_name = self.extract_sample_name(file_path)
+                sample_name = self.extract_sample_name(file_key)
 
                 # Determine status based on validation messages
                 if dataset.has_errors():
                     status = 'failed'
                     # Keep as error tab but with validation info
                     detailed_error = f"Data loaded but has validation errors"
-                    self.update_error_tab_message.emit(file_path, detailed_error)
+                    self.update_error_tab_message.emit(file_key, detailed_error)
                 else:
                     status = 'auto'
                     # Replace error tab with normal dataset tab
-                    self.dataset_loaded_successfully.emit(dataset, file_path)
+                    self.dataset_loaded_successfully.emit(dataset, file_key)
 
-                self.file_statuses[file_path] = status
+                self.file_statuses[file_key] = status
                 self.loaded_samples[sample_name] = {
-                    'file_path': file_path,
+                    'file_path': file_key,
                     'data': dataset,
+                    'datasets': [dataset],
                     'status': status
                 }
-                self.update_file_in_table(file_path, status)
+                self.update_file_in_table(file_key, status)
 
             except Exception as e:
                 # Failed - update error tab with real error message
-                self.file_statuses[file_path] = 'review'
+                self.file_statuses[file_key] = 'review'
 
                 error_str = str(e)
-                if "could not parse" in error_str.lower():
+                if "requires manual" in error_str.lower() or "column mapping" in error_str.lower():
+                    detailed_error = "Excel sheet requires manual column mapping"
+                elif "could not parse" in error_str.lower():
                     detailed_error = "Could not auto-detect column format"
                 elif "no valid" in error_str.lower():
-                    detailed_error = "No valid grain size data found in file"
+                    detailed_error = "No valid grain size data found"
                 elif "delimiter" in error_str.lower():
                     detailed_error = "Could not determine file delimiter format"
                 else:
                     detailed_error = str(e)
 
-                self.update_file_in_table(file_path, 'review')
+                self.update_file_in_table(file_key, 'review')
                 # Update the existing error tab with real error
-                self.update_error_tab_message.emit(file_path, detailed_error)
+                self.update_error_tab_message.emit(file_key, detailed_error)
 
         # Final progress update
-        self.progress_bar.setValue(len(file_paths))
+        self.progress_bar.setValue(len(file_entries))
         self.progress_label.setText("🎉 Processing complete!")
 
         # Hide progress indicators

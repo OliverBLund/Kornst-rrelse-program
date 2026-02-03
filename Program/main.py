@@ -11,6 +11,7 @@ import tempfile
 
 from PyQt6.QtWidgets import QApplication
 from PyQt6.QtCore import QTimer, QThread, pyqtSignal
+from PyQt6.QtGui import QFont
 
 from Splash.simple_splash import SimpleSplash
 # MainWindow imported later to speed up splash appearance
@@ -56,6 +57,17 @@ def main() -> None:
     app.setApplicationVersion("1.0.0")
     app.setOrganizationName("Geotechnical Engineering")
     app.setOrganizationDomain("grainsize.app")
+
+    # Set a modern default font to avoid DirectWrite warnings with legacy fonts like "MS Sans Serif"
+    # This prevents Qt from falling back to problematic legacy Windows fonts
+    default_font = QFont("Segoe UI", 9)
+    if not default_font.exactMatch():
+        # Fallback to other modern fonts if Segoe UI is not available
+        for fallback in ["Arial", "Helvetica", "Sans Serif"]:
+            default_font = QFont(fallback, 9)
+            if default_font.exactMatch():
+                break
+    app.setFont(default_font)
 
     # Create and show splash screen IMMEDIATELY (before heavy imports)
     splash = SimpleSplash()

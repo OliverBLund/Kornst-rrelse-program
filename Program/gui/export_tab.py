@@ -42,7 +42,7 @@ class ExportTab(QWidget):
             'pdf': False
         }
 
-        # Content toggles
+        # Content toggles (legacy - kept for backward compatibility)
         self.content_enabled = {
             'grain_data': True,
             'k_values': True,
@@ -50,7 +50,136 @@ class ExportTab(QWidget):
             'plots': True
         }
 
+        # Initialize granular content selection
+        self._init_content_selection()
+
         self.setup_ui()
+
+    @staticmethod
+    def _fmt(value, fmt: str, dash: str = "-") -> str:
+        """Safely format numbers that may be None."""
+        try:
+            if value is None:
+                return dash
+            return format(value, fmt)
+        except Exception:
+            return dash
+
+    def _init_content_selection(self):
+        """Initialize granular content selection structure with smart defaults"""
+        self.content_selection = {
+            # === GRAIN SIZE DATA ===
+            'grain_size': {
+                'enabled': True,
+                'items': {
+                    'raw_distribution': True,  # particle_sizes + percent_passing arrays
+                    'percentiles': {
+                        'enabled': True,
+                        'items': {
+                            'd5': False,   # Less commonly used
+                            'd10': True,   # Essential
+                            'd16': False,
+                            'd17': False,
+                            'd20': True,
+                            'd30': True,
+                            'd50': True,   # Essential
+                            'd60': True,   # Essential
+                            'd84': False,
+                            'd95': False,
+                        }
+                    },
+                    'gradation': {
+                        'enabled': True,
+                        'items': {
+                            'cu': True,  # Uniformity coefficient
+                            'cc': True,  # Coefficient of curvature
+                        }
+                    },
+                    'classification': True,  # USCS soil classification
+                }
+            },
+
+            # === K-VALUE RESULTS ===
+            'k_values': {
+                'enabled': True,
+                'filter_mode': 'all',  # 'all', 'category', 'individual'
+                'categories': {
+                    'hazen_based': True,           # Hazen, Hazen_1892
+                    'porosity_dependent': True,    # Slichter, Kozeny-Carman, Zunker, Zamarin, Barr
+                    'uniformity_dependent': True,  # Beyer
+                    'empirical': True,             # USBR, Alyamani-Sen, Chapuis, Shepherd, Terzaghi, Kruger, Krumbein-Monk
+                    'temperature_corrected': True, # Sauerbrei
+                },
+                'individual_methods': {
+                    'Hazen': True,
+                    'Hazen_1892': True,
+                    'Slichter': True,
+                    'Terzaghi': True,
+                    'Beyer': True,
+                    'Sauerbrei': True,
+                    'Kruger': True,
+                    'Kozeny-Carman': True,
+                    'Zunker': True,
+                    'Zamarin': True,
+                    'USBR': True,
+                    'Barr': True,
+                    'Alyamani-Sen': True,
+                    'Chapuis': True,
+                    'Shepherd': True,
+                    'Krumbein-Monk': True,
+                },
+                'include_formulas': False,      # Reduces clutter by default
+                'include_validation': False,    # Reduces clutter by default
+                'units': {
+                    'm_s': True,   # meters/second
+                    'cm_s': True,  # centimeters/second
+                    'm_d': True,   # meters/day
+                }
+            },
+
+            # === STATISTICAL SUMMARIES ===
+            'statistics': {
+                'enabled': True,
+                'items': {
+                    'k_value_stats': {
+                        'enabled': True,
+                        'items': {
+                            'mean': True,
+                            'median': True,
+                            'std_dev': True,
+                            'min': True,
+                            'max': True,
+                            'valid_count': True,
+                        }
+                    },
+                    'grain_size_stats': True,  # Summary of percentiles/gradation
+                }
+            },
+
+            # === METADATA ===
+            'metadata': {
+                'enabled': True,
+                'items': {
+                    'sample_info': True,        # name, date
+                    'environmental': True,      # temperature, porosity
+                    'processing_notes': False,  # comments (often empty)
+                    'export_timestamp': True,
+                    'software_version': False,  # Not commonly needed
+                }
+            },
+
+            # === PLOTS/FIGURES ===
+            'plots': {
+                'enabled': True,
+                'items': {
+                    'grain_size_curve': True,
+                    'k_value_comparison': False,      # Advanced feature
+                    'statistical_boxplots': False,    # Advanced feature
+                    'include_legend': True,
+                    'include_grid': True,
+                }
+            }
+        }
 
     def _create_format_card(self, format_key: str, title: str, description: str, icon_text: str) -> QPushButton:
         """Create a compact clickable format selection card"""
@@ -314,6 +443,575 @@ class ExportTab(QWidget):
         self.update_file_tree()
         self.update_summary_card()
 
+    def _create_content_selection_panel(self) -> QWidget:
+        """Create collapsible content selection panel"""
+        # Main container
+        content_panel = QFrame()
+        content_panel.setFrameShape(QFrame.Shape.StyledPanel)
+        content_panel.setStyleSheet("""
+            QFrame {
+                background-color: #f9f9f9;
+                border: 1px solid #ddd;
+                border-radius: 6px;
+                padding: 4px;
+            }
+        """)
+
+        panel_layout = QVBoxLayout(content_panel)
+        panel_layout.setContentsMargins(6, 6, 6, 6)
+        panel_layout.setSpacing(6)
+
+        # Header with collapse button
+        header_layout = QHBoxLayout()
+        header_layout.setSpacing(8)
+
+        header_label = QLabel("📋 Content Selection")
+        header_label.setFont(QFont("Segoe UI", 10, QFont.Weight.Bold))
+        header_layout.addWidget(header_label)
+
+        header_layout.addStretch()
+
+        self.content_collapse_btn = QToolButton()
+        self.content_collapse_btn.setText("▼")
+        self.content_collapse_btn.setMaximumSize(20, 20)
+        self.content_collapse_btn.setStyleSheet("""
+            QToolButton {
+                border: none;
+                font-size: 10px;
+            }
+            QToolButton:hover {
+                background-color: #e0e0e0;
+                border-radius: 3px;
+            }
+        """)
+        self.content_collapse_btn.clicked.connect(self._toggle_content_panel_collapse)
+        header_layout.addWidget(self.content_collapse_btn)
+
+        panel_layout.addLayout(header_layout)
+
+        # Content area (collapsible)
+        self.content_area = QWidget()
+        content_area_layout = QVBoxLayout(self.content_area)
+        content_area_layout.setContentsMargins(0, 0, 0, 0)
+        content_area_layout.setSpacing(8)
+
+        # === GRAIN SIZE DATA ===
+        grain_size_group = self._create_grain_size_category()
+        content_area_layout.addWidget(grain_size_group)
+
+        # === K-VALUE RESULTS ===
+        k_values_group = self._create_content_category(
+            "🔢 K-Value Results",
+            [
+                ("all_methods", "All calculation methods (16)"),
+                ("include_formulas", "Include formulas"),
+                ("include_validation", "Include validation messages"),
+                ("units_group", "Units: m/s, cm/s, m/d")
+            ],
+            'k_values'
+        )
+        content_area_layout.addWidget(k_values_group)
+
+        # === STATISTICS ===
+        stats_group = self._create_content_category(
+            "📊 Statistical Summaries",
+            [
+                ("k_value_stats", "K-value statistics (mean, median, std, etc.)"),
+                ("grain_size_stats", "Grain size summary")
+            ],
+            'statistics'
+        )
+        content_area_layout.addWidget(stats_group)
+
+        # === METADATA ===
+        metadata_group = self._create_content_category(
+            "🏷️ Metadata",
+            [
+                ("sample_info", "Sample information"),
+                ("environmental", "Environmental parameters (T, n)"),
+                ("export_timestamp", "Export timestamp")
+            ],
+            'metadata'
+        )
+        content_area_layout.addWidget(metadata_group)
+
+        # === PLOTS ===
+        plots_group = self._create_content_category(
+            "🎨 Plots/Figures",
+            [
+                ("grain_size_curve", "Grain size distribution curve"),
+                ("include_legend", "Include legend"),
+                ("include_grid", "Include grid lines")
+            ],
+            'plots'
+        )
+        content_area_layout.addWidget(plots_group)
+
+        # Quick actions
+        quick_actions = QHBoxLayout()
+        quick_actions.setSpacing(4)
+
+        select_all_btn = QPushButton("Select All")
+        select_all_btn.setMaximumHeight(24)
+        select_all_btn.setFont(QFont("Segoe UI", 8))
+        select_all_btn.clicked.connect(self._select_all_content)
+        quick_actions.addWidget(select_all_btn)
+
+        deselect_all_btn = QPushButton("Deselect All")
+        deselect_all_btn.setMaximumHeight(24)
+        deselect_all_btn.setFont(QFont("Segoe UI", 8))
+        deselect_all_btn.clicked.connect(self._deselect_all_content)
+        quick_actions.addWidget(deselect_all_btn)
+
+        reset_btn = QPushButton("Reset Defaults")
+        reset_btn.setMaximumHeight(24)
+        reset_btn.setFont(QFont("Segoe UI", 8))
+        reset_btn.clicked.connect(self._reset_content_defaults)
+        quick_actions.addWidget(reset_btn)
+
+        content_area_layout.addLayout(quick_actions)
+
+        # Add preset buttons
+        preset_label = QLabel("Quick Presets:")
+        preset_label.setFont(QFont("Segoe UI", 8, QFont.Weight.Bold))
+        content_area_layout.addWidget(preset_label)
+
+        preset_buttons = QHBoxLayout()
+        preset_buttons.setSpacing(4)
+
+        minimal_preset_btn = QPushButton("📋 Minimal")
+        minimal_preset_btn.setMaximumHeight(22)
+        minimal_preset_btn.setFont(QFont("Segoe UI", 7))
+        minimal_preset_btn.setToolTip("Essential data only (D10, D50, D60, all K-values)")
+        minimal_preset_btn.clicked.connect(lambda: self._apply_preset('minimal'))
+        preset_buttons.addWidget(minimal_preset_btn)
+
+        full_preset_btn = QPushButton("📦 Full")
+        full_preset_btn.setMaximumHeight(22)
+        full_preset_btn.setFont(QFont("Segoe UI", 7))
+        full_preset_btn.setToolTip("All available data")
+        full_preset_btn.clicked.connect(lambda: self._apply_preset('full'))
+        preset_buttons.addWidget(full_preset_btn)
+
+        stats_preset_btn = QPushButton("📊 Stats")
+        stats_preset_btn.setMaximumHeight(22)
+        stats_preset_btn.setFont(QFont("Segoe UI", 7))
+        stats_preset_btn.setToolTip("Optimized for statistical analysis")
+        stats_preset_btn.clicked.connect(lambda: self._apply_preset('statistical'))
+        preset_buttons.addWidget(stats_preset_btn)
+
+        content_area_layout.addLayout(preset_buttons)
+
+        panel_layout.addWidget(self.content_area)
+
+        return content_panel
+
+    def _create_grain_size_category(self) -> QWidget:
+        """Create grain size data category with expandable percentile grid"""
+        group = QFrame()
+        group.setStyleSheet("""
+            QFrame {
+                background-color: white;
+                border: 1px solid #e0e0e0;
+                border-radius: 4px;
+                padding: 4px;
+            }
+        """)
+
+        layout = QVBoxLayout(group)
+        layout.setContentsMargins(6, 4, 6, 4)
+        layout.setSpacing(3)
+
+        # Category header
+        header_cb = QCheckBox("📏 Grain Size Data")
+        header_cb.setFont(QFont("Segoe UI", 9, QFont.Weight.Bold))
+        header_cb.setChecked(self.content_selection['grain_size']['enabled'])
+        header_cb.stateChanged.connect(lambda state: self._toggle_category('grain_size', state == 2))
+        layout.addWidget(header_cb)
+
+        if not hasattr(self, 'content_checkboxes'):
+            self.content_checkboxes = {}
+        self.content_checkboxes['grain_size_header'] = header_cb
+
+        # Items container
+        items_layout = QVBoxLayout()
+        items_layout.setContentsMargins(20, 0, 0, 0)
+        items_layout.setSpacing(2)
+
+        # Raw distribution
+        raw_cb = QCheckBox("Raw distribution curve")
+        raw_cb.setFont(QFont("Segoe UI", 8))
+        raw_cb.setChecked(self.content_selection['grain_size']['items']['raw_distribution'])
+        raw_cb.stateChanged.connect(lambda state: self._update_grain_size_item('raw_distribution', state == 2))
+        items_layout.addWidget(raw_cb)
+        self.content_checkboxes['grain_size_raw_distribution'] = raw_cb
+
+        # Percentiles - expandable section
+        percentiles_header = QHBoxLayout()
+        percentiles_header.setSpacing(4)
+
+        self.percentiles_expand_btn = QToolButton()
+        self.percentiles_expand_btn.setText("▶")
+        self.percentiles_expand_btn.setMaximumSize(16, 16)
+        self.percentiles_expand_btn.setStyleSheet("QToolButton { border: none; font-size: 8px; }")
+        self.percentiles_expand_btn.clicked.connect(self._toggle_percentiles_expand)
+        percentiles_header.addWidget(self.percentiles_expand_btn)
+
+        percentiles_cb = QCheckBox("Percentiles (D5, D10, D20, ..., D95)")
+        percentiles_cb.setFont(QFont("Segoe UI", 8))
+        percentiles_cb.setChecked(self.content_selection['grain_size']['items']['percentiles']['enabled'])
+        percentiles_cb.stateChanged.connect(lambda state: self._toggle_percentiles_category(state == 2))
+        percentiles_header.addWidget(percentiles_cb)
+        self.content_checkboxes['grain_size_percentiles'] = percentiles_cb
+
+        percentiles_header.addStretch()
+        items_layout.addLayout(percentiles_header)
+
+        # Percentile grid (initially hidden)
+        self.percentiles_grid_widget = QWidget()
+        percentiles_grid = QGridLayout(self.percentiles_grid_widget)
+        percentiles_grid.setContentsMargins(40, 2, 0, 2)
+        percentiles_grid.setSpacing(4)
+
+        # Quick actions for percentiles
+        select_common_btn = QPushButton("Common (D10,D20,D30,D50,D60)")
+        select_common_btn.setMaximumHeight(20)
+        select_common_btn.setFont(QFont("Segoe UI", 7))
+        select_common_btn.clicked.connect(self._select_common_percentiles)
+        percentiles_grid.addWidget(select_common_btn, 0, 0, 1, 4)
+
+        select_all_p_btn = QPushButton("All")
+        select_all_p_btn.setMaximumHeight(20)
+        select_all_p_btn.setFont(QFont("Segoe UI", 7))
+        select_all_p_btn.clicked.connect(self._select_all_percentiles)
+        percentiles_grid.addWidget(select_all_p_btn, 0, 4)
+
+        deselect_all_p_btn = QPushButton("None")
+        deselect_all_p_btn.setMaximumHeight(20)
+        deselect_all_p_btn.setFont(QFont("Segoe UI", 7))
+        deselect_all_p_btn.clicked.connect(self._deselect_all_percentiles)
+        percentiles_grid.addWidget(deselect_all_p_btn, 0, 5)
+
+        # Percentile checkboxes in grid (2 rows x 5 columns)
+        percentiles = ['d5', 'd10', 'd16', 'd17', 'd20', 'd30', 'd50', 'd60', 'd84', 'd95']
+        percentile_labels = ['D5', 'D10', 'D16', 'D17', 'D20', 'D30', 'D50', 'D60', 'D84', 'D95']
+
+        for i, (p_key, p_label) in enumerate(zip(percentiles, percentile_labels)):
+            row = 1 + (i // 5)
+            col = i % 5
+
+            p_cb = QCheckBox(p_label)
+            p_cb.setFont(QFont("Segoe UI", 7))
+            p_cb.setChecked(self.content_selection['grain_size']['items']['percentiles']['items'][p_key])
+            p_cb.stateChanged.connect(
+                lambda state, key=p_key: self._update_percentile(key, state == 2)
+            )
+            percentiles_grid.addWidget(p_cb, row, col)
+            self.content_checkboxes[f'percentile_{p_key}'] = p_cb
+
+        self.percentiles_grid_widget.setVisible(False)  # Initially collapsed
+        items_layout.addWidget(self.percentiles_grid_widget)
+
+        # Gradation
+        gradation_cb = QCheckBox("Gradation (Cu, Cc)")
+        gradation_cb.setFont(QFont("Segoe UI", 8))
+        gradation_cb.setChecked(self.content_selection['grain_size']['items']['gradation']['enabled'])
+        gradation_cb.stateChanged.connect(lambda state: self._toggle_gradation(state == 2))
+        items_layout.addWidget(gradation_cb)
+        self.content_checkboxes['grain_size_gradation'] = gradation_cb
+
+        # Classification
+        classification_cb = QCheckBox("Soil Classification (USCS)")
+        classification_cb.setFont(QFont("Segoe UI", 8))
+        classification_cb.setChecked(self.content_selection['grain_size']['items']['classification'])
+        classification_cb.stateChanged.connect(lambda state: self._update_grain_size_item('classification', state == 2))
+        items_layout.addWidget(classification_cb)
+        self.content_checkboxes['grain_size_classification'] = classification_cb
+
+        layout.addLayout(items_layout)
+
+        return group
+
+    def _toggle_percentiles_expand(self):
+        """Toggle percentile grid visibility"""
+        if self.percentiles_grid_widget.isVisible():
+            self.percentiles_grid_widget.setVisible(False)
+            self.percentiles_expand_btn.setText("▶")
+        else:
+            self.percentiles_grid_widget.setVisible(True)
+            self.percentiles_expand_btn.setText("▼")
+
+    def _toggle_percentiles_category(self, enabled: bool):
+        """Toggle all percentiles on/off"""
+        self.content_selection['grain_size']['items']['percentiles']['enabled'] = enabled
+        # Update all percentile checkboxes
+        for p_key in self.content_selection['grain_size']['items']['percentiles']['items'].keys():
+            cb = self.content_checkboxes.get(f'percentile_{p_key}')
+            if cb:
+                cb.setEnabled(enabled)
+        self.update_file_tree()
+        self.update_summary_card()
+
+    def _update_percentile(self, percentile_key: str, checked: bool):
+        """Update individual percentile selection"""
+        self.content_selection['grain_size']['items']['percentiles']['items'][percentile_key] = checked
+        # Check dependencies
+        self._check_percentile_dependencies()
+        self.update_file_tree()
+        self.update_summary_card()
+
+    def _select_common_percentiles(self):
+        """Select commonly used percentiles (D10, D20, D30, D50, D60)"""
+        common = ['d10', 'd20', 'd30', 'd50', 'd60']
+        for p_key in self.content_selection['grain_size']['items']['percentiles']['items'].keys():
+            is_common = p_key in common
+            self.content_selection['grain_size']['items']['percentiles']['items'][p_key] = is_common
+            cb = self.content_checkboxes.get(f'percentile_{p_key}')
+            if cb:
+                cb.setChecked(is_common)
+
+    def _select_all_percentiles(self):
+        """Select all percentiles"""
+        for p_key in self.content_selection['grain_size']['items']['percentiles']['items'].keys():
+            self.content_selection['grain_size']['items']['percentiles']['items'][p_key] = True
+            cb = self.content_checkboxes.get(f'percentile_{p_key}')
+            if cb:
+                cb.setChecked(True)
+        self.update_file_tree()
+        self.update_summary_card()
+
+    def _deselect_all_percentiles(self):
+        """Deselect all percentiles"""
+        for p_key in self.content_selection['grain_size']['items']['percentiles']['items'].keys():
+            self.content_selection['grain_size']['items']['percentiles']['items'][p_key] = False
+            cb = self.content_checkboxes.get(f'percentile_{p_key}')
+            if cb:
+                cb.setChecked(False)
+        self.update_file_tree()
+        self.update_summary_card()
+
+    def _update_grain_size_item(self, item_key: str, checked: bool):
+        """Update grain size item selection"""
+        self.content_selection['grain_size']['items'][item_key] = checked
+        self.update_file_tree()
+        self.update_summary_card()
+
+    def _toggle_gradation(self, enabled: bool):
+        """Toggle gradation parameters"""
+        self.content_selection['grain_size']['items']['gradation']['enabled'] = enabled
+        # If gradation is enabled, ensure required percentiles are selected
+        if enabled:
+            self._check_percentile_dependencies()
+        self.update_file_tree()
+        self.update_summary_card()
+
+    def _check_percentile_dependencies(self):
+        """Check and auto-enable percentiles required for gradation"""
+        gradation = self.content_selection['grain_size']['items']['gradation']
+        if gradation['enabled']:
+            # Cu requires D10 and D60
+            if gradation['items']['cu']:
+                for p in ['d10', 'd60']:
+                    if not self.content_selection['grain_size']['items']['percentiles']['items'][p]:
+                        self.content_selection['grain_size']['items']['percentiles']['items'][p] = True
+                        cb = self.content_checkboxes.get(f'percentile_{p}')
+                        if cb:
+                            cb.setChecked(True)
+
+            # Cc requires D10, D30, and D60
+            if gradation['items']['cc']:
+                for p in ['d10', 'd30', 'd60']:
+                    if not self.content_selection['grain_size']['items']['percentiles']['items'][p]:
+                        self.content_selection['grain_size']['items']['percentiles']['items'][p] = True
+                        cb = self.content_checkboxes.get(f'percentile_{p}')
+                        if cb:
+                            cb.setChecked(True)
+
+    def _create_content_category(self, title: str, items: list, category_key: str) -> QWidget:
+        """Create a content category group with checkboxes"""
+        group = QFrame()
+        group.setStyleSheet("""
+            QFrame {
+                background-color: white;
+                border: 1px solid #e0e0e0;
+                border-radius: 4px;
+                padding: 4px;
+            }
+        """)
+
+        layout = QVBoxLayout(group)
+        layout.setContentsMargins(6, 4, 6, 4)
+        layout.setSpacing(3)
+
+        # Category header
+        header_cb = QCheckBox(title)
+        header_cb.setFont(QFont("Segoe UI", 9, QFont.Weight.Bold))
+        header_cb.setChecked(self.content_selection[category_key]['enabled'])
+        header_cb.stateChanged.connect(lambda state: self._toggle_category(category_key, state == 2))
+        layout.addWidget(header_cb)
+
+        # Store reference
+        if not hasattr(self, 'content_checkboxes'):
+            self.content_checkboxes = {}
+        self.content_checkboxes[f'{category_key}_header'] = header_cb
+
+        # Items
+        items_layout = QVBoxLayout()
+        items_layout.setContentsMargins(20, 0, 0, 0)
+        items_layout.setSpacing(2)
+
+        for item_key, item_label in items:
+            item_cb = QCheckBox(item_label)
+            item_cb.setFont(QFont("Segoe UI", 8))
+            item_cb.setChecked(True)  # Default checked
+            item_cb.stateChanged.connect(
+                lambda state, cat=category_key, key=item_key:
+                self._toggle_content_item(cat, key, state == 2)
+            )
+            items_layout.addWidget(item_cb)
+            self.content_checkboxes[f'{category_key}_{item_key}'] = item_cb
+
+        layout.addLayout(items_layout)
+
+        return group
+
+    def _toggle_content_panel_collapse(self):
+        """Toggle content panel collapse/expand"""
+        if self.content_area.isVisible():
+            self.content_area.setVisible(False)
+            self.content_collapse_btn.setText("▶")
+        else:
+            self.content_area.setVisible(True)
+            self.content_collapse_btn.setText("▼")
+
+    def _toggle_category(self, category_key: str, enabled: bool):
+        """Toggle entire content category"""
+        self.content_selection[category_key]['enabled'] = enabled
+        # Update all items in category
+        for key, cb in self.content_checkboxes.items():
+            if key.startswith(f'{category_key}_') and key != f'{category_key}_header':
+                cb.setEnabled(enabled)
+        self.update_file_tree()
+        self.update_summary_card()
+
+    def _toggle_content_item(self, category_key: str, item_key: str, enabled: bool):
+        """Toggle individual content item"""
+        # This is a simplified version - will be expanded when implementing granular selection
+        self.update_file_tree()
+        self.update_summary_card()
+
+    def _select_all_content(self):
+        """Select all content items"""
+        for cb in self.content_checkboxes.values():
+            cb.setChecked(True)
+
+    def _deselect_all_content(self):
+        """Deselect all content items"""
+        for cb in self.content_checkboxes.values():
+            cb.setChecked(False)
+
+    def _reset_content_defaults(self):
+        """Reset content selection to defaults"""
+        self._init_content_selection()
+        # Update UI checkboxes to match
+        for category_key in self.content_selection.keys():
+            header_cb = self.content_checkboxes.get(f'{category_key}_header')
+            if header_cb:
+                header_cb.setChecked(self.content_selection[category_key]['enabled'])
+        self.update_file_tree()
+        self.update_summary_card()
+
+    def _apply_preset(self, preset_name: str):
+        """Apply a content selection preset"""
+        if preset_name == 'minimal':
+            # Essential data only
+            # Percentiles: D10, D50, D60
+            for p_key in ['d5', 'd16', 'd17', 'd20', 'd30', 'd84', 'd95']:
+                self.content_selection['grain_size']['items']['percentiles']['items'][p_key] = False
+            for p_key in ['d10', 'd50', 'd60']:
+                self.content_selection['grain_size']['items']['percentiles']['items'][p_key] = True
+
+            # Keep all K-values, gradation, classification
+            self.content_selection['grain_size']['items']['raw_distribution'] = True
+            self.content_selection['grain_size']['items']['percentiles']['enabled'] = True
+            self.content_selection['grain_size']['items']['gradation']['enabled'] = True
+            self.content_selection['grain_size']['items']['classification'] = True
+            self.content_selection['k_values']['enabled'] = True
+            self.content_selection['statistics']['enabled'] = True
+            self.content_selection['metadata']['enabled'] = True
+            self.content_selection['plots']['enabled'] = True
+
+        elif preset_name == 'full':
+            # All data
+            for p_key in self.content_selection['grain_size']['items']['percentiles']['items'].keys():
+                self.content_selection['grain_size']['items']['percentiles']['items'][p_key] = True
+
+            self.content_selection['grain_size']['items']['raw_distribution'] = True
+            self.content_selection['grain_size']['items']['percentiles']['enabled'] = True
+            self.content_selection['grain_size']['items']['gradation']['enabled'] = True
+            self.content_selection['grain_size']['items']['classification'] = True
+            self.content_selection['k_values']['enabled'] = True
+            self.content_selection['k_values']['include_formulas'] = True
+            self.content_selection['k_values']['include_validation'] = True
+            self.content_selection['statistics']['enabled'] = True
+            self.content_selection['metadata']['enabled'] = True
+            self.content_selection['metadata']['items']['processing_notes'] = True
+            self.content_selection['metadata']['items']['software_version'] = True
+            self.content_selection['plots']['enabled'] = True
+
+        elif preset_name == 'statistical':
+            # Optimized for statistical analysis (wide CSV format)
+            # Common percentiles for stats
+            for p_key in ['d5', 'd16', 'd17', 'd84', 'd95']:
+                self.content_selection['grain_size']['items']['percentiles']['items'][p_key] = False
+            for p_key in ['d10', 'd20', 'd30', 'd50', 'd60']:
+                self.content_selection['grain_size']['items']['percentiles']['items'][p_key] = True
+
+            self.content_selection['grain_size']['items']['raw_distribution'] = False  # Not needed for stats
+            self.content_selection['grain_size']['items']['percentiles']['enabled'] = True
+            self.content_selection['grain_size']['items']['gradation']['enabled'] = True
+            self.content_selection['grain_size']['items']['classification'] = True
+            self.content_selection['k_values']['enabled'] = True
+            self.content_selection['k_values']['include_formulas'] = False
+            self.content_selection['k_values']['include_validation'] = False
+            self.content_selection['statistics']['enabled'] = True
+            self.content_selection['metadata']['enabled'] = True
+            self.content_selection['plots']['enabled'] = False  # No plots for statistical export
+
+        # Update all UI checkboxes to reflect preset
+        self._update_all_checkboxes()
+        self.update_file_tree()
+        self.update_summary_card()
+
+    def _update_all_checkboxes(self):
+        """Update all UI checkboxes to match content_selection state"""
+        # Update category headers
+        for category_key in self.content_selection.keys():
+            header_cb = self.content_checkboxes.get(f'{category_key}_header')
+            if header_cb:
+                header_cb.setChecked(self.content_selection[category_key]['enabled'])
+
+        # Update grain size items
+        for item_key in ['raw_distribution', 'classification']:
+            cb = self.content_checkboxes.get(f'grain_size_{item_key}')
+            if cb:
+                cb.setChecked(self.content_selection['grain_size']['items'][item_key])
+
+        # Update percentiles
+        percentiles_cb = self.content_checkboxes.get('grain_size_percentiles')
+        if percentiles_cb:
+            percentiles_cb.setChecked(self.content_selection['grain_size']['items']['percentiles']['enabled'])
+
+        for p_key in self.content_selection['grain_size']['items']['percentiles']['items'].keys():
+            cb = self.content_checkboxes.get(f'percentile_{p_key}')
+            if cb:
+                cb.setChecked(self.content_selection['grain_size']['items']['percentiles']['items'][p_key])
+
+        # Update gradation
+        gradation_cb = self.content_checkboxes.get('grain_size_gradation')
+        if gradation_cb:
+            gradation_cb.setChecked(self.content_selection['grain_size']['items']['gradation']['enabled'])
+
     def setup_ui(self):
         """Setup the export tab UI with 2-column layout"""
         main_layout = QVBoxLayout(self)
@@ -475,6 +1173,9 @@ class ExportTab(QWidget):
             'pdf', 'PDF', 'Publication ready', '📄'))
 
         left_layout.addWidget(format_container)
+
+        # Content selection panel
+        left_layout.addWidget(self._create_content_selection_panel())
 
         # Summary card
         summary_card = QFrame()
@@ -739,18 +1440,18 @@ class ExportTab(QWidget):
             cc = dataset.get_coefficient_of_curvature() if hasattr(dataset, 'get_coefficient_of_curvature') else 0
 
             # Fill all percentile columns
-            preview.setItem(row, 3, QTableWidgetItem(f"{d5:.4f}"))
-            preview.setItem(row, 4, QTableWidgetItem(f"{d10:.4f}"))
-            preview.setItem(row, 5, QTableWidgetItem(f"{d16:.4f}"))
-            preview.setItem(row, 6, QTableWidgetItem(f"{d17:.4f}"))
-            preview.setItem(row, 7, QTableWidgetItem(f"{d20:.4f}"))
-            preview.setItem(row, 8, QTableWidgetItem(f"{d30:.4f}"))
-            preview.setItem(row, 9, QTableWidgetItem(f"{d50:.4f}"))
-            preview.setItem(row, 10, QTableWidgetItem(f"{d60:.4f}"))
-            preview.setItem(row, 11, QTableWidgetItem(f"{d84:.4f}"))
-            preview.setItem(row, 12, QTableWidgetItem(f"{d95:.4f}"))
-            preview.setItem(row, 13, QTableWidgetItem(f"{cu:.2f}"))
-            preview.setItem(row, 14, QTableWidgetItem(f"{cc:.2f}"))
+            preview.setItem(row, 3, QTableWidgetItem(self._fmt(d5, ".4f")))
+            preview.setItem(row, 4, QTableWidgetItem(self._fmt(d10, ".4f")))
+            preview.setItem(row, 5, QTableWidgetItem(self._fmt(d16, ".4f")))
+            preview.setItem(row, 6, QTableWidgetItem(self._fmt(d17, ".4f")))
+            preview.setItem(row, 7, QTableWidgetItem(self._fmt(d20, ".4f")))
+            preview.setItem(row, 8, QTableWidgetItem(self._fmt(d30, ".4f")))
+            preview.setItem(row, 9, QTableWidgetItem(self._fmt(d50, ".4f")))
+            preview.setItem(row, 10, QTableWidgetItem(self._fmt(d60, ".4f")))
+            preview.setItem(row, 11, QTableWidgetItem(self._fmt(d84, ".4f")))
+            preview.setItem(row, 12, QTableWidgetItem(self._fmt(d95, ".4f")))
+            preview.setItem(row, 13, QTableWidgetItem(self._fmt(cu, ".2f")))
+            preview.setItem(row, 14, QTableWidgetItem(self._fmt(cc, ".2f")))
 
             # Add K-values for each method (in all 3 units) + status
             method_dict = {r.method_name: r for r in results} if results else {}
@@ -758,7 +1459,7 @@ class ExportTab(QWidget):
             # K-values in m/s
             for col_idx, method in enumerate(method_names):
                 if method in method_dict and method_dict[method].k_value:
-                    preview.setItem(row, 15 + col_idx, QTableWidgetItem(f"{method_dict[method].k_value:.3e}"))
+                    preview.setItem(row, 15 + col_idx, QTableWidgetItem(self._fmt(method_dict[method].k_value, ".3e")))
                 else:
                     preview.setItem(row, 15 + col_idx, QTableWidgetItem("-"))
 
@@ -767,7 +1468,7 @@ class ExportTab(QWidget):
             for col_idx, method in enumerate(method_names):
                 if method in method_dict and method_dict[method].k_value:
                     k_cm_s = method_dict[method].k_value * 100
-                    preview.setItem(row, col_offset + col_idx, QTableWidgetItem(f"{k_cm_s:.3e}"))
+                    preview.setItem(row, col_offset + col_idx, QTableWidgetItem(self._fmt(k_cm_s, ".3e")))
                 else:
                     preview.setItem(row, col_offset + col_idx, QTableWidgetItem("-"))
 
@@ -776,7 +1477,7 @@ class ExportTab(QWidget):
             for col_idx, method in enumerate(method_names):
                 if method in method_dict and method_dict[method].k_value:
                     k_m_d = method_dict[method].k_value * 86400
-                    preview.setItem(row, col_offset + col_idx, QTableWidgetItem(f"{k_m_d:.2f}"))
+                    preview.setItem(row, col_offset + col_idx, QTableWidgetItem(self._fmt(k_m_d, ".2f")))
                 else:
                     preview.setItem(row, col_offset + col_idx, QTableWidgetItem("-"))
 
@@ -797,24 +1498,24 @@ class ExportTab(QWidget):
             if valid_k_values:
                 # K statistics in m/s
                 preview.setItem(row, stats_col_offset, QTableWidgetItem(f"{np.mean(valid_k_values):.3e}"))
-                preview.setItem(row, stats_col_offset + 1, QTableWidgetItem(f"{np.median(valid_k_values):.3e}"))
-                preview.setItem(row, stats_col_offset + 2, QTableWidgetItem(f"{np.std(valid_k_values):.3e}"))
-                preview.setItem(row, stats_col_offset + 3, QTableWidgetItem(f"{np.min(valid_k_values):.3e}"))
-                preview.setItem(row, stats_col_offset + 4, QTableWidgetItem(f"{np.max(valid_k_values):.3e}"))
+                preview.setItem(row, stats_col_offset + 1, QTableWidgetItem(self._fmt(np.median(valid_k_values), ".3e")))
+                preview.setItem(row, stats_col_offset + 2, QTableWidgetItem(self._fmt(np.std(valid_k_values), ".3e")))
+                preview.setItem(row, stats_col_offset + 3, QTableWidgetItem(self._fmt(np.min(valid_k_values), ".3e")))
+                preview.setItem(row, stats_col_offset + 4, QTableWidgetItem(self._fmt(np.max(valid_k_values), ".3e")))
 
                 # K statistics in cm/s
                 valid_k_cm_s = [k * 100 for k in valid_k_values]
-                preview.setItem(row, stats_col_offset + 5, QTableWidgetItem(f"{np.mean(valid_k_cm_s):.3e}"))
-                preview.setItem(row, stats_col_offset + 6, QTableWidgetItem(f"{np.median(valid_k_cm_s):.3e}"))
-                preview.setItem(row, stats_col_offset + 7, QTableWidgetItem(f"{np.min(valid_k_cm_s):.3e}"))
-                preview.setItem(row, stats_col_offset + 8, QTableWidgetItem(f"{np.max(valid_k_cm_s):.3e}"))
+                preview.setItem(row, stats_col_offset + 5, QTableWidgetItem(self._fmt(np.mean(valid_k_cm_s), ".3e")))
+                preview.setItem(row, stats_col_offset + 6, QTableWidgetItem(self._fmt(np.median(valid_k_cm_s), ".3e")))
+                preview.setItem(row, stats_col_offset + 7, QTableWidgetItem(self._fmt(np.min(valid_k_cm_s), ".3e")))
+                preview.setItem(row, stats_col_offset + 8, QTableWidgetItem(self._fmt(np.max(valid_k_cm_s), ".3e")))
 
                 # K statistics in m/d
                 valid_k_m_d = [k * 86400 for k in valid_k_values]
-                preview.setItem(row, stats_col_offset + 9, QTableWidgetItem(f"{np.mean(valid_k_m_d):.2f}"))
-                preview.setItem(row, stats_col_offset + 10, QTableWidgetItem(f"{np.median(valid_k_m_d):.2f}"))
-                preview.setItem(row, stats_col_offset + 11, QTableWidgetItem(f"{np.min(valid_k_m_d):.2f}"))
-                preview.setItem(row, stats_col_offset + 12, QTableWidgetItem(f"{np.max(valid_k_m_d):.2f}"))
+                preview.setItem(row, stats_col_offset + 9, QTableWidgetItem(self._fmt(np.mean(valid_k_m_d), ".2f")))
+                preview.setItem(row, stats_col_offset + 10, QTableWidgetItem(self._fmt(np.median(valid_k_m_d), ".2f")))
+                preview.setItem(row, stats_col_offset + 11, QTableWidgetItem(self._fmt(np.min(valid_k_m_d), ".2f")))
+                preview.setItem(row, stats_col_offset + 12, QTableWidgetItem(self._fmt(np.max(valid_k_m_d), ".2f")))
 
                 # Valid methods count
                 preview.setItem(row, stats_col_offset + 13, QTableWidgetItem(str(len(valid_k_values))))
@@ -952,352 +1653,6 @@ class ExportTab(QWidget):
         preview.setPlainText("\n".join(text))
         self.preview_tabs.addTab(preview, "ℹ️ Help")
 
-    def _old_setup_ui_backup(self):
-        """OLD setup_ui - kept for reference during transition"""
-        main_layout = QVBoxLayout(self)
-        main_layout.setSpacing(5)
-        main_layout.setContentsMargins(5, 5, 5, 5)
-
-        # Create splitter for settings and preview (SIDE BY SIDE)
-        splitter = QSplitter(Qt.Orientation.Horizontal)
-
-        # === LEFT: Export Settings ===
-        settings_widget = QWidget()
-        settings_main_layout = QVBoxLayout(settings_widget)
-        settings_main_layout.setSpacing(5)
-        settings_main_layout.setContentsMargins(0, 0, 0, 0)
-
-        # Create scroll area for the settings
-        scroll = QScrollArea()
-        scroll.setWidgetResizable(True)
-        scroll.setFrameShape(QScrollArea.Shape.NoFrame)
-
-        content_widget = QWidget()
-        content_layout = QVBoxLayout(content_widget)
-        content_layout.setSpacing(15)
-
-        # === EXPORT SCOPE ===
-        scope_group = QGroupBox("Export Scope")
-        scope_layout = QVBoxLayout()
-
-        self.scope_group = QButtonGroup(self)
-
-        self.scope_current = QRadioButton("Current Dataset")
-        self.scope_current.setChecked(True)
-        self.current_dataset_combo = QComboBox()
-        self.current_dataset_combo.setMinimumWidth(200)
-
-        current_layout = QHBoxLayout()
-        current_layout.addWidget(self.scope_current)
-        current_layout.addWidget(self.current_dataset_combo)
-        current_layout.addStretch()
-
-        self.scope_all = QRadioButton("All Loaded Datasets")
-        self.all_datasets_label = QLabel("(0 datasets loaded)")
-
-        all_layout = QHBoxLayout()
-        all_layout.addWidget(self.scope_all)
-        all_layout.addWidget(self.all_datasets_label)
-        all_layout.addStretch()
-
-        self.scope_selected = QRadioButton("Selected Datasets")
-        self.select_datasets_btn = QPushButton("Select...")
-        self.select_datasets_btn.setMaximumWidth(100)
-        self.select_datasets_btn.clicked.connect(self.select_datasets)
-
-        selected_layout = QHBoxLayout()
-        selected_layout.addWidget(self.scope_selected)
-        selected_layout.addWidget(self.select_datasets_btn)
-        selected_layout.addStretch()
-
-        self.scope_group.addButton(self.scope_current)
-        self.scope_group.addButton(self.scope_all)
-        self.scope_group.addButton(self.scope_selected)
-
-        scope_layout.addLayout(current_layout)
-        scope_layout.addLayout(all_layout)
-        scope_layout.addLayout(selected_layout)
-        scope_group.setLayout(scope_layout)
-
-        # === EXPORT FORMAT ===
-        format_group = QGroupBox("Export Format")
-        format_layout = QVBoxLayout()
-
-        # Data Formats
-        data_label = QLabel("<b>Data Formats:</b>")
-        self.format_csv = QCheckBox("CSV - Simple tables")
-        self.format_csv.setChecked(True)
-
-        csv_options_layout = QHBoxLayout()
-        csv_options_layout.setContentsMargins(30, 0, 0, 0)
-
-        self.csv_option_group = QButtonGroup(self)
-        self.csv_separate = QRadioButton("One file per dataset")
-        self.csv_separate.setChecked(True)
-        self.csv_combined = QRadioButton("Combined single file")
-
-        self.csv_option_group.addButton(self.csv_separate)
-        self.csv_option_group.addButton(self.csv_combined)
-
-        csv_options_layout.addWidget(self.csv_separate)
-        csv_options_layout.addWidget(self.csv_combined)
-        csv_options_layout.addStretch()
-
-        self.format_excel = QCheckBox("Excel (.xlsx) - Formatted workbooks")
-
-        excel_options_layout = QHBoxLayout()
-        excel_options_layout.setContentsMargins(30, 0, 0, 0)
-
-        self.excel_option_group = QButtonGroup(self)
-        self.excel_per_dataset = QRadioButton("One workbook per dataset (multi-sheet)")
-        self.excel_per_dataset.setChecked(True)
-        self.excel_combined = QRadioButton("Single combined workbook (all datasets)")
-        self.excel_method_organized = QRadioButton("Method-organized (compare all datasets)")
-
-        self.excel_option_group.addButton(self.excel_per_dataset)
-        self.excel_option_group.addButton(self.excel_combined)
-        self.excel_option_group.addButton(self.excel_method_organized)
-
-        excel_options_layout.addWidget(self.excel_per_dataset)
-        excel_options_layout.addWidget(self.excel_combined)
-        excel_options_layout.addStretch()
-
-        excel_options_layout2 = QHBoxLayout()
-        excel_options_layout2.setContentsMargins(30, 0, 0, 0)
-        excel_options_layout2.addWidget(self.excel_method_organized)
-        excel_options_layout2.addStretch()
-
-        self.format_json = QCheckBox("JSON - Structured data")
-
-        format_layout.addWidget(data_label)
-        format_layout.addWidget(self.format_csv)
-        format_layout.addLayout(csv_options_layout)
-        format_layout.addSpacing(5)
-        format_layout.addWidget(self.format_excel)
-        format_layout.addLayout(excel_options_layout)
-        format_layout.addLayout(excel_options_layout2)
-        format_layout.addSpacing(5)
-        format_layout.addWidget(self.format_json)
-
-        # Plot Formats
-        format_layout.addSpacing(10)
-        plot_label = QLabel("<b>Plots:</b>")
-
-        self.format_png = QCheckBox("PNG (raster)")
-        self.format_png.setChecked(True)
-        self.png_dpi_label = QLabel("DPI:")
-        self.png_dpi = QSpinBox()
-        self.png_dpi.setRange(72, 600)
-        self.png_dpi.setValue(300)
-        self.png_dpi.setSingleStep(50)
-
-        png_layout = QHBoxLayout()
-        png_layout.setContentsMargins(30, 0, 0, 0)
-        png_layout.addWidget(self.format_png)
-        png_layout.addWidget(self.png_dpi_label)
-        png_layout.addWidget(self.png_dpi)
-        png_layout.addStretch()
-
-        self.format_svg = QCheckBox("SVG (vector)")
-        self.format_pdf_plot = QCheckBox("PDF (vector)")
-
-        format_layout.addWidget(plot_label)
-        format_layout.addLayout(png_layout)
-        format_layout.addWidget(self.format_svg)
-        format_layout.addWidget(self.format_pdf_plot)
-
-        format_group.setLayout(format_layout)
-
-        # === CONTENT SELECTION ===
-        content_group = QGroupBox("Content Selection")
-        content_sel_layout = QVBoxLayout()
-
-        self.content_grain_dist = QCheckBox("Raw grain size distribution")
-        self.content_grain_dist.setChecked(True)
-
-        self.content_percentiles = QCheckBox("Characteristic grain sizes (D10, D50, etc.)")
-        self.content_percentiles.setChecked(True)
-
-        self.content_gradation = QCheckBox("Gradation parameters (Cu, Cc)")
-        self.content_gradation.setChecked(True)
-
-        self.content_classification = QCheckBox("Soil classification")
-        self.content_classification.setChecked(True)
-
-        self.content_k_values = QCheckBox("K-value results (all methods)")
-        self.content_k_values.setChecked(True)
-
-        self.content_statistics = QCheckBox("Statistical summaries")
-        self.content_statistics.setChecked(True)
-
-        self.content_plots = QCheckBox("Plots/figures")
-        self.content_plots.setChecked(True)
-
-        self.content_formulas = QCheckBox("Include formulas and methodology")
-        self.content_formulas.setChecked(False)
-
-        self.content_validation = QCheckBox("Include validation messages")
-        self.content_validation.setChecked(False)
-
-        content_sel_layout.addWidget(self.content_grain_dist)
-        content_sel_layout.addWidget(self.content_percentiles)
-        content_sel_layout.addWidget(self.content_gradation)
-        content_sel_layout.addWidget(self.content_classification)
-        content_sel_layout.addWidget(self.content_k_values)
-        content_sel_layout.addWidget(self.content_statistics)
-        content_sel_layout.addWidget(self.content_plots)
-        content_sel_layout.addWidget(self.content_formulas)
-        content_sel_layout.addWidget(self.content_validation)
-
-        content_group.setLayout(content_sel_layout)
-
-        # === OUTPUT OPTIONS ===
-        output_group = QGroupBox("Output Options")
-        output_layout = QVBoxLayout()
-
-        # Output directory
-        dir_layout = QHBoxLayout()
-        dir_label = QLabel("Output Directory:")
-        self.output_dir = QLineEdit()
-        self.output_dir.setText(os.path.expanduser("~/Desktop"))
-        self.browse_btn = QPushButton("Browse...")
-        self.browse_btn.clicked.connect(self.browse_output_dir)
-
-        dir_layout.addWidget(dir_label)
-        dir_layout.addWidget(self.output_dir)
-        dir_layout.addWidget(self.browse_btn)
-
-        # Filename template
-        template_layout = QHBoxLayout()
-        template_label = QLabel("Filename Template:")
-        self.filename_template = QLineEdit()
-        self.filename_template.setText("{sample_name}_results_{date}")
-
-        template_layout.addWidget(template_label)
-        template_layout.addWidget(self.filename_template)
-
-        # Template help
-        help_label = QLabel(
-            "<small>Available variables: {sample_name}, {date}, {time}, {project}, {method}</small>"
-        )
-        help_label.setWordWrap(True)
-
-        output_layout.addLayout(dir_layout)
-        output_layout.addLayout(template_layout)
-        output_layout.addWidget(help_label)
-
-        output_group.setLayout(output_layout)
-
-        # === ACTION BUTTONS ===
-        button_layout = QHBoxLayout()
-        button_layout.addStretch()
-
-        self.preview_btn = QPushButton("Preview Export")
-        self.preview_btn.clicked.connect(self.preview_export)
-
-        self.export_btn = QPushButton("Export Now")
-        self.export_btn.setStyleSheet("""
-            QPushButton {
-                background-color: #6b8e23;
-                color: white;
-                font-weight: bold;
-                padding: 8px 24px;
-                border-radius: 4px;
-            }
-            QPushButton:hover {
-                background-color: #7ca02a;
-            }
-        """)
-        self.export_btn.clicked.connect(self.export_now)
-
-        self.save_config_btn = QPushButton("Save Export Config")
-        self.save_config_btn.clicked.connect(self.save_export_config)
-
-        button_layout.addWidget(self.preview_btn)
-        button_layout.addWidget(self.export_btn)
-        button_layout.addWidget(self.save_config_btn)
-
-        # Add all groups to content layout
-        content_layout.addWidget(scope_group)
-        content_layout.addWidget(format_group)
-        content_layout.addWidget(content_group)
-        content_layout.addWidget(output_group)
-        content_layout.addStretch()
-
-        scroll.setWidget(content_widget)
-
-        settings_main_layout.addWidget(scroll)
-        settings_main_layout.addLayout(button_layout)
-
-        # === RIGHT: Preview Tabs ===
-        preview_widget = QWidget()
-        preview_layout = QVBoxLayout(preview_widget)
-        preview_layout.setContentsMargins(5, 0, 0, 0)
-        preview_layout.setSpacing(5)
-
-        preview_label = QLabel("📊 Data Preview")
-        preview_label.setStyleSheet("font-weight: bold; font-size: 13pt; padding: 5px; background-color: #f0f0f0; border-radius: 3px;")
-        preview_layout.addWidget(preview_label)
-
-        self.preview_tabs = QTabWidget()
-        self.preview_tabs.setDocumentMode(True)
-
-        # K-Results Preview Tab
-        self.k_results_preview = QTableWidget()
-        self.k_results_preview.setAlternatingRowColors(True)
-        self.k_results_preview.setEditTriggers(QTableWidget.EditTrigger.NoEditTriggers)
-        self.k_results_preview.setSelectionBehavior(QTableWidget.SelectionBehavior.SelectRows)
-        self.preview_tabs.addTab(self.k_results_preview, "K-Results")
-
-        # Grain Data Preview Tab
-        self.grain_data_preview = QTableWidget()
-        self.grain_data_preview.setAlternatingRowColors(True)
-        self.grain_data_preview.setEditTriggers(QTableWidget.EditTrigger.NoEditTriggers)
-        self.preview_tabs.addTab(self.grain_data_preview, "Grain Size Data")
-
-        # Export Format Preview Tab
-        self.format_preview = QTextEdit()
-        self.format_preview.setReadOnly(True)
-        self.format_preview.setFont(QFont("Courier", 9))
-        self.preview_tabs.addTab(self.format_preview, "Export Format Preview")
-
-        # Files Preview Tab
-        self.files_preview = QTableWidget()
-        self.files_preview.setAlternatingRowColors(True)
-        self.files_preview.setEditTriggers(QTableWidget.EditTrigger.NoEditTriggers)
-        self.preview_tabs.addTab(self.files_preview, "Files to Export")
-
-        preview_layout.addWidget(self.preview_tabs)
-
-        # Add to splitter
-        splitter.addWidget(settings_widget)
-        splitter.addWidget(preview_widget)
-
-        # Set initial sizes: Settings ~400px, Preview gets the rest
-        splitter.setSizes([400, 800])
-        splitter.setStretchFactor(0, 0)  # Settings: fixed-ish
-        splitter.setStretchFactor(1, 1)  # Preview: stretches
-
-        main_layout.addWidget(splitter)
-
-        # Connect signals
-        self.format_csv.toggled.connect(self.update_format_options)
-        self.format_excel.toggled.connect(self.update_format_options)
-        self.format_png.toggled.connect(self.update_format_options)
-
-        # Connect signals for preview updates
-        self.scope_current.toggled.connect(self.update_preview)
-        self.scope_all.toggled.connect(self.update_preview)
-        self.scope_selected.toggled.connect(self.update_preview)
-        self.current_dataset_combo.currentIndexChanged.connect(self.update_preview)
-        self.format_csv.toggled.connect(self.update_preview)
-        self.format_excel.toggled.connect(self.update_preview)
-        self.csv_separate.toggled.connect(self.update_preview)
-        self.csv_combined.toggled.connect(self.update_preview)
-
-        self.update_format_options()
-        self.update_preview()
-
     def update_datasets(self, datasets: List[tuple]):
         """
         Update the list of available datasets
@@ -1305,9 +1660,6 @@ class ExportTab(QWidget):
         Args:
             datasets: List of (name, GrainSizeData, List[KCalculationResult]) tuples
         """
-        print(f"[DEBUG] ExportTab.update_datasets called with {len(datasets)} datasets")
-        for idx, (name, dataset, results) in enumerate(datasets):
-            print(f"[DEBUG]   Dataset {idx}: {name}, results={len(results) if results else 0}")
         self.datasets = datasets
 
         # Update current dataset combo
@@ -1349,9 +1701,31 @@ class ExportTab(QWidget):
         """No longer needed - using simple All/Current selection"""
         pass
 
-    def _old_update_preview(self):
-        """OLD update_preview - no longer used"""
-        pass
+    def _format_filename(self, template: str, name: str, extension: str = "") -> str:
+        """Format filename from template (helper method)"""
+        now = datetime.now()
+
+        replacements = {
+            '{sample_name}': name,
+            '{date}': now.strftime('%Y%m%d'),
+            '{time}': now.strftime('%H%M%S'),
+            '{project}': 'grain_analysis',
+            '{method}': 'all'
+        }
+
+        filename = template
+        for key, value in replacements.items():
+            filename = filename.replace(key, value)
+
+        # Remove invalid chars
+        invalid_chars = '<>:"|?*'
+        for char in invalid_chars:
+            filename = filename.replace(char, '_')
+
+        if extension and not filename.endswith(extension):
+            filename += extension
+
+        return filename
 
     def _update_k_results_preview(self):
         """Update K-Results preview table"""
@@ -1638,94 +2012,6 @@ class ExportTab(QWidget):
 
         self.format_preview.setPlainText("\n".join(preview_text))
 
-    def _update_files_preview(self):
-        """No longer used - file tree in middle column shows this info"""
-        pass
-
-    def _old_update_files_preview(self):
-        """OLD _update_files_preview - kept for reference"""
-        datasets_to_export = self._get_datasets_to_export()
-        config = self._build_export_config()
-
-        headers = ["Filename", "Type", "Size Estimate", "Description"]
-        # self.files_preview.setColumnCount(len(headers))
-        # self.files_preview.setHorizontalHeaderLabels(headers)
-
-        files = []
-
-        # CSV files
-        if config.get('csv', False):
-            if config.get('csv_mode') == 'separate':
-                for name, _, _ in datasets_to_export:
-                    base = self._format_filename(config['filename_template'], name, '')
-                    if config.get('grain_distribution'):
-                        files.append((f"{base}_grain_size.csv", "CSV", "~5-50 KB", "Grain size distribution"))
-                    if config.get('k_values'):
-                        files.append((f"{base}_k_values.csv", "CSV", "~2-10 KB", "K-value results"))
-                    if config.get('statistics'):
-                        files.append((f"{base}_statistics.csv", "CSV", "~1-5 KB", "Statistical summary"))
-            else:
-                files.append(("combined_all_datasets.csv", "CSV", "~10-100 KB", "All K-values combined"))
-                files.append(("wide_format_all_datasets.csv", "CSV", "~10-100 KB", "Wide format for analysis"))
-
-        # Excel files
-        if config.get('excel', False):
-            mode = config.get('excel_mode', 'per_dataset')
-            if mode == 'per_dataset':
-                for name, _, _ in datasets_to_export:
-                    base = self._format_filename(config['filename_template'], name, '.xlsx')
-                    files.append((base, "Excel", "~50-200 KB", "Complete dataset workbook"))
-            elif mode == 'combined':
-                files.append(("combined_all_datasets.xlsx", "Excel", "~100-500 KB", "All datasets combined"))
-            else:
-                files.append(("method_comparison.xlsx", "Excel", "~50-200 KB", "Method-organized comparison"))
-
-        # JSON files
-        if config.get('json', False):
-            for name, _, _ in datasets_to_export:
-                base = self._format_filename(config['filename_template'], name, '.json')
-                files.append((base, "JSON", "~10-50 KB", "Structured data export"))
-
-        self.files_preview.setRowCount(len(files))
-
-        for row, (filename, file_type, size, description) in enumerate(files):
-            self.files_preview.setItem(row, 0, QTableWidgetItem(filename))
-            self.files_preview.setItem(row, 1, QTableWidgetItem(file_type))
-            self.files_preview.setItem(row, 2, QTableWidgetItem(size))
-            self.files_preview.setItem(row, 3, QTableWidgetItem(description))
-
-        # Auto-resize columns
-        self.files_preview.horizontalHeader().setSectionResizeMode(0, QHeaderView.ResizeMode.Stretch)
-        self.files_preview.horizontalHeader().setSectionResizeMode(1, QHeaderView.ResizeMode.ResizeToContents)
-        self.files_preview.horizontalHeader().setSectionResizeMode(2, QHeaderView.ResizeMode.ResizeToContents)
-        self.files_preview.horizontalHeader().setSectionResizeMode(3, QHeaderView.ResizeMode.Stretch)
-
-    def _format_filename(self, template: str, name: str, extension: str = "") -> str:
-        """Format filename from template (helper method)"""
-        now = datetime.now()
-
-        replacements = {
-            '{sample_name}': name,
-            '{date}': now.strftime('%Y%m%d'),
-            '{time}': now.strftime('%H%M%S'),
-            '{project}': 'grain_analysis',
-            '{method}': 'all'
-        }
-
-        filename = template
-        for key, value in replacements.items():
-            filename = filename.replace(key, value)
-
-        # Remove invalid chars
-        invalid_chars = '<>:"|?*'
-        for char in invalid_chars:
-            filename = filename.replace(char, '_')
-
-        if extension and not filename.endswith(extension):
-            filename += extension
-
-        return filename
-
     def preview_export(self):
         """Preview what will be exported with detailed data availability"""
         # Get selected datasets
@@ -1993,16 +2279,40 @@ class ExportTab(QWidget):
             'svg': self.selected_formats.get('svg', False),
             'pdf_plot': self.selected_formats.get('pdf', False),
 
-            # Content - using new content_enabled dict
-            'grain_distribution': self.content_enabled.get('grain_data', True),
-            'percentiles': self.content_enabled.get('grain_data', True),
-            'gradation': self.content_enabled.get('grain_data', True),
-            'classification': self.content_enabled.get('grain_data', True),
-            'k_values': self.content_enabled.get('k_values', True),
-            'statistics': self.content_enabled.get('statistics', True),
-            'plots': self.content_enabled.get('plots', True),
-            'formulas': False,  # Not exposed in new UI
-            'validation': False,  # Not exposed in new UI
+            # Content - using granular content_selection structure
+            'grain_distribution': self.content_selection['grain_size']['items']['raw_distribution'],
+            'percentiles': self.content_selection['grain_size']['items']['percentiles']['enabled'],
+            'gradation': self.content_selection['grain_size']['items']['gradation']['enabled'],
+            'classification': self.content_selection['grain_size']['items']['classification'],
+            'k_values': self.content_selection['k_values']['enabled'],
+            'statistics': self.content_selection['statistics']['enabled'],
+            'plots': self.content_selection['plots']['enabled'],
+            'formulas': self.content_selection['k_values']['include_formulas'],
+            'validation': self.content_selection['k_values']['include_validation'],
+
+            # Granular selections (NEW)
+            'selected_percentiles': [
+                p for p, enabled in self.content_selection['grain_size']['items']['percentiles']['items'].items()
+                if enabled
+            ],
+            'selected_k_methods': [
+                method for method, enabled in self.content_selection['k_values']['individual_methods'].items()
+                if enabled
+            ] if self.content_selection['k_values']['filter_mode'] == 'individual' else None,
+            'k_units': {
+                'm_s': self.content_selection['k_values']['units']['m_s'],
+                'cm_s': self.content_selection['k_values']['units']['cm_s'],
+                'm_d': self.content_selection['k_values']['units']['m_d'],
+            },
+            'selected_statistics': [
+                stat for stat, enabled in self.content_selection['statistics']['items']['k_value_stats']['items'].items()
+                if enabled
+            ] if self.content_selection['statistics']['items']['k_value_stats']['enabled'] else [],
+            'include_metadata': {
+                'sample_info': self.content_selection['metadata']['items']['sample_info'],
+                'environmental': self.content_selection['metadata']['items']['environmental'],
+                'export_timestamp': self.content_selection['metadata']['items']['export_timestamp'],
+            },
 
             # Output
             'output_dir': self.output_dir.text(),

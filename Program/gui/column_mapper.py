@@ -6,7 +6,7 @@ from PyQt6.QtWidgets import (QDialog, QVBoxLayout, QHBoxLayout, QLabel,
                             QComboBox, QPushButton, QTableWidget, QTableWidgetItem,
                             QDialogButtonBox, QGroupBox, QFormLayout, QSpinBox,
                             QDoubleSpinBox, QTextEdit, QTabWidget, QWidget,
-                            QMessageBox, QCheckBox)
+                            QMessageBox, QCheckBox, QListWidget, QListWidgetItem)
 from PyQt6.QtCore import Qt
 from PyQt6.QtGui import QFont, QColor
 import csv
@@ -17,14 +17,17 @@ from data_loader import GrainSizeData
 class ColumnMapperDialog(QDialog):
     """Dialog for mapping CSV columns to grain size data"""
 
-    def __init__(self, file_path: str, parent=None, main_window=None):
+    def __init__(self, file_path: str, parent=None, main_window=None, sheet_name: str = None):
         super().__init__(parent)
         self.file_path = file_path
         self.main_window = main_window  # Direct reference to main window
+        self.forced_sheet_name = sheet_name  # If provided, only work with this specific sheet
         self.column_mapping = {}
         self.sample_data = []
         self.headers = []
         self.excel_sheets = []  # Available Excel sheets
+        self.sheet_list = None  # Multi-sheet selection widget
+        self._excel_file = None  # Cached ExcelFile reference
         self.current_sheet = None
         self.header_row = 0  # Detected header row
         self.cell_range_mode = False  # False = column mapping, True = cell range selection
@@ -34,7 +37,11 @@ class ColumnMapperDialog(QDialog):
         self.selected_headers = []  # List of (row, col) tuples for header cells
         self.learned_pattern = None  # Stores pattern for batch processing
 
-        self.setWindowTitle(f"Map Columns - {os.path.basename(file_path)}")
+        # Update window title to show sheet if provided
+        if sheet_name:
+            self.setWindowTitle(f"Map Columns - {os.path.basename(file_path)} [{sheet_name}]")
+        else:
+            self.setWindowTitle(f"Map Columns - {os.path.basename(file_path)}")
         self.setModal(True)
         self.resize(800, 600)
 
@@ -90,7 +97,7 @@ class ColumnMapperDialog(QDialog):
             QMessageBox.critical(self, "Error", f"Could not load CSV file:\n{str(e)}")
             self.reject()
 
-    def load_csv_preview(self):
+    def load_csv_preview(self, sheet_name: Optional[str] = None):
         """Load first few rows of file for preview"""
         file_ext = os.path.splitext(self.file_path)[1].lower()
         rows = []
@@ -106,21 +113,24 @@ class ColumnMapperDialog(QDialog):
             # Load Excel file with pandas - handle multi-sheet files
             import pandas as pd
 
-            # First, get all sheet names
-            excel_file = pd.ExcelFile(self.file_path)
-            self.excel_sheets = excel_file.sheet_names
+            if not self.excel_sheets:
+                self._excel_file = pd.ExcelFile(self.file_path)
+                self.excel_sheets = self._excel_file.sheet_names
 
-            # Use first sheet by default, or 'English' if available
-            sheet_name = self.excel_sheets[0]
-            if 'English' in self.excel_sheets:
-                sheet_name = 'English'
-            elif 'english' in self.excel_sheets:
-                sheet_name = 'english'
+            # Determine which sheet to preview
+            # If forced_sheet_name is set, use only that sheet
+            if self.forced_sheet_name:
+                target_sheet = self.forced_sheet_name
+                self.excel_sheets = [self.forced_sheet_name]  # Hide other sheets from UI
+            else:
+                target_sheet = sheet_name or self.current_sheet
+                if not target_sheet or target_sheet not in self.excel_sheets:
+                    target_sheet = self._get_preferred_sheet_name()
 
-            self.current_sheet = sheet_name
+            self.current_sheet = target_sheet
 
             # Load with header=None to get raw data - load enough rows for complex Excel files
-            df = pd.read_excel(self.file_path, sheet_name=sheet_name, header=None, nrows=100)
+            df = pd.read_excel(self.file_path, sheet_name=target_sheet, header=None, nrows=100)
             # Convert dataframe to list of lists
             rows = df.values.tolist()
             rows = [[str(cell) if pd.notna(cell) else '' for cell in row] for row in rows]  # Convert all to strings, handle NaN
@@ -223,16 +233,38 @@ class ColumnMapperDialog(QDialog):
 
         # Add Excel sheet selector if multiple sheets
         if len(self.excel_sheets) > 1:
-            sheet_group = QGroupBox("Excel Sheet Selection")
-            sheet_layout = QFormLayout(sheet_group)
+            sheet_group = QGroupBox("Excel Sheets in Workbook")
+            sheet_layout = QVBoxLayout(sheet_group)
 
-            self.sheet_combo = QComboBox()
-            self.sheet_combo.addItems(self.excel_sheets)
-            if self.current_sheet in self.excel_sheets:
-                self.sheet_combo.setCurrentText(self.current_sheet)
-            self.sheet_combo.currentTextChanged.connect(self.reload_sheet)
+            sheet_info = QLabel("Check the sheets you want to import. Select a sheet to preview/mapping.")
+            sheet_info.setStyleSheet("color: #555; font-size: 10px;")
+            sheet_info.setWordWrap(True)
+            sheet_layout.addWidget(sheet_info)
 
-            sheet_layout.addRow("Sheet:", self.sheet_combo)
+            self.sheet_list = QListWidget()
+            self.sheet_list.setSelectionMode(QListWidget.SelectionMode.SingleSelection)
+            for sheet_name in self.excel_sheets:
+                item = QListWidgetItem(sheet_name)
+                item.setFlags(item.flags() | Qt.ItemFlag.ItemIsUserCheckable | Qt.ItemFlag.ItemIsSelectable | Qt.ItemFlag.ItemIsEnabled)
+                item.setCheckState(Qt.CheckState.Checked)
+                self.sheet_list.addItem(item)
+                if sheet_name == self.current_sheet:
+                    self.sheet_list.setCurrentItem(item)
+            if self.sheet_list.count() > 0 and not self.sheet_list.currentItem():
+                self.sheet_list.setCurrentRow(0)
+            self.sheet_list.itemSelectionChanged.connect(self.on_sheet_selection_changed)
+            sheet_layout.addWidget(self.sheet_list)
+
+            button_row = QHBoxLayout()
+            select_all_btn = QPushButton("Select All")
+            select_all_btn.clicked.connect(lambda: self.set_sheet_checks(Qt.CheckState.Checked))
+            clear_btn = QPushButton("Select None")
+            clear_btn.clicked.connect(lambda: self.set_sheet_checks(Qt.CheckState.Unchecked))
+            button_row.addWidget(select_all_btn)
+            button_row.addWidget(clear_btn)
+            button_row.addStretch()
+            sheet_layout.addLayout(button_row)
+
             mapping_layout.addWidget(sheet_group)
 
         # Preview group
@@ -394,6 +426,61 @@ class ColumnMapperDialog(QDialog):
 
         layout.addWidget(button_box)
 
+    def set_sheet_checks(self, state: Qt.CheckState):
+        """Check or uncheck all sheet items"""
+        if not self.sheet_list:
+            return
+        for i in range(self.sheet_list.count()):
+            item = self.sheet_list.item(i)
+            item.setCheckState(state)
+
+    def on_sheet_selection_changed(self):
+        """Preview the sheet that is currently highlighted in the list"""
+        if not self.sheet_list:
+            return
+        item = self.sheet_list.currentItem()
+        if not item:
+            return
+        sheet_name = item.text()
+        if sheet_name != self.current_sheet:
+            self.reload_sheet(sheet_name)
+        else:
+            # Ensure check state at least enabled when user focuses a sheet
+            pass
+
+    def _select_sheet_in_list(self, sheet_name: str):
+        """Programmatically select a sheet in the checklist"""
+        if not self.sheet_list or not sheet_name:
+            return
+        for i in range(self.sheet_list.count()):
+            item = self.sheet_list.item(i)
+            if item.text() == sheet_name:
+                self.sheet_list.blockSignals(True)
+                self.sheet_list.setCurrentItem(item)
+                self.sheet_list.blockSignals(False)
+                break
+
+    def get_selected_sheet_names(self) -> List[str]:
+        """Return list of sheet names that are checked for import"""
+        if not self.sheet_list:
+            # No multi-sheet UI; fall back to current sheet if any
+            if self.current_sheet:
+                return [self.current_sheet]
+            return []
+
+        selected = []
+        for i in range(self.sheet_list.count()):
+            item = self.sheet_list.item(i)
+            if item.checkState() == Qt.CheckState.Checked:
+                selected.append(item.text())
+
+        if not selected and self.sheet_list.currentItem():
+            selected.append(self.sheet_list.currentItem().text())
+        elif not selected and self.excel_sheets:
+            selected.append(self.excel_sheets[0])
+
+        return selected
+
     def setup_preview_table(self):
         """Setup the preview table with CSV data"""
         if not self.sample_data:
@@ -498,7 +585,43 @@ class ColumnMapperDialog(QDialog):
         else:
             return self.extract_data_from_columns()
 
-    def extract_data_from_columns(self) -> Tuple[List[float], List[float]]:
+    def extract_data_for_sheet(self, sheet_name: Optional[str]) -> Tuple[List[float], List[float]]:
+        """Extract data for a specific sheet using the current mapping settings"""
+        if self.cell_range_mode:
+            if sheet_name and sheet_name != self.current_sheet:
+                raise ValueError("Cell range selection mode currently supports one sheet at a time. Please select a single sheet or switch to column mapping mode.")
+            return self.extract_data_from_ranges(sheet_name=sheet_name)
+        return self.extract_data_from_columns(sheet_name=sheet_name)
+
+    def _get_preferred_sheet_name(self) -> str:
+        """Choose a default sheet when none is explicitly selected"""
+        if not self.excel_sheets:
+            return "Sheet1"
+        lower_name_map = {name.lower(): name for name in self.excel_sheets}
+        if 'english' in lower_name_map:
+            return lower_name_map['english']
+        return self.excel_sheets[0]
+
+    def _load_rows_for_sheet(self, sheet_name: Optional[str] = None) -> List[List[str]]:
+        """Load all rows for the specified sheet (or entire CSV)"""
+        file_ext = os.path.splitext(self.file_path)[1].lower()
+        if file_ext == '.csv':
+            with open(self.file_path, 'r', encoding='utf-8') as file:
+                reader = csv.reader(file)
+                return list(reader)
+
+        if file_ext in ['.xlsx', '.xls']:
+            import pandas as pd
+            target_sheet = sheet_name or self.current_sheet
+            if not target_sheet or (self.excel_sheets and target_sheet not in self.excel_sheets):
+                target_sheet = self._get_preferred_sheet_name()
+            df = pd.read_excel(self.file_path, sheet_name=target_sheet, header=None)
+            rows = df.values.tolist()
+            return [[str(cell) if pd.notna(cell) else '' for cell in row] for row in rows]
+
+        return []
+
+    def extract_data_from_columns(self, sheet_name: Optional[str] = None) -> Tuple[List[float], List[float]]:
         """Extract data using column mapping mode"""
         size_idx = self.size_combo.currentIndex() - 1  # -1 for "(Not Used)"
         passing_idx = self.passing_combo.currentIndex() - 1
@@ -518,19 +641,7 @@ class ColumnMapperDialog(QDialog):
         percent_passing = []
 
         # Load all data (not just preview)
-        file_ext = os.path.splitext(self.file_path)[1].lower()
-
-        if file_ext == '.csv':
-            with open(self.file_path, 'r', encoding='utf-8') as file:
-                reader = csv.reader(file)
-                rows = list(reader)
-        elif file_ext in ['.xlsx', '.xls']:
-            import pandas as pd
-            # Use the selected sheet
-            sheet_name = getattr(self, 'current_sheet', None) or self.excel_sheets[0] if hasattr(self, 'excel_sheets') and self.excel_sheets else 0
-            df = pd.read_excel(self.file_path, sheet_name=sheet_name, header=None)
-            rows = df.values.tolist()
-            rows = [[str(cell) if pd.notna(cell) else '' for cell in row] for row in rows]
+        rows = self._load_rows_for_sheet(sheet_name)
 
         # Skip header row(s) - use detected header row + 1
         header_row_idx = getattr(self, 'header_row', 0)
@@ -573,7 +684,7 @@ class ColumnMapperDialog(QDialog):
 
         return particle_sizes, percent_passing
 
-    def extract_data_from_ranges(self) -> Tuple[List[float], List[float]]:
+    def extract_data_from_ranges(self, sheet_name: Optional[str] = None) -> Tuple[List[float], List[float]]:
         """Extract data using cell range selection mode"""
         if not self.selected_size_range or not self.selected_percent_range:
             raise ValueError("Please select both size data range and percent data range")
@@ -581,20 +692,7 @@ class ColumnMapperDialog(QDialog):
         if len(self.selected_size_range) != len(self.selected_percent_range):
             raise ValueError(f"Size range ({len(self.selected_size_range)} cells) and percent range ({len(self.selected_percent_range)} cells) must have the same number of cells")
 
-        # Load full Excel data for extraction
-        file_ext = os.path.splitext(self.file_path)[1].lower()
-        if file_ext in ['.xlsx', '.xls']:
-            import pandas as pd
-            # Use the selected sheet
-            sheet_name = getattr(self, 'current_sheet', None) or self.excel_sheets[0] if hasattr(self, 'excel_sheets') and self.excel_sheets else 0
-            df = pd.read_excel(self.file_path, sheet_name=sheet_name, header=None)
-            rows = df.values.tolist()
-            rows = [[str(cell) if pd.notna(cell) else '' for cell in row] for row in rows]
-        else:
-            # CSV file
-            with open(self.file_path, 'r', encoding='utf-8') as file:
-                reader = csv.reader(file)
-                rows = list(reader)
+        rows = self._load_rows_for_sheet(sheet_name)
 
         particle_sizes = []
         percent_passing = []
@@ -638,35 +736,65 @@ class ColumnMapperDialog(QDialog):
 
         return particle_sizes, percent_passing
 
-    def get_mapping_result(self) -> Dict:
-        """Get the final mapping result"""
+    def get_mapping_results(self) -> List[Dict]:
+        """Get mapping results for all selected sheets"""
         try:
-            particle_sizes, percent_passing = self.extract_data()
+            selected_sheets = self.get_selected_sheet_names()
+            if not selected_sheets:
+                selected_sheets = [self.current_sheet or self._get_preferred_sheet_name()]
 
-            # Learn pattern from cell range selection if in range mode
-            if self.cell_range_mode and self.selected_size_range and self.selected_percent_range:
-                self.learn_pattern_from_selection()
+            if self.cell_range_mode and len(selected_sheets) > 1:
+                raise ValueError("Cell range selection mode only supports one sheet at a time. Please select a single sheet or switch to Column Mapping mode.")
 
-            return {
-                'particle_sizes': particle_sizes,
-                'percent_passing': percent_passing,
-                'sample_name': self.sample_name_edit.toPlainText().strip(),
-                'temperature': self.temperature_spin.value(),
-                'porosity': self.porosity_spin.value()
-            }
+            base_sample_name = self.sample_name_edit.toPlainText().strip()
+            if not base_sample_name:
+                base_sample_name = os.path.splitext(os.path.basename(self.file_path))[0]
+
+            results: List[Dict] = []
+
+            for idx, sheet_name in enumerate(selected_sheets):
+                particle_sizes, percent_passing = self.extract_data_for_sheet(sheet_name)
+
+                # Learn pattern from cell range selection if applicable (only once)
+                if idx == 0 and self.cell_range_mode and self.selected_size_range and self.selected_percent_range:
+                    self.learn_pattern_from_selection()
+
+                sample_name = base_sample_name
+                if len(selected_sheets) > 1:
+                    sample_name = f"{base_sample_name} - {sheet_name}"
+
+                results.append({
+                    'particle_sizes': particle_sizes,
+                    'percent_passing': percent_passing,
+                    'sample_name': sample_name,
+                    'temperature': self.temperature_spin.value(),
+                    'porosity': self.porosity_spin.value(),
+                    'sheet_name': sheet_name
+                })
+
+            return results
         except Exception as e:
             raise ValueError(f"Mapping failed: {str(e)}")
+
+    def get_mapping_result(self) -> Dict:
+        """Backward-compatible helper returning only the first mapping result"""
+        results = self.get_mapping_results()
+        if not results:
+            raise ValueError("No data extracted from the selected sheet(s)")
+        return results[0]
 
     def reload_sheet(self, sheet_name: str):
         """Reload data when Excel sheet changes"""
         if not sheet_name or sheet_name == self.current_sheet:
             return
 
-        self.current_sheet = sheet_name
         try:
             # Reload the preview with new sheet
-            self.load_csv_preview()
+            self.load_csv_preview(sheet_name=sheet_name)
             self.setup_preview_table()
+
+            # Update list selection to match
+            self._select_sheet_in_list(sheet_name)
 
             # Update combo boxes
             column_options = ["(Not Used)"] + self.headers
@@ -681,6 +809,16 @@ class ColumnMapperDialog(QDialog):
             if hasattr(self, 'header_row_spin'):
                 self.header_row_spin.setRange(0, min(10, len(self.sample_data) - 1))
                 self.header_row_spin.setValue(self.header_row)
+
+            # Reset any learned pattern or selections since data changed
+            self.selected_size_range = []
+            self.selected_percent_range = []
+            self.selected_headers = []
+            self.learned_pattern = None
+            if hasattr(self, 'batch_apply_btn'):
+                self.batch_apply_btn.setEnabled(False)
+            if hasattr(self, 'pattern_info_label'):
+                self.pattern_info_label.setText("Select headers and data together, then apply to batch")
 
         except Exception as e:
             QMessageBox.warning(self, "Sheet Load Error", f"Could not load sheet '{sheet_name}':\n{str(e)}")

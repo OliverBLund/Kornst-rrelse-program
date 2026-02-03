@@ -21,13 +21,22 @@ class ErrorTab(QWidget):
     """Tab widget for datasets that failed to load"""
 
     # Signal emitted when dataset is successfully fixed
-    dataset_fixed = pyqtSignal(GrainSizeData, str)  # dataset, original_file_path
+    dataset_fixed = pyqtSignal(object, str)  # dataset or list of datasets, original_file_path
 
     def __init__(self, file_path: str, error_message: str, parent=None):
         super().__init__(parent)
-        self.file_path = file_path
+        self.file_path = file_path  # May be "path:::sheet_name" format
         self.error_message = error_message
-        self.file_name = os.path.basename(file_path)
+
+        # Parse file path and sheet name if present
+        if ":::" in file_path:
+            actual_path, self.sheet_name = file_path.split(":::", 1)
+            self.actual_file_path = actual_path
+            self.file_name = f"{os.path.basename(actual_path)} [{self.sheet_name}]"
+        else:
+            self.actual_file_path = file_path
+            self.sheet_name = None
+            self.file_name = os.path.basename(file_path)
 
         self.setup_ui()
         self.load_file_preview()
@@ -180,7 +189,7 @@ Instructions:
     def load_file_preview(self):
         """Load first few rows of the file for preview"""
         try:
-            file_ext = os.path.splitext(self.file_path)[1].lower()
+            file_ext = os.path.splitext(self.actual_file_path)[1].lower()
             rows = []
 
             if file_ext == '.csv':
@@ -191,7 +200,7 @@ Instructions:
 
                 for delimiter in delimiters:
                     try:
-                        with open(self.file_path, 'r', encoding='utf-8') as file:
+                        with open(self.actual_file_path, 'r', encoding='utf-8') as file:
                             reader = csv.reader(file, delimiter=delimiter)
                             test_rows = []
                             for i, row in enumerate(reader):
@@ -213,7 +222,11 @@ Instructions:
             elif file_ext in ['.xlsx', '.xls']:
                 try:
                     import pandas as pd
-                    df = pd.read_excel(self.file_path, nrows=5)
+                    # Load specific sheet if sheet_name is provided
+                    if self.sheet_name:
+                        df = pd.read_excel(self.actual_file_path, sheet_name=self.sheet_name, nrows=5, header=None)
+                    else:
+                        df = pd.read_excel(self.actual_file_path, nrows=5)
                     rows = [df.columns.tolist()] + df.values.tolist()
                     rows = [[str(cell) for cell in row] for row in rows]
                 except ImportError:
@@ -264,23 +277,36 @@ Instructions:
             while main_window and not hasattr(main_window, 'dataset_tabs_widget'):
                 main_window = main_window.parent()
 
-            dialog = ColumnMapperDialog(self.file_path, self, main_window)
+            # Pass actual file path and optional sheet name to column mapper
+            dialog = ColumnMapperDialog(self.actual_file_path, self, main_window,
+                                       sheet_name=self.sheet_name)
             if dialog.exec() == QDialog.DialogCode.Accepted:
-                # Get the mapped data
-                mapping_result = dialog.get_mapping_result()
+                mapping_results = dialog.get_mapping_results()
+                if not mapping_results:
+                    QMessageBox.warning(self, "No Data", "No sheet data was extracted.")
+                    return
 
-                # Create GrainSizeData from mapping result
-                dataset = GrainSizeData(
-                    sample_name=mapping_result['sample_name'],
-                    temperature=mapping_result['temperature'],
-                    porosity=mapping_result['porosity'],
-                    particle_sizes=mapping_result['particle_sizes'],
-                    percent_passing=mapping_result['percent_passing'],
-                    file_path=self.file_path
-                )
+                datasets = []
+                for mapping in mapping_results:
+                    # Use sheet-specific sample name if we have a sheet
+                    sample_name = mapping['sample_name']
+                    if self.sheet_name and not f"[{self.sheet_name}]" in sample_name:
+                        sample_name = f"{sample_name} [{self.sheet_name}]"
 
-                # Emit signal that dataset was fixed
-                self.dataset_fixed.emit(dataset, self.file_path)
+                    dataset = GrainSizeData(
+                        sample_name=sample_name,
+                        temperature=mapping['temperature'],
+                        porosity=mapping['porosity'],
+                        particle_sizes=mapping['particle_sizes'],
+                        percent_passing=mapping['percent_passing'],
+                        file_path=self.file_path  # Use original file_path key
+                    )
+                    datasets.append(dataset)
+
+                payload = datasets[0] if len(datasets) == 1 else datasets
+
+                # Emit signal that dataset(s) were fixed
+                self.dataset_fixed.emit(payload, self.file_path)
 
         except Exception as e:
             QMessageBox.critical(self, "Fix Error", f"Could not fix dataset:\n{str(e)}")
