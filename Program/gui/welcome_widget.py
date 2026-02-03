@@ -76,22 +76,22 @@ class WelcomeWidget(QWidget):
             image_path = get_resource_path(os.path.join("resources", "soil_layers.png"))
 
         if os.path.exists(image_path):
-            # Load and draw background image (scaled to fit)
+            # Load and draw background image (scaled to fill entire area)
             pixmap = QPixmap(image_path)
             if not pixmap.isNull():
-                # Scale the image to fit within the widget without cropping
+                # Scale the image to fill the entire widget (may crop edges)
                 scaled_pixmap = pixmap.scaled(
                     self.size(),
-                    Qt.AspectRatioMode.KeepAspectRatio,
+                    Qt.AspectRatioMode.KeepAspectRatioByExpanding,
                     Qt.TransformationMode.SmoothTransformation
                 )
 
-                # Center the scaled image
+                # Center the scaled image (cropping will be symmetric)
                 x = (self.width() - scaled_pixmap.width()) // 2
                 y = (self.height() - scaled_pixmap.height()) // 2
                 painter.drawPixmap(x, y, scaled_pixmap)
 
-                # Add a stronger semi-transparent overlay for better text readability
+                # Add a semi-transparent overlay for better text readability
                 overlay = QColor(255, 255, 255, 120)  # White with 120/255 opacity
                 painter.fillRect(self.rect(), overlay)
             else:
@@ -112,7 +112,8 @@ class WelcomeWidget(QWidget):
         painter.fillRect(self.rect(), gradient)
 
     def setup_ui(self):
-        """Setup enhanced welcome screen with background image and gradient overlay"""
+        """Setup enhanced welcome screen with background image and gradient overlay.
+        Responsive design that adapts to smaller screens."""
         main_layout = QVBoxLayout(self)
         main_layout.setContentsMargins(0, 0, 0, 0)
         main_layout.setSpacing(0)
@@ -131,11 +132,44 @@ class WelcomeWidget(QWidget):
         attribution_label.setFixedHeight(22)
         attribution_label.setSizePolicy(QSizePolicy.Policy.Fixed, QSizePolicy.Policy.Fixed)
 
-        # Center container - this will center everything
-        center_container = QWidget()
-        center_layout = QVBoxLayout(center_container)
-        center_layout.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        center_layout.setSpacing(15)
+        # === MAIN SCROLL AREA for responsive layout ===
+        scroll_area = QScrollArea()
+        scroll_area.setWidgetResizable(True)
+        scroll_area.setFrameShape(QFrame.Shape.NoFrame)
+        scroll_area.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAsNeeded)
+        scroll_area.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAsNeeded)
+        scroll_area.setStyleSheet("""
+            QScrollArea {
+                background: transparent;
+                border: none;
+            }
+            QScrollBar:vertical, QScrollBar:horizontal {
+                border: none;
+                background: rgba(240, 240, 240, 150);
+                width: 10px;
+                border-radius: 5px;
+            }
+            QScrollBar::handle:vertical, QScrollBar::handle:horizontal {
+                background: rgba(180, 180, 180, 200);
+                border-radius: 5px;
+                min-height: 20px;
+            }
+            QScrollBar::handle:vertical:hover, QScrollBar::handle:horizontal:hover {
+                background: rgba(150, 150, 150, 220);
+            }
+            QScrollBar::add-line, QScrollBar::sub-line {
+                height: 0px;
+                width: 0px;
+            }
+        """)
+
+        # Scroll content widget
+        scroll_content = QWidget()
+        scroll_content.setStyleSheet("background: transparent;")
+        scroll_content_layout = QVBoxLayout(scroll_content)
+        scroll_content_layout.setContentsMargins(20, 20, 20, 10)
+        scroll_content_layout.setSpacing(15)
+        scroll_content_layout.setAlignment(Qt.AlignmentFlag.AlignHCenter)
 
         # === TITLE BOX ===
         title_box = QFrame()
@@ -148,20 +182,23 @@ class WelcomeWidget(QWidget):
             }
         """)
         title_box.setMaximumWidth(700)
+        title_box.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
         title_box_layout = QVBoxLayout(title_box)
-        title_box_layout.setContentsMargins(20, 15, 20, 15)
-        title_box_layout.setSpacing(5)
+        title_box_layout.setContentsMargins(15, 12, 15, 12)
+        title_box_layout.setSpacing(4)
 
         title_label = QLabel("Grain Size Analysis")
-        title_label.setFont(QFont("Segoe UI", 28, QFont.Weight.Bold))
+        title_label.setFont(QFont("Segoe UI", 22, QFont.Weight.Bold))
         title_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
         title_label.setStyleSheet("color: black;")
+        title_label.setWordWrap(True)
         title_box_layout.addWidget(title_label)
 
         subtitle_label = QLabel("Hydraulic Conductivity Calculator")
-        subtitle_label.setFont(QFont("Segoe UI", 13))
+        subtitle_label.setFont(QFont("Segoe UI", 11))
         subtitle_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
         subtitle_label.setStyleSheet("color: black;")
+        subtitle_label.setWordWrap(True)
         title_box_layout.addWidget(subtitle_label)
 
         version_label = QLabel("Version 0.9.0-beta")
@@ -170,7 +207,7 @@ class WelcomeWidget(QWidget):
         version_label.setStyleSheet("color: black;")
         title_box_layout.addWidget(version_label)
 
-        center_layout.addWidget(title_box, 0, Qt.AlignmentFlag.AlignCenter)
+        scroll_content_layout.addWidget(title_box, 0, Qt.AlignmentFlag.AlignHCenter)
 
         # === MAIN CONTENT CARD ===
         card = QFrame()
@@ -183,46 +220,56 @@ class WelcomeWidget(QWidget):
             }
         """)
         card.setMaximumWidth(700)
+        card.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Preferred)
         card_layout = QVBoxLayout(card)
-        card_layout.setContentsMargins(20, 20, 20, 20)
-        card_layout.setSpacing(10)
+        card_layout.setContentsMargins(15, 15, 15, 15)
+        card_layout.setSpacing(8)
 
-        # === Grid Layout for sections (2x2) ===
-        from PyQt6.QtWidgets import QGridLayout
-
-        grid_layout = QGridLayout()
-        grid_layout.setSpacing(10)
+        # === Grid Layout for sections (2x2) - responsive ===
+        self.grid_widget = QWidget()
+        self.grid_widget.setStyleSheet("background: transparent;")
+        grid_layout = QGridLayout(self.grid_widget)
+        grid_layout.setSpacing(8)
+        grid_layout.setContentsMargins(0, 0, 0, 0)
 
         # Row 1: Recent Files | What's New
         recent_section = self._create_section_box(
             "📂 Recent Sessions",
             self._create_recent_files_content(),
-            show_clear_button=True,  # Add clear button for sessions
+            show_clear_button=True,
         )
+        recent_section.setMinimumWidth(200)
         grid_layout.addWidget(recent_section, 0, 0)
 
         whats_new_section = self._create_section_box(
             "📝 What's New", self._create_whats_new_content()
         )
+        whats_new_section.setMinimumWidth(200)
         grid_layout.addWidget(whats_new_section, 0, 1)
 
         # Row 2: Quick Help | Quick Actions
         help_section = self._create_section_box(
             "📚 Quick Help", self._create_quick_help_content()
         )
+        help_section.setMinimumWidth(200)
         grid_layout.addWidget(help_section, 1, 0)
 
         actions_section = self._create_section_box(
             "🚀 Quick Actions", self._create_quick_actions_content()
         )
+        actions_section.setMinimumWidth(200)
         grid_layout.addWidget(actions_section, 1, 1)
 
-        card_layout.addLayout(grid_layout)
+        # Set equal column stretch
+        grid_layout.setColumnStretch(0, 1)
+        grid_layout.setColumnStretch(1, 1)
+
+        card_layout.addWidget(self.grid_widget)
 
         # Don't show again checkbox
         self.dont_show_checkbox = QCheckBox("Don't show this welcome screen on startup")
         self.dont_show_checkbox.setFont(QFont("Segoe UI", 9))
-        self.dont_show_checkbox.setStyleSheet("color: #777777; margin-top: 10px;")
+        self.dont_show_checkbox.setStyleSheet("color: #777777; margin-top: 8px;")
         self.dont_show_checkbox.stateChanged.connect(
             lambda state: self.dont_show_again_changed.emit(
                 state == Qt.CheckState.Checked.value
@@ -230,12 +277,11 @@ class WelcomeWidget(QWidget):
         )
         card_layout.addWidget(self.dont_show_checkbox)
 
-        center_layout.addWidget(card, 0, Qt.AlignmentFlag.AlignCenter)
+        scroll_content_layout.addWidget(card, 0, Qt.AlignmentFlag.AlignHCenter)
+        scroll_content_layout.addStretch()
 
-        # Add center container to main layout
-        main_layout.addStretch()
-        main_layout.addWidget(center_container)
-        main_layout.addStretch()
+        scroll_area.setWidget(scroll_content)
+        main_layout.addWidget(scroll_area, 1)
 
         # Add attribution at bottom left
         attribution_container = QWidget()
@@ -250,19 +296,20 @@ class WelcomeWidget(QWidget):
     def _create_section_box(
         self, title: str, content_widget: QWidget, show_clear_button: bool = False
     ) -> QFrame:
-        """Create a visually separated section box"""
+        """Create a visually separated section box with responsive sizing"""
         section = QFrame()
         section.setStyleSheet("""
             QFrame {
                 background-color: #f8f8f8;
                 border: 1px solid #e0e0e0;
                 border-radius: 6px;
-                margin-bottom: 8px;
+                margin-bottom: 4px;
             }
         """)
+        section.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Preferred)
         section_layout = QVBoxLayout(section)
-        section_layout.setContentsMargins(12, 10, 12, 10)
-        section_layout.setSpacing(8)
+        section_layout.setContentsMargins(10, 8, 10, 8)
+        section_layout.setSpacing(6)
 
         # Title row (with optional clear button)
         title_row = QWidget()
@@ -313,7 +360,7 @@ class WelcomeWidget(QWidget):
         widget.setStyleSheet("background: transparent; border: none;")
         layout = QVBoxLayout(widget)
         layout.setContentsMargins(0, 0, 0, 0)
-        layout.setSpacing(4)
+        layout.setSpacing(2)
 
         # Load recent sessions from settings
         settings = QSettings("GrainSizeAnalysis", "MainWindow")
@@ -323,7 +370,7 @@ class WelcomeWidget(QWidget):
             recent_sessions = []
 
         if recent_sessions:
-            for session in recent_sessions[:5]:  # Show max 5 sessions
+            for session in recent_sessions[:4]:  # Show max 4 sessions for compact display
                 # Create a container for each session
                 session_container = QWidget()
                 session_container.setStyleSheet("""
@@ -339,8 +386,8 @@ class WelcomeWidget(QWidget):
                 session_container.setCursor(QCursor(Qt.CursorShape.PointingHandCursor))
 
                 session_layout = QVBoxLayout(session_container)
-                session_layout.setContentsMargins(8, 6, 8, 6)
-                session_layout.setSpacing(2)
+                session_layout.setContentsMargins(6, 4, 6, 4)
+                session_layout.setSpacing(1)
 
                 # Session name/date
                 session_name = session.get("name", "Unnamed Session")
@@ -348,7 +395,7 @@ class WelcomeWidget(QWidget):
                 session_files = session.get("files", [])
 
                 session_name_label = QLabel(f"📁 {session_name}")
-                session_name_label.setFont(QFont("Segoe UI", 9, QFont.Weight.DemiBold))
+                session_name_label.setFont(QFont("Segoe UI", 8, QFont.Weight.DemiBold))
                 session_name_label.setStyleSheet(
                     "color: #0078d4; background: transparent; border: none;"
                 )
@@ -361,7 +408,7 @@ class WelcomeWidget(QWidget):
                     info_text += f" • {session_date}"
 
                 session_info_label = QLabel(info_text)
-                session_info_label.setFont(QFont("Segoe UI", 8))
+                session_info_label.setFont(QFont("Segoe UI", 7))
                 session_info_label.setStyleSheet(
                     "color: #666666; background: transparent; border: none;"
                 )
@@ -375,9 +422,9 @@ class WelcomeWidget(QWidget):
                 layout.addWidget(session_container)
         else:
             no_sessions = QLabel("No recent sessions")
-            no_sessions.setFont(QFont("Segoe UI", 9))
+            no_sessions.setFont(QFont("Segoe UI", 8))
             no_sessions.setStyleSheet(
-                "color: #999999; font-style: italic; background: transparent; border: none; padding: 10px;"
+                "color: #999999; font-style: italic; background: transparent; border: none; padding: 8px;"
             )
             no_sessions.setAlignment(Qt.AlignmentFlag.AlignCenter)
             layout.addWidget(no_sessions)
@@ -397,13 +444,13 @@ class WelcomeWidget(QWidget):
         widget.setStyleSheet("background: transparent; border: none;")
         layout = QGridLayout(widget)
         layout.setContentsMargins(0, 0, 0, 0)
-        layout.setSpacing(8)
+        layout.setSpacing(4)
 
         help_topics = [
             ("Getting Started", "getting_started.html"),
             ("File Formats", "file_formats.html"),
-            ("Methods Overview", "methods_overview.html"),
-            ("Troubleshooting", "troubleshooting.html"),
+            ("Methods", "methods_overview.html"),
+            ("Troubleshoot", "troubleshooting.html"),
         ]
 
         # Arrange in 2x2 grid
@@ -415,14 +462,14 @@ class WelcomeWidget(QWidget):
             topic_btn.setSizePolicy(
                 QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed
             )
-            topic_btn.setMinimumHeight(28)
+            topic_btn.setMinimumHeight(24)
             topic_btn.setCursor(QCursor(Qt.CursorShape.PointingHandCursor))
             topic_btn.setStyleSheet("""
                 QPushButton {
                     background: transparent;
                     border: 1px solid #0078d4;
                     border-radius: 3px;
-                    padding: 4px 8px;
+                    padding: 3px 6px;
                     color: #0078d4;
                     text-align: center;
                 }
@@ -438,25 +485,26 @@ class WelcomeWidget(QWidget):
         return widget
 
     def _create_quick_actions_content(self) -> QWidget:
-        """Create quick actions content"""
+        """Create quick actions content with responsive button layout"""
         widget = QWidget()
         widget.setStyleSheet("background: transparent; border: none;")
-        layout = QHBoxLayout(widget)
+        layout = QVBoxLayout(widget)
         layout.setContentsMargins(0, 0, 0, 0)
-        layout.setSpacing(12)
+        layout.setSpacing(8)
 
         # Load Files button
         load_btn = QPushButton("📁 Load Files")
-        load_btn.setMinimumHeight(40)
-        load_btn.setFont(QFont("Segoe UI", 10, QFont.Weight.DemiBold))
+        load_btn.setMinimumHeight(36)
+        load_btn.setFont(QFont("Segoe UI", 9, QFont.Weight.DemiBold))
         load_btn.setCursor(QCursor(Qt.CursorShape.PointingHandCursor))
+        load_btn.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
         load_btn.setStyleSheet("""
             QPushButton {
                 background-color: #0078d4;
                 color: white;
                 border: none;
                 border-radius: 5px;
-                padding: 8px 20px;
+                padding: 6px 16px;
             }
             QPushButton:hover {
                 background-color: #006cc1;
@@ -470,16 +518,17 @@ class WelcomeWidget(QWidget):
 
         # Load Sample button
         sample_btn = QPushButton("📊 Load Sample Data")
-        sample_btn.setMinimumHeight(40)
-        sample_btn.setFont(QFont("Segoe UI", 10))
+        sample_btn.setMinimumHeight(36)
+        sample_btn.setFont(QFont("Segoe UI", 9))
         sample_btn.setCursor(QCursor(Qt.CursorShape.PointingHandCursor))
+        sample_btn.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
         sample_btn.setStyleSheet("""
             QPushButton {
                 background-color: white;
                 color: #333333;
                 border: 2px solid #cccccc;
                 border-radius: 5px;
-                padding: 8px 20px;
+                padding: 6px 16px;
             }
             QPushButton:hover {
                 border-color: #0078d4;
@@ -496,18 +545,17 @@ class WelcomeWidget(QWidget):
 
     def _create_whats_new_content(self) -> QWidget:
         """Create what's new content with scrollable changelog"""
-        from PyQt6.QtWidgets import QScrollArea
-
         widget = QWidget()
         widget.setStyleSheet("background: transparent; border: none;")
         main_layout = QVBoxLayout(widget)
         main_layout.setContentsMargins(0, 0, 0, 0)
-        main_layout.setSpacing(6)
+        main_layout.setSpacing(4)
 
         # Scrollable area for changelog - takes all available space
         scroll = QScrollArea()
         scroll.setWidgetResizable(True)
         scroll.setFrameShape(QFrame.Shape.NoFrame)
+        scroll.setMaximumHeight(150)  # Limit height for compact display
         scroll.setStyleSheet("""
             QScrollArea {
                 background: transparent;
@@ -516,12 +564,12 @@ class WelcomeWidget(QWidget):
             QScrollBar:vertical {
                 border: none;
                 background: #f0f0f0;
-                width: 8px;
-                border-radius: 4px;
+                width: 6px;
+                border-radius: 3px;
             }
             QScrollBar::handle:vertical {
                 background: #c0c0c0;
-                border-radius: 4px;
+                border-radius: 3px;
                 min-height: 20px;
             }
             QScrollBar::handle:vertical:hover {

@@ -187,8 +187,8 @@ class ExportTab(QWidget):
         card.setCheckable(True)
         card.setChecked(self.selected_formats.get(format_key, False))
         card.setObjectName(f"format_card_{format_key}")
-        card.setMinimumHeight(50)
-        card.setMaximumHeight(50)
+        card.setMinimumHeight(36)
+        card.setMaximumHeight(40)
         card.setCursor(Qt.CursorShape.PointingHandCursor)
 
         # Store format key as property
@@ -196,18 +196,18 @@ class ExportTab(QWidget):
 
         # Create layout for card contents
         card_layout = QHBoxLayout(card)
-        card_layout.setSpacing(8)
-        card_layout.setContentsMargins(8, 6, 8, 6)
+        card_layout.setSpacing(6)
+        card_layout.setContentsMargins(6, 4, 6, 4)
 
         # Icon
         icon_label = QLabel(icon_text)
-        icon_label.setFont(QFont("Segoe UI", 16))
-        icon_label.setFixedWidth(30)
+        icon_label.setFont(QFont("Segoe UI", 12))
+        icon_label.setFixedWidth(24)
         card_layout.addWidget(icon_label)
 
         # Title (no description to save space)
         title_label = QLabel(title)
-        title_label.setFont(QFont("Segoe UI", 10, QFont.Weight.Bold))
+        title_label.setFont(QFont("Segoe UI", 9, QFont.Weight.Bold))
         card_layout.addWidget(title_label)
         card_layout.addStretch()
 
@@ -603,6 +603,10 @@ class ExportTab(QWidget):
         content_area_layout.addLayout(preset_buttons)
 
         panel_layout.addWidget(self.content_area)
+
+        # Start collapsed by default to save vertical space on smaller screens
+        self.content_area.setVisible(False)
+        self.content_collapse_btn.setText("▶")
 
         return content_panel
 
@@ -1013,19 +1017,21 @@ class ExportTab(QWidget):
             gradation_cb.setChecked(self.content_selection['grain_size']['items']['gradation']['enabled'])
 
     def setup_ui(self):
-        """Setup the export tab UI with 2-column layout"""
+        """Setup the export tab UI with 2-column layout, responsive to smaller screens"""
         main_layout = QVBoxLayout(self)
         main_layout.setSpacing(6)
         main_layout.setContentsMargins(6, 6, 6, 6)
 
-        # === TOP BAR: Dataset Scope + Output Directory + Include + Export Button ===
+        # === TOP BAR: Dataset Scope + Output Directory + Export Button ===
+        # Use a more compact layout that wraps better on smaller screens
         top_bar = QFrame()
         top_bar.setFrameShape(QFrame.Shape.StyledPanel)
-        top_bar.setStyleSheet("background-color: #f0f0f0; padding: 8px; border-radius: 4px;")
+        top_bar.setStyleSheet("background-color: #f0f0f0; padding: 6px; border-radius: 4px;")
         top_layout = QHBoxLayout(top_bar)
-        top_layout.setSpacing(12)
+        top_layout.setSpacing(8)
+        top_layout.setContentsMargins(8, 4, 8, 4)
 
-        # Dataset scope
+        # Dataset scope - compact layout
         scope_label = QLabel("Export:")
         scope_label.setFont(QFont("Segoe UI", 9, QFont.Weight.Bold))
         top_layout.addWidget(scope_label)
@@ -1037,9 +1043,11 @@ class ExportTab(QWidget):
         self.scope_current = QRadioButton("Current:")
         self.scope_current.setFont(QFont("Segoe UI", 9))
         self.current_dataset_combo = QComboBox()
-        self.current_dataset_combo.setMinimumWidth(160)
+        self.current_dataset_combo.setMinimumWidth(120)
+        self.current_dataset_combo.setMaximumWidth(200)
         self.current_dataset_combo.setMaximumHeight(24)
         self.current_dataset_combo.setFont(QFont("Segoe UI", 9))
+        self.current_dataset_combo.setSizePolicy(QSizePolicy.Policy.Preferred, QSizePolicy.Policy.Fixed)
 
         self.all_datasets_label = QLabel("(0)")
         self.all_datasets_label.setFont(QFont("Segoe UI", 8))
@@ -1054,31 +1062,32 @@ class ExportTab(QWidget):
         top_layout.addWidget(self.current_dataset_combo)
 
         # Add spacing
-        top_layout.addSpacing(20)
+        top_layout.addSpacing(10)
 
-        # Output directory - redesigned as a clearer section
+        # Output directory - more compact
         output_container = QFrame()
         output_container.setStyleSheet("""
             QFrame {
                 background-color: white;
                 border: 1px solid #ddd;
                 border-radius: 4px;
-                padding: 4px 8px;
+                padding: 2px 6px;
             }
         """)
         output_layout = QHBoxLayout(output_container)
-        output_layout.setContentsMargins(6, 2, 6, 2)
-        output_layout.setSpacing(8)
+        output_layout.setContentsMargins(4, 2, 4, 2)
+        output_layout.setSpacing(6)
 
-        output_label = QLabel("📁 Output:")
-        output_label.setFont(QFont("Segoe UI", 9, QFont.Weight.Bold))
+        output_label = QLabel("📁")
+        output_label.setFont(QFont("Segoe UI", 9))
         output_layout.addWidget(output_label)
 
         self.output_dir = QLineEdit()
         self.output_dir.setText(os.path.expanduser("~/Desktop"))
         self.output_dir.setReadOnly(True)
-        self.output_dir.setMinimumWidth(250)
-        self.output_dir.setMaximumHeight(24)
+        self.output_dir.setMinimumWidth(150)
+        self.output_dir.setMaximumHeight(22)
+        self.output_dir.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
         self.output_dir.setStyleSheet("""
             QLineEdit {
                 border: none;
@@ -1090,15 +1099,17 @@ class ExportTab(QWidget):
         """)
         output_layout.addWidget(self.output_dir)
 
-        browse_btn = QPushButton("Browse...")
-        browse_btn.setMaximumHeight(24)
+        browse_btn = QPushButton("...")
+        browse_btn.setMaximumHeight(20)
+        browse_btn.setMaximumWidth(30)
         browse_btn.setFont(QFont("Segoe UI", 8))
+        browse_btn.setToolTip("Browse for output directory")
         browse_btn.setStyleSheet("""
             QPushButton {
                 background-color: #d2b48c;
                 border: 1px solid #8b7355;
                 border-radius: 3px;
-                padding: 2px 10px;
+                padding: 2px 6px;
             }
             QPushButton:hover {
                 background-color: #ddbf94;
@@ -1107,21 +1118,19 @@ class ExportTab(QWidget):
         browse_btn.clicked.connect(self.browse_output_dir)
         output_layout.addWidget(browse_btn)
 
-        top_layout.addWidget(output_container)
+        top_layout.addWidget(output_container, 1)  # Allow output container to stretch
 
-        top_layout.addStretch()
-
-        # Export button
-        self.export_btn = QPushButton("🚀 Export Now")
-        self.export_btn.setFont(QFont("Segoe UI", 11, QFont.Weight.Bold))
-        self.export_btn.setMinimumHeight(36)
-        self.export_btn.setMinimumWidth(140)
+        # Export button - slightly more compact
+        self.export_btn = QPushButton("🚀 Export")
+        self.export_btn.setFont(QFont("Segoe UI", 10, QFont.Weight.Bold))
+        self.export_btn.setMinimumHeight(32)
+        self.export_btn.setMinimumWidth(100)
         self.export_btn.setStyleSheet("""
             QPushButton {
                 background-color: #6b8e23;
                 color: white;
-                border-radius: 6px;
-                padding: 8px 16px;
+                border-radius: 5px;
+                padding: 6px 12px;
             }
             QPushButton:hover {
                 background-color: #7ca02a;
@@ -1135,25 +1144,63 @@ class ExportTab(QWidget):
 
         main_layout.addWidget(top_bar)
 
-        # === 2-Column Layout ===
-        columns_layout = QHBoxLayout()
-        columns_layout.setSpacing(8)
+        # === 2-Column Layout with Splitter for resizability ===
+        splitter = QSplitter(Qt.Orientation.Horizontal)
+        splitter.setHandleWidth(4)
+        splitter.setStyleSheet("""
+            QSplitter::handle {
+                background-color: #d0d0d0;
+            }
+            QSplitter::handle:hover {
+                background-color: #a0a0a0;
+            }
+        """)
 
-        # === LEFT COLUMN: Formats + Summary + File Tree (35%) ===
+        # === LEFT COLUMN: Formats + Content + Summary + File Tree ===
+        # Wrap in scroll area for smaller screens
+        left_scroll = QScrollArea()
+        left_scroll.setWidgetResizable(True)
+        left_scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+        left_scroll.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAsNeeded)
+        left_scroll.setFrameShape(QFrame.Shape.NoFrame)
+        left_scroll.setStyleSheet("""
+            QScrollArea {
+                border: none;
+                background-color: transparent;
+            }
+            QScrollBar:vertical {
+                border: none;
+                background: #e8e8e8;
+                width: 8px;
+                border-radius: 4px;
+            }
+            QScrollBar::handle:vertical {
+                background: #c0c0c0;
+                border-radius: 4px;
+                min-height: 20px;
+            }
+            QScrollBar::handle:vertical:hover {
+                background: #a0a0a0;
+            }
+            QScrollBar::add-line:vertical, QScrollBar::sub-line:vertical {
+                height: 0px;
+            }
+        """)
+
         left_column = QWidget()
         left_layout = QVBoxLayout(left_column)
-        left_layout.setContentsMargins(0, 0, 0, 0)
-        left_layout.setSpacing(8)
+        left_layout.setContentsMargins(0, 0, 4, 0)
+        left_layout.setSpacing(6)
 
         # Format cards section
         format_label = QLabel("📁 Select Formats")
-        format_label.setFont(QFont("Segoe UI", 11, QFont.Weight.Bold))
+        format_label.setFont(QFont("Segoe UI", 10, QFont.Weight.Bold))
         left_layout.addWidget(format_label)
 
-        # Format cards container
+        # Format cards container - use grid for more compact display
         format_container = QWidget()
         self.formats_layout = QVBoxLayout(format_container)
-        self.formats_layout.setSpacing(4)
+        self.formats_layout.setSpacing(3)
         self.formats_layout.setContentsMargins(0, 0, 0, 0)
 
         # Add format cards (compact)
@@ -1174,28 +1221,29 @@ class ExportTab(QWidget):
 
         left_layout.addWidget(format_container)
 
-        # Content selection panel
-        left_layout.addWidget(self._create_content_selection_panel())
+        # Content selection panel (starts collapsed for small screens)
+        content_panel = self._create_content_selection_panel()
+        left_layout.addWidget(content_panel)
 
-        # Summary card
+        # Summary card - more compact
         summary_card = QFrame()
         summary_card.setFrameShape(QFrame.Shape.StyledPanel)
         summary_card.setStyleSheet("""
             QFrame {
                 background-color: #e8f5e9;
                 border: 2px solid #6b8e23;
-                border-radius: 6px;
-                padding: 8px;
+                border-radius: 5px;
+                padding: 4px;
             }
         """)
         summary_layout = QVBoxLayout(summary_card)
-        summary_layout.setSpacing(3)
-        summary_layout.setContentsMargins(8, 6, 8, 6)
+        summary_layout.setSpacing(2)
+        summary_layout.setContentsMargins(6, 4, 6, 4)
 
         self.summary_files_label = QLabel("📦 You will export <b>0 files</b>")
-        self.summary_files_label.setFont(QFont("Segoe UI", 10))
+        self.summary_files_label.setFont(QFont("Segoe UI", 9))
         self.summary_size_label = QLabel("Estimated size: ~0 KB")
-        self.summary_size_label.setFont(QFont("Segoe UI", 9))
+        self.summary_size_label.setFont(QFont("Segoe UI", 8))
         self.summary_size_label.setStyleSheet("color: #666;")
 
         summary_layout.addWidget(self.summary_files_label)
@@ -1203,59 +1251,82 @@ class ExportTab(QWidget):
 
         left_layout.addWidget(summary_card)
 
-        # File tree
+        # File tree - with minimum height
         tree_label = QLabel("📄 Files to be Created")
-        tree_label.setFont(QFont("Segoe UI", 10, QFont.Weight.Bold))
+        tree_label.setFont(QFont("Segoe UI", 9, QFont.Weight.Bold))
         left_layout.addWidget(tree_label)
 
         self.file_tree = QTreeWidget()
         self.file_tree.setHeaderLabels(["Filename", "Size", "Description"])
         self.file_tree.setAlternatingRowColors(True)
         self.file_tree.setRootIsDecorated(True)
+        self.file_tree.setMinimumHeight(100)
         self.file_tree.header().setSectionResizeMode(0, QHeaderView.ResizeMode.Stretch)
         self.file_tree.header().setSectionResizeMode(1, QHeaderView.ResizeMode.ResizeToContents)
         self.file_tree.header().setSectionResizeMode(2, QHeaderView.ResizeMode.Stretch)
+        self.file_tree.setStyleSheet("""
+            QTreeWidget {
+                font-size: 9px;
+            }
+            QHeaderView::section {
+                font-size: 9px;
+                padding: 2px;
+            }
+        """)
 
         left_layout.addWidget(self.file_tree, 1)  # Give file tree stretch factor
 
-        # === RIGHT COLUMN: Preview Tabs (65%) ===
+        left_scroll.setWidget(left_column)
+
+        # === RIGHT COLUMN: Preview Tabs ===
         right_column = QWidget()
         right_layout = QVBoxLayout(right_column)
-        right_layout.setContentsMargins(0, 0, 0, 0)
-        right_layout.setSpacing(5)
+        right_layout.setContentsMargins(4, 0, 0, 0)
+        right_layout.setSpacing(4)
 
         preview_label = QLabel("📊 Data Preview")
-        preview_label.setFont(QFont("Segoe UI", 11, QFont.Weight.Bold))
+        preview_label.setFont(QFont("Segoe UI", 10, QFont.Weight.Bold))
         right_layout.addWidget(preview_label)
 
         self.preview_tabs = QTabWidget()
         self.preview_tabs.setDocumentMode(True)
+        self.preview_tabs.setStyleSheet("""
+            QTabBar::tab {
+                padding: 4px 8px;
+                font-size: 9px;
+            }
+        """)
 
         # K-Results Preview
         self.k_results_preview = QTableWidget()
         self.k_results_preview.setAlternatingRowColors(True)
         self.k_results_preview.setEditTriggers(QTableWidget.EditTrigger.NoEditTriggers)
-        self.preview_tabs.addTab(self.k_results_preview, "K-Values Data")
+        self.preview_tabs.addTab(self.k_results_preview, "K-Values")
 
         # Format Preview
         self.format_preview = QTextEdit()
         self.format_preview.setReadOnly(True)
-        self.format_preview.setFont(QFont("Courier", 9))
-        self.preview_tabs.addTab(self.format_preview, "Export Format")
+        self.format_preview.setFont(QFont("Consolas", 8))
+        self.preview_tabs.addTab(self.format_preview, "Format")
 
         # Grain Data Preview
         self.grain_data_preview = QTableWidget()
         self.grain_data_preview.setAlternatingRowColors(True)
         self.grain_data_preview.setEditTriggers(QTableWidget.EditTrigger.NoEditTriggers)
-        self.preview_tabs.addTab(self.grain_data_preview, "Grain Size Data")
+        self.preview_tabs.addTab(self.grain_data_preview, "Grain Data")
 
         right_layout.addWidget(self.preview_tabs)
 
-        # Add columns to layout with proportions
-        columns_layout.addWidget(left_column, 35)    # 35%
-        columns_layout.addWidget(right_column, 65)   # 65%
+        # Add to splitter
+        splitter.addWidget(left_scroll)
+        splitter.addWidget(right_column)
 
-        main_layout.addLayout(columns_layout, 1)  # Takes most space
+        # Set initial splitter proportions (35% / 65%)
+        splitter.setSizes([350, 650])
+        splitter.setCollapsible(0, False)
+        splitter.setCollapsible(1, False)
+
+        main_layout.addWidget(splitter, 1)  # Takes most space
 
         # Connect scope signals
         self.scope_all.toggled.connect(self.update_file_tree)
