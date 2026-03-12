@@ -32,6 +32,7 @@ class ColumnMapperDialog(QDialog):
         self.header_row = 0  # Detected header row
         self.cell_range_mode = False  # False = column mapping, True = cell range selection
         self.smart_selection_mode = False  # Smart selection with automatic analysis
+        self.raw_sieve_mode = False  # True = user provides raw sieve weighings instead of pre-calculated % passing
         self.selected_size_range = []  # List of (row, col) tuples for size data
         self.selected_percent_range = []  # List of (row, col) tuples for percent data
         self.selected_headers = []  # List of (row, col) tuples for header cells
@@ -267,6 +268,32 @@ class ColumnMapperDialog(QDialog):
 
             mapping_layout.addWidget(sheet_group)
 
+        # Input format selector (available for all file types)
+        input_format_group = QGroupBox("Input Format")
+        input_format_layout = QHBoxLayout(input_format_group)
+
+        self.calculated_data_btn = QPushButton("📊 Calculated Data")
+        self.raw_sieve_btn = QPushButton("⚖️ Raw Sieve Weighings")
+
+        self.calculated_data_btn.setCheckable(True)
+        self.raw_sieve_btn.setCheckable(True)
+        self.calculated_data_btn.setChecked(True)
+
+        self.calculated_data_btn.setToolTip(
+            "Columns already contain Sieve Size (mm) and Cumulative % Passing"
+        )
+        self.raw_sieve_btn.setToolTip(
+            "Columns contain Sieve Size (mm), Weight of Empty Sieve (g), and "
+            "Weight of Sieve + Sample (g) — the program calculates % passing automatically"
+        )
+
+        self.calculated_data_btn.clicked.connect(self.switch_to_calculated_mode)
+        self.raw_sieve_btn.clicked.connect(self.switch_to_raw_sieve_mode)
+
+        input_format_layout.addWidget(self.calculated_data_btn)
+        input_format_layout.addWidget(self.raw_sieve_btn)
+        mapping_layout.addWidget(input_format_group)
+
         # Preview group
         preview_group = QGroupBox("File Preview")
         preview_layout = QVBoxLayout(preview_group)
@@ -378,6 +405,44 @@ class ColumnMapperDialog(QDialog):
         mapping_form.addRow(help_text)
 
         mapping_layout.addWidget(self.mapping_group)
+
+        # Raw Sieve Analysis group (hidden by default; visible when "Raw Sieve Weighings" mode is active)
+        self.raw_sieve_group = QGroupBox("Raw Sieve Analysis Column Mapping")
+        raw_sieve_form = QFormLayout(self.raw_sieve_group)
+
+        self.raw_size_combo = QComboBox()
+        self.empty_sieve_combo = QComboBox()
+        self.sieve_sample_combo = QComboBox()
+
+        for combo in [self.raw_size_combo, self.empty_sieve_combo, self.sieve_sample_combo]:
+            combo.setStyleSheet(f"QComboBox {{ {self.required_empty_style} padding: 5px; border-radius: 3px; }}")
+            combo.addItems(column_options)
+            combo.currentIndexChanged.connect(self.validate_required_fields)
+
+        self._auto_detect_raw_sieve_columns()
+
+        raw_sieve_form.addRow("Sieve Size (mm): *", self.raw_size_combo)
+        raw_sieve_form.addRow("Weight of Empty Sieve (g): *", self.empty_sieve_combo)
+        raw_sieve_form.addRow("Weight of Sieve + Sample (g): *", self.sieve_sample_combo)
+
+        raw_sieve_help = QLabel(
+            "💡 Raw Sieve Analysis Mode:\n"
+            "• Provide the three directly-measured columns from a standard sieve analysis\n"
+            "• The program automatically calculates:\n"
+            "    – Retained weight = (Sieve + Sample Weight) − (Empty Sieve Weight)\n"
+            "    – Weight % per sieve fraction\n"
+            "    – Cumulative percent passing (100% → 0%)\n"
+            "• Rows where retained weight ≤ 0 are skipped (empty sieves)\n"
+            "• Exclude pan / total rows — include only valid sieve size rows\n"
+            "• Sieve sizes should be in millimetres\n\n"
+            "* = Required fields"
+        )
+        raw_sieve_help.setWordWrap(True)
+        raw_sieve_help.setStyleSheet("color: #666; font-style: italic; margin: 10px;")
+        raw_sieve_form.addRow(raw_sieve_help)
+
+        self.raw_sieve_group.setVisible(False)
+        mapping_layout.addWidget(self.raw_sieve_group)
 
         tab_widget.addTab(mapping_tab, "Column Mapping")
 
@@ -515,17 +580,30 @@ class ColumnMapperDialog(QDialog):
 
     def validate_required_fields(self):
         """Update styling based on whether required fields are filled"""
-        # Check if size combo is filled (index > 0 means not "(Not Used)")
-        if self.size_combo.currentIndex() > 0:
-            self.size_combo.setStyleSheet(f"QComboBox {{ {self.required_filled_style} padding: 5px; border-radius: 3px; }}")
+        if self.raw_sieve_mode:
+            # Raw sieve mode: all three raw-sieve columns are required
+            for combo in [
+                getattr(self, 'raw_size_combo', None),
+                getattr(self, 'empty_sieve_combo', None),
+                getattr(self, 'sieve_sample_combo', None),
+            ]:
+                if combo is None:
+                    continue
+                if combo.currentIndex() > 0:
+                    combo.setStyleSheet(f"QComboBox {{ {self.required_filled_style} padding: 5px; border-radius: 3px; }}")
+                else:
+                    combo.setStyleSheet(f"QComboBox {{ {self.required_empty_style} padding: 5px; border-radius: 3px; }}")
         else:
-            self.size_combo.setStyleSheet(f"QComboBox {{ {self.required_empty_style} padding: 5px; border-radius: 3px; }}")
+            # Calculated mode: sieve size + percent passing (or retained)
+            if self.size_combo.currentIndex() > 0:
+                self.size_combo.setStyleSheet(f"QComboBox {{ {self.required_filled_style} padding: 5px; border-radius: 3px; }}")
+            else:
+                self.size_combo.setStyleSheet(f"QComboBox {{ {self.required_empty_style} padding: 5px; border-radius: 3px; }}")
 
-        # Check if passing combo is filled OR retained combo is filled
-        if self.passing_combo.currentIndex() > 0 or self.retained_combo.currentIndex() > 0:
-            self.passing_combo.setStyleSheet(f"QComboBox {{ {self.required_filled_style} padding: 5px; border-radius: 3px; }}")
-        else:
-            self.passing_combo.setStyleSheet(f"QComboBox {{ {self.required_empty_style} padding: 5px; border-radius: 3px; }}")
+            if self.passing_combo.currentIndex() > 0 or self.retained_combo.currentIndex() > 0:
+                self.passing_combo.setStyleSheet(f"QComboBox {{ {self.required_filled_style} padding: 5px; border-radius: 3px; }}")
+            else:
+                self.passing_combo.setStyleSheet(f"QComboBox {{ {self.required_empty_style} padding: 5px; border-radius: 3px; }}")
 
     def auto_detect_columns(self):
         """Try to automatically detect column types"""
@@ -557,6 +635,35 @@ class ColumnMapperDialog(QDialog):
             elif any(keyword in header_lower for keyword in retained_keywords) and not passing_found:
                 self.retained_combo.setCurrentIndex(i + 1)
 
+    def _auto_detect_raw_sieve_columns(self):
+        """Try to automatically detect the three raw sieve weighing columns."""
+        if not self.headers or not hasattr(self, 'raw_size_combo'):
+            return
+
+        size_keywords     = ['sieve', 'size', 'diameter', 'grain', 'particle', 'mesh', 'mm']
+        empty_keywords    = ['empty', 'tare', 'blank']
+        full_keywords     = ['sample', 'total', 'full', 'gross', 'sieve + sample', 'sieve+sample',
+                             'sieve and sample', 'filled']
+
+        size_found  = False
+        empty_found = False
+        full_found  = False
+
+        for i, header in enumerate(self.headers):
+            h = header.lower()
+
+            if not size_found and any(k in h for k in size_keywords):
+                self.raw_size_combo.setCurrentIndex(i + 1)
+                size_found = True
+
+            elif not empty_found and any(k in h for k in empty_keywords):
+                self.empty_sieve_combo.setCurrentIndex(i + 1)
+                empty_found = True
+
+            elif not full_found and any(k in h for k in full_keywords):
+                self.sieve_sample_combo.setCurrentIndex(i + 1)
+                full_found = True
+
     def preview_mapping(self):
         """Preview the results of the current mapping"""
         try:
@@ -579,15 +686,19 @@ class ColumnMapperDialog(QDialog):
             QMessageBox.warning(self, "Preview Error", f"Error in mapping:\n{str(e)}")
 
     def extract_data(self) -> Tuple[List[float], List[float]]:
-        """Extract data based on current mode (column mapping or cell range selection)"""
-        if self.cell_range_mode:
+        """Extract data based on current mode (column mapping, cell range, or raw sieve)"""
+        if self.raw_sieve_mode:
+            return self.extract_data_from_raw_sieve()
+        elif self.cell_range_mode:
             return self.extract_data_from_ranges()
         else:
             return self.extract_data_from_columns()
 
     def extract_data_for_sheet(self, sheet_name: Optional[str]) -> Tuple[List[float], List[float]]:
         """Extract data for a specific sheet using the current mapping settings"""
-        if self.cell_range_mode:
+        if self.raw_sieve_mode:
+            return self.extract_data_from_raw_sieve(sheet_name=sheet_name)
+        elif self.cell_range_mode:
             if sheet_name and sheet_name != self.current_sheet:
                 raise ValueError("Cell range selection mode currently supports one sheet at a time. Please select a single sheet or switch to column mapping mode.")
             return self.extract_data_from_ranges(sheet_name=sheet_name)
@@ -845,8 +956,19 @@ class ColumnMapperDialog(QDialog):
                     combo.clear()
                     combo.addItems(column_options)
 
-                # Re-run auto detection
+                # Also update raw sieve combo boxes if they exist
+                for combo in [
+                    getattr(self, 'raw_size_combo', None),
+                    getattr(self, 'empty_sieve_combo', None),
+                    getattr(self, 'sieve_sample_combo', None),
+                ]:
+                    if combo is not None:
+                        combo.clear()
+                        combo.addItems(column_options)
+
+                # Re-run auto detection for both modes
                 self.auto_detect_columns()
+                self._auto_detect_raw_sieve_columns()
 
                 # Update preview table headers
                 if len(self.headers) >= self.preview_table.columnCount():
@@ -861,24 +983,135 @@ class ColumnMapperDialog(QDialog):
     def switch_to_column_mode(self):
         """Switch to column mapping mode"""
         self.cell_range_mode = False
+        self.raw_sieve_mode = False
         self.column_mode_btn.setChecked(True)
         self.range_mode_btn.setChecked(False)
         self.mapping_group.setVisible(True)
         self.range_controls.setVisible(False)
+        if hasattr(self, 'raw_sieve_group'):
+            self.raw_sieve_group.setVisible(False)
         self.clear_range_selection()
 
     def switch_to_range_mode(self):
         """Switch to cell range selection mode"""
         self.cell_range_mode = True
+        self.raw_sieve_mode = False
         self.column_mode_btn.setChecked(False)
         self.range_mode_btn.setChecked(True)
         self.mapping_group.setVisible(False)
         self.range_controls.setVisible(True)
+        if hasattr(self, 'raw_sieve_group'):
+            self.raw_sieve_group.setVisible(False)
         self.clear_range_selection()
 
         # Enable selection capabilities on the table
         self.preview_table.setSelectionBehavior(QTableWidget.SelectionBehavior.SelectItems)
         self.preview_table.setSelectionMode(QTableWidget.SelectionMode.ExtendedSelection)
+
+    def switch_to_raw_sieve_mode(self):
+        """Switch to raw sieve weighings input mode."""
+        self.raw_sieve_mode = True
+        self.cell_range_mode = False
+        self.raw_sieve_btn.setChecked(True)
+        self.calculated_data_btn.setChecked(False)
+        # Hide calculated-data group and range controls, show raw sieve group
+        self.mapping_group.setVisible(False)
+        self.range_controls.setVisible(False)
+        if hasattr(self, 'raw_sieve_group'):
+            self.raw_sieve_group.setVisible(True)
+        # Deactivate Excel range-mode buttons if present
+        if hasattr(self, 'column_mode_btn'):
+            self.column_mode_btn.setChecked(False)
+        if hasattr(self, 'range_mode_btn'):
+            self.range_mode_btn.setChecked(False)
+        self.validate_required_fields()
+
+    def switch_to_calculated_mode(self):
+        """Switch back to the standard calculated-data input mode."""
+        self.raw_sieve_mode = False
+        self.calculated_data_btn.setChecked(True)
+        self.raw_sieve_btn.setChecked(False)
+        # Show calculated-data group, hide raw sieve group
+        self.mapping_group.setVisible(True)
+        self.range_controls.setVisible(False)
+        if hasattr(self, 'raw_sieve_group'):
+            self.raw_sieve_group.setVisible(False)
+        # Restore Excel column-mode button state if present
+        if hasattr(self, 'column_mode_btn'):
+            self.column_mode_btn.setChecked(True)
+        if hasattr(self, 'range_mode_btn'):
+            self.range_mode_btn.setChecked(False)
+        self.cell_range_mode = False
+        self.validate_required_fields()
+
+    def extract_data_from_raw_sieve(self, sheet_name: Optional[str] = None) -> Tuple[List[float], List[float]]:
+        """
+        Extract raw sieve weighing columns and compute cumulative % passing.
+
+        Reads the three user-mapped columns (sieve size, empty sieve weight,
+        sieve+sample weight), delegates the calculation to
+        data_loader.calculate_sieve_percent_passing, and returns the same
+        (particle_sizes, percent_passing) tuple that all other extractors
+        return — so nothing downstream needs to change.
+        """
+        size_idx   = self.raw_size_combo.currentIndex() - 1
+        empty_idx  = self.empty_sieve_combo.currentIndex() - 1
+        full_idx   = self.sieve_sample_combo.currentIndex() - 1
+
+        if size_idx < 0:
+            raise ValueError("Please select a Sieve Size column")
+        if empty_idx < 0:
+            raise ValueError("Please select a Weight of Empty Sieve column")
+        if full_idx < 0:
+            raise ValueError("Please select a Weight of Sieve + Sample column")
+
+        rows = self._load_rows_for_sheet(sheet_name)
+        header_row_idx = getattr(self, 'header_row', 0)
+        data_rows = rows[header_row_idx + 1:] if len(rows) > header_row_idx + 1 else rows
+
+        sieve_sizes: List[float]   = []
+        empty_weights: List[float] = []
+        full_weights: List[float]  = []
+
+        max_idx = max(size_idx, empty_idx, full_idx)
+        for row in data_rows:
+            if len(row) <= max_idx:
+                continue
+            try:
+                size_str  = row[size_idx].strip()
+                empty_str = row[empty_idx].strip()
+                full_str  = row[full_idx].strip()
+
+                if not size_str or not self.is_numeric(size_str):
+                    continue
+                if not empty_str or not self.is_numeric(empty_str):
+                    continue
+                if not full_str or not self.is_numeric(full_str):
+                    continue
+
+                size  = float(size_str)
+                empty = float(empty_str)
+                full  = float(full_str)
+
+                if size <= 0:
+                    continue  # Skip pan / invalid size rows
+
+                sieve_sizes.append(size)
+                empty_weights.append(empty)
+                full_weights.append(full)
+
+            except (ValueError, IndexError):
+                continue
+
+        if not sieve_sizes:
+            raise ValueError(
+                "No valid data rows found. Make sure the correct columns are selected "
+                "and that the Header Row setting points to the actual header row."
+            )
+
+        # Delegate all arithmetic to the utility function in data_loader
+        from data_loader import calculate_sieve_percent_passing
+        return calculate_sieve_percent_passing(sieve_sizes, empty_weights, full_weights)
 
     def toggle_smart_selection(self):
         """Toggle smart selection mode"""

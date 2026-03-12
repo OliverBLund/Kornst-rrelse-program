@@ -1,0 +1,741 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>GrainSize Analysis — Reports & Export</title>
+
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Playfair+Display:wght@600;700&family=Source+Sans+3:wght@300;400;500;600&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/all.min.css">
+<link rel="stylesheet" href="_shared.css">
+
+<style>
+/* ══════════════════════════════════════════════
+   PAGE-SPECIFIC STYLES: Reports + Export tabs
+══════════════════════════════════════════════ */
+
+/* ── Shared page layout ── */
+.page-host{flex:1;display:flex;flex-direction:column;overflow:hidden}
+.tab-content{display:none;flex:1;flex-direction:column;overflow:hidden}
+.tab-content.active{display:flex}
+
+/* ══════════════════════════════════════════════
+   REPORTS TAB
+   Left: report builder panel  |  Right: paper preview
+══════════════════════════════════════════════ */
+.rpt-layout{flex:1;display:flex;overflow:hidden}
+
+/* Builder panel */
+.rpt-panel{
+  width:280px;flex-shrink:0;display:flex;flex-direction:column;
+  background:var(--bg-raised);border-right:1px solid var(--border);
+  overflow:hidden;
+}
+.rpt-panel-body{flex:1;overflow-y:auto;scrollbar-width:thin;scrollbar-color:var(--border) transparent}
+.rpt-section{border-bottom:1px solid var(--border)}
+.rpt-sect-head{
+  padding:9px 14px 7px;background:var(--bg-low);
+  font-size:10px;font-weight:600;color:var(--text-muted);
+  text-transform:uppercase;letter-spacing:.08em;
+  display:flex;align-items:center;gap:6px;
+}
+.rpt-sect-head i{font-size:9px}
+
+/* Report type cards */
+.rpt-type-grid{display:flex;flex-direction:column;gap:5px;padding:10px 12px}
+.rpt-type-card{
+  display:flex;align-items:flex-start;gap:10px;padding:9px 11px;
+  border:1.5px solid var(--border);border-radius:5px;
+  background:rgba(255,255,255,.4);cursor:pointer;transition:all .12s;
+}
+.rpt-type-card:hover{background:rgba(255,255,255,.7);border-color:var(--border-dk)}
+.rpt-type-card.on{
+  background:rgba(107,142,35,.07);border-color:var(--olive);
+  box-shadow:0 0 0 1px rgba(107,142,35,.15);
+}
+.rpt-type-icon{
+  width:30px;height:30px;border-radius:5px;flex-shrink:0;
+  display:flex;align-items:center;justify-content:center;
+  background:var(--bg-low);border:1px solid var(--border);
+  font-size:13px;color:var(--text-muted);transition:all .12s;
+}
+.rpt-type-card.on .rpt-type-icon{background:rgba(107,142,35,.12);border-color:rgba(107,142,35,.3);color:var(--olive)}
+.rpt-type-label{font-size:12px;font-weight:600;color:var(--text);line-height:1.3}
+.rpt-type-desc{font-size:10.5px;color:var(--text-muted);margin-top:2px;line-height:1.4}
+
+/* Dataset checkboxes */
+.rpt-ds-list{padding:6px 12px 8px;display:flex;flex-direction:column;gap:1px}
+.rpt-ds-row{
+  display:flex;align-items:center;gap:8px;padding:5px 7px;
+  border-radius:var(--r);cursor:pointer;transition:background .08s;
+}
+.rpt-ds-row:hover{background:rgba(255,255,255,.5)}
+.rpt-ds-row input[type=checkbox]{accent-color:var(--olive);width:13px;height:13px;flex-shrink:0}
+.rpt-ds-name{font-size:11.5px;color:var(--text-mid);flex:1;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.rpt-ds-led{width:6px;height:6px;border-radius:50%;flex-shrink:0}
+.rpt-ds-led.ok{background:#5aaa3a}.rpt-ds-led.warn{background:#d08020}
+.rpt-ds-actions{display:flex;gap:5px;padding:0 12px 8px}
+.rpt-link-btn{font-size:11px;color:var(--olive);background:none;border:none;padding:0;text-decoration:underline;cursor:pointer}
+
+/* Sections toggles */
+.rpt-sections{padding:8px 12px;display:flex;flex-direction:column;gap:4px}
+.rpt-sec-row{
+  display:flex;align-items:center;justify-content:space-between;
+  padding:5px 8px;border-radius:var(--r);background:rgba(255,255,255,.3);
+  border:1px solid transparent;transition:all .1s;cursor:pointer;
+}
+.rpt-sec-row:hover{background:rgba(255,255,255,.55);border-color:var(--border)}
+.rpt-sec-row.disabled{opacity:.4;cursor:default}
+.rpt-sec-label{font-size:11.5px;color:var(--text-mid);display:flex;align-items:center;gap:7px}
+.rpt-sec-label i{font-size:10px;color:var(--text-muted);width:12px}
+.rpt-toggle{width:28px;height:15px;background:var(--border);border-radius:8px;position:relative;flex-shrink:0;transition:background .15s}
+.rpt-toggle.on{background:var(--olive)}
+.rpt-toggle::after{content:'';position:absolute;width:11px;height:11px;top:2px;left:2px;background:#fff;border-radius:50%;transition:transform .15s;box-shadow:0 1px 2px rgba(0,0,0,.2)}
+.rpt-toggle.on::after{transform:translateX(13px)}
+
+/* Template + format */
+.rpt-opts{padding:8px 12px;display:flex;flex-direction:column;gap:7px}
+.rpt-opt-row{display:flex;align-items:center;justify-content:space-between;gap:8px}
+.rpt-opt-lbl{font-size:11.5px;color:var(--text-mid)}
+.rpt-sel{
+  height:24px;padding:0 6px;border:1px solid var(--border);border-radius:var(--r);
+  font-family:var(--fu);font-size:11.5px;color:var(--text-mid);
+  background:rgba(255,255,255,.5);min-width:120px;
+}
+.rpt-sel:focus{outline:none;border-color:var(--olive)}
+
+/* Generate button */
+.rpt-generate{
+  flex-shrink:0;padding:10px 12px;border-top:1px solid var(--border);
+  background:var(--bg-low);
+}
+.rpt-gen-btn{
+  width:100%;height:32px;display:flex;align-items:center;justify-content:center;gap:8px;
+  background:var(--olive);border:1px solid var(--olive-dk);border-radius:var(--r);
+  color:#fff;font-size:13px;font-weight:600;transition:background .1s;
+}
+.rpt-gen-btn:hover{background:var(--olive-h)}
+.rpt-gen-btn i{font-size:12px}
+
+/* Preview area */
+.rpt-preview{
+  flex:1;background:var(--bg-low);overflow:auto;
+  display:flex;align-items:flex-start;justify-content:center;
+  padding:24px 24px 32px;
+}
+
+/* Paper sheet */
+.rpt-paper{
+  width:680px;min-height:900px;flex-shrink:0;
+  background:#fff;
+  box-shadow:0 4px 24px rgba(60,40,20,.12),0 1px 4px rgba(60,40,20,.08);
+  border-radius:2px;font-family:'Source Sans 3',sans-serif;
+  font-size:12px;color:#2f2f2f;
+}
+
+/* Report header band */
+.rp-header{
+  background:#C8002A;padding:16px 28px 14px;
+  display:flex;align-items:center;gap:16px;
+}
+.rp-dtu{
+  background:#fff;color:#C8002A;font-size:16px;font-weight:700;
+  padding:4px 8px 3px;border-radius:2px;letter-spacing:.05em;
+  flex-shrink:0;font-family:'Source Sans 3',sans-serif;
+}
+.rp-title-block{flex:1}
+.rp-title{color:#fff;font-family:'Playfair Display',serif;font-size:18px;font-weight:700;line-height:1.2}
+.rp-subtitle{color:rgba(255,255,255,.75);font-size:11px;margin-top:3px;font-family:'JetBrains Mono',monospace;letter-spacing:.04em}
+
+/* Report body */
+.rp-body{padding:20px 28px 28px}
+
+/* Info grid */
+.rp-info-grid{
+  display:grid;grid-template-columns:1fr 1fr;gap:0;
+  border:1px solid #ddd;border-radius:4px;overflow:hidden;margin-bottom:18px;
+}
+.rp-info-cell{padding:8px 12px;border-bottom:1px solid #eee;border-right:1px solid #eee}
+.rp-info-cell:nth-child(2n){border-right:none}
+.rp-info-cell:nth-last-child(-n+2){border-bottom:none}
+.rp-info-key{font-size:9.5px;font-weight:600;color:#888;text-transform:uppercase;letter-spacing:.06em;margin-bottom:2px}
+.rp-info-val{font-size:12px;color:#2f2f2f;font-weight:500}
+
+/* Section heading in report */
+.rp-sect{
+  font-size:13px;font-weight:700;color:#2f2f2f;
+  border-bottom:2px solid #C8002A;padding-bottom:4px;margin:16px 0 10px;
+}
+
+/* Mini table in report */
+.rp-tbl{width:100%;border-collapse:collapse;font-size:11px;margin-bottom:14px}
+.rp-tbl thead th{background:#f5f0e8;padding:6px 10px;text-align:left;font-weight:600;font-size:10px;text-transform:uppercase;letter-spacing:.05em;color:#666;border-bottom:1px solid #ddd}
+.rp-tbl thead th:nth-child(n+2){text-align:right}
+.rp-tbl tbody td{padding:5px 10px;border-bottom:1px solid #f0ebe4}
+.rp-tbl tbody td:nth-child(n+2){text-align:right;font-family:'JetBrains Mono',monospace;font-size:10.5px;color:#3a7ea0}
+.rp-tbl tbody tr:hover{background:#faf7f2}
+
+/* Chart placeholder in report */
+.rp-chart-ph{
+  height:180px;background:#f8f5f0;border:1px solid #e0d8cc;border-radius:3px;
+  display:flex;align-items:center;justify-content:center;flex-direction:column;gap:6px;
+  color:#aaa;margin-bottom:14px;
+}
+.rp-chart-ph i{font-size:28px}
+.rp-chart-ph span{font-size:11px}
+
+/* Report footer */
+.rp-footer{
+  border-top:1px solid #eee;margin-top:20px;padding-top:10px;
+  display:flex;align-items:center;justify-content:space-between;
+  font-size:10px;color:#aaa;font-family:'JetBrains Mono',monospace;
+}
+
+/* ══════════════════════════════════════════════
+   EXPORT TAB
+   Full-width card-based layout
+══════════════════════════════════════════════ */
+.exp-layout{flex:1;display:flex;flex-direction:column;overflow:hidden}
+
+/* Header bar */
+.exp-header{
+  background:var(--bg-raised);border-bottom:1px solid var(--border);
+  padding:10px 20px;display:flex;align-items:center;gap:12px;flex-shrink:0;
+}
+.exp-header-title{font-size:13px;font-weight:600;color:var(--text)}
+.exp-header-sub{font-size:11.5px;color:var(--text-muted)}
+.exp-sp{flex:1}
+
+/* Scrollable body */
+.exp-body{flex:1;overflow-y:auto;padding:16px 20px 24px;display:flex;flex-direction:column;gap:16px}
+
+/* Section label */
+.exp-sect-lbl{
+  font-size:10.5px;font-weight:600;color:var(--text-muted);
+  text-transform:uppercase;letter-spacing:.08em;margin-bottom:8px;
+  display:flex;align-items:center;gap:7px;
+}
+.exp-sect-lbl::after{content:'';flex:1;height:1px;background:var(--border)}
+
+/* Content type toggles — large cards, 4-up */
+.exp-content-grid{display:grid;grid-template-columns:repeat(4,1fr);gap:8px}
+.exp-content-card{
+  padding:14px 14px 12px;border:1.5px solid var(--border);border-radius:6px;
+  background:rgba(255,255,255,.45);cursor:pointer;transition:all .14s;
+  display:flex;flex-direction:column;gap:7px;
+}
+.exp-content-card:hover{background:rgba(255,255,255,.75);border-color:var(--border-dk)}
+.exp-content-card.on{
+  background:rgba(107,142,35,.07);border-color:var(--olive);
+  box-shadow:0 0 0 1px rgba(107,142,35,.12);
+}
+.exp-cc-icon{font-size:18px;color:var(--text-muted);transition:color .12s}
+.exp-content-card.on .exp-cc-icon{color:var(--olive)}
+.exp-cc-name{font-size:12px;font-weight:600;color:var(--text)}
+.exp-cc-desc{font-size:10.5px;color:var(--text-muted);line-height:1.4}
+.exp-cc-check{
+  display:flex;align-items:center;gap:4px;
+  font-size:10px;color:var(--text-muted);margin-top:2px;
+}
+.exp-cc-check i{font-size:9px}
+.exp-content-card.on .exp-cc-check{color:var(--olive)}
+
+/* Format cards — two groups: Data and Visualizations */
+.exp-format-groups{display:flex;flex-direction:column;gap:12px}
+.exp-format-group-label{
+  font-size:10px;font-weight:600;color:var(--text-muted);
+  text-transform:uppercase;letter-spacing:.07em;margin-bottom:6px;
+}
+.exp-format-grid{display:grid;grid-template-columns:repeat(4,1fr);gap:8px}
+
+.exp-fmt-card{
+  padding:11px 12px;border:1.5px solid var(--border);border-radius:5px;
+  background:rgba(255,255,255,.4);cursor:pointer;transition:all .12s;
+  display:flex;flex-direction:column;gap:5px;position:relative;
+}
+.exp-fmt-card:hover{background:rgba(255,255,255,.7);border-color:var(--border-dk)}
+.exp-fmt-card.on{
+  background:rgba(107,142,35,.07);border-color:var(--olive);
+  box-shadow:0 0 0 1px rgba(107,142,35,.12);
+}
+.exp-fmt-card.on::after{
+  content:'\f00c';font-family:'Font Awesome 6 Free';font-weight:900;
+  position:absolute;top:7px;right:8px;font-size:9px;color:var(--olive);
+}
+.exp-fmt-icon{font-size:20px;color:var(--text-muted);transition:color .12s}
+.exp-fmt-card.on .exp-fmt-icon{color:var(--olive)}
+.exp-fmt-name{font-size:12px;font-weight:600;color:var(--text)}
+.exp-fmt-desc{font-size:10.5px;color:var(--text-muted);line-height:1.4}
+.exp-fmt-size{
+  font-family:var(--fm);font-size:9.5px;color:var(--text-muted);
+  margin-top:2px;
+}
+
+/* Output configuration */
+.exp-output-card{
+  background:var(--bg-raised);border:1px solid var(--border);border-radius:6px;padding:14px 16px;
+}
+.exp-out-row{display:flex;align-items:center;gap:10px;margin-bottom:10px}
+.exp-out-row:last-child{margin-bottom:0}
+.exp-out-lbl{font-size:12px;color:var(--text-mid);width:120px;flex-shrink:0}
+.exp-out-field{
+  flex:1;height:28px;padding:0 9px;border:1px solid var(--border);border-radius:var(--r);
+  font-family:var(--fu);font-size:12px;color:var(--text);background:rgba(255,255,255,.6);
+}
+.exp-out-field:focus{outline:none;border-color:var(--olive);background:rgba(255,255,255,.9)}
+.exp-browse-btn{
+  height:28px;padding:0 11px;border:1px solid var(--border);border-radius:var(--r);
+  font-size:12px;color:var(--text-mid);background:rgba(255,255,255,.4);
+  display:flex;align-items:center;gap:5px;transition:all .1s;
+}
+.exp-browse-btn:hover{background:var(--bg-low);border-color:var(--border-dk)}
+.exp-browse-btn i{font-size:10px}
+.exp-out-hint{font-size:10.5px;color:var(--text-muted);font-family:var(--fm)}
+
+/* Summary + export button row */
+.exp-action-bar{
+  background:var(--bg-raised);border:1px solid var(--border);border-radius:6px;
+  padding:12px 16px;display:flex;align-items:center;gap:14px;
+}
+.exp-summary{flex:1}
+.exp-summary-line{font-size:12px;color:var(--text);font-weight:500}
+.exp-summary-detail{font-size:10.5px;color:var(--text-muted);margin-top:3px;font-family:var(--fm)}
+.exp-do-btn{
+  height:34px;padding:0 20px;border-radius:var(--r);
+  background:var(--olive);border:1px solid var(--olive-dk);
+  color:#fff;font-size:13px;font-weight:600;display:flex;align-items:center;gap:8px;
+  transition:background .1s;flex-shrink:0;
+}
+.exp-do-btn:hover{background:var(--olive-h)}
+.exp-do-btn i{font-size:12px}
+</style>
+</head>
+<body>
+<div class="app">
+  <main class="main">
+    <!-- Shell injects toolbar here -->
+
+    <div class="page-host">
+
+      <!-- ═══ REPORTS TAB ═══ -->
+      <div class="tab-content active" id="tab-reports">
+        <div class="rpt-layout">
+
+          <!-- Builder panel -->
+          <div class="rpt-panel">
+            <div class="rpt-panel-body">
+
+              <!-- Report type -->
+              <div class="rpt-section">
+                <div class="rpt-sect-head"><i class="fa-solid fa-file-contract"></i>Report Type</div>
+                <div class="rpt-type-grid">
+                  <div class="rpt-type-card on" onclick="pickType(this)">
+                    <div class="rpt-type-icon"><i class="fa-solid fa-vial"></i></div>
+                    <div>
+                      <div class="rpt-type-label">Individual Sample</div>
+                      <div class="rpt-type-desc">Full report for one selected sample: grain data, plot, K-values, statistics.</div>
+                    </div>
+                  </div>
+                  <div class="rpt-type-card" onclick="pickType(this)">
+                    <div class="rpt-type-icon"><i class="fa-solid fa-code-compare"></i></div>
+                    <div>
+                      <div class="rpt-type-label">Cross-Sample Comparison</div>
+                      <div class="rpt-type-desc">Side-by-side grain parameters and K-values for selected datasets.</div>
+                    </div>
+                  </div>
+                  <div class="rpt-type-card" onclick="pickType(this)">
+                    <div class="rpt-type-icon"><i class="fa-solid fa-layer-group"></i></div>
+                    <div>
+                      <div class="rpt-type-label">Full Project Summary</div>
+                      <div class="rpt-type-desc">All samples, all methods, all statistics. Complete project documentation.</div>
+                    </div>
+                  </div>
+                </div>
+              </div>
+
+              <!-- Dataset selection -->
+              <div class="rpt-section">
+                <div class="rpt-sect-head"><i class="fa-solid fa-database"></i>Datasets</div>
+                <div class="rpt-ds-actions">
+                  <button class="rpt-link-btn" onclick="checkAll(true)">Select all</button>
+                  <span style="color:var(--text-muted);font-size:11px;margin:0 4px">·</span>
+                  <button class="rpt-link-btn" onclick="checkAll(false)">Clear</button>
+                </div>
+                <div class="rpt-ds-list" id="rpt-ds-list">
+                  <!-- JS populated -->
+                </div>
+              </div>
+
+              <!-- Report sections -->
+              <div class="rpt-section">
+                <div class="rpt-sect-head"><i class="fa-solid fa-list-ul"></i>Sections</div>
+                <div class="rpt-sections">
+                  <div class="rpt-sec-row" onclick="toggleSec(this)">
+                    <span class="rpt-sec-label"><i class="fa-solid fa-address-card"></i>Cover Page</span>
+                    <div class="rpt-toggle on"></div>
+                  </div>
+                  <div class="rpt-sec-row" onclick="toggleSec(this)">
+                    <span class="rpt-sec-label"><i class="fa-solid fa-align-left"></i>Executive Summary</span>
+                    <div class="rpt-toggle on"></div>
+                  </div>
+                  <div class="rpt-sec-row" onclick="toggleSec(this)">
+                    <span class="rpt-sec-label"><i class="fa-solid fa-table"></i>Grain Size Data</span>
+                    <div class="rpt-toggle on"></div>
+                  </div>
+                  <div class="rpt-sec-row" onclick="toggleSec(this)">
+                    <span class="rpt-sec-label"><i class="fa-solid fa-chart-line"></i>Distribution Plot</span>
+                    <div class="rpt-toggle on"></div>
+                  </div>
+                  <div class="rpt-sec-row" onclick="toggleSec(this)">
+                    <span class="rpt-sec-label"><i class="fa-solid fa-water"></i>K-Values Table</span>
+                    <div class="rpt-toggle on"></div>
+                  </div>
+                  <div class="rpt-sec-row" onclick="toggleSec(this)">
+                    <span class="rpt-sec-label"><i class="fa-solid fa-chart-bar"></i>Statistics</span>
+                    <div class="rpt-toggle on"></div>
+                  </div>
+                  <div class="rpt-sec-row" onclick="toggleSec(this)">
+                    <span class="rpt-sec-label"><i class="fa-solid fa-book"></i>Method References</span>
+                    <div class="rpt-toggle"></div>
+                  </div>
+                  <div class="rpt-sec-row" onclick="toggleSec(this)">
+                    <span class="rpt-sec-label"><i class="fa-solid fa-paperclip"></i>Appendix (raw data)</span>
+                    <div class="rpt-toggle"></div>
+                  </div>
+                </div>
+              </div>
+
+              <!-- Options -->
+              <div class="rpt-section">
+                <div class="rpt-sect-head"><i class="fa-solid fa-sliders"></i>Options</div>
+                <div class="rpt-opts">
+                  <div class="rpt-opt-row">
+                    <span class="rpt-opt-lbl">Template</span>
+                    <select class="rpt-sel">
+                      <option>Standard</option>
+                      <option>Detailed</option>
+                      <option>Minimal</option>
+                      <option>DTU Official</option>
+                    </select>
+                  </div>
+                  <div class="rpt-opt-row">
+                    <span class="rpt-opt-lbl">Output format</span>
+                    <select class="rpt-sel">
+                      <option>PDF</option>
+                      <option>HTML</option>
+                      <option>Word (.docx)</option>
+                    </select>
+                  </div>
+                  <div class="rpt-opt-row">
+                    <span class="rpt-opt-lbl">Language</span>
+                    <select class="rpt-sel">
+                      <option>English</option>
+                      <option>Danish</option>
+                    </select>
+                  </div>
+                </div>
+              </div>
+
+            </div><!-- /panel body -->
+
+            <!-- Generate button -->
+            <div class="rpt-generate">
+              <button class="rpt-gen-btn">
+                <i class="fa-solid fa-print"></i> Generate Report
+              </button>
+            </div>
+          </div><!-- /builder panel -->
+
+          <!-- Paper preview -->
+          <div class="rpt-preview">
+            <div class="rpt-paper">
+
+              <!-- Report header -->
+              <div class="rp-header">
+                <div class="rp-dtu">DTU</div>
+                <div class="rp-title-block">
+                  <div class="rp-title">Grain Size Analysis Report</div>
+                  <div class="rp-subtitle">HYDRAULIC CONDUCTIVITY CALCULATOR · v0.9-β</div>
+                </div>
+              </div>
+
+              <!-- Report body -->
+              <div class="rp-body">
+
+                <!-- Project info -->
+                <div class="rp-info-grid">
+                  <div class="rp-info-cell"><div class="rp-info-key">Sample</div><div class="rp-info-val">Borehole_DK-07</div></div>
+                  <div class="rp-info-cell"><div class="rp-info-key">Date</div><div class="rp-info-val">2026-03-12</div></div>
+                  <div class="rp-info-cell"><div class="rp-info-key">Temperature</div><div class="rp-info-val">20.0 °C</div></div>
+                  <div class="rp-info-cell"><div class="rp-info-key">Porosity</div><div class="rp-info-val">0.40</div></div>
+                  <div class="rp-info-cell"><div class="rp-info-key">Analyst</div><div class="rp-info-val">—</div></div>
+                  <div class="rp-info-cell"><div class="rp-info-key">Project</div><div class="rp-info-val">—</div></div>
+                </div>
+
+                <!-- Grain parameters -->
+                <div class="rp-sect">Grain Size Parameters</div>
+                <table class="rp-tbl">
+                  <thead><tr><th>Parameter</th><th>Value</th><th>Unit</th><th>Classification</th></tr></thead>
+                  <tbody>
+                    <tr><td>D10 (Effective size)</td><td>0.160</td><td>mm</td><td>Fine Sand</td></tr>
+                    <tr><td>D30</td><td>0.300</td><td>mm</td><td>Medium Sand</td></tr>
+                    <tr><td>D50 (Median)</td><td>0.420</td><td>mm</td><td>Medium Sand</td></tr>
+                    <tr><td>D60</td><td>0.560</td><td>mm</td><td>Medium Sand</td></tr>
+                    <tr><td>Uniformity coeff. Cu</td><td>3.50</td><td>—</td><td>Uniform</td></tr>
+                    <tr><td>Curvature coeff. Cc</td><td>1.05</td><td>—</td><td>Well-graded</td></tr>
+                    <tr><td>USCS Classification</td><td colspan="3">SP — Poorly graded sand</td></tr>
+                  </tbody>
+                </table>
+
+                <!-- Chart placeholder -->
+                <div class="rp-sect">Grain Size Distribution</div>
+                <div class="rp-chart-ph">
+                  <i class="fa-solid fa-chart-line"></i>
+                  <span>Grain Size Distribution Curve — Borehole_DK-07</span>
+                </div>
+
+                <!-- K values -->
+                <div class="rp-sect">Hydraulic Conductivity Results</div>
+                <table class="rp-tbl">
+                  <thead><tr><th>Method</th><th>K (m/s)</th><th>K (m/d)</th><th>Status</th></tr></thead>
+                  <tbody>
+                    <tr><td>Hazen (1892)</td><td>1.42×10⁻⁴</td><td>12.3</td><td>Valid</td></tr>
+                    <tr><td>Kozeny-Carman</td><td>1.37×10⁻⁴</td><td>11.8</td><td>Valid</td></tr>
+                    <tr><td>USBR</td><td>1.52×10⁻⁴</td><td>13.1</td><td>Valid</td></tr>
+                    <tr><td>Beyer</td><td>1.69×10⁻⁴</td><td>14.6</td><td>Valid</td></tr>
+                    <tr><td>Terzaghi</td><td>1.26×10⁻⁴</td><td>10.9</td><td>Valid</td></tr>
+                    <tr style="background:#f8f5f0;font-weight:600"><td>K̄ Geometric Mean</td><td>1.42×10⁻⁴</td><td>12.3</td><td>14 / 14 valid</td></tr>
+                  </tbody>
+                </table>
+
+                <div class="rp-footer">
+                  <span>Generated by GrainSize Analysis v0.9-β · DTU</span>
+                  <span>Page 1 of 2</span>
+                </div>
+              </div>
+
+            </div><!-- /paper -->
+          </div><!-- /preview -->
+
+        </div><!-- /rpt-layout -->
+      </div><!-- /tab-reports -->
+
+      <!-- ═══ EXPORT TAB ═══ -->
+      <div class="tab-content" id="tab-export">
+        <div class="exp-layout">
+
+          <!-- Header -->
+          <div class="exp-header">
+            <i class="fa-solid fa-file-export" style="color:var(--text-muted)"></i>
+            <span class="exp-header-title">Export Data</span>
+            <span class="exp-header-sub">Select what to export and in which formats</span>
+            <div class="exp-sp"></div>
+            <span style="font-family:var(--fm);font-size:11px;color:var(--text-muted)">12 datasets loaded</span>
+          </div>
+
+          <!-- Scrollable body -->
+          <div class="exp-body">
+
+            <!-- 1. What to include -->
+            <div>
+              <div class="exp-sect-lbl"><i class="fa-solid fa-layer-group"></i>What to include</div>
+              <div class="exp-content-grid">
+
+                <div class="exp-content-card on" onclick="this.classList.toggle('on')">
+                  <i class="fa-solid fa-table exp-cc-icon"></i>
+                  <div class="exp-cc-name">Grain Size Data</div>
+                  <div class="exp-cc-desc">Raw sieve data, percentiles D5–D90, gradation parameters</div>
+                  <div class="exp-cc-check"><i class="fa-solid fa-check-circle"></i>Included</div>
+                </div>
+
+                <div class="exp-content-card on" onclick="this.classList.toggle('on')">
+                  <i class="fa-solid fa-water exp-cc-icon"></i>
+                  <div class="exp-cc-name">K-Values</div>
+                  <div class="exp-cc-desc">All 14 method results in cm/s, m/s, m/d + geometric mean</div>
+                  <div class="exp-cc-check"><i class="fa-solid fa-check-circle"></i>Included</div>
+                </div>
+
+                <div class="exp-content-card on" onclick="this.classList.toggle('on')">
+                  <i class="fa-solid fa-chart-bar exp-cc-icon"></i>
+                  <div class="exp-cc-name">Statistics</div>
+                  <div class="exp-cc-desc">Soil classification, gradation coefficients, K̄ statistics</div>
+                  <div class="exp-cc-check"><i class="fa-solid fa-check-circle"></i>Included</div>
+                </div>
+
+                <div class="exp-content-card" onclick="this.classList.toggle('on')">
+                  <i class="fa-solid fa-chart-line exp-cc-icon"></i>
+                  <div class="exp-cc-name">Plots</div>
+                  <div class="exp-cc-desc">Grain size distribution curves, one per dataset or combined</div>
+                  <div class="exp-cc-check" style="color:var(--text-muted)"><i class="fa-regular fa-circle-xmark"></i>Not included</div>
+                </div>
+
+              </div>
+            </div>
+
+            <!-- 2. Format selection -->
+            <div>
+              <div class="exp-sect-lbl"><i class="fa-solid fa-file-arrow-down"></i>Export formats</div>
+              <div class="exp-format-groups">
+
+                <!-- Data formats -->
+                <div>
+                  <div class="exp-format-group-label">Data</div>
+                  <div class="exp-format-grid">
+
+                    <div class="exp-fmt-card on" onclick="this.classList.toggle('on')">
+                      <i class="fa-solid fa-file-csv exp-fmt-icon"></i>
+                      <div class="exp-fmt-name">CSV — Long</div>
+                      <div class="exp-fmt-desc">One row per sample + method. Easy to filter in Excel.</div>
+                      <div class="exp-fmt-size">~18 KB · 12 datasets</div>
+                    </div>
+
+                    <div class="exp-fmt-card on" onclick="this.classList.toggle('on')">
+                      <i class="fa-solid fa-table-columns exp-fmt-icon"></i>
+                      <div class="exp-fmt-name">CSV — Wide</div>
+                      <div class="exp-fmt-desc">One column per sample. Easier to compare side-by-side.</div>
+                      <div class="exp-fmt-size">~6 KB · 12 datasets</div>
+                    </div>
+
+                    <div class="exp-fmt-card" onclick="this.classList.toggle('on')">
+                      <i class="fa-solid fa-file-excel exp-fmt-icon"></i>
+                      <div class="exp-fmt-name">Excel (.xlsx)</div>
+                      <div class="exp-fmt-desc">Multi-sheet workbook: grain data, K-values, statistics.</div>
+                      <div class="exp-fmt-size">~45 KB · 12 datasets</div>
+                    </div>
+
+                    <div class="exp-fmt-card" onclick="this.classList.toggle('on')">
+                      <i class="fa-solid fa-brackets-curly exp-fmt-icon"></i>
+                      <div class="exp-fmt-name">JSON</div>
+                      <div class="exp-fmt-desc">Machine-readable. Useful for further processing or APIs.</div>
+                      <div class="exp-fmt-size">~22 KB · 12 datasets</div>
+                    </div>
+
+                  </div>
+                </div>
+
+                <!-- Visual formats -->
+                <div>
+                  <div class="exp-format-group-label">Visualizations</div>
+                  <div class="exp-format-grid">
+
+                    <div class="exp-fmt-card on" onclick="this.classList.toggle('on')">
+                      <i class="fa-regular fa-image exp-fmt-icon"></i>
+                      <div class="exp-fmt-name">PNG</div>
+                      <div class="exp-fmt-desc">Raster image at 300 dpi. One file per dataset.</div>
+                      <div class="exp-fmt-size">~120 KB each</div>
+                    </div>
+
+                    <div class="exp-fmt-card" onclick="this.classList.toggle('on')">
+                      <i class="fa-solid fa-bezier-curve exp-fmt-icon"></i>
+                      <div class="exp-fmt-name">SVG</div>
+                      <div class="exp-fmt-desc">Vector format. Scales to any size without quality loss.</div>
+                      <div class="exp-fmt-size">~28 KB each</div>
+                    </div>
+
+                    <div class="exp-fmt-card" onclick="this.classList.toggle('on')">
+                      <i class="fa-solid fa-file-pdf exp-fmt-icon"></i>
+                      <div class="exp-fmt-name">PDF Report</div>
+                      <div class="exp-fmt-desc">Full printable report with plots, tables, and analysis.</div>
+                      <div class="exp-fmt-size">~380 KB · all datasets</div>
+                    </div>
+
+                    <!-- spacer -->
+                    <div></div>
+
+                  </div>
+                </div>
+
+              </div>
+            </div>
+
+            <!-- 3. Output configuration -->
+            <div>
+              <div class="exp-sect-lbl"><i class="fa-solid fa-folder-open"></i>Output location</div>
+              <div class="exp-output-card">
+                <div class="exp-out-row">
+                  <span class="exp-out-lbl">Save to</span>
+                  <input class="exp-out-field" type="text" value="C:\Users\Projects\GrainSize\Output" readonly>
+                  <button class="exp-browse-btn"><i class="fa-solid fa-folder-open"></i> Browse…</button>
+                </div>
+                <div class="exp-out-row">
+                  <span class="exp-out-lbl">Filename pattern</span>
+                  <input class="exp-out-field" type="text" value="{sample}_{date}_{format}">
+                  <span class="exp-out-hint">&nbsp;e.g. Borehole_DK-07_2026-03-12_wide.csv</span>
+                </div>
+              </div>
+            </div>
+
+            <!-- 4. Export action -->
+            <div class="exp-action-bar">
+              <div class="exp-summary">
+                <div class="exp-summary-line">Ready to export: 3 formats selected · grain data + K-values + statistics</div>
+                <div class="exp-summary-detail">12 datasets × CSV Long, CSV Wide, PNG → ~1.6 MB estimated · 38 files</div>
+              </div>
+              <button class="exp-do-btn">
+                <i class="fa-solid fa-download"></i> Export Now
+              </button>
+            </div>
+
+          </div><!-- /exp-body -->
+        </div><!-- /exp-layout -->
+      </div><!-- /tab-export -->
+
+    </div><!-- /page-host -->
+  </main>
+</div><!-- /app -->
+
+<script src="_shell.js"></script>
+<script>
+/* ── Page-level tab handler (called by _shell.js _navTab) ── */
+function _onPageTab(id) {
+  document.querySelectorAll('.tab-content').forEach(c => c.classList.remove('active'));
+  const el = document.getElementById('tab-' + id);
+  if (el) el.classList.add('active');
+
+  /* Sync toolbar active state */
+  document.querySelectorAll('.tab').forEach(t => {
+    t.classList.toggle('on', t.getAttribute('onclick')?.includes("'" + id + "'"));
+  });
+}
+
+/* ── Populate dataset checklist in Reports panel ── */
+function buildRptDatasets() {
+  const list = document.getElementById('rpt-ds-list');
+  if (!list) return;
+  list.innerHTML = DATASETS.filter(d => !d.special).map((d, i) => `
+    <label class="rpt-ds-row">
+      <input type="checkbox" ${i < 3 ? 'checked' : ''}>
+      <span class="rpt-ds-name">${d.label}</span>
+      <div class="rpt-ds-led ${d.status}"></div>
+    </label>`).join('');
+}
+
+function checkAll(val) {
+  document.querySelectorAll('#rpt-ds-list input[type=checkbox]').forEach(cb => cb.checked = val);
+}
+
+function pickType(el) {
+  document.querySelectorAll('.rpt-type-card').forEach(c => c.classList.remove('on'));
+  el.classList.add('on');
+}
+
+function toggleSec(el) {
+  const toggle = el.querySelector('.rpt-toggle');
+  if (toggle) toggle.classList.toggle('on');
+}
+
+/* Read ?tab= param from URL to activate correct tab on load */
+function _onPageInit() {
+  buildRptDatasets();
+  const params = new URLSearchParams(window.location.search);
+  const tab = params.get('tab') || 'reports';
+  _onPageTab(tab);
+}
+
+/* ── Init shell with this page's active tab ── */
+initShell({ activeTab: 'reports' });
+</script>
+</body>
+</html>

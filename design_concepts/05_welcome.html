@@ -1,0 +1,335 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>05 — Welcome · GrainSize Concept</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Playfair+Display:wght@700&family=Source+Sans+3:wght@300;400;500;600&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/all.min.css">
+<link rel="stylesheet" href="_shared.css">
+
+<style>
+/* ══════════════════════════════════════════════
+   WELCOME — matches existing welcome_widget.py
+   structure: soil bg + white overlay + title card
+   + 2×2 content grid (Recent | What's New /
+   Quick Help | Quick Actions)
+══════════════════════════════════════════════ */
+
+/* The welcome fills the whole content area (no ds-bar) */
+.wlc-host{
+  flex:1;overflow-y:auto;display:flex;flex-direction:column;align-items:center;
+  padding:22px 20px 14px;gap:14px;position:relative;
+  /* Soil background gradient (mirrors the _draw_gradient_background fallback) */
+  background:linear-gradient(170deg, #b5a080 0%, #a0826d 45%, #6a94a8 100%);
+}
+
+/* Grain texture on the background */
+.wlc-host::before{
+  content:'';position:absolute;inset:0;pointer-events:none;z-index:0;
+  opacity:.22;
+  background-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='260' height='260'%3E%3Cfilter id='g'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.65' numOctaves='4' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='260' height='260' filter='url(%23g)' opacity='.09'/%3E%3C/svg%3E");
+}
+
+/* Semi-transparent overlay (like the white overlay in paintEvent) */
+.wlc-host::after{
+  content:'';position:absolute;inset:0;pointer-events:none;z-index:0;
+  background:rgba(255,255,255,.38);
+}
+
+.wlc-host > *{ position:relative;z-index:1; }
+
+/* ── Title card ── */
+.wlc-title-card{
+  background:rgba(255,255,255,.22);
+  border:1.5px solid rgba(255,255,255,.38);
+  border-radius:8px;padding:13px 22px 11px;text-align:center;
+  max-width:660px;width:100%;
+  backdrop-filter:blur(6px);
+  box-shadow:0 4px 18px rgba(60,30,8,.10);
+}
+.wlc-title-main{
+  font-family:var(--fd);font-size:22px;color:var(--text);
+  letter-spacing:.02em;line-height:1.2;margin-bottom:3px;
+}
+.wlc-title-sub{font-size:12px;color:var(--text-mid);font-weight:400}
+.wlc-title-ver{
+  font-family:var(--fm);font-size:9.5px;color:var(--text-muted);margin-top:5px;
+  display:inline-block;
+}
+
+/* ── Main content card (white, wraps the 2×2 grid) ── */
+.wlc-card{
+  background:rgba(255,255,255,.97);
+  border:1.5px solid rgba(180,160,130,.25);
+  border-radius:10px;padding:14px;
+  max-width:660px;width:100%;
+  box-shadow:0 6px 24px rgba(60,30,8,.12);
+}
+
+/* 2×2 grid */
+.wlc-grid{
+  display:grid;grid-template-columns:1fr 1fr;gap:8px;
+}
+
+/* Section boxes */
+.wlc-sec{
+  background:#f8f6f2;border:1px solid var(--border);border-radius:6px;
+  padding:10px;display:flex;flex-direction:column;gap:7px;
+}
+.wlc-sec-head{
+  display:flex;align-items:center;justify-content:space-between;gap:6px;
+}
+.wlc-sec-title{
+  font-size:12px;font-weight:600;color:var(--text);display:flex;align-items:center;gap:6px;
+}
+.wlc-sec-title i{font-size:11px;color:var(--earth)}
+
+/* ── Recent sessions ── */
+.recent-list{display:flex;flex-direction:column;gap:1px}
+.rec-item{
+  display:flex;align-items:flex-start;gap:7px;padding:5px 7px;border-radius:4px;
+  cursor:pointer;transition:background .1s;
+}
+.rec-item:hover{background:rgba(0,120,212,.06)}
+.rec-item-ic{font-size:12px;color:var(--earth);margin-top:1px;flex-shrink:0}
+.rec-item-tx{flex:1;min-width:0}
+.rec-item-nm{
+  font-size:11.5px;font-weight:500;color:#0066cc;
+  overflow:hidden;text-overflow:ellipsis;white-space:nowrap;
+}
+.rec-item-meta{font-size:10px;color:var(--text-muted);font-family:var(--fm);margin-top:1px}
+.rec-empty{
+  font-size:11px;color:var(--text-muted);font-style:italic;
+  text-align:center;padding:12px 6px;
+}
+
+.clear-btn{
+  display:flex;align-items:center;gap:4px;padding:2px 8px;height:22px;
+  background:#dc3545;color:#fff;border:none;border-radius:3px;
+  font-size:10px;cursor:pointer;transition:background .1s;flex-shrink:0;
+}
+.clear-btn:hover{background:#c82333}
+
+/* ── What's New ── */
+.changelog-scroll{
+  max-height:148px;overflow-y:auto;display:flex;flex-direction:column;gap:9px;
+  padding-right:3px;scrollbar-width:thin;scrollbar-color:var(--border) transparent;
+}
+.cl-ver-hd{
+  font-size:11px;font-weight:600;color:#2c3e50;display:flex;align-items:center;gap:5px;
+}
+.cl-ver-hd i{font-size:9px;color:#0078d4}
+.cl-change{font-size:10.5px;color:#555;line-height:1.5;padding-left:12px}
+.cl-change::before{content:'• ';color:var(--earth)}
+.cl-changes{display:flex;flex-direction:column;gap:1px}
+.cl-more-btn{
+  display:flex;align-items:center;justify-content:center;gap:5px;
+  border:1px solid #0078d4;border-radius:3px;padding:4px 10px;
+  color:#0078d4;background:transparent;font-size:10.5px;cursor:pointer;
+  transition:background .1s;margin-top:2px;
+}
+.cl-more-btn:hover{background:rgba(0,120,212,.07)}
+
+/* ── Quick Help 2×2 ── */
+.help-grid{display:grid;grid-template-columns:1fr 1fr;gap:5px}
+.help-btn{
+  display:flex;align-items:center;justify-content:center;padding:5px 6px;
+  border:1px solid #0078d4;border-radius:3px;color:#0078d4;background:transparent;
+  font-size:10.5px;cursor:pointer;transition:background .1s;min-height:26px;
+}
+.help-btn:hover{background:rgba(0,120,212,.08)}
+
+/* ── Quick Actions ── */
+.qa-stack{display:flex;flex-direction:column;gap:8px}
+.qa-primary{
+  display:flex;align-items:center;justify-content:center;gap:8px;
+  padding:9px 18px;border:none;border-radius:5px;
+  background:#0078d4;color:#fff;
+  font-size:12px;font-weight:600;font-family:var(--fu);cursor:pointer;
+  transition:background .12s;min-height:36px;
+}
+.qa-primary:hover{background:#006cc1}
+.qa-secondary{
+  display:flex;align-items:center;justify-content:center;gap:8px;
+  padding:7px 18px;border:2px solid #ccc;border-radius:5px;
+  background:#fff;color:#333;
+  font-size:12px;font-family:var(--fu);cursor:pointer;transition:all .12s;min-height:36px;
+}
+.qa-secondary:hover{border-color:#0078d4;color:#0078d4}
+
+/* ── Don't show again ── */
+.wlc-footer{
+  max-width:660px;width:100%;display:flex;align-items:center;gap:7px;
+}
+.wlc-chk-row{display:flex;align-items:center;gap:6px;cursor:pointer;font-size:11px;color:rgba(80,60,30,.75)}
+.wlc-chk-row input{accent-color:var(--earth);cursor:pointer}
+.wlc-attr{
+  margin-left:auto;font-size:9px;color:rgba(80,60,30,.55);font-family:var(--fm);
+  background:rgba(255,255,255,.55);padding:2px 8px;border-radius:3px;
+}
+</style>
+</head>
+<body>
+<div class="app">
+  <div class="main">
+    <!-- shell injects menubar/sidebar/toolbar/statusbar -->
+
+    <div class="wlc-host" id="page-host">
+
+      <!-- Title card -->
+      <div class="wlc-title-card">
+        <div class="wlc-title-main">Grain Size Analysis</div>
+        <div class="wlc-title-sub">Hydraulic Conductivity Calculator</div>
+        <div class="wlc-title-ver">Version 0.9.0-beta</div>
+      </div>
+
+      <!-- Main content card -->
+      <div class="wlc-card">
+        <div class="wlc-grid">
+
+          <!-- Recent Sessions -->
+          <div class="wlc-sec">
+            <div class="wlc-sec-head">
+              <div class="wlc-sec-title"><i class="fa-solid fa-folder-open"></i>Recent Sessions</div>
+              <button class="clear-btn"><i class="fa-solid fa-trash-can"></i>Clear</button>
+            </div>
+            <div class="recent-list" id="rec-list">
+              <!-- Populated by JS -->
+            </div>
+          </div>
+
+          <!-- What's New -->
+          <div class="wlc-sec">
+            <div class="wlc-sec-head">
+              <div class="wlc-sec-title"><i class="fa-solid fa-file-lines"></i>What's New</div>
+            </div>
+            <div class="changelog-scroll">
+              <div>
+                <div class="cl-ver-hd"><i class="fa-solid fa-diamond"></i>v0.9.0-beta <span style="font-size:9.5px;color:var(--text-muted);font-weight:400">(2025-01-15)</span></div>
+                <div class="cl-changes">
+                  <div class="cl-change">New export tab with live data preview</div>
+                  <div class="cl-change">Wide format CSV export for statistical analysis</div>
+                  <div class="cl-change">Enhanced welcome screen with recent files</div>
+                </div>
+              </div>
+              <div>
+                <div class="cl-ver-hd"><i class="fa-solid fa-diamond"></i>v1.9.0-alpha <span style="font-size:9.5px;color:var(--text-muted);font-weight:400">(2024-12-20)</span></div>
+                <div class="cl-changes">
+                  <div class="cl-change">Added comparison tab for multiple datasets</div>
+                  <div class="cl-change">Improved calculation methods validation</div>
+                  <div class="cl-change">Bug fixes for column mapping</div>
+                </div>
+              </div>
+              <div>
+                <div class="cl-ver-hd"><i class="fa-solid fa-diamond"></i>v1.8.0-alpha <span style="font-size:9.5px;color:var(--text-muted);font-weight:400">(2024-11-30)</span></div>
+                <div class="cl-changes">
+                  <div class="cl-change">New help system with comprehensive guides</div>
+                  <div class="cl-change">Enhanced reporting tab with templates</div>
+                  <div class="cl-change">Performance improvements for large datasets</div>
+                </div>
+              </div>
+              <div>
+                <div class="cl-ver-hd"><i class="fa-solid fa-diamond"></i>v1.7.0-alpha <span style="font-size:9.5px;color:var(--text-muted);font-weight:400">(2024-11-10)</span></div>
+                <div class="cl-changes">
+                  <div class="cl-change">Added statistics tab with grain analysis</div>
+                  <div class="cl-change">Improved porosity calculation methods</div>
+                  <div class="cl-change">New plot customization options</div>
+                </div>
+              </div>
+            </div>
+            <button class="cl-more-btn"><i class="fa-solid fa-book-open"></i>View Full Changelog</button>
+          </div>
+
+          <!-- Quick Help -->
+          <div class="wlc-sec">
+            <div class="wlc-sec-head">
+              <div class="wlc-sec-title"><i class="fa-solid fa-book"></i>Quick Help</div>
+            </div>
+            <div class="help-grid">
+              <button class="help-btn">Getting Started</button>
+              <button class="help-btn">File Formats</button>
+              <button class="help-btn">Methods</button>
+              <button class="help-btn">Troubleshoot</button>
+            </div>
+          </div>
+
+          <!-- Quick Actions -->
+          <div class="wlc-sec">
+            <div class="wlc-sec-head">
+              <div class="wlc-sec-title"><i class="fa-solid fa-rocket"></i>Quick Actions</div>
+            </div>
+            <div class="qa-stack">
+              <button class="qa-primary"><i class="fa-solid fa-folder-open"></i>Load Files</button>
+              <button class="qa-secondary"><i class="fa-solid fa-flask"></i>Load Sample Data</button>
+            </div>
+          </div>
+
+        </div><!-- /wlc-grid -->
+      </div><!-- /wlc-card -->
+
+      <!-- Don't show again + attribution -->
+      <div class="wlc-footer">
+        <label class="wlc-chk-row">
+          <input type="checkbox">
+          Don't show this welcome screen on startup
+        </label>
+        <span class="wlc-attr">Background generated using Sora from OpenAI</span>
+      </div>
+
+    </div><!-- /wlc-host -->
+  </div><!-- /main -->
+</div><!-- /app -->
+
+<script src="_shell.js"></script>
+<script>
+/* ── Welcome page: no ds-bar, no dataset tabs shown ── */
+function _onPageInit() {
+  /* Disable Calculate K button in empty state */
+  const go = document.querySelector('.sb-btn.go');
+  if (go) { go.disabled = true; go.style.opacity = '.45'; go.title = 'Load data first'; }
+
+  /* Replace sample list with empty-state */
+  const sl = document.getElementById('s-list');
+  if (sl) sl.innerHTML = `
+    <div style="display:flex;flex-direction:column;align-items:center;padding:20px 12px 12px;gap:8px;opacity:.65">
+      <div style="width:36px;height:36px;border-radius:4px;background:rgba(255,255,255,.3);border:1px dashed var(--sb-bdr);display:flex;align-items:center;justify-content:center">
+        <i class="fa-solid fa-inbox" style="font-size:14px;color:var(--sb-muted)"></i>
+      </div>
+      <div style="font-size:10.5px;color:var(--sb-muted);text-align:center;line-height:1.5">No samples loaded yet.</div>
+    </div>`;
+
+  buildRecent();
+}
+function _onPageTab() {}
+
+/* Demo recent sessions */
+const SESSIONS = [
+  { name:'GW Survey 2024',       date:'2026-03-10', files:['GW_Samples_2024.csv'], count:12 },
+  { name:'Borehole Campaign',    date:'2026-03-07', files:['Boreholes_March.xlsx'], count:5 },
+  { name:'Rock Core Analysis',   date:'2026-03-05', files:['RockCore_RK-15.txt'], count:1 },
+  { name:'Archive 2022 Import',  date:'2026-02-14', files:['Archive_2022.xlsx'], count:3 },
+];
+function buildRecent() {
+  const list = document.getElementById('rec-list');
+  if (!list) return;
+  if (!SESSIONS.length) {
+    list.innerHTML = '<div class="rec-empty">No recent sessions</div>';
+    return;
+  }
+  list.innerHTML = SESSIONS.map(s => `
+    <div class="rec-item">
+      <i class="fa-solid fa-folder rec-item-ic"></i>
+      <div class="rec-item-tx">
+        <div class="rec-item-nm">${s.name}</div>
+        <div class="rec-item-meta">${s.count} file${s.count!==1?'s':''} · ${s.date}</div>
+      </div>
+    </div>`).join('');
+}
+
+initShell({ activeTab: 'individual' });
+</script>
+</body>
+</html>

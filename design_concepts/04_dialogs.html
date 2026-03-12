@@ -1,0 +1,1176 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>04 — Dialogs · GrainSize Concept</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Playfair+Display:wght@700&family=Source+Sans+3:wght@300;400;500;600&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/all.min.css">
+<link rel="stylesheet" href="_shared.css">
+
+<style>
+/* ══════════════════════════════════════════════
+   PAGE — Dialog Demo Host
+══════════════════════════════════════════════ */
+
+/* Demo picker bar */
+.dlg-picker{
+  position:absolute;top:0;left:0;right:0;z-index:10;
+  background:var(--bg);border-bottom:1px solid var(--border);
+  padding:0 12px;display:flex;align-items:center;gap:4px;height:34px;
+  flex-shrink:0;
+}
+.dp-lbl{font-size:10px;font-weight:600;letter-spacing:.08em;text-transform:uppercase;color:var(--text-muted);margin-right:6px;white-space:nowrap}
+.dp-btn{
+  display:flex;align-items:center;gap:5px;padding:3px 10px;
+  border:1px solid var(--border);border-radius:var(--r);
+  font-size:11.5px;color:var(--text-muted);background:transparent;
+  cursor:pointer;transition:all .12s;white-space:nowrap;
+}
+.dp-btn i{font-size:10px}
+.dp-btn:hover{background:var(--bg-raised);color:var(--text-mid);border-color:var(--border-dk)}
+.dp-btn.on{background:var(--sb-act);color:var(--sb-text);border-color:var(--sb-bdr);font-weight:500}
+.dp-sp{flex:1}
+.dp-hint{font-size:10px;color:var(--text-muted);font-family:var(--fm)}
+
+/* Main stage — shows app blurred behind dialog */
+.dlg-stage{
+  position:absolute;top:34px;left:0;right:0;bottom:0;
+  display:flex;align-items:center;justify-content:center;
+  background:rgba(42,30,15,.52);backdrop-filter:blur(1.5px);
+  z-index:5;
+}
+
+/* All dialogs hidden by default */
+.dlg{display:none;flex-direction:column;background:var(--bg);border:1px solid var(--border);
+  border-radius:7px;box-shadow:0 14px 50px rgba(30,15,5,.28),0 3px 10px rgba(30,15,5,.14);
+  animation:dlg-in .18s cubic-bezier(.2,.6,.35,1) both;overflow:hidden;position:relative}
+.dlg.show{display:flex}
+@keyframes dlg-in{from{opacity:0;transform:scale(.96) translateY(5px)}to{opacity:1;transform:none}}
+
+/* Dialog header */
+.dh{
+  display:flex;align-items:center;gap:10px;padding:11px 16px 10px;
+  background:var(--bg-raised);border-bottom:1px solid var(--border);flex-shrink:0;
+}
+.dh-icon{width:28px;height:28px;border-radius:var(--r);flex-shrink:0;
+  display:flex;align-items:center;justify-content:center;
+  background:rgba(107,142,35,.12);border:1px solid rgba(107,142,35,.25)}
+.dh-icon i{font-size:12px;color:var(--olive)}
+.dh-tx{flex:1;min-width:0}
+.dh-title{font-family:var(--fd);font-size:13.5px;color:var(--text);line-height:1.2}
+.dh-sub{font-size:10.5px;color:var(--text-muted);margin-top:1px;font-family:var(--fm)}
+.dh-close{
+  width:24px;height:24px;border:none;background:transparent;border-radius:3px;
+  color:var(--text-muted);font-size:13px;cursor:pointer;display:flex;align-items:center;justify-content:center;
+  transition:all .1s;
+}
+.dh-close:hover{background:rgba(180,48,32,.1);color:#a03020}
+
+/* Dialog footer */
+.df{
+  display:flex;align-items:center;justify-content:flex-end;gap:7px;
+  padding:9px 14px;background:var(--bg-raised);border-top:1px solid var(--border);flex-shrink:0;
+}
+.df-l{flex:1}
+.d-btn{
+  display:flex;align-items:center;gap:6px;height:28px;padding:0 14px;
+  border:1px solid var(--border);border-radius:var(--r);
+  font-size:12px;color:var(--text-mid);background:var(--bg);cursor:pointer;transition:all .12s;
+}
+.d-btn:hover{background:var(--bg-raised);border-color:var(--border-dk);color:var(--text)}
+.d-btn.prim{background:var(--olive);border-color:var(--olive-dk);color:#fff;font-weight:500}
+.d-btn.prim:hover{background:var(--olive-h)}
+.d-btn.danger{border-color:rgba(160,48,32,.35);color:#a03020}
+.d-btn.danger:hover{background:rgba(160,48,32,.06)}
+.d-btn i{font-size:10px}
+
+/* ══════════════════════════════════════════════
+   1 — COLUMN MAPPER
+══════════════════════════════════════════════ */
+#dlg-colmap{width:820px;max-width:95vw}
+.cm-body{display:flex;flex-direction:column;gap:0;flex:1;overflow:hidden}
+.cm-file-strip{
+  display:flex;align-items:center;gap:10px;padding:8px 16px;
+  background:var(--bg-low);border-bottom:1px solid var(--border);flex-shrink:0;
+  font-family:var(--fm);font-size:10.5px;color:var(--text-mid);
+}
+.cm-file-strip i{color:var(--text-muted);font-size:13px}
+.cm-file-name{font-weight:500;color:var(--text)}
+.cm-file-meta{color:var(--text-muted)}
+.cm-file-sp{flex:1}
+.cm-auto-btn{
+  display:flex;align-items:center;gap:5px;padding:3px 9px;height:22px;
+  border:1px solid var(--border);border-radius:var(--r);
+  background:rgba(107,142,35,.08);color:var(--olive);font-size:10.5px;cursor:pointer;transition:all .12s;
+}
+.cm-auto-btn:hover{background:rgba(107,142,35,.15)}
+
+.cm-layout{display:flex;gap:0;flex:1;overflow:hidden}
+
+/* Left: source column list */
+.cm-left{
+  width:210px;flex-shrink:0;border-right:1px solid var(--border);
+  display:flex;flex-direction:column;overflow:hidden;background:var(--bg-raised);
+}
+.cm-pane-hd{
+  padding:7px 12px;font-size:9.5px;font-weight:600;letter-spacing:.08em;
+  text-transform:uppercase;color:var(--text-muted);
+  border-bottom:1px solid var(--border);flex-shrink:0;
+}
+.cm-col-list{flex:1;overflow-y:auto;padding:4px 6px}
+.cm-col{
+  display:flex;align-items:center;gap:7px;padding:5px 8px;border-radius:var(--r);
+  border:1px solid transparent;cursor:grab;margin-bottom:1px;transition:all .1s;
+}
+.cm-col:hover{background:var(--bg-low);border-color:var(--border)}
+.cm-col.mapped{opacity:.45}
+.cm-col-icon{
+  width:22px;height:22px;border-radius:3px;flex-shrink:0;
+  display:flex;align-items:center;justify-content:center;
+  background:rgba(255,255,255,.55);border:1px solid var(--border);
+}
+.cm-col-icon i{font-size:9px;color:var(--text-muted)}
+.cm-col-nm{font-size:11.5px;color:var(--text);font-weight:500;flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.cm-col-sample{font-family:var(--fm);font-size:9px;color:var(--text-muted)}
+.cm-col.suggest .cm-col-icon{background:rgba(107,142,35,.12);border-color:rgba(107,142,35,.28)}
+.cm-col.suggest .cm-col-icon i{color:var(--olive)}
+.cm-col-tag{font-family:var(--fm);font-size:9px;padding:1px 5px;border-radius:99px;background:rgba(107,142,35,.12);color:var(--olive);border:1px solid rgba(107,142,35,.25);flex-shrink:0}
+
+/* Middle: mapping area */
+.cm-mid{flex:1;display:flex;flex-direction:column;overflow:hidden}
+.cm-targets{flex:1;overflow-y:auto;padding:12px 14px;display:flex;flex-direction:column;gap:8px}
+.cm-target-row{display:flex;align-items:center;gap:10px}
+.cm-target-lbl{
+  width:115px;flex-shrink:0;font-size:11.5px;color:var(--text-mid);font-weight:500;
+  display:flex;align-items:center;gap:5px;
+}
+.cm-target-lbl i{font-size:10px;color:var(--text-muted);width:12px}
+.cm-slot{
+  flex:1;height:30px;border:1.5px dashed var(--border);border-radius:var(--r);
+  display:flex;align-items:center;padding:0 8px;gap:7px;
+  font-size:11.5px;color:var(--text-muted);background:rgba(255,255,255,.3);
+  transition:all .12s;position:relative;cursor:pointer;
+}
+.cm-slot:hover{border-color:var(--border-dk);background:var(--bg-raised)}
+.cm-slot.filled{
+  background:var(--bg-raised);border-color:var(--border-dk);border-style:solid;
+  color:var(--text);font-weight:500;
+}
+.cm-slot.filled i.slot-icon{color:var(--olive)}
+.cm-slot .slot-clear{
+  margin-left:auto;width:16px;height:16px;border-radius:50%;display:flex;align-items:center;justify-content:center;
+  font-size:8px;color:var(--text-muted);cursor:pointer;transition:all .1s;
+}
+.cm-slot .slot-clear:hover{background:var(--border);color:var(--text)}
+.cm-slot-ph{color:var(--text-muted);font-size:11px}
+.cm-sel{
+  width:100%;height:30px;border:1.5px solid var(--border);border-radius:var(--r);
+  background:rgba(255,255,255,.5);color:var(--text-mid);font-family:var(--fu);font-size:11.5px;
+  padding:0 6px;appearance:none;cursor:pointer;transition:border-color .12s;
+}
+.cm-sel:focus{outline:none;border-color:var(--olive)}
+
+.cm-section-hd{font-size:9px;font-weight:600;letter-spacing:.09em;text-transform:uppercase;color:var(--text-muted);padding:4px 0 2px;display:flex;align-items:center;gap:6px}
+.cm-section-hd::after{content:'';flex:1;height:1px;background:var(--border)}
+.cm-opt-row{display:flex;align-items:center;gap:6px;padding:2px 0}
+.cm-chk-lbl{font-size:11.5px;color:var(--text-mid);display:flex;align-items:center;gap:6px;cursor:pointer}
+.cm-chk-lbl input{accent-color:var(--olive);cursor:pointer}
+
+/* Right: data preview */
+.cm-right{
+  width:220px;flex-shrink:0;border-left:1px solid var(--border);
+  display:flex;flex-direction:column;overflow:hidden;background:var(--bg-raised);
+}
+.cm-preview-tbl{flex:1;overflow:auto}
+.cm-prev-table{width:100%;border-collapse:collapse;font-size:10.5px;font-family:var(--fm)}
+.cm-prev-table th{
+  position:sticky;top:0;background:var(--bg-low);padding:4px 8px;text-align:left;
+  font-size:9px;font-weight:600;letter-spacing:.06em;text-transform:uppercase;color:var(--text-muted);
+  border-bottom:1px solid var(--border);white-space:nowrap;
+}
+.cm-prev-table td{padding:3px 8px;border-bottom:1px solid rgba(var(--border),0.5);color:var(--text-mid);white-space:nowrap}
+.cm-prev-table tr:last-child td{border-bottom:none}
+.cm-prev-table tr:hover td{background:rgba(107,142,35,.04)}
+.cm-prev-table .th-mapped{color:var(--olive)}
+
+/* ══════════════════════════════════════════════
+   2 — SHEET SELECTOR
+══════════════════════════════════════════════ */
+#dlg-sheet{width:500px}
+.sh-body{padding:14px;display:flex;flex-direction:column;gap:10px}
+.sh-file-row{display:flex;align-items:center;gap:8px;padding:8px 12px;background:var(--bg-low);border:1px solid var(--border);border-radius:var(--r);font-size:11.5px;color:var(--text-mid);font-family:var(--fm)}
+.sh-file-row i{color:#1d7a4a;font-size:14px}
+.sh-file-nm{font-weight:500;color:var(--text);flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.sh-file-sz{color:var(--text-muted);font-size:10px}
+.sh-grid{display:grid;grid-template-columns:1fr 1fr;gap:6px}
+.sh-card{
+  border:1.5px solid var(--border);border-radius:5px;padding:10px 11px;cursor:pointer;
+  background:var(--bg-raised);transition:all .14s;display:flex;flex-direction:column;gap:5px;
+}
+.sh-card:hover{border-color:var(--border-dk);background:var(--bg-low)}
+.sh-card.on{border-color:var(--olive);background:rgba(107,142,35,.06)}
+.sh-card-top{display:flex;align-items:center;gap:7px}
+.sh-card-icon{
+  width:26px;height:26px;border-radius:3px;flex-shrink:0;
+  display:flex;align-items:center;justify-content:center;
+  background:rgba(255,255,255,.55);border:1px solid var(--border);
+}
+.sh-card.on .sh-card-icon{background:rgba(107,142,35,.12);border-color:rgba(107,142,35,.3)}
+.sh-card-icon i{font-size:11px;color:var(--text-muted)}
+.sh-card.on .sh-card-icon i{color:var(--olive)}
+.sh-card-name{font-size:12px;font-weight:500;color:var(--text);flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.sh-card-sel{width:14px;height:14px;border-radius:50%;border:1.5px solid var(--border);flex-shrink:0;display:flex;align-items:center;justify-content:center}
+.sh-card.on .sh-card-sel{border-color:var(--olive);background:var(--olive)}
+.sh-card.on .sh-card-sel::after{content:'';width:5px;height:5px;border-radius:50%;background:#fff}
+.sh-stats{display:flex;gap:8px;font-family:var(--fm);font-size:9.5px;color:var(--text-muted)}
+.sh-stat{display:flex;align-items:center;gap:3px}
+.sh-stat i{font-size:8px}
+.sh-warn{display:flex;align-items:center;gap:6px;padding:6px 10px;background:rgba(208,128,32,.08);border:1px solid rgba(208,128,32,.28);border-radius:var(--r);font-size:11px;color:#7a5010}
+.sh-warn i{color:#d08020;font-size:11px;flex-shrink:0}
+.sh-hdr{padding:6px 0 2px;font-size:9.5px;font-weight:600;letter-spacing:.08em;text-transform:uppercase;color:var(--text-muted)}
+
+/* ══════════════════════════════════════════════
+   3 — MANAGE POROSITY
+══════════════════════════════════════════════ */
+#dlg-por{width:580px}
+.por-body{display:flex;flex-direction:column;gap:0;flex:1;overflow:hidden}
+.por-global{
+  display:flex;align-items:center;gap:10px;padding:10px 14px;
+  background:rgba(107,142,35,.05);border-bottom:1px solid var(--border);flex-shrink:0;
+}
+.por-global-lbl{font-size:12px;font-weight:500;color:var(--text-mid);flex:1}
+.por-global-lbl span{font-size:10.5px;color:var(--text-muted);margin-left:5px;font-weight:400}
+.por-field{display:flex;align-items:center;gap:5px}
+.por-in{
+  width:64px;height:26px;background:rgba(255,255,255,.7);border:1px solid var(--border);
+  border-radius:var(--r);font-family:var(--fm);font-size:12px;color:var(--text);
+  text-align:right;padding:0 6px;
+}
+.por-in:focus{outline:none;border-color:var(--olive)}
+.por-unit{font-family:var(--fm);font-size:11px;color:var(--text-muted);min-width:12px}
+.por-apply-btn{
+  display:flex;align-items:center;gap:5px;padding:3px 10px;height:26px;
+  border:1px solid var(--border);border-radius:var(--r);font-size:11px;
+  color:var(--text-mid);background:var(--bg);cursor:pointer;transition:all .12s;
+}
+.por-apply-btn:hover{background:var(--bg-raised);border-color:var(--border-dk);color:var(--text)}
+.por-table-wrap{flex:1;overflow-y:auto}
+.por-table{width:100%;border-collapse:collapse}
+.por-table th{
+  position:sticky;top:0;background:var(--bg-low);padding:5px 12px;text-align:left;
+  font-size:9.5px;font-weight:600;letter-spacing:.07em;text-transform:uppercase;color:var(--text-muted);
+  border-bottom:1px solid var(--border);
+}
+.por-table td{padding:5px 12px;border-bottom:1px solid rgba(212,196,168,.45);vertical-align:middle}
+.por-table tr:last-child td{border-bottom:none}
+.por-table tr:hover td{background:rgba(107,142,35,.03)}
+.por-nm{font-size:12px;font-weight:500;color:var(--text)}
+.por-id{font-family:var(--fm);font-size:9.5px;color:var(--text-muted)}
+.por-mode{display:flex;align-items:center;gap:6px}
+.por-radio{display:flex;align-items:center;gap:4px;font-size:11px;color:var(--text-mid);cursor:pointer}
+.por-radio input{accent-color:var(--olive)}
+.por-row-in{
+  width:58px;height:22px;background:rgba(255,255,255,.65);border:1px solid var(--border);
+  border-radius:3px;font-family:var(--fm);font-size:11px;color:var(--text);
+  text-align:right;padding:0 5px;
+}
+.por-row-in:focus{outline:none;border-color:var(--olive)}
+.por-row-in:disabled{opacity:.4;cursor:not-allowed}
+.por-badge-global{display:inline-flex;align-items:center;padding:1px 6px;border-radius:99px;font-size:9.5px;background:var(--bg-low);color:var(--text-muted);border:1px solid var(--border)}
+.por-badge-custom{display:inline-flex;align-items:center;padding:1px 6px;border-radius:99px;font-size:9.5px;background:rgba(107,142,35,.1);color:var(--olive);border:1px solid rgba(107,142,35,.25)}
+
+/* ══════════════════════════════════════════════
+   4 — DATA INSPECTOR
+══════════════════════════════════════════════ */
+#dlg-insp{width:640px;max-height:78vh}
+.di-toolbar{
+  display:flex;align-items:center;gap:6px;padding:7px 14px;
+  background:var(--bg-low);border-bottom:1px solid var(--border);flex-shrink:0;
+}
+.di-chip{
+  display:flex;align-items:center;gap:5px;padding:3px 9px;border-radius:var(--r);
+  border:1px solid var(--border);background:var(--bg-raised);font-size:11px;color:var(--text-mid);
+}
+.di-chip i{font-size:9px;color:var(--text-muted)}
+.di-chip .di-val{font-family:var(--fm);font-size:10.5px;color:var(--text);font-weight:500}
+.di-sp{flex:1}
+.di-mode-grp{display:flex;border:1px solid var(--border);border-radius:var(--r);overflow:hidden}
+.di-mode-btn{
+  padding:3px 10px;border:none;background:var(--bg-raised);font-size:11px;
+  color:var(--text-muted);cursor:pointer;transition:all .1s;border-right:1px solid var(--border);
+}
+.di-mode-btn:last-child{border-right:none}
+.di-mode-btn:hover{background:var(--bg-low);color:var(--text)}
+.di-mode-btn.on{background:var(--sb-act);color:var(--sb-text)}
+.di-table-wrap{flex:1;overflow:auto}
+.di-table{width:100%;border-collapse:collapse;font-family:var(--fm);font-size:11px}
+.di-table th{
+  position:sticky;top:0;background:var(--bg-raised);padding:5px 12px;text-align:right;
+  font-size:9.5px;font-weight:600;letter-spacing:.05em;text-transform:uppercase;color:var(--text-muted);
+  border-bottom:2px solid var(--border);white-space:nowrap;
+}
+.di-table th:first-child{text-align:center}
+.di-table td{padding:4px 12px;text-align:right;border-bottom:1px solid rgba(212,196,168,.35);color:var(--text-mid)}
+.di-table td:first-child{text-align:center;color:var(--text-muted);font-size:9.5px}
+.di-table td.di-size{font-weight:500;color:var(--text)}
+.di-table td.di-pct{color:var(--olive)}
+.di-table tr:last-child td{border-bottom:none;font-weight:600;background:rgba(107,142,35,.05)}
+.di-table tr:hover td{background:rgba(107,142,35,.04)}
+.di-bar{display:inline-block;height:7px;background:var(--olive);border-radius:2px;opacity:.55;min-width:2px;transition:width .2s}
+
+/* ══════════════════════════════════════════════
+   5 — LOAD LOG
+══════════════════════════════════════════════ */
+#dlg-log{width:600px;max-height:76vh}
+.ll-toolbar{
+  display:flex;align-items:center;gap:5px;padding:6px 12px;
+  background:var(--bg-low);border-bottom:1px solid var(--border);flex-shrink:0;flex-wrap:wrap;
+}
+.ll-filter{
+  display:flex;align-items:center;gap:4px;padding:3px 8px;border-radius:var(--r);
+  border:1px solid var(--border);background:transparent;font-size:10.5px;
+  color:var(--text-muted);cursor:pointer;transition:all .1s;
+}
+.ll-filter:hover{background:var(--bg-raised);color:var(--text)}
+.ll-filter.on{font-weight:500}
+.ll-filter.on.f-all{background:var(--bg-raised);color:var(--text);border-color:var(--border-dk)}
+.ll-filter.on.f-err{background:rgba(160,48,32,.08);color:#a03020;border-color:rgba(160,48,32,.3)}
+.ll-filter.on.f-warn{background:rgba(208,128,32,.08);color:#7a5010;border-color:rgba(208,128,32,.3)}
+.ll-filter.on.f-info{background:rgba(58,126,160,.08);color:#2a5a78;border-color:rgba(58,126,160,.3)}
+.ll-filter.on.f-ok{background:rgba(90,170,58,.08);color:#3a7020;border-color:rgba(90,170,58,.3)}
+.ll-cnt{font-family:var(--fm);font-size:9.5px;padding:2px 6px;border-radius:99px;margin-left:1px}
+.ll-sp{flex:1}
+.ll-clear-btn{font-size:10.5px;color:var(--text-muted);background:transparent;border:none;cursor:pointer;padding:2px 6px;border-radius:3px}
+.ll-clear-btn:hover{color:var(--text);background:var(--bg-raised)}
+.ll-body{flex:1;overflow-y:auto;background:var(--bg);font-family:var(--fm);font-size:11px}
+.ll-entry{
+  display:flex;align-items:flex-start;gap:10px;padding:5px 14px;
+  border-bottom:1px solid rgba(212,196,168,.3);transition:background .08s;
+}
+.ll-entry:last-child{border-bottom:none}
+.ll-entry:hover{background:rgba(107,142,35,.03)}
+.ll-lvl{
+  width:38px;flex-shrink:0;font-size:9px;font-weight:600;letter-spacing:.05em;
+  padding:1px 0;border-radius:3px;text-align:center;margin-top:2px;
+}
+.ll-lvl.err{background:rgba(160,48,32,.12);color:#a03020}
+.ll-lvl.warn{background:rgba(208,128,32,.1);color:#8a6010}
+.ll-lvl.info{background:rgba(58,126,160,.1);color:#2a5a78}
+.ll-lvl.ok{background:rgba(90,170,58,.1);color:#3a7020}
+.ll-time{flex-shrink:0;font-size:9.5px;color:var(--text-muted);margin-top:2px;white-space:nowrap}
+.ll-msg{flex:1;color:var(--text-mid);line-height:1.5}
+.ll-msg strong{color:var(--text);font-weight:500}
+.ll-msg .hi{color:var(--olive)}
+.ll-summ{
+  display:flex;align-items:center;gap:8px;padding:5px 14px;
+  background:var(--bg-low);border-top:1px solid var(--border);font-size:10.5px;flex-shrink:0;
+}
+.ll-s-item{display:flex;align-items:center;gap:4px;color:var(--text-muted)}
+.ll-s-item.has-err{color:#a03020}.ll-s-item.has-warn{color:#8a6010}
+
+/* ══════════════════════════════════════════════
+   6 — ABOUT
+══════════════════════════════════════════════ */
+#dlg-about{width:440px}
+.ab-hero{
+  display:flex;flex-direction:column;align-items:center;padding:28px 20px 20px;
+  background:linear-gradient(160deg,var(--logo-bg-top) 0%,var(--logo-bg) 100%);
+  border-bottom:1px solid var(--border);
+}
+.ab-mark{
+  width:52px;height:52px;border-radius:8px;
+  background:rgba(255,255,255,.12);border:1.5px solid rgba(255,255,255,.22);
+  display:flex;align-items:center;justify-content:center;
+  box-shadow:inset 0 1px 0 rgba(255,255,255,.25),0 4px 12px rgba(0,0,0,.2);
+  margin-bottom:12px;
+}
+.ab-mark i{font-size:22px;color:var(--logo-text)}
+.ab-name{font-family:var(--fd);font-size:20px;color:var(--logo-text);margin-bottom:2px;letter-spacing:.02em}
+.ab-tagline{font-size:11.5px;color:var(--logo-sub);font-family:var(--fm);letter-spacing:.04em;text-align:center}
+.ab-ver{margin-top:10px;display:inline-flex;align-items:center;gap:5px;padding:3px 10px;border-radius:99px;background:rgba(0,0,0,.18);border:1px solid rgba(255,255,255,.15);font-family:var(--fm);font-size:10px;color:var(--logo-sub)}
+.ab-body{padding:14px 18px;display:flex;flex-direction:column;gap:12px}
+.ab-dtu-row{display:flex;align-items:center;gap:12px;padding:10px 14px;background:var(--bg-raised);border:1px solid var(--border);border-radius:var(--r)}
+.ab-dtu-box{background:#C8002A;color:#fff;font-family:'Source Sans 3',sans-serif;font-size:16px;font-weight:700;letter-spacing:.04em;padding:5px 9px 4px;border-radius:3px;line-height:1.2;flex-shrink:0}
+.ab-dtu-tx{display:flex;flex-direction:column;gap:2px}
+.ab-dtu-nm{font-size:12.5px;font-weight:600;color:var(--text)}
+.ab-dtu-dept{font-size:10.5px;color:var(--text-muted);font-family:var(--fm)}
+.ab-info-grid{display:grid;grid-template-columns:1fr 1fr;gap:6px}
+.ab-info-item{background:var(--bg-low);border:1px solid var(--border);border-radius:var(--r);padding:7px 10px}
+.ab-info-lbl{font-size:9px;font-weight:600;letter-spacing:.08em;text-transform:uppercase;color:var(--text-muted);margin-bottom:2px}
+.ab-info-val{font-size:11.5px;color:var(--text);font-family:var(--fm)}
+.ab-links{display:flex;gap:5px}
+.ab-link{
+  flex:1;display:flex;align-items:center;justify-content:center;gap:5px;padding:5px 8px;
+  border:1px solid var(--border);border-radius:var(--r);font-size:11px;color:var(--text-mid);
+  cursor:pointer;transition:all .12s;background:var(--bg-raised);
+}
+.ab-link:hover{background:var(--bg-low);border-color:var(--border-dk);color:var(--text)}
+.ab-link i{font-size:10px;color:var(--text-muted)}
+
+/* ══════════════════════════════════════════════
+   7 — DATASET SELECTION
+══════════════════════════════════════════════ */
+#dlg-dssel{width:540px;max-height:78vh}
+.ds-toolbar{
+  display:flex;align-items:center;gap:8px;padding:8px 12px;
+  background:var(--bg-low);border-bottom:1px solid var(--border);flex-shrink:0;
+}
+.ds-search{
+  flex:1;height:28px;background:rgba(255,255,255,.7);border:1px solid var(--border);
+  border-radius:var(--r);font-family:var(--fu);font-size:12px;color:var(--text);
+  padding:0 8px 0 30px;position:relative;transition:border-color .12s;
+}
+.ds-search:focus{outline:none;border-color:var(--olive);background:#fff}
+.ds-search-wrap{position:relative;flex:1}
+.ds-search-wrap i{position:absolute;left:9px;top:50%;transform:translateY(-50%);font-size:11px;color:var(--text-muted);pointer-events:none}
+.ds-quick{display:flex;gap:4px}
+.ds-quick-btn{
+  padding:3px 8px;border:1px solid var(--border);border-radius:var(--r);
+  font-size:10.5px;color:var(--text-muted);background:transparent;cursor:pointer;transition:all .1s;
+}
+.ds-quick-btn:hover{background:var(--bg-raised);color:var(--text);border-color:var(--border-dk)}
+.ds-list{flex:1;overflow-y:auto;padding:4px 0}
+.ds-row{
+  display:flex;align-items:center;gap:10px;padding:7px 14px;
+  border-bottom:1px solid rgba(212,196,168,.35);cursor:pointer;transition:background .08s;
+}
+.ds-row:last-child{border-bottom:none}
+.ds-row:hover{background:rgba(107,142,35,.04)}
+.ds-row.checked{background:rgba(107,142,35,.05)}
+.ds-chk{width:15px;height:15px;border:1.5px solid var(--border);border-radius:3px;flex-shrink:0;display:flex;align-items:center;justify-content:center;transition:all .12s;background:rgba(255,255,255,.5)}
+.ds-row.checked .ds-chk{background:var(--olive);border-color:var(--olive-dk)}
+.ds-row.checked .ds-chk::after{content:'';width:8px;height:5px;border-left:1.5px solid #fff;border-bottom:1.5px solid #fff;transform:rotate(-45deg) translateY(-1px)}
+.ds-row-ic{
+  width:26px;height:26px;border-radius:3px;flex-shrink:0;
+  display:flex;align-items:center;justify-content:center;
+  background:rgba(255,255,255,.4);border:1px solid var(--border);
+}
+.ds-row-ic i{font-size:10px;color:var(--text-muted)}
+.ds-row.checked .ds-row-ic{background:rgba(107,142,35,.12);border-color:rgba(107,142,35,.3)}
+.ds-row.checked .ds-row-ic i{color:var(--olive)}
+.ds-row-nm{flex:1;min-width:0}
+.ds-row-label{font-size:12px;font-weight:500;color:var(--text);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.ds-row-meta{font-family:var(--fm);font-size:9.5px;color:var(--text-muted);margin-top:1px}
+.ds-row-stat{display:flex;align-items:center;gap:5px;flex-shrink:0}
+.ds-sel-bar{
+  display:flex;align-items:center;gap:8px;padding:7px 14px;
+  background:var(--bg-raised);border-top:1px solid var(--border);flex-shrink:0;
+  font-size:11.5px;color:var(--text-mid);
+}
+.ds-sel-count{
+  font-family:var(--fm);font-size:10.5px;font-weight:500;padding:2px 8px;border-radius:99px;
+  background:rgba(107,142,35,.1);color:var(--olive);border:1px solid rgba(107,142,35,.25);
+}
+</style>
+</head>
+<body>
+<div class="app">
+  <div class="main" style="position:relative">
+    <!-- Blurred app content behind dialogs (just a placeholder) -->
+    <div style="flex:1;background:var(--bg);display:flex;align-items:center;justify-content:center;opacity:.35;pointer-events:none;position:absolute;inset:0;top:34px">
+      <div style="text-align:center;color:var(--text-muted)">
+        <i class="fa-solid fa-layer-group" style="font-size:40px;display:block;margin-bottom:12px;opacity:.3"></i>
+        <div style="font-family:var(--fd);font-size:18px;opacity:.5">Application Window</div>
+      </div>
+    </div>
+
+    <!-- Dialog picker bar -->
+    <div class="dlg-picker">
+      <span class="dp-lbl">Dialog</span>
+      <button class="dp-btn on" onclick="showDlg('colmap')" id="dpb-colmap"><i class="fa-solid fa-table-columns"></i>Column Mapper</button>
+      <button class="dp-btn" onclick="showDlg('sheet')" id="dpb-sheet"><i class="fa-solid fa-file-excel"></i>Sheet Selector</button>
+      <button class="dp-btn" onclick="showDlg('por')" id="dpb-por"><i class="fa-solid fa-circle-nodes"></i>Manage Porosity</button>
+      <button class="dp-btn" onclick="showDlg('insp')" id="dpb-insp"><i class="fa-solid fa-table"></i>Data Inspector</button>
+      <button class="dp-btn" onclick="showDlg('log')" id="dpb-log"><i class="fa-solid fa-terminal"></i>Load Log</button>
+      <button class="dp-btn" onclick="showDlg('about')" id="dpb-about"><i class="fa-solid fa-circle-info"></i>About</button>
+      <button class="dp-btn" onclick="showDlg('dssel')" id="dpb-dssel"><i class="fa-solid fa-list-check"></i>Dataset Selection</button>
+      <span class="dp-sp"></span>
+      <span class="dp-hint">Click a dialog to preview · ESC to dismiss</span>
+    </div>
+
+    <!-- Modal stage -->
+    <div class="dlg-stage" id="dlg-stage">
+
+      <!-- ═══════════ 1 COLUMN MAPPER ═══════════ -->
+      <div class="dlg show" id="dlg-colmap" style="width:820px;max-width:95vw;max-height:82vh">
+        <div class="dh">
+          <div class="dh-icon"><i class="fa-solid fa-table-columns"></i></div>
+          <div class="dh-tx">
+            <div class="dh-title">Column Mapper</div>
+            <div class="dh-sub">Assign source columns to grain-size analysis fields</div>
+          </div>
+          <button class="dh-close" onclick="closeDlg()"><i class="fa-solid fa-xmark"></i></button>
+        </div>
+        <div class="cm-body" style="flex:1;overflow:hidden;display:flex;flex-direction:column">
+          <div class="cm-file-strip">
+            <i class="fa-solid fa-file-csv"></i>
+            <span class="cm-file-name">GW_Samples_2024.csv</span>
+            <span class="cm-file-meta">· 147 rows · 8 columns · detected UTF-8</span>
+            <span class="cm-file-sp"></span>
+            <button class="cm-auto-btn"><i class="fa-solid fa-wand-magic-sparkles"></i>Auto-detect</button>
+          </div>
+          <div class="cm-layout" style="flex:1;overflow:hidden">
+            <!-- Left: detected columns -->
+            <div class="cm-left">
+              <div class="cm-pane-hd">Source Columns</div>
+              <div class="cm-col-list">
+                <div class="cm-col suggest">
+                  <div class="cm-col-icon"><i class="fa-solid fa-ruler-horizontal"></i></div>
+                  <div style="flex:1;min-width:0">
+                    <div class="cm-col-nm">Sieve_mm</div>
+                    <div class="cm-col-sample">0.063, 0.125, 0.25…</div>
+                  </div>
+                  <span class="cm-col-tag">size</span>
+                </div>
+                <div class="cm-col suggest">
+                  <div class="cm-col-icon"><i class="fa-solid fa-percent"></i></div>
+                  <div style="flex:1;min-width:0">
+                    <div class="cm-col-nm">Passing_pct</div>
+                    <div class="cm-col-sample">2.1, 5.4, 18.7…</div>
+                  </div>
+                  <span class="cm-col-tag">pct</span>
+                </div>
+                <div class="cm-col">
+                  <div class="cm-col-icon"><i class="fa-solid fa-weight-hanging"></i></div>
+                  <div style="flex:1;min-width:0">
+                    <div class="cm-col-nm">Retained_g</div>
+                    <div class="cm-col-sample">0.0, 4.2, 12.8…</div>
+                  </div>
+                </div>
+                <div class="cm-col">
+                  <div class="cm-col-icon"><i class="fa-solid fa-tag"></i></div>
+                  <div style="flex:1;min-width:0">
+                    <div class="cm-col-nm">Sample_ID</div>
+                    <div class="cm-col-sample">GW-A, GW-B…</div>
+                  </div>
+                </div>
+                <div class="cm-col mapped">
+                  <div class="cm-col-icon"><i class="fa-solid fa-calendar"></i></div>
+                  <div style="flex:1;min-width:0">
+                    <div class="cm-col-nm">Date</div>
+                    <div class="cm-col-sample">2024-03-12…</div>
+                  </div>
+                </div>
+                <div class="cm-col">
+                  <div class="cm-col-icon"><i class="fa-solid fa-location-dot"></i></div>
+                  <div style="flex:1;min-width:0">
+                    <div class="cm-col-nm">Location</div>
+                    <div class="cm-col-sample">N55.7, E12.4…</div>
+                  </div>
+                </div>
+                <div class="cm-col">
+                  <div class="cm-col-icon"><i class="fa-solid fa-align-left"></i></div>
+                  <div style="flex:1;min-width:0">
+                    <div class="cm-col-nm">Notes</div>
+                    <div class="cm-col-sample">Fine to medium…</div>
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            <!-- Middle: mapping configuration -->
+            <div class="cm-mid">
+              <div class="cm-targets">
+                <div class="cm-section-hd">Required Fields</div>
+
+                <div class="cm-target-row">
+                  <div class="cm-target-lbl"><i class="fa-solid fa-ruler-horizontal"></i>Grain size</div>
+                  <div class="cm-slot filled">
+                    <i class="fa-solid fa-ruler-horizontal slot-icon"></i>
+                    Sieve_mm
+                    <span class="cm-col-tag" style="margin-left:4px">size</span>
+                    <span class="slot-clear"><i class="fa-solid fa-xmark"></i></span>
+                  </div>
+                </div>
+
+                <div class="cm-target-row">
+                  <div class="cm-target-lbl"><i class="fa-solid fa-percent"></i>% Passing</div>
+                  <div class="cm-slot filled">
+                    <i class="fa-solid fa-percent slot-icon"></i>
+                    Passing_pct
+                    <span class="cm-col-tag" style="margin-left:4px">pct</span>
+                    <span class="slot-clear"><i class="fa-solid fa-xmark"></i></span>
+                  </div>
+                </div>
+
+                <div class="cm-section-hd" style="margin-top:6px">Optional Fields</div>
+
+                <div class="cm-target-row">
+                  <div class="cm-target-lbl"><i class="fa-solid fa-weight-hanging"></i>Mass retained</div>
+                  <select class="cm-sel">
+                    <option value="">— not mapped —</option>
+                    <option>Retained_g</option>
+                    <option>Sieve_mm</option>
+                    <option>Passing_pct</option>
+                  </select>
+                </div>
+
+                <div class="cm-target-row">
+                  <div class="cm-target-lbl"><i class="fa-solid fa-tag"></i>Sample name</div>
+                  <select class="cm-sel">
+                    <option value="">— not mapped —</option>
+                    <option selected>Sample_ID</option>
+                    <option>Notes</option>
+                  </select>
+                </div>
+
+                <div class="cm-target-row">
+                  <div class="cm-target-lbl"><i class="fa-solid fa-location-dot"></i>Location</div>
+                  <select class="cm-sel">
+                    <option value="">— not mapped —</option>
+                    <option>Location</option>
+                  </select>
+                </div>
+
+                <div class="cm-section-hd" style="margin-top:6px">Options</div>
+                <div class="cm-opt-row">
+                  <label class="cm-chk-lbl"><input type="checkbox" checked>Skip first row (header)</label>
+                </div>
+                <div class="cm-opt-row">
+                  <label class="cm-chk-lbl"><input type="checkbox" checked>Parse one sample per column group</label>
+                </div>
+                <div class="cm-opt-row">
+                  <label class="cm-chk-lbl"><input type="checkbox">Reverse cumulative (% retained → % passing)</label>
+                </div>
+              </div>
+            </div>
+
+            <!-- Right: data preview -->
+            <div class="cm-right">
+              <div class="cm-pane-hd">Data Preview</div>
+              <div class="cm-preview-tbl">
+                <table class="cm-prev-table">
+                  <thead>
+                    <tr>
+                      <th class="th-mapped">Sieve_mm</th>
+                      <th class="th-mapped">Passing_%</th>
+                      <th>Retained_g</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    <tr><td>0.063</td><td>2.1</td><td>0.00</td></tr>
+                    <tr><td>0.125</td><td>5.4</td><td>4.22</td></tr>
+                    <tr><td>0.250</td><td>18.7</td><td>12.8</td></tr>
+                    <tr><td>0.500</td><td>42.3</td><td>23.4</td></tr>
+                    <tr><td>1.000</td><td>71.8</td><td>29.5</td></tr>
+                    <tr><td>2.000</td><td>89.2</td><td>17.4</td></tr>
+                    <tr><td>4.000</td><td>96.5</td><td>7.30</td></tr>
+                    <tr><td>8.000</td><td>99.1</td><td>2.60</td></tr>
+                    <tr><td>16.00</td><td>100.</td><td>0.90</td></tr>
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          </div>
+        </div>
+        <div class="df">
+          <div class="df-l" style="font-size:10.5px;color:var(--text-muted);font-family:var(--fm)">
+            <i class="fa-solid fa-circle-check" style="color:var(--olive)"></i>
+            2 required fields mapped · 1 sample detected
+          </div>
+          <button class="d-btn" onclick="closeDlg()">Cancel</button>
+          <button class="d-btn prim"><i class="fa-solid fa-check"></i>Confirm &amp; Load</button>
+        </div>
+      </div>
+
+      <!-- ═══════════ 2 SHEET SELECTOR ═══════════ -->
+      <div class="dlg" id="dlg-sheet">
+        <div class="dh">
+          <div class="dh-icon"><i class="fa-solid fa-file-excel"></i></div>
+          <div class="dh-tx">
+            <div class="dh-title">Select Sheet</div>
+            <div class="dh-sub">Choose which worksheet to import</div>
+          </div>
+          <button class="dh-close" onclick="closeDlg()"><i class="fa-solid fa-xmark"></i></button>
+        </div>
+        <div class="sh-body">
+          <div class="sh-file-row">
+            <i class="fa-solid fa-file-excel" style="color:#1d7a4a"></i>
+            <span class="sh-file-nm">Grain_Size_Database_2024.xlsx</span>
+            <span class="sh-file-sz">· 2.4 MB</span>
+          </div>
+          <div class="sh-hdr">Worksheets (4 found)</div>
+          <div class="sh-grid">
+            <div class="sh-card on" onclick="pickSheet(this)">
+              <div class="sh-card-top">
+                <div class="sh-card-icon"><i class="fa-solid fa-table" style="color:var(--olive)"></i></div>
+                <div class="sh-card-name">Samples_2024</div>
+                <div class="sh-card-sel"></div>
+              </div>
+              <div class="sh-stats">
+                <div class="sh-stat"><i class="fa-solid fa-table-rows"></i>147 rows</div>
+                <div class="sh-stat"><i class="fa-solid fa-table-columns"></i>8 cols</div>
+                <div class="sh-stat"><i class="fa-solid fa-arrow-down-1-9"></i>row 1</div>
+              </div>
+            </div>
+            <div class="sh-card" onclick="pickSheet(this)">
+              <div class="sh-card-top">
+                <div class="sh-card-icon"><i class="fa-solid fa-table"></i></div>
+                <div class="sh-card-name">Samples_2023</div>
+                <div class="sh-card-sel"></div>
+              </div>
+              <div class="sh-stats">
+                <div class="sh-stat"><i class="fa-solid fa-table-rows"></i>92 rows</div>
+                <div class="sh-stat"><i class="fa-solid fa-table-columns"></i>8 cols</div>
+                <div class="sh-stat"><i class="fa-solid fa-arrow-down-1-9"></i>row 1</div>
+              </div>
+            </div>
+            <div class="sh-card" onclick="pickSheet(this)">
+              <div class="sh-card-top">
+                <div class="sh-card-icon"><i class="fa-solid fa-table"></i></div>
+                <div class="sh-card-name">Summary</div>
+                <div class="sh-card-sel"></div>
+              </div>
+              <div class="sh-stats">
+                <div class="sh-stat"><i class="fa-solid fa-table-rows"></i>18 rows</div>
+                <div class="sh-stat"><i class="fa-solid fa-table-columns"></i>14 cols</div>
+                <div class="sh-stat" style="color:#d08020"><i class="fa-solid fa-triangle-exclamation"></i>merged</div>
+              </div>
+            </div>
+            <div class="sh-card" onclick="pickSheet(this)">
+              <div class="sh-card-top">
+                <div class="sh-card-icon"><i class="fa-solid fa-table"></i></div>
+                <div class="sh-card-name">Metadata</div>
+                <div class="sh-card-sel"></div>
+              </div>
+              <div class="sh-stats">
+                <div class="sh-stat"><i class="fa-solid fa-table-rows"></i>24 rows</div>
+                <div class="sh-stat"><i class="fa-solid fa-table-columns"></i>5 cols</div>
+                <div class="sh-stat"><i class="fa-solid fa-arrow-down-1-9"></i>row 2</div>
+              </div>
+            </div>
+          </div>
+          <div class="sh-warn">
+            <i class="fa-solid fa-triangle-exclamation"></i>
+            Sheet "Summary" contains merged cells — grain data may not parse correctly.
+          </div>
+        </div>
+        <div class="df">
+          <button class="d-btn" onclick="closeDlg()">Cancel</button>
+          <button class="d-btn prim"><i class="fa-solid fa-check"></i>Open Sheet</button>
+        </div>
+      </div>
+
+      <!-- ═══════════ 3 MANAGE POROSITY ═══════════ -->
+      <div class="dlg" id="dlg-por" style="max-height:80vh">
+        <div class="dh">
+          <div class="dh-icon"><i class="fa-solid fa-circle-nodes"></i></div>
+          <div class="dh-tx">
+            <div class="dh-title">Manage Per-Sample Porosity</div>
+            <div class="dh-sub">Override the global default for individual samples</div>
+          </div>
+          <button class="dh-close" onclick="closeDlg()"><i class="fa-solid fa-xmark"></i></button>
+        </div>
+        <div class="por-body" style="flex:1;overflow:hidden;display:flex;flex-direction:column">
+          <div class="por-global">
+            <div class="por-global-lbl">Global default <span>applied to all samples without a custom value</span></div>
+            <div class="por-field">
+              <input class="por-in" type="number" value="0.400" step="0.01" min="0.01" max="0.99">
+              <span class="por-unit">—</span>
+            </div>
+            <button class="por-apply-btn"><i class="fa-solid fa-arrow-down-to-line"></i>Apply to all</button>
+          </div>
+          <div class="por-table-wrap">
+            <table class="por-table">
+              <thead>
+                <tr>
+                  <th>Sample</th>
+                  <th>Mode</th>
+                  <th style="text-align:right">Porosity</th>
+                  <th style="text-align:right">Status</th>
+                </tr>
+              </thead>
+              <tbody id="por-tbody"></tbody>
+            </table>
+          </div>
+        </div>
+        <div class="df">
+          <div class="df-l">
+            <span style="font-family:var(--fm);font-size:10.5px;color:var(--text-muted)">
+              <i class="fa-solid fa-circle-nodes" style="color:var(--olive)"></i>
+              3 custom values · 9 using global (0.400)
+            </span>
+          </div>
+          <button class="d-btn" onclick="closeDlg()">Cancel</button>
+          <button class="d-btn" onclick="closeDlg()">Reset All</button>
+          <button class="d-btn prim"><i class="fa-solid fa-check"></i>Apply</button>
+        </div>
+      </div>
+
+      <!-- ═══════════ 4 DATA INSPECTOR ═══════════ -->
+      <div class="dlg" id="dlg-insp" style="max-height:78vh">
+        <div class="dh">
+          <div class="dh-icon"><i class="fa-solid fa-table"></i></div>
+          <div class="dh-tx">
+            <div class="dh-title">Data Inspector</div>
+            <div class="dh-sub" id="insp-sub">Borehole_DK-07 · 47 sieve fractions</div>
+          </div>
+          <button class="dh-close" onclick="closeDlg()"><i class="fa-solid fa-xmark"></i></button>
+        </div>
+        <div class="di-toolbar">
+          <div class="di-chip">
+            <i class="fa-solid fa-circle-dot"></i>
+            <span>D10</span><span class="di-val">0.18 mm</span>
+          </div>
+          <div class="di-chip">
+            <i class="fa-solid fa-circle-dot"></i>
+            <span>D50</span><span class="di-val">0.42 mm</span>
+          </div>
+          <div class="di-chip">
+            <i class="fa-solid fa-circle-dot"></i>
+            <span>D60</span><span class="di-val">0.55 mm</span>
+          </div>
+          <div class="di-chip">
+            <i class="fa-solid fa-circle-dot"></i>
+            <span>Cu</span><span class="di-val">3.06</span>
+          </div>
+          <div class="di-sp"></div>
+          <div class="di-mode-grp">
+            <button class="di-mode-btn on">% Passing</button>
+            <button class="di-mode-btn">Mass (g)</button>
+            <button class="di-mode-btn">Both</button>
+          </div>
+        </div>
+        <div class="di-table-wrap">
+          <table class="di-table" id="insp-table"></table>
+        </div>
+        <div class="df">
+          <div class="df-l">
+            <span style="font-family:var(--fm);font-size:10px;color:var(--text-muted)">
+              <i class="fa-solid fa-check-circle" style="color:var(--olive)"></i>
+              All fractions valid · Total mass 248.4 g
+            </span>
+          </div>
+          <button class="d-btn"><i class="fa-solid fa-copy"></i>Copy CSV</button>
+          <button class="d-btn prim" onclick="closeDlg()">Close</button>
+        </div>
+      </div>
+
+      <!-- ═══════════ 5 LOAD LOG ═══════════ -->
+      <div class="dlg" id="dlg-log" style="max-height:76vh">
+        <div class="dh">
+          <div class="dh-icon"><i class="fa-solid fa-terminal"></i></div>
+          <div class="dh-tx">
+            <div class="dh-title">Load Log</div>
+            <div class="dh-sub">Messages from the most recent file operation</div>
+          </div>
+          <button class="dh-close" onclick="closeDlg()"><i class="fa-solid fa-xmark"></i></button>
+        </div>
+        <div class="ll-toolbar">
+          <button class="ll-filter on f-all" onclick="filterLog(this,'all')">
+            All <span class="ll-cnt" style="background:var(--bg-low);color:var(--text-muted)">24</span>
+          </button>
+          <button class="ll-filter f-err" onclick="filterLog(this,'err')">
+            <i class="fa-solid fa-circle-xmark"></i>Errors <span class="ll-cnt" style="background:rgba(160,48,32,.1);color:#a03020">2</span>
+          </button>
+          <button class="ll-filter f-warn" onclick="filterLog(this,'warn')">
+            <i class="fa-solid fa-triangle-exclamation"></i>Warnings <span class="ll-cnt" style="background:rgba(208,128,32,.1);color:#8a6010">5</span>
+          </button>
+          <button class="ll-filter f-info" onclick="filterLog(this,'info')">
+            <i class="fa-solid fa-circle-info"></i>Info <span class="ll-cnt" style="background:rgba(58,126,160,.1);color:#2a5a78">12</span>
+          </button>
+          <button class="ll-filter f-ok" onclick="filterLog(this,'ok')">
+            <i class="fa-solid fa-circle-check"></i>OK <span class="ll-cnt" style="background:rgba(90,170,58,.1);color:#3a7020">5</span>
+          </button>
+          <span class="ll-sp"></span>
+          <button class="ll-clear-btn"><i class="fa-solid fa-trash-can"></i> Clear</button>
+        </div>
+        <div class="ll-body" id="ll-body"></div>
+        <div class="ll-summ">
+          <div class="ll-s-item has-err"><i class="fa-solid fa-circle-xmark"></i>2 errors</div>
+          <div class="ll-s-item has-warn"><i class="fa-solid fa-triangle-exclamation"></i>5 warnings</div>
+          <div class="ll-s-item"><i class="fa-solid fa-file"></i>3 files processed</div>
+          <div class="ll-s-item"><i class="fa-solid fa-vial"></i>12 samples loaded</div>
+          <span style="flex:1"></span>
+          <span style="font-family:var(--fm);font-size:9.5px;color:var(--text-muted)">Session · 14:23:07</span>
+        </div>
+        <div class="df">
+          <button class="d-btn"><i class="fa-solid fa-file-arrow-down"></i>Save Log</button>
+          <div class="df-l"></div>
+          <button class="d-btn prim" onclick="closeDlg()">Close</button>
+        </div>
+      </div>
+
+      <!-- ═══════════ 6 ABOUT ═══════════ -->
+      <div class="dlg" id="dlg-about">
+        <div class="dh" style="position:absolute;top:0;right:0;left:0;background:transparent;border:none;z-index:2">
+          <span style="flex:1"></span>
+          <button class="dh-close" onclick="closeDlg()" style="background:rgba(0,0,0,.18);color:var(--logo-text)"><i class="fa-solid fa-xmark"></i></button>
+        </div>
+        <div class="ab-hero">
+          <div class="ab-mark"><i class="fa-solid fa-layer-group"></i></div>
+          <div class="ab-name">GrainSize Analysis</div>
+          <div class="ab-tagline">Hydraulic Conductivity Calculator</div>
+          <div class="ab-ver"><i class="fa-solid fa-tag"></i>v0.9.0-beta · March 2026</div>
+        </div>
+        <div class="ab-body">
+          <div class="ab-dtu-row">
+            <div class="ab-dtu-box">DTU</div>
+            <div class="ab-dtu-tx">
+              <div class="ab-dtu-nm">Danmarks Tekniske Universitet</div>
+              <div class="ab-dtu-dept">Department of Environmental &amp; Resource Engineering</div>
+            </div>
+          </div>
+          <div class="ab-info-grid">
+            <div class="ab-info-item">
+              <div class="ab-info-lbl">Author</div>
+              <div class="ab-info-val">Oliver Lund</div>
+            </div>
+            <div class="ab-info-item">
+              <div class="ab-info-lbl">Build</div>
+              <div class="ab-info-val">2026.03.12-rc1</div>
+            </div>
+            <div class="ab-info-item">
+              <div class="ab-info-lbl">Framework</div>
+              <div class="ab-info-val">PyQt6 · Python 3.12</div>
+            </div>
+            <div class="ab-info-item">
+              <div class="ab-info-lbl">Methods</div>
+              <div class="ab-info-val">14 empirical K</div>
+            </div>
+          </div>
+          <div class="ab-links">
+            <div class="ab-link"><i class="fa-solid fa-book"></i>Documentation</div>
+            <div class="ab-link"><i class="fa-brands fa-github"></i>Source Code</div>
+            <div class="ab-link"><i class="fa-solid fa-envelope"></i>Contact</div>
+          </div>
+          <div style="font-size:10px;color:var(--text-muted);text-align:center;line-height:1.6;font-family:var(--fm)">
+            © 2024–2026 Oliver Lund / DTU · MIT License<br>
+            Uses NumPy, SciPy, Matplotlib, openpyxl
+          </div>
+        </div>
+        <div class="df" style="justify-content:center">
+          <button class="d-btn prim" onclick="closeDlg()">Close</button>
+        </div>
+      </div>
+
+      <!-- ═══════════ 7 DATASET SELECTION ═══════════ -->
+      <div class="dlg" id="dlg-dssel" style="max-height:78vh">
+        <div class="dh">
+          <div class="dh-icon"><i class="fa-solid fa-list-check"></i></div>
+          <div class="dh-tx">
+            <div class="dh-title">Select Datasets for Comparison</div>
+            <div class="dh-sub">Choose which samples to include in the comparison view</div>
+          </div>
+          <button class="dh-close" onclick="closeDlg()"><i class="fa-solid fa-xmark"></i></button>
+        </div>
+        <div class="ds-toolbar">
+          <div class="ds-search-wrap">
+            <i class="fa-solid fa-magnifying-glass"></i>
+            <input class="ds-search" type="text" placeholder="Filter by name, D50, K…" oninput="filterDs(this.value)">
+          </div>
+          <div class="ds-quick">
+            <button class="ds-quick-btn" onclick="dsSelAll(true)">All</button>
+            <button class="ds-quick-btn" onclick="dsSelAll(false)">None</button>
+            <button class="ds-quick-btn" onclick="dsInvert()">Invert</button>
+          </div>
+        </div>
+        <div class="ds-list" id="ds-list-sel"></div>
+        <div class="ds-sel-bar">
+          <span class="ds-sel-count" id="ds-sel-count">0 selected</span>
+          <span style="font-size:11px;color:var(--text-muted)">of 12 datasets</span>
+        </div>
+        <div class="df">
+          <button class="d-btn" onclick="closeDlg()">Cancel</button>
+          <button class="d-btn prim" id="ds-apply-btn" disabled><i class="fa-solid fa-code-compare"></i>Compare Selected</button>
+        </div>
+      </div>
+
+    </div><!-- /dlg-stage -->
+  </div><!-- /main -->
+</div><!-- /app -->
+
+<script src="_shell.js"></script>
+<script>
+/* ── Page init ── */
+function _onPageInit() {
+  buildPorTable();
+  buildInspTable();
+  buildLogEntries();
+  buildDsSelList();
+  document.addEventListener('keydown', e => { if (e.key === 'Escape') closeDlg(); });
+}
+initShell({ activeTab: 'individual' });
+
+/* ── Dialog switcher ── */
+function showDlg(id) {
+  document.querySelectorAll('.dlg').forEach(d => d.classList.remove('show'));
+  document.querySelectorAll('.dp-btn').forEach(b => b.classList.remove('on'));
+  const el = document.getElementById('dlg-' + id);
+  if (el) el.classList.add('show');
+  const btn = document.getElementById('dpb-' + id);
+  if (btn) btn.classList.add('on');
+}
+function closeDlg() { /* In a real app this closes the dialog; in demo just keep it visible */ }
+function pickSheet(el) {
+  document.querySelectorAll('.sh-card').forEach(c => c.classList.remove('on'));
+  el.classList.add('on');
+}
+
+/* ── Porosity table ── */
+const POR_DATA = DATASETS.filter(d => !d.special).map((d, i) => ({
+  id: d.id, label: d.label,
+  custom: i === 2 || i === 5 || i === 9,
+  val: i === 2 ? '0.350' : i === 5 ? '0.420' : i === 9 ? '0.380' : '0.400'
+}));
+
+function buildPorTable() {
+  const tbody = document.getElementById('por-tbody');
+  tbody.innerHTML = POR_DATA.map(p => `
+    <tr>
+      <td>
+        <div class="por-nm">${p.label}</div>
+        <div class="por-id">${p.id.toUpperCase()}</div>
+      </td>
+      <td>
+        <div class="por-mode">
+          <label class="por-radio"><input type="radio" name="pr-${p.id}" ${!p.custom ? 'checked' : ''}>Global</label>
+          <label class="por-radio"><input type="radio" name="pr-${p.id}" ${p.custom ? 'checked' : ''}>Custom</label>
+        </div>
+      </td>
+      <td style="text-align:right">
+        <div class="por-field" style="justify-content:flex-end">
+          <input class="por-row-in" type="number" value="${p.val}" step="0.01" min="0.01" max="0.99" ${!p.custom ? 'disabled' : ''}>
+          <span class="por-unit">—</span>
+        </div>
+      </td>
+      <td style="text-align:right">
+        ${p.custom ? '<span class="por-badge-custom">Custom</span>' : '<span class="por-badge-global">Global</span>'}
+      </td>
+    </tr>`).join('');
+}
+
+/* ── Data Inspector table ── */
+const INSP_DATA = [
+  [0.020, 0.0, 0.00], [0.063, 2.1, 5.22], [0.090, 4.8, 6.62],
+  [0.125, 8.4, 8.90], [0.180, 14.2, 14.4], [0.250, 26.7, 30.8],
+  [0.355, 41.3, 36.3], [0.500, 58.9, 43.9], [0.710, 71.8, 31.4],
+  [1.000, 82.4, 26.2], [1.400, 89.7, 18.0], [2.000, 94.2, 11.1],
+  [2.800, 96.8,  6.40], [4.000, 98.3,  3.72], [8.000, 99.4,  2.70],
+  [16.00, 99.9,  1.23], [31.50, 100.,  0.25],
+];
+function buildInspTable() {
+  const t = document.getElementById('insp-table');
+  t.innerHTML = `<thead><tr>
+    <th>#</th>
+    <th style="text-align:left">Sieve (mm)</th>
+    <th>% Passing</th>
+    <th>Mass (g)</th>
+    <th style="text-align:left;padding-left:8px">Distribution</th>
+  </tr></thead><tbody>` +
+  INSP_DATA.map((r, i) => {
+    const barW = Math.round(r[1] * 0.9);
+    return `<tr>
+      <td>${i + 1}</td>
+      <td class="di-size" style="text-align:left">${r[0].toFixed(r[0] < 1 ? 3 : r[0] < 10 ? 2 : 1)}</td>
+      <td class="di-pct">${r[1].toFixed(1)}</td>
+      <td>${r[2].toFixed(2)}</td>
+      <td style="text-align:left;padding-left:8px"><span class="di-bar" style="width:${barW}px"></span></td>
+    </tr>`;
+  }).join('') + `<tr>
+    <td>Σ</td>
+    <td class="di-size" style="text-align:left">Total</td>
+    <td class="di-pct">100.0</td>
+    <td>248.4</td>
+    <td></td>
+  </tr></tbody>`;
+}
+
+/* ── Load Log ── */
+const LOG_ENTRIES = [
+  {t:'14:23:01', lvl:'info', msg:'Starting file load session'},
+  {t:'14:23:02', lvl:'info', msg:'Opening <strong>GW_Samples_2024.csv</strong> · 147 rows detected'},
+  {t:'14:23:02', lvl:'ok',   msg:'Column mapping confirmed: Sieve_mm → grain size · Passing_pct → % passing'},
+  {t:'14:23:02', lvl:'info', msg:'Parsing 12 sample groups from CSV'},
+  {t:'14:23:03', lvl:'warn', msg:'Sample <strong>SP-05</strong>: sieve fractions 0.020 mm and 0.032 mm are below instrument detection limit (0.045 mm)'},
+  {t:'14:23:03', lvl:'warn', msg:'Sample <strong>SP-05</strong>: Cu = 12.4 — some empirical methods may be unreliable above Cu = 10'},
+  {t:'14:23:03', lvl:'ok',   msg:'Loaded <span class="hi">10 samples</span> from GW_Samples_2024.csv'},
+  {t:'14:23:03', lvl:'info', msg:'Opening <strong>Archive_2022.xlsx</strong> · Sheet "Samples_2022" selected'},
+  {t:'14:23:04', lvl:'warn', msg:'Row 34: missing value for 1.000 mm sieve — interpolated from adjacent fractions'},
+  {t:'14:23:04', lvl:'warn', msg:'Sample <strong>CL-01</strong>: Cu > 500 · Hazen, Beyer, Slichter methods not applicable'},
+  {t:'14:23:04', lvl:'err',  msg:'Sample <strong>ERR-X1</strong>: cumulative % passing is non-monotonic (rows 12–14) — sample rejected'},
+  {t:'14:23:04', lvl:'ok',   msg:'Loaded <span class="hi">1 sample</span> from Archive_2022.xlsx (1 rejected)'},
+  {t:'14:23:05', lvl:'info', msg:'Opening <strong>RockCore_RK-15.txt</strong> · TAB-delimited, 14 fractions'},
+  {t:'14:23:05', lvl:'err',  msg:'Encoding error: file appears to be Windows-1252, not UTF-8 — re-reading with fallback encoding'},
+  {t:'14:23:05', lvl:'warn', msg:'Sample <strong>RK-15</strong>: only 14 sieve fractions — minimum recommended is 16 for accurate D60'},
+  {t:'14:23:05', lvl:'ok',   msg:'Loaded <span class="hi">1 sample</span> from RockCore_RK-15.txt'},
+  {t:'14:23:06', lvl:'info', msg:'Running K-value calculations for 12 loaded samples…'},
+  {t:'14:23:06', lvl:'info', msg:'Temperature: 20.0 °C · Global porosity: 0.400'},
+  {t:'14:23:06', lvl:'ok',   msg:'<span class="hi">12 samples</span> calculated · 14 methods each'},
+  {t:'14:23:07', lvl:'info', msg:'Session complete · 3 files · 12 samples loaded · 2 errors · 5 warnings'},
+];
+function buildLogEntries() {
+  const body = document.getElementById('ll-body');
+  body.innerHTML = LOG_ENTRIES.map(e => `
+    <div class="ll-entry" data-lvl="${e.lvl}">
+      <div class="ll-lvl ${e.lvl}">${e.lvl.toUpperCase()}</div>
+      <div class="ll-time">${e.t}</div>
+      <div class="ll-msg">${e.msg}</div>
+    </div>`).join('');
+}
+function filterLog(btn, lvl) {
+  document.querySelectorAll('.ll-filter').forEach(b => b.classList.remove('on'));
+  btn.classList.add('on');
+  document.querySelectorAll('.ll-entry').forEach(e => {
+    e.style.display = (lvl === 'all' || e.dataset.lvl === lvl) ? '' : 'none';
+  });
+}
+
+/* ── Dataset Selection ── */
+let _dsChecked = new Set(['dk07', 'gw24a', 'lc11', 'bh03']);
+function buildDsSelList() {
+  const list = document.getElementById('ds-list-sel');
+  const samples = DATASETS.filter(d => !d.special);
+  list.innerHTML = samples.map(d => {
+    const checked = _dsChecked.has(d.id);
+    return `<div class="ds-row${checked ? ' checked' : ''}" id="dsr-${d.id}" onclick="toggleDs('${d.id}')">
+      <div class="ds-chk"></div>
+      <div class="ds-row-ic"><i class="fa-solid fa-vial"></i></div>
+      <div class="ds-row-nm">
+        <div class="ds-row-label">${d.label}</div>
+        <div class="ds-row-meta">D50 ${d.d50} mm · K̄ ${d.k} m/d · ${d.fractions} fractions</div>
+      </div>
+      <div class="ds-row-stat">
+        <div class="s-led ${d.status}" style="width:7px;height:7px;border-radius:50%;background:${d.status==='ok'?'#5aaa3a':'#d08020'}"></div>
+      </div>
+    </div>`;
+  }).join('');
+  updateDsSel();
+}
+function toggleDs(id) {
+  if (_dsChecked.has(id)) _dsChecked.delete(id); else _dsChecked.add(id);
+  const row = document.getElementById('dsr-' + id);
+  if (row) row.classList.toggle('checked', _dsChecked.has(id));
+  updateDsSel();
+}
+function dsSelAll(v) {
+  DATASETS.filter(d => !d.special).forEach(d => v ? _dsChecked.add(d.id) : _dsChecked.delete(d.id));
+  buildDsSelList();
+}
+function dsInvert() {
+  DATASETS.filter(d => !d.special).forEach(d => {
+    if (_dsChecked.has(d.id)) _dsChecked.delete(d.id); else _dsChecked.add(d.id);
+  });
+  buildDsSelList();
+}
+function updateDsSel() {
+  const cnt = _dsChecked.size;
+  const c = document.getElementById('ds-sel-count');
+  const btn = document.getElementById('ds-apply-btn');
+  if (c) c.textContent = cnt + ' selected';
+  if (btn) btn.disabled = cnt < 2;
+}
+function filterDs(q) {
+  const lq = q.toLowerCase();
+  document.querySelectorAll('#ds-list-sel .ds-row').forEach(row => {
+    const txt = row.querySelector('.ds-row-label').textContent.toLowerCase() +
+                row.querySelector('.ds-row-meta').textContent.toLowerCase();
+    row.style.display = txt.includes(lq) ? '' : 'none';
+  });
+}
+</script>
+</body>
+</html>

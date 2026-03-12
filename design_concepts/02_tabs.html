@@ -1,0 +1,1879 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>GrainSize Analysis — Individual Samples + Comparison</title>
+
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Playfair+Display:wght@600;700&family=Source+Sans+3:wght@300;400;500;600&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/all.min.css">
+
+<style>
+/* ══════════════════════════════════════════════
+   TOKENS — same as 01_shell.html
+══════════════════════════════════════════════ */
+:root {
+  --bg:        #f5f5f0;
+  --bg-raised: #eee8dc;
+  --bg-low:    #e8e0d0;
+  --border:    #d4c4a8;
+  --border-dk: #c0ae90;
+  --text:      #2f2f2f;
+  --text-mid:  #5d4e37;
+  --text-muted:#9a8c78;
+
+  --olive:     #6b8e23;
+  --olive-h:   #7fa02d;
+  --olive-dk:  #4f6a1a;
+  --forest:    #2c5530;
+  --tan:       #d2b48c;
+  --tan-h:     #ddbf94;
+  --amber:     #c4a574;
+  --earth:     #8b7355;
+
+  --sb:        #ddd3be;
+  --sb-up:     #e5dcc8;
+  --sb-dn:     #d0c4ac;
+  --sb-act:    #c8ba9e;
+  --sb-bdr:    #c0ae90;
+  --sb-text:   #3a2e1c;
+  --sb-mid:    #6a5438;
+  --sb-muted:  #9a8468;
+
+  --logo-bg:     #7a5e3e;
+  --logo-bg-top: #8e6e4a;
+  --logo-text:   #f4ece0;
+  --logo-sub:    #c8a87a;
+  --logo-mark-bg:rgba(255,255,255,0.13);
+  --logo-mark-bdr:rgba(255,255,255,0.22);
+
+  --st-bg:   #8b7355;
+  --st-text: #f0e8d8;
+  --st-muted:#c4a882;
+  --st-dim:  #a89070;
+
+  --mb-bg:   #ede8de;
+  --mb-bdr:  #cfc0a4;
+  --tb-bg:   #e4d8c0;
+  --tb-bdr:  #ccc0a0;
+
+  /* Plot workspace inner sidebar */
+  --pw-sb:   #ece5d8;
+  --pw-sb-bdr:#d4c4a8;
+
+  --sw: 258px;
+  --mbh: 24px;
+  --tbh: 40px;
+  --dth: 30px;
+  --sth: 24px;
+
+  --fu: 'Source Sans 3', system-ui, sans-serif;
+  --fd: 'Playfair Display', Georgia, serif;
+  --fm: 'JetBrains Mono', monospace;
+  --r: 4px;
+}
+
+*,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
+html,body{height:100%;overflow:hidden}
+body{font-family:var(--fu);font-size:13px;background:var(--bg);color:var(--text);-webkit-font-smoothing:antialiased}
+button,select,input{font-family:inherit;cursor:pointer}
+
+body::after{
+  content:'';position:fixed;inset:0;pointer-events:none;z-index:9998;
+  opacity:.18;
+  background-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='260' height='260'%3E%3Cfilter id='g'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.72' numOctaves='4' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='260' height='260' filter='url(%23g)' opacity='.07'/%3E%3C/svg%3E");
+}
+
+/* ══════════════════════════════════════════════ GRID */
+.app{
+  display:grid;height:100vh;
+  grid-template-rows:var(--mbh) 1fr var(--sth);
+  grid-template-columns:var(--sw) 1fr;
+  grid-template-areas:"mb mb" "sb main" "st st";
+  overflow:hidden;
+}
+
+/* ══════════════════════════════════════════════ MENU BAR */
+.mb{
+  grid-area:mb;display:flex;align-items:center;
+  background:var(--mb-bg);border-bottom:1px solid var(--mb-bdr);
+  padding:0 6px;user-select:none;position:relative;z-index:200;
+}
+.mb-title{
+  position:absolute;left:50%;transform:translateX(-50%);
+  font-size:11.5px;color:var(--text-muted);pointer-events:none;white-space:nowrap;
+}
+.mi{display:flex;align-items:center;height:100%;padding:0 10px;font-size:12.5px;color:var(--text-mid);cursor:pointer;border-radius:2px;transition:background .1s;position:relative}
+.mi:hover{background:rgba(107,142,35,.1);color:var(--text)}
+.dd{display:none;position:absolute;top:calc(100% + 1px);left:0;min-width:215px;background:var(--bg-raised);border:1px solid var(--border);border-radius:6px;padding:4px 0;z-index:9000;box-shadow:0 5px 18px rgba(40,24,8,.14),0 1px 3px rgba(40,24,8,.08)}
+.mi:hover .dd{display:block}
+.ddi{display:flex;align-items:center;gap:10px;padding:5px 14px;font-size:12.5px;color:var(--text-mid);transition:background .08s,color .08s}
+.ddi i{width:14px;color:var(--text-muted);font-size:11px}
+.ddi:hover{background:rgba(107,142,35,.08);color:var(--text)}
+.ddi:hover i{color:var(--olive)}
+.ddi .k{margin-left:auto;font-family:var(--fm);font-size:9.5px;color:var(--text-muted);background:var(--bg-low);border:1px solid var(--border);padding:1px 5px;border-radius:3px}
+.dds{height:1px;background:var(--border);margin:3px 8px}
+.mb-sp{flex:1}
+
+/* ══════════════════════════════════════════════ SIDEBAR */
+.sb{
+  grid-area:sb;display:flex;flex-direction:column;overflow:hidden;
+  background:var(--sb);border-right:1px solid var(--sb-bdr);
+  box-shadow:inset -4px 0 8px rgba(100,60,20,.05);
+}
+.sb-logo{
+  display:flex;align-items:center;gap:11px;padding:11px 14px 10px;flex-shrink:0;
+  background:linear-gradient(160deg,var(--logo-bg-top) 0%,var(--logo-bg) 100%);
+  border-bottom:2px solid var(--sb-bdr);box-shadow:0 2px 6px rgba(0,0,0,.08);
+}
+.logo-mark{width:32px;height:32px;flex-shrink:0;background:var(--logo-mark-bg);border:1px solid var(--logo-mark-bdr);border-radius:var(--r);display:flex;align-items:center;justify-content:center;box-shadow:inset 0 1px 0 rgba(255,255,255,.2),0 1px 3px rgba(0,0,0,.15)}
+.logo-mark i{color:var(--logo-text);font-size:14px;opacity:.9}
+.logo-tx{display:flex;flex-direction:column;gap:2px}
+.logo-name{font-family:var(--fd);font-size:14px;font-weight:700;color:var(--logo-text);line-height:1.15;letter-spacing:.01em}
+.logo-sub{font-family:var(--fm);font-size:8.5px;color:var(--logo-sub);letter-spacing:.06em}
+.sb-body{flex:1;overflow-y:auto;overflow-x:hidden;scrollbar-width:thin;scrollbar-color:var(--sb-bdr) transparent}
+::-webkit-scrollbar{width:5px}
+::-webkit-scrollbar-track{background:transparent}
+::-webkit-scrollbar-thumb{background:var(--sb-bdr);border-radius:99px}
+.sb-sect{padding:8px 13px 5px;background:var(--sb-up);border-bottom:1px solid var(--sb-bdr);border-top:1px solid rgba(255,255,255,.45);display:flex;align-items:center;justify-content:space-between}
+.sb-sect-lbl{font-size:9.5px;font-weight:600;color:var(--sb-muted);letter-spacing:.09em;text-transform:uppercase}
+.sb-sect-btn{display:flex;align-items:center;gap:3px;padding:2px 7px;border:1px solid var(--sb-bdr);background:rgba(255,255,255,.35);border-radius:var(--r);font-size:10.5px;color:var(--sb-mid);transition:all .12s}
+.sb-sect-btn:hover{background:rgba(255,255,255,.6);border-color:var(--border-dk);color:var(--sb-text)}
+.sb-sect-btn i{font-size:9px}
+.sb-pad{padding:8px 10px}
+.drop{border:1.5px dashed var(--sb-bdr);border-radius:5px;padding:11px 10px;text-align:center;cursor:pointer;transition:all .15s;background:rgba(255,255,255,.25);display:flex;flex-direction:column;align-items:center;gap:4px}
+.drop:hover{border-color:var(--olive);background:rgba(107,142,35,.07)}
+.drop i{font-size:17px;color:var(--sb-muted);transition:color .15s}
+.drop:hover i{color:var(--olive)}
+.drop-t{font-size:11px;color:var(--sb-mid)}
+.drop-s{font-size:9.5px;color:var(--sb-muted)}
+.s-list{display:flex;flex-direction:column;gap:1px;padding:4px 6px 2px}
+.s-item{display:flex;flex-direction:column;border-radius:var(--r);border:1px solid transparent;position:relative;transition:background .1s}
+.s-item:hover{background:rgba(255,255,255,.4)}
+.s-item.active{background:var(--sb-act);border-color:var(--sb-bdr);box-shadow:inset 0 1px 0 rgba(255,255,255,.4)}
+.s-item.active::before{content:'';position:absolute;left:-6px;top:10px;width:3px;height:16px;background:var(--olive);border-radius:0 3px 3px 0}
+.s-item-main{display:flex;align-items:center;gap:8px;padding:6px 8px;cursor:pointer}
+.s-ic{width:26px;height:26px;border-radius:3px;flex-shrink:0;display:flex;align-items:center;justify-content:center;background:rgba(255,255,255,.3);border:1px solid var(--sb-bdr)}
+.s-ic i{font-size:11px;color:var(--sb-mid)}
+.s-item.active .s-ic{background:rgba(107,142,35,.15);border-color:rgba(107,142,35,.3)}
+.s-item.active .s-ic i{color:var(--olive)}
+.s-info{flex:1;min-width:0}
+.s-name{font-size:12px;font-weight:500;color:var(--sb-text);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.s-meta{font-family:var(--fm);font-size:9px;color:var(--sb-muted);margin-top:1px}
+.s-led{width:6px;height:6px;border-radius:50%;flex-shrink:0}
+.s-led.ok{background:#5aaa3a;box-shadow:0 0 4px rgba(90,170,58,.4)}
+.p-rows{display:flex;flex-direction:column;gap:5px;padding:6px 10px 6px}
+.p-row{display:flex;align-items:center;justify-content:space-between;gap:6px}
+.p-lbl{font-size:11.5px;color:var(--sb-mid)}
+.p-lbl i{width:14px;font-size:10px;margin-right:3px;color:var(--sb-muted)}
+.p-field{display:flex;align-items:center;gap:4px}
+.p-in{width:60px;height:22px;background:rgba(255,255,255,.55);border:1px solid var(--sb-bdr);border-radius:3px;color:var(--sb-text);font-family:var(--fm);font-size:11px;text-align:right;padding:0 5px;transition:border-color .12s,background .12s}
+.p-in:focus{outline:none;border-color:var(--olive);background:rgba(255,255,255,.85)}
+.p-unit{font-family:var(--fm);font-size:10px;color:var(--sb-muted);min-width:18px}
+.sb-btn{display:flex;align-items:center;gap:7px;width:calc(100% - 20px);margin:2px 10px;padding:6px 10px;border:1px solid var(--sb-bdr);background:rgba(255,255,255,.35);border-radius:var(--r);font-size:12px;color:var(--sb-mid);transition:all .12s;text-align:left}
+.sb-btn i{font-size:11px;width:14px;color:var(--sb-muted)}
+.sb-btn:hover{background:rgba(255,255,255,.6);border-color:var(--border-dk);color:var(--sb-text)}
+.sb-btn.go{background:var(--olive);border-color:var(--olive-dk);color:#fff;font-weight:600}
+.sb-btn.go i{color:rgba(255,255,255,.8)}
+.sb-btn.go:hover{background:var(--olive-h)}
+.strata{margin:4px 10px 6px;border-radius:var(--r);overflow:hidden;border:1px solid var(--sb-bdr);opacity:.7}
+.st-row{display:flex;align-items:center;gap:7px;padding:4px 8px;font-size:9px;font-family:var(--fm);border-bottom:1px solid rgba(0,0,0,.07)}
+.st-row:last-child{border-bottom:none}
+.st-r1{background:#c4b090;color:#6a4820}.st-r2{background:#d4c098;color:#7a5c30}
+.st-r3{background:#c8b888;color:#6a5820}.st-r4{background:#a0b8c8;color:#2a5878}
+.st-dot{width:5px;height:5px;border-radius:50%;background:currentColor;flex-shrink:0}
+.dtu-box{flex-shrink:0;border-top:1px solid var(--sb-bdr);background:var(--sb-dn);padding:9px 13px 8px;display:flex;align-items:center;gap:10px}
+.dtu-logo{background:#C8002A;color:#fff;font-family:'Source Sans 3',sans-serif;font-size:13px;font-weight:700;letter-spacing:.04em;padding:3px 6px 2px;border-radius:2px;flex-shrink:0;line-height:1.2;user-select:none}
+.dtu-info{display:flex;flex-direction:column;gap:1px;min-width:0}
+.dtu-prog{font-size:10.5px;font-weight:600;color:var(--sb-text);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;line-height:1.3}
+.dtu-dept{font-size:9px;color:var(--sb-muted);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;font-family:var(--fm);letter-spacing:.01em}
+.sb-foot{background:var(--sb-dn);border-top:1px solid var(--sb-bdr);padding:5px 6px;display:flex;gap:2px;flex-shrink:0}
+.sf-btn{flex:1;display:flex;flex-direction:column;align-items:center;gap:3px;padding:5px 4px;border:none;background:transparent;border-radius:var(--r);font-size:9.5px;color:var(--sb-muted);transition:all .12s}
+.sf-btn i{font-size:12px}
+.sf-btn:hover{background:rgba(255,255,255,.5);color:var(--sb-text)}
+
+/* ══════════════════════════════════════════════ MAIN */
+.main{grid-area:main;display:flex;flex-direction:column;overflow:hidden}
+
+/* Toolbar */
+.tb{height:var(--tbh);display:flex;align-items:center;background:var(--tb-bg);border-bottom:1px solid var(--tb-bdr);flex-shrink:0;padding:0 8px 0 6px}
+.tb-tabs{display:flex;align-items:flex-end;height:100%;padding:0 8px 0 4px}
+.tab{display:flex;align-items:center;gap:6px;height:100%;padding:0 15px;font-size:12.5px;font-weight:500;color:var(--text-muted);border-bottom:2px solid transparent;cursor:pointer;transition:color .12s,border-color .12s;white-space:nowrap}
+.tab i{font-size:11px}
+.tab:hover{color:var(--text-mid)}
+.tab.on{color:var(--olive);border-bottom-color:var(--olive)}
+.t-badge{font-family:var(--fm);font-size:9px;font-weight:700;padding:1px 5px;border-radius:99px;line-height:1.4;background:var(--bg-low);color:var(--text-muted);border:1px solid var(--border)}
+.tab.on .t-badge{background:rgba(107,142,35,.1);color:var(--olive);border-color:rgba(107,142,35,.3)}
+.tb-sep{width:1px;height:20px;background:var(--tb-bdr);margin:0 6px;flex-shrink:0}
+.tb-sp{flex:1}
+.tb-btn{display:flex;align-items:center;gap:5px;height:26px;padding:0 11px;border:1px solid transparent;background:transparent;border-radius:var(--r);font-size:12px;color:var(--text-mid);transition:all .1s;white-space:nowrap}
+.tb-btn i{font-size:11px}
+.tb-btn:hover{background:var(--tan);border-color:var(--earth);color:var(--text)}
+.tb-btn.go{background:var(--olive);border-color:var(--olive-dk);color:#fff;font-weight:600}
+.tb-btn.go:hover{background:var(--olive-h)}
+
+/* Dataset sub-tabs */
+.ds-bar{height:var(--dth);display:flex;align-items:flex-end;background:var(--bg-raised);border-bottom:1px solid var(--border);padding:0 8px 0 12px;gap:2px;overflow-x:auto;scrollbar-width:none;flex-shrink:0}
+.ds-bar::-webkit-scrollbar{display:none}
+.ds-tab{display:flex;align-items:center;gap:5px;padding:4px 10px;border:1px solid transparent;border-bottom:none;border-radius:var(--r) var(--r) 0 0;font-size:11.5px;color:var(--text-muted);cursor:pointer;white-space:nowrap;transition:all .1s;background:transparent;margin-bottom:-1px}
+.ds-tab:hover{background:var(--bg-low);color:var(--text-mid);border-color:var(--border)}
+.ds-tab.on{background:var(--bg);border-color:var(--border);color:var(--text);font-weight:500}
+.ds-tab i{font-size:10px}
+.dx{width:14px;height:14px;border-radius:50%;display:flex;align-items:center;justify-content:center;font-size:8px;color:transparent;transition:all .1s}
+.ds-tab:hover .dx{color:var(--text-muted)}
+.dx:hover{background:var(--border);color:var(--text)!important}
+
+/* View host */
+.view{flex:1;overflow:hidden;display:flex;flex-direction:column}
+
+/* Nested sub-tabs (Plot / Results / Stats) */
+.ntab-bar{
+  height:32px;display:flex;align-items:flex-end;
+  background:var(--bg);
+  border-bottom:2px solid var(--border);
+  padding:0 0 0 14px;gap:0;flex-shrink:0;
+}
+.ntab{
+  display:flex;align-items:center;gap:5px;
+  height:100%;padding:0 14px;
+  font-size:12px;font-weight:500;
+  color:var(--text-muted);border-bottom:2px solid transparent;
+  cursor:pointer;margin-bottom:-2px;transition:all .12s;
+}
+.ntab i{font-size:11px}
+.ntab:hover{color:var(--text-mid)}
+.ntab.on{color:var(--text);border-bottom-color:var(--earth)}
+
+/* ══════════════════════════════════════════════
+   PLOT WORKSPACE
+   Inner toolbar + collapsible left sidebar + SVG area
+══════════════════════════════════════════════ */
+.pw{flex:1;display:flex;flex-direction:column;overflow:hidden}
+
+/* Inner toolbar — compact, same sandy family, slightly lighter */
+.pw-tb{
+  height:34px;display:flex;align-items:center;
+  background:var(--bg-raised);border-bottom:1px solid var(--border);
+  padding:0 8px;gap:4px;flex-shrink:0;
+}
+.pw-sep{width:1px;height:16px;background:var(--border);margin:0 3px;flex-shrink:0}
+.pw-sp{flex:1}
+
+/* Toolbar controls — compact pill style */
+.pw-seg{display:flex;border:1px solid var(--border);border-radius:var(--r);overflow:hidden}
+.pw-seg-btn{
+  display:flex;align-items:center;gap:4px;
+  height:22px;padding:0 8px;
+  font-size:11.5px;color:var(--text-mid);
+  background:rgba(255,255,255,.4);border:none;border-right:1px solid var(--border);
+  transition:background .1s,color .1s;white-space:nowrap;
+}
+.pw-seg-btn:last-child{border-right:none}
+.pw-seg-btn i{font-size:10px}
+.pw-seg-btn.on{background:var(--bg-low);color:var(--text);font-weight:500}
+.pw-seg-btn:hover:not(.on){background:var(--tan-h)}
+
+/* Checkbox-style toggles */
+.pw-chk{
+  display:flex;align-items:center;gap:4px;
+  height:22px;padding:0 7px;
+  border:1px solid var(--border);border-radius:var(--r);
+  font-size:11px;color:var(--text-mid);background:rgba(255,255,255,.3);
+  transition:background .1s;cursor:pointer;white-space:nowrap;
+}
+.pw-chk.on{background:rgba(107,142,35,.1);border-color:rgba(107,142,35,.35);color:var(--olive)}
+.pw-chk:hover{background:rgba(255,255,255,.6)}
+.pw-chk i{font-size:9px}
+
+/* Zoom / export buttons */
+.pw-btn{
+  display:flex;align-items:center;gap:4px;height:22px;padding:0 7px;
+  border:1px solid var(--border);border-radius:var(--r);
+  font-size:11px;color:var(--text-mid);background:rgba(255,255,255,.3);
+  transition:background .1s;white-space:nowrap;
+}
+.pw-btn:hover{background:var(--bg-low);border-color:var(--border-dk)}
+.pw-btn i{font-size:10px}
+
+/* Dropdown select */
+.pw-sel{
+  height:22px;padding:0 5px;border:1px solid var(--border);border-radius:var(--r);
+  font-family:var(--fu);font-size:11.5px;color:var(--text-mid);
+  background:rgba(255,255,255,.4);transition:background .1s;
+}
+.pw-sel:focus{outline:none;border-color:var(--olive)}
+
+/* Inner layout: collapsible left sidebar + chart area */
+.pw-body{flex:1;display:flex;overflow:hidden}
+
+/* Plot left sidebar — axis controls, display options */
+.pw-side{
+  width:200px;flex-shrink:0;
+  background:var(--pw-sb);
+  border-right:1px solid var(--pw-sb-bdr);
+  overflow-y:auto;overflow-x:hidden;
+  scrollbar-width:thin;scrollbar-color:var(--border) transparent;
+  transition:width .2s ease;
+}
+.pw-side.collapsed{width:0;overflow:hidden}
+
+.pws-sect{
+  padding:7px 11px 5px;
+  background:rgba(255,255,255,.3);
+  border-bottom:1px solid var(--pw-sb-bdr);
+  font-size:9.5px;font-weight:600;
+  color:var(--text-muted);letter-spacing:.08em;text-transform:uppercase;
+}
+.pws-row{
+  display:flex;align-items:center;justify-content:space-between;
+  padding:5px 10px;border-bottom:1px solid rgba(212,196,168,.4);gap:5px;
+}
+.pws-lbl{font-size:11px;color:var(--text-mid);white-space:nowrap}
+.pws-in{
+  width:52px;height:20px;
+  background:rgba(255,255,255,.6);border:1px solid var(--border);
+  border-radius:3px;font-family:var(--fm);font-size:10.5px;
+  color:var(--text);text-align:right;padding:0 4px;
+}
+.pws-in:focus{outline:none;border-color:var(--olive)}
+.pws-toggle{
+  display:flex;align-items:center;justify-content:space-between;
+  padding:5px 10px;border-bottom:1px solid rgba(212,196,168,.4);cursor:pointer;
+}
+.pws-toggle:hover{background:rgba(255,255,255,.3)}
+.pws-tog-lbl{font-size:11px;color:var(--text-mid)}
+.toggle-sw{
+  width:26px;height:14px;background:var(--border);border-radius:7px;
+  position:relative;transition:background .15s;flex-shrink:0;
+}
+.toggle-sw.on{background:var(--olive)}
+.toggle-sw::after{
+  content:'';position:absolute;width:10px;height:10px;top:2px;left:2px;
+  background:#fff;border-radius:50%;transition:transform .15s;
+  box-shadow:0 1px 2px rgba(0,0,0,.2);
+}
+.toggle-sw.on::after{transform:translateX(12px)}
+.pws-color-dot{width:12px;height:12px;border-radius:50%;flex-shrink:0;border:1px solid rgba(0,0,0,.1)}
+
+/* Chart area */
+.pw-chart{flex:1;position:relative;overflow:hidden;background:var(--bg)}
+
+/* Toggle sidebar button (at left edge of chart) */
+.pw-toggle-sb{
+  position:absolute;left:0;top:50%;transform:translateY(-50%);
+  width:14px;height:40px;background:var(--border);
+  border:1px solid var(--border-dk);border-left:none;
+  border-radius:0 3px 3px 0;
+  display:flex;align-items:center;justify-content:center;
+  cursor:pointer;z-index:10;transition:background .1s;
+}
+.pw-toggle-sb:hover{background:var(--tan)}
+.pw-toggle-sb i{font-size:8px;color:var(--text-mid)}
+
+/* SVG plot */
+.plot-svg{width:100%;height:100%;display:block}
+
+/* Plot area labels */
+.ax-lbl{font-family:var(--fu);font-size:11px;fill:var(--text-mid)}
+.ax-tick{font-family:var(--fm);font-size:9.5px;fill:var(--text-muted)}
+.ax-title{font-family:var(--fu);font-size:12px;fill:var(--text-mid);font-weight:500}
+.grid-l{stroke:var(--border);stroke-width:0.5;opacity:.6}
+.zone-lbl{font-family:var(--fu);font-size:9px;fill:var(--text-muted);font-style:italic}
+.curve{fill:none;stroke-width:2.5;stroke-linejoin:round;stroke-linecap:round}
+.dline{stroke-dasharray:4,3;stroke-width:1.2;opacity:.7}
+.d-lbl{font-family:var(--fm);font-size:9px;font-weight:500}
+
+/* Plot legend */
+.plot-legend{
+  position:absolute;right:16px;top:12px;
+  background:rgba(245,245,240,.9);border:1px solid var(--border);
+  border-radius:5px;padding:8px 12px;
+  box-shadow:0 2px 8px rgba(0,0,0,.07);
+}
+.leg-row{display:flex;align-items:center;gap:7px;font-size:11px;color:var(--text-mid);margin-bottom:4px}
+.leg-row:last-child{margin-bottom:0}
+.leg-line{width:20px;height:2.5px;border-radius:2px;flex-shrink:0}
+
+/* ══════════════════════════════════════════════
+   RESULTS TAB
+══════════════════════════════════════════════ */
+.res-view{flex:1;display:flex;flex-direction:column;overflow:hidden}
+
+/* Summary bar at top of results */
+.res-bar{
+  display:flex;align-items:center;gap:0;
+  background:var(--bg-raised);border-bottom:1px solid var(--border);
+  padding:0;flex-shrink:0;
+}
+.res-stat{
+  display:flex;flex-direction:column;align-items:center;
+  padding:8px 18px;border-right:1px solid var(--border);
+}
+.res-stat-v{font-family:var(--fm);font-size:15px;font-weight:500;color:var(--text);line-height:1.2}
+.res-stat-v.hi{color:var(--olive)}
+.res-stat-v.blue{color:#3a7ea0}
+.res-stat-k{font-size:9.5px;color:var(--text-muted);margin-top:2px;text-transform:uppercase;letter-spacing:.06em}
+.res-stat-sub{font-family:var(--fm);font-size:9px;color:var(--text-muted);margin-top:1px}
+.res-sp{flex:1}
+.res-toolbar{display:flex;align-items:center;gap:5px;padding:0 10px}
+.res-btn{display:flex;align-items:center;gap:4px;height:24px;padding:0 10px;border:1px solid var(--border);border-radius:var(--r);font-size:11.5px;color:var(--text-mid);background:rgba(255,255,255,.4);transition:all .1s}
+.res-btn:hover{background:var(--bg-low);border-color:var(--border-dk)}
+.res-btn i{font-size:10px}
+
+/* Split layout: table + detail */
+.res-split{flex:1;display:flex;overflow:hidden}
+
+/* K-values table */
+.k-table-wrap{flex:1;overflow:auto;padding:10px 12px}
+table.k-tbl{width:100%;border-collapse:collapse;font-size:12px}
+table.k-tbl thead th{
+  position:sticky;top:0;
+  background:var(--bg-raised);border-bottom:2px solid var(--border-dk);
+  font-size:10.5px;font-weight:600;color:var(--text-mid);letter-spacing:.04em;
+  text-transform:uppercase;padding:7px 10px;text-align:left;white-space:nowrap;
+  z-index:2;
+}
+table.k-tbl thead th:nth-child(n+3){text-align:right}
+table.k-tbl tbody tr{border-bottom:1px solid rgba(212,196,168,.4);transition:background .08s}
+table.k-tbl tbody tr:hover{background:rgba(212,196,168,.2)}
+table.k-tbl tbody tr.sel-row{background:rgba(107,142,35,.07);border-left:3px solid var(--olive)}
+table.k-tbl tbody td{padding:6px 10px;color:var(--text);vertical-align:middle}
+table.k-tbl tbody td:nth-child(n+3){text-align:right;font-family:var(--fm);font-size:11.5px;color:#3a7ea0}
+table.k-tbl tbody td.k-na{color:var(--text-muted);font-style:italic}
+
+.meth-name{font-weight:500}
+.meth-cat{font-size:10px;color:var(--text-muted);margin-top:1px}
+.k-badge{
+  display:inline-flex;align-items:center;padding:2px 7px;
+  border-radius:99px;font-size:10px;font-weight:500;
+  border:1px solid;
+}
+.k-badge.ok{background:rgba(90,170,58,.1);color:#3a7a20;border-color:rgba(90,170,58,.3)}
+.k-badge.warn{background:rgba(196,165,116,.15);color:#7a5820;border-color:rgba(196,165,116,.4)}
+.k-badge.na{background:rgba(154,140,120,.1);color:var(--text-muted);border-color:rgba(154,140,120,.3)}
+
+/* Method detail panel */
+.meth-detail{
+  width:240px;flex-shrink:0;
+  background:var(--bg-raised);border-left:1px solid var(--border);
+  overflow-y:auto;display:flex;flex-direction:column;
+}
+.md-header{
+  padding:12px 14px 10px;border-bottom:1px solid var(--border);
+  background:var(--bg-low);
+}
+.md-name{font-size:13px;font-weight:600;color:var(--text);line-height:1.3}
+.md-cat{font-size:10.5px;color:var(--text-muted);margin-top:2px}
+.md-k-big{font-family:var(--fm);font-size:20px;font-weight:500;color:#3a7ea0;margin:8px 0 2px}
+.md-k-unit{font-size:10px;color:var(--text-muted)}
+.md-section{padding:10px 14px;border-bottom:1px solid rgba(212,196,168,.4)}
+.md-sect-lbl{font-size:9.5px;font-weight:600;color:var(--text-muted);text-transform:uppercase;letter-spacing:.07em;margin-bottom:6px}
+.md-row{display:flex;justify-content:space-between;align-items:center;font-size:11.5px;margin-bottom:4px}
+.md-row-lbl{color:var(--text-mid)}
+.md-row-val{font-family:var(--fm);font-size:11px;color:var(--text)}
+.md-note{font-size:10.5px;color:var(--text-muted);line-height:1.5;font-style:italic}
+.md-formula{
+  font-family:var(--fm);font-size:10.5px;color:var(--text-mid);
+  background:var(--bg-low);border:1px solid var(--border);
+  border-radius:3px;padding:6px 8px;margin-top:4px;line-height:1.7;
+}
+
+/* ══════════════════════════════════════════════
+   STATS TAB
+══════════════════════════════════════════════ */
+.stats-view{flex:1;display:flex;flex-direction:column;overflow:hidden}
+.stats-body{flex:1;overflow-y:auto;display:flex;flex-wrap:wrap;align-content:flex-start;gap:12px;padding:12px}
+
+.stat-card{
+  background:var(--bg-raised);border:1px solid var(--border);
+  border-radius:6px;overflow:hidden;
+}
+.stat-card-head{
+  padding:8px 12px;background:var(--bg-low);border-bottom:1px solid var(--border);
+  font-size:10.5px;font-weight:600;color:var(--text-mid);
+  text-transform:uppercase;letter-spacing:.07em;
+  display:flex;align-items:center;gap:6px;
+}
+.stat-card-head i{color:var(--text-muted);font-size:10px}
+
+/* Percentile table */
+.perc-tbl{width:100%;border-collapse:collapse;font-size:12px}
+.perc-tbl td,.perc-tbl th{padding:5px 12px}
+.perc-tbl thead th{font-size:10px;font-weight:600;color:var(--text-muted);text-transform:uppercase;letter-spacing:.05em;border-bottom:1px solid var(--border)}
+.perc-tbl thead th:nth-child(n+2){text-align:right}
+.perc-tbl tbody tr{border-bottom:1px solid rgba(212,196,168,.35)}
+.perc-tbl tbody td:nth-child(n+2){text-align:right;font-family:var(--fm);font-size:11.5px}
+.perc-tbl .perc-hi{color:var(--olive);font-weight:500}
+
+/* Gradation parameter grid */
+.grad-grid{display:grid;grid-template-columns:1fr 1fr;gap:0}
+.grad-cell{padding:8px 12px;border-bottom:1px solid rgba(212,196,168,.35);border-right:1px solid rgba(212,196,168,.35)}
+.grad-cell:nth-child(2n){border-right:none}
+.grad-cell:nth-last-child(-n+2){border-bottom:none}
+.grad-v{font-family:var(--fm);font-size:15px;color:var(--text);font-weight:500}
+.grad-v.hi{color:var(--olive)}
+.grad-v.blue{color:#3a7ea0}
+.grad-k{font-size:10px;color:var(--text-muted);margin-top:2px}
+
+/* K-statistics */
+.kstat-grid{display:grid;grid-template-columns:1fr 1fr 1fr;gap:0}
+.kstat-cell{padding:9px 12px;border-bottom:1px solid rgba(212,196,168,.35);border-right:1px solid rgba(212,196,168,.35)}
+.kstat-cell:nth-child(3n){border-right:none}
+.kstat-cell:nth-last-child(-n+3){border-bottom:none}
+.kstat-v{font-family:var(--fm);font-size:14px;color:#3a7ea0;font-weight:500}
+.kstat-k{font-size:10px;color:var(--text-muted);margin-top:2px}
+
+/* Soil classification badge */
+.soil-badge{
+  display:inline-flex;align-items:center;gap:5px;
+  padding:4px 10px;border-radius:var(--r);
+  font-size:11.5px;font-weight:500;
+}
+.soil-badge.sand{background:rgba(196,165,116,.2);color:#6a4820;border:1px solid rgba(196,165,116,.4)}
+.soil-badge.gravel{background:rgba(139,115,85,.15);color:#5a3a18;border:1px solid rgba(139,115,85,.35)}
+.soil-badge.silt{background:rgba(107,142,35,.1);color:#3a5010;border:1px solid rgba(107,142,35,.3)}
+
+/* ══════════════════════════════════════════════
+   COMPARISON TAB
+══════════════════════════════════════════════ */
+.cmp-view{flex:1;display:flex;flex-direction:column;overflow:hidden}
+.cmp-header{
+  background:var(--bg-raised);border-bottom:1px solid var(--border);
+  padding:8px 16px;display:flex;align-items:center;gap:12px;flex-shrink:0;
+}
+.cmp-title{font-size:13px;font-weight:600;color:var(--text)}
+.cmp-sp{flex:1}
+.cmp-btn{display:flex;align-items:center;gap:5px;height:26px;padding:0 11px;border:1px solid var(--border);border-radius:var(--r);font-size:12px;color:var(--text-mid);background:rgba(255,255,255,.5);transition:all .1s}
+.cmp-btn:hover{background:var(--bg-low);border-color:var(--border-dk)}
+.cmp-btn.go{background:var(--olive);border-color:var(--olive-dk);color:#fff;font-weight:600}
+.cmp-btn i{font-size:11px}
+
+/* Sample color chips (used in comparison) */
+.s-chip{
+  display:inline-flex;align-items:center;gap:5px;
+  padding:2px 8px;border-radius:99px;
+  font-size:11px;font-weight:500;
+}
+.chip-a{background:rgba(58,126,160,.12);color:#2a5a78;border:1px solid rgba(58,126,160,.3)}
+.chip-b{background:rgba(107,142,35,.12);color:#3a5810;border:1px solid rgba(107,142,35,.3)}
+.chip-c{background:rgba(180,100,40,.12);color:#783010;border:1px solid rgba(180,100,40,.3)}
+.chip-dot{width:7px;height:7px;border-radius:50%}
+.chip-a .chip-dot{background:#3a7ea0}
+.chip-b .chip-dot{background:#6b8e23}
+.chip-c .chip-dot{background:#b46428}
+
+/* Comparison body splits into two panels */
+.cmp-body{flex:1;display:flex;gap:0;overflow:hidden}
+
+.cmp-panel{flex:1;display:flex;flex-direction:column;overflow:hidden;border-right:1px solid var(--border)}
+.cmp-panel:last-child{border-right:none}
+.cmp-panel-head{
+  padding:7px 14px;background:var(--bg-low);border-bottom:1px solid var(--border);
+  font-size:10.5px;font-weight:600;color:var(--text-mid);text-transform:uppercase;letter-spacing:.06em;
+  display:flex;align-items:center;gap:7px;
+}
+.cmp-panel-head i{font-size:10px;color:var(--text-muted)}
+
+.cmp-tbl-wrap{flex:1;overflow:auto}
+table.cmp-tbl{width:100%;border-collapse:collapse;font-size:12px}
+table.cmp-tbl thead th{
+  position:sticky;top:0;
+  background:var(--bg-raised);border-bottom:2px solid var(--border-dk);
+  font-size:10px;font-weight:600;color:var(--text-mid);letter-spacing:.04em;
+  text-transform:uppercase;padding:7px 12px;text-align:left;z-index:2;white-space:nowrap;
+}
+table.cmp-tbl thead th:nth-child(n+2){text-align:right}
+table.cmp-tbl tbody tr{border-bottom:1px solid rgba(212,196,168,.4);transition:background .08s}
+table.cmp-tbl tbody tr:hover{background:rgba(212,196,168,.15)}
+table.cmp-tbl tbody td{padding:6px 12px;vertical-align:middle}
+table.cmp-tbl tbody td:nth-child(n+2){text-align:right;font-family:var(--fm);font-size:11.5px}
+table.cmp-tbl .param-name{font-weight:500;color:var(--text)}
+table.cmp-tbl .param-desc{font-size:10px;color:var(--text-muted);margin-top:1px}
+
+/* Color-coded cells */
+.cv-a{color:#3a7ea0}
+.cv-b{color:#5a7e18}
+.cv-c{color:#b46428}
+
+/* Permeability classification */
+.perm-badge{
+  display:inline-flex;align-items:center;gap:4px;
+  padding:2px 8px;border-radius:3px;
+  font-size:10.5px;font-weight:500;border:1px solid;
+}
+.perm-high{background:rgba(58,126,160,.1);color:#2a5a78;border-color:rgba(58,126,160,.3)}
+.perm-med{background:rgba(107,142,35,.1);color:#3a5810;border-color:rgba(107,142,35,.3)}
+.perm-low{background:rgba(196,165,116,.15);color:#6a4820;border-color:rgba(196,165,116,.4)}
+.perm-vlow{background:rgba(154,140,120,.1);color:var(--text-muted);border-color:rgba(154,140,120,.3)}
+
+/* ══════════════════════════════════════════════ STATUS BAR */
+.st{
+  grid-area:st;display:flex;align-items:center;
+  background:var(--st-bg);border-top:1px solid #7a6448;
+  padding:0 10px;font-family:var(--fm);font-size:10.5px;color:var(--st-muted);overflow:hidden;
+}
+.st-pill{display:flex;align-items:center;gap:5px;padding-right:10px;border-right:1px solid rgba(255,255,255,.15);margin-right:10px}
+.led{width:6px;height:6px;border-radius:50%;flex-shrink:0}
+.led.ok{background:#7dd050;box-shadow:0 0 5px rgba(125,208,80,.5);animation:blink 4s ease infinite}
+@keyframes blink{0%,100%{opacity:1}50%{opacity:.35}}
+.st-ready{color:#a0d070}
+.stsep{width:1px;height:12px;background:rgba(255,255,255,.15);margin:0 8px;flex-shrink:0}
+.stsp{flex:1}
+.sseg{display:flex;align-items:center;gap:4px;white-space:nowrap}
+.sk{color:var(--st-dim);font-size:9.5px}
+.sv{color:var(--st-text)}
+.sv.hi{color:#f0e0b0}
+.sv.bl{color:#90c8e8}
+.st-ver{padding-left:10px;border-left:1px solid rgba(255,255,255,.15);font-size:9.5px;color:var(--st-dim)}
+
+/* ══════════════════════════════════════════════
+   TAB CONTENT PANELS — shown/hidden
+══════════════════════════════════════════════ */
+.tab-content{display:none;flex:1;flex-direction:column;overflow:hidden}
+.tab-content.active{display:flex}
+.ntab-content{display:none;flex:1;flex-direction:column;overflow:hidden}
+.ntab-content.active{display:flex}
+
+/* ══════════════════════════════════════════════ ANIMATION */
+.sb{animation:slin .28s ease both}
+.main{animation:fin .28s .06s ease both}
+@keyframes slin{from{opacity:0;transform:translateX(-4px)}to{opacity:1;transform:none}}
+@keyframes fin{from{opacity:0}to{opacity:1}}
+
+/* ══════════════════════════════════════════════
+   EXPANDABLE SIDEBAR CARDS
+══════════════════════════════════════════════ */
+.s-expand-btn{
+  width:16px;height:16px;flex-shrink:0;
+  border:none;background:transparent;padding:0;
+  color:var(--sb-muted);font-size:9px;border-radius:3px;
+  display:flex;align-items:center;justify-content:center;
+  transition:color .1s,background .1s,transform .15s;
+}
+.s-expand-btn:hover{color:var(--sb-text);background:rgba(0,0,0,.07)}
+.s-item.expanded .s-expand-btn{transform:rotate(90deg);color:var(--sb-mid)}
+.s-detail{display:none;padding:0 8px 7px}
+.s-item.expanded .s-detail{display:block}
+.s-status-line{
+  display:flex;align-items:center;gap:5px;
+  padding:3px 7px;border-radius:3px;margin-bottom:5px;
+  font-size:10px;color:var(--sb-mid);font-family:var(--fm);
+  background:rgba(255,255,255,.35);
+}
+.s-status-line.warn{background:rgba(180,100,40,.09);color:#7a4818}
+.s-status-line i{font-size:9px}
+.s-act-row{display:flex;gap:3px;flex-wrap:wrap}
+.s-act-btn{
+  display:flex;align-items:center;gap:3px;
+  padding:3px 7px;border:1px solid var(--sb-bdr);border-radius:3px;
+  background:rgba(255,255,255,.38);font-size:10px;color:var(--sb-mid);transition:all .1s;
+}
+.s-act-btn i{font-size:9px}
+.s-act-btn:hover{background:rgba(255,255,255,.7);color:var(--sb-text)}
+.s-act-btn.danger{color:#a03020;border-color:rgba(160,48,32,.28)}
+.s-act-btn.danger:hover{background:rgba(160,48,32,.07)}
+
+/* ══════════════════════════════════════════════
+   SCROLLABLE DATASET TAB BAR
+══════════════════════════════════════════════ */
+.ds-bar-outer{
+  display:flex;align-items:stretch;
+  height:var(--dth);background:var(--bg-raised);
+  border-bottom:1px solid var(--border);flex-shrink:0;
+}
+.ds-nav{
+  width:22px;flex-shrink:0;display:flex;align-items:center;justify-content:center;
+  border:none;background:transparent;color:var(--text-muted);cursor:pointer;
+  transition:background .1s,color .1s;border-right:1px solid var(--border);
+}
+.ds-nav + .ds-more-wrap{border-left:1px solid var(--border)}
+.ds-nav:hover:not(:disabled){background:var(--bg-low);color:var(--text)}
+.ds-nav:disabled{opacity:.28;cursor:default}
+.ds-nav i{font-size:8px}
+.ds-scroll-wrap{flex:1;overflow:hidden;position:relative}
+/* .ds-bar inside scroll-wrap stays as flex, now width:max-content */
+.ds-bar{
+  display:flex;align-items:flex-end;
+  height:100%;padding:0 4px 0 8px;gap:2px;
+  width:max-content;
+}
+.ds-more-wrap{
+  position:relative;flex-shrink:0;
+  display:flex;align-items:stretch;
+  border-left:1px solid var(--border);
+}
+.ds-more-btn{
+  padding:0 11px;display:flex;align-items:center;gap:5px;
+  border:none;background:transparent;font-size:11px;
+  color:var(--text-muted);cursor:pointer;font-family:var(--fu);
+  transition:background .1s,color .1s;white-space:nowrap;
+}
+.ds-more-btn:hover{background:var(--bg-low);color:var(--text)}
+.ds-more-btn i{font-size:10px}
+.ds-dropdown-menu{
+  display:none;position:absolute;right:0;top:calc(100% + 1px);
+  min-width:240px;background:var(--bg-raised);
+  border:1px solid var(--border);border-radius:5px;
+  padding:4px 0;z-index:500;
+  box-shadow:0 6px 20px rgba(40,24,8,.14);
+  max-height:300px;overflow-y:auto;
+}
+.ds-dropdown-menu.open{display:block}
+.ds-dd-item{
+  display:flex;align-items:center;gap:8px;
+  padding:6px 12px;font-size:12px;color:var(--text-mid);
+  cursor:pointer;transition:background .08s;
+}
+.ds-dd-item:hover{background:rgba(107,142,35,.07)}
+.ds-dd-item.on{color:var(--text);font-weight:500}
+.ds-dd-item i{font-size:10px;color:var(--text-muted);width:14px;flex-shrink:0}
+.ds-dd-check{margin-left:auto;color:var(--olive);font-size:10px}
+.ds-dd-led{width:6px;height:6px;border-radius:50%;flex-shrink:0}
+.ds-dd-led.ok{background:#5aaa3a}.ds-dd-led.warn{background:#d08020}
+.ds-dd-sep{height:1px;background:var(--border);margin:3px 8px}
+</style>
+</head>
+<body>
+<div class="app">
+
+<!-- ═══════ MENU BAR ═══════ -->
+<div class="mb">
+  <div class="mi">File
+    <div class="dd">
+      <div class="ddi"><i class="fa-regular fa-folder-open"></i>Open Files…<span class="k">Ctrl+O</span></div>
+      <div class="ddi"><i class="fa-regular fa-file-lines"></i>Load Sample Data</div>
+      <div class="dds"></div>
+      <div class="ddi"><i class="fa-solid fa-file-export"></i>Export Results…<span class="k">Ctrl+E</span></div>
+      <div class="ddi"><i class="fa-regular fa-image"></i>Export Plot…</div>
+      <div class="dds"></div>
+      <div class="ddi"><i class="fa-solid fa-right-from-bracket"></i>Exit<span class="k">Ctrl+Q</span></div>
+    </div>
+  </div>
+  <div class="mi">Analysis
+    <div class="dd">
+      <div class="ddi"><i class="fa-solid fa-bolt"></i>Calculate K Values<span class="k">Ctrl+K</span></div>
+      <div class="ddi"><i class="fa-solid fa-rotate"></i>Recalculate All</div>
+      <div class="dds"></div>
+      <div class="ddi"><i class="fa-solid fa-sliders"></i>Manage Porosity…</div>
+    </div>
+  </div>
+  <div class="mi">View
+    <div class="dd">
+      <div class="ddi"><i class="fa-solid fa-sidebar"></i>Toggle Panel<span class="k">Ctrl+B</span></div>
+      <div class="dds"></div>
+      <div class="ddi"><i class="fa-solid fa-chart-line"></i>Distribution Plot</div>
+    </div>
+  </div>
+  <div class="mi">Help
+    <div class="dd">
+      <div class="ddi"><i class="fa-solid fa-book"></i>Help Topics<span class="k">F1</span></div>
+      <div class="ddi"><i class="fa-solid fa-circle-info"></i>About</div>
+    </div>
+  </div>
+  <span class="mb-sp"></span>
+  <span style="font-size:11px;color:var(--text-muted);font-family:var(--fm);padding-right:4px">
+    Grain Size Analysis — Hydraulic Conductivity Calculator
+  </span>
+</div>
+
+<!-- ═══════ SIDEBAR ═══════ -->
+<aside class="sb">
+  <div class="sb-logo">
+    <div class="logo-mark"><i class="fa-solid fa-layer-group"></i></div>
+    <div class="logo-tx">
+      <span class="logo-name">GrainSize</span>
+      <span class="logo-sub">ANALYSIS · v0.9-β</span>
+    </div>
+  </div>
+
+  <div class="sb-body">
+    <div class="sb-sect">
+      <span class="sb-sect-lbl">Files &amp; Samples</span>
+      <button class="sb-sect-btn"><i class="fa-solid fa-plus"></i> Add</button>
+    </div>
+    <div class="sb-pad" style="padding-bottom:4px">
+      <div class="drop">
+        <i class="fa-solid fa-cloud-arrow-up"></i>
+        <span class="drop-t">Drop files or click to browse</span>
+        <span class="drop-s">CSV · XLSX · TXT</span>
+      </div>
+    </div>
+    <div class="s-list" id="s-list"><!-- JS generated --></div>
+
+    <div class="sb-sect" style="margin-top:6px">
+      <span class="sb-sect-lbl">Parameters</span>
+    </div>
+    <div class="p-rows">
+      <div class="p-row">
+        <span class="p-lbl"><i class="fa-solid fa-thermometer-half"></i>Temperature</span>
+        <div class="p-field">
+          <input class="p-in" type="number" value="20.0" step="0.5">
+          <span class="p-unit">°C</span>
+        </div>
+      </div>
+      <div class="p-row">
+        <span class="p-lbl"><i class="fa-solid fa-circle-nodes"></i>Porosity</span>
+        <div class="p-field">
+          <input class="p-in" type="number" value="0.40" step="0.01">
+          <span class="p-unit">—</span>
+        </div>
+      </div>
+    </div>
+    <button class="sb-btn">
+      <i class="fa-solid fa-sliders"></i> Manage Per-Sample Porosity…
+    </button>
+
+    <div class="sb-sect" style="margin-top:6px">
+      <span class="sb-sect-lbl">Actions</span>
+    </div>
+    <div style="padding:6px 0 2px">
+      <button class="sb-btn go">
+        <i class="fa-solid fa-bolt"></i> Calculate K Values
+      </button>
+    </div>
+
+    <div class="sb-sect" style="margin-top:6px">
+      <span class="sb-sect-lbl">Stratigraphy</span>
+    </div>
+    <div style="padding:6px 0 4px">
+      <div class="strata">
+        <div class="st-row st-r1"><div class="st-dot"></div>Topsoil / Fill</div>
+        <div class="st-row st-r2"><div class="st-dot"></div>Fine Sand</div>
+        <div class="st-row st-r3"><div class="st-dot"></div>Coarse Gravel</div>
+        <div class="st-row st-r4"><div class="st-dot"></div>▼ Groundwater</div>
+      </div>
+    </div>
+  </div>
+
+  <div class="dtu-box">
+    <div class="dtu-logo">DTU</div>
+    <div class="dtu-info">
+      <span class="dtu-prog">Grain Size Analysis</span>
+      <span class="dtu-dept">Hydraulic Conductivity Calculator</span>
+    </div>
+  </div>
+
+  <div class="sb-foot">
+    <button class="sf-btn"><i class="fa-solid fa-book-open"></i>Help</button>
+    <button class="sf-btn"><i class="fa-solid fa-gears"></i>Settings</button>
+    <button class="sf-btn"><i class="fa-solid fa-circle-info"></i>About</button>
+  </div>
+</aside>
+
+<!-- ═══════ MAIN ═══════ -->
+<main class="main">
+
+  <!-- Global toolbar: nav tabs + global actions -->
+  <div class="tb">
+    <div class="tb-tabs">
+      <div class="tab on" onclick="swMainTab('individual',this)">
+        <i class="fa-solid fa-chart-area"></i>Individual Samples
+        <span class="t-badge">12</span>
+      </div>
+      <div class="tab" onclick="swMainTab('comparison',this)">
+        <i class="fa-solid fa-code-compare"></i>Comparison
+      </div>
+      <div class="tab" onclick="swMainTab('reports',this)">
+        <i class="fa-solid fa-file-contract"></i>Reports
+      </div>
+      <div class="tab" onclick="swMainTab('export',this)">
+        <i class="fa-solid fa-file-export"></i>Export
+      </div>
+    </div>
+    <div class="tb-sep"></div>
+    <button class="tb-btn"><i class="fa-regular fa-folder-open"></i>&nbsp;Add Files</button>
+    <button class="tb-btn go"><i class="fa-solid fa-bolt"></i>&nbsp;Calculate K</button>
+    <div class="tb-sp"></div>
+    <button class="tb-btn" style="margin-right:4px"><i class="fa-solid fa-book"></i>&nbsp;Help</button>
+  </div>
+
+  <!-- ═══ INDIVIDUAL SAMPLES TAB ═══ -->
+  <div class="tab-content active" id="tab-individual">
+
+    <!-- Dataset sub-tabs — scrollable with overflow dropdown -->
+    <div class="ds-bar-outer" id="ds-bar-outer">
+      <button class="ds-nav" id="ds-prev" onclick="scrollTabs(-1)" disabled title="Scroll left">
+        <i class="fa-solid fa-chevron-left"></i>
+      </button>
+      <div class="ds-scroll-wrap" id="ds-scroll-wrap">
+        <div class="ds-bar" id="dsbar"><!-- JS generated --></div>
+      </div>
+      <button class="ds-nav" id="ds-next" onclick="scrollTabs(1)" title="Scroll right">
+        <i class="fa-solid fa-chevron-right"></i>
+      </button>
+      <div class="ds-more-wrap">
+        <button class="ds-more-btn" id="ds-more-btn" onclick="toggleDropdown()">
+          <i class="fa-solid fa-ellipsis"></i><span id="ds-more-count">+0</span>
+        </button>
+        <div class="ds-dropdown-menu" id="ds-dropdown-menu"><!-- JS generated --></div>
+      </div>
+    </div>
+
+    <!-- Nested sub-tabs: Plot | Results | Stats -->
+    <div class="ntab-bar">
+      <div class="ntab on" onclick="swNtab('plot',this)">
+        <i class="fa-solid fa-chart-line"></i>Plot
+      </div>
+      <div class="ntab" onclick="swNtab('results',this)">
+        <i class="fa-solid fa-table"></i>Results
+      </div>
+      <div class="ntab" onclick="swNtab('stats',this)">
+        <i class="fa-solid fa-chart-bar"></i>Statistics
+      </div>
+    </div>
+
+    <!-- ─── PLOT SUB-TAB ─── -->
+    <div class="ntab-content active" id="ntab-plot">
+      <div class="pw">
+
+        <!-- Inner plot toolbar: plot controls only (NOT global actions) -->
+        <div class="pw-tb">
+          <!-- Plot type segment -->
+          <div class="pw-seg">
+            <button class="pw-seg-btn on" title="Grain size distribution curve">
+              <i class="fa-solid fa-chart-line"></i> Dist. Curve
+            </button>
+            <button class="pw-seg-btn" title="K-values bar chart">
+              <i class="fa-solid fa-chart-bar"></i> K-Values
+            </button>
+          </div>
+
+          <div class="pw-sep"></div>
+
+          <!-- Style selector -->
+          <select class="pw-sel" title="Plot style">
+            <option>Professional</option>
+            <option>Presentation</option>
+            <option>Minimalist</option>
+            <option>Classic</option>
+          </select>
+
+          <div class="pw-sep"></div>
+
+          <!-- Display toggles -->
+          <button class="pw-chk on" onclick="this.classList.toggle('on')" title="Toggle grid">
+            <i class="fa-solid fa-hashtag"></i> Grid
+          </button>
+          <button class="pw-chk on" onclick="this.classList.toggle('on')" title="Toggle legend">
+            <i class="fa-solid fa-list"></i> Legend
+          </button>
+          <button class="pw-chk on" onclick="this.classList.toggle('on')" title="Toggle soil zones">
+            <i class="fa-solid fa-layer-group"></i> Zones
+          </button>
+          <button class="pw-chk on" onclick="this.classList.toggle('on')" title="Show D-values">
+            <i class="fa-solid fa-crosshairs"></i> D-lines
+          </button>
+
+          <div class="pw-sep"></div>
+
+          <!-- Zoom controls -->
+          <button class="pw-btn" title="Zoom in"><i class="fa-solid fa-magnifying-glass-plus"></i></button>
+          <button class="pw-btn" title="Zoom out"><i class="fa-solid fa-magnifying-glass-minus"></i></button>
+          <button class="pw-btn" title="Reset zoom"><i class="fa-solid fa-arrows-to-circle"></i> Fit</button>
+
+          <div class="pw-sep"></div>
+
+          <!-- Export -->
+          <button class="pw-btn" title="Export plot"><i class="fa-solid fa-download"></i> Export</button>
+
+          <div class="pw-sp"></div>
+
+          <!-- Toggle sidebar button in toolbar -->
+          <button class="pw-btn" onclick="togglePwSide()" title="Toggle controls panel">
+            <i class="fa-solid fa-sidebar" id="sb-toggle-icon"></i>
+          </button>
+        </div><!-- /pw-tb -->
+
+        <!-- Inner body: left sidebar + chart -->
+        <div class="pw-body">
+
+          <!-- Left sidebar: axis + display controls -->
+          <div class="pw-side" id="pw-side">
+            <div class="pws-sect">Axis Controls</div>
+            <div class="pws-row">
+              <span class="pws-lbl">X min (mm)</span>
+              <input class="pws-in" type="number" value="0.001">
+            </div>
+            <div class="pws-row">
+              <span class="pws-lbl">X max (mm)</span>
+              <input class="pws-in" type="number" value="100">
+            </div>
+            <div class="pws-row">
+              <span class="pws-lbl">Y min (%)</span>
+              <input class="pws-in" type="number" value="0">
+            </div>
+            <div class="pws-row">
+              <span class="pws-lbl">Y max (%)</span>
+              <input class="pws-in" type="number" value="100">
+            </div>
+
+            <div class="pws-sect" style="margin-top:4px">Display Options</div>
+            <div class="pws-toggle" onclick="this.querySelector('.toggle-sw').classList.toggle('on')">
+              <span class="pws-tog-lbl">Show grid lines</span>
+              <div class="toggle-sw on"></div>
+            </div>
+            <div class="pws-toggle" onclick="this.querySelector('.toggle-sw').classList.toggle('on')">
+              <span class="pws-tog-lbl">Show soil zones</span>
+              <div class="toggle-sw on"></div>
+            </div>
+            <div class="pws-toggle" onclick="this.querySelector('.toggle-sw').classList.toggle('on')">
+              <span class="pws-tog-lbl">Show D10 / D30 / D60</span>
+              <div class="toggle-sw on"></div>
+            </div>
+            <div class="pws-toggle" onclick="this.querySelector('.toggle-sw').classList.toggle('on')">
+              <span class="pws-tog-lbl">Fill curve area</span>
+              <div class="toggle-sw"></div>
+            </div>
+            <div class="pws-toggle" onclick="this.querySelector('.toggle-sw').classList.toggle('on')">
+              <span class="pws-tog-lbl">Markers on curve</span>
+              <div class="toggle-sw"></div>
+            </div>
+
+            <div class="pws-sect" style="margin-top:4px">Curve Color</div>
+            <div class="pws-row">
+              <span class="pws-lbl">Borehole_DK-07</span>
+              <div class="pws-color-dot" style="background:#3a7ea0"></div>
+            </div>
+            <div class="pws-row">
+              <span class="pws-lbl">Sample_GW-2024-A</span>
+              <div class="pws-color-dot" style="background:#6b8e23"></div>
+            </div>
+            <div class="pws-row">
+              <span class="pws-lbl">Core_LC-11</span>
+              <div class="pws-color-dot" style="background:#b46428"></div>
+            </div>
+          </div><!-- /pw-side -->
+
+          <!-- Chart area with SVG -->
+          <div class="pw-chart" id="pw-chart">
+
+            <!-- Toggle sidebar handle -->
+            <div class="pw-toggle-sb" onclick="togglePwSide()" title="Toggle sidebar">
+              <i class="fa-solid fa-chevron-left" id="sb-chevron"></i>
+            </div>
+
+            <!-- Legend overlay -->
+            <div class="plot-legend">
+              <div class="leg-row">
+                <div class="leg-line" style="background:#3a7ea0"></div>
+                <span>Borehole_DK-07</span>
+              </div>
+              <div class="leg-row">
+                <div class="leg-line" style="background:#6b8e23;opacity:.5"></div>
+                <span style="color:var(--text-muted);font-style:italic">Sample_GW-2024-A</span>
+              </div>
+              <div class="leg-row">
+                <div class="leg-line" style="background:#b46428;opacity:.5"></div>
+                <span style="color:var(--text-muted);font-style:italic">Core_LC-11</span>
+              </div>
+            </div>
+
+            <!-- Grain size distribution SVG -->
+            <svg class="plot-svg" viewBox="0 0 860 480" xmlns="http://www.w3.org/2000/svg" id="grain-svg">
+              <defs>
+                <clipPath id="plot-clip">
+                  <rect x="72" y="20" width="760" height="400"/>
+                </clipPath>
+                <!-- Subtle fill gradient for active curve -->
+                <linearGradient id="curve-fill" x1="0" y1="0" x2="0" y2="1">
+                  <stop offset="0%" stop-color="#3a7ea0" stop-opacity="0.15"/>
+                  <stop offset="100%" stop-color="#3a7ea0" stop-opacity="0.02"/>
+                </linearGradient>
+              </defs>
+
+              <!-- Plot background -->
+              <rect x="72" y="20" width="760" height="400" fill="white" rx="2"/>
+
+              <!-- Soil zone bands (clay | silt | fine | med | coarse | gravel | cobble) -->
+              <!-- X axis is log scale: 0.001..100mm mapped to x 72..832 -->
+              <!-- log(0.001)=-3, log(100)=2 → range=5, px/log=760/5=152px per decade -->
+              <!-- Boundaries: clay<0.002, silt<0.063, fine sand<0.2, med<0.6, coarse<2, gravel<60, cobble+ -->
+              <!-- x = 72 + (log10(val)+3)*152 -->
+              <!-- 0.002 → 72+(-2.699+3)*152 = 72+0.301*152 = 72+45.7 = 117.7 -->
+              <!-- 0.063 → 72+(−1.201+3)*152 = 72+1.799*152 = 72+273.5 = 345.5 -->
+              <!-- 0.2   → 72+(−0.699+3)*152 = 72+2.301*152 = 72+349.8 = 421.8 -->
+              <!-- 0.6   → 72+(−0.222+3)*152 = 72+2.778*152 = 72+422.3 = 494.3 -->
+              <!-- 2     → 72+(0.301+3)*152  = 72+3.301*152 = 72+501.8 = 573.8 -->
+              <!-- 60    → 72+(1.778+3)*152  = 72+4.778*152 = 72+726.3 = 798.3 -->
+
+              <rect x="72" y="20" width="45.7" height="400" fill="#e8e4ee" opacity="0.5"/> <!-- clay -->
+              <rect x="117.7" y="20" width="227.8" height="400" fill="#e4ecdc" opacity="0.4"/> <!-- silt -->
+              <rect x="345.5" y="20" width="76.3" height="400" fill="#fff8e8" opacity="0.5"/> <!-- fine sand -->
+              <rect x="421.8" y="20" width="72.5" height="400" fill="#fdf0d8" opacity="0.5"/> <!-- med sand -->
+              <rect x="494.3" y="20" width="79.5" height="400" fill="#f8e8cc" opacity="0.45"/> <!-- coarse sand -->
+              <rect x="573.8" y="20" width="224.5" height="400" fill="#ede0c8" opacity="0.45"/> <!-- gravel -->
+              <rect x="798.3" y="20" width="33.7" height="400" fill="#e0d4c0" opacity="0.5"/> <!-- cobble -->
+
+              <!-- Zone labels -->
+              <text x="94.5" y="434" class="zone-lbl" text-anchor="middle">Clay</text>
+              <text x="231.6" y="434" class="zone-lbl" text-anchor="middle">Silt</text>
+              <text x="383.7" y="434" class="zone-lbl" text-anchor="middle">Fine</text>
+              <text x="458.1" y="434" class="zone-lbl" text-anchor="middle">Med.</text>
+              <text x="534.0" y="434" class="zone-lbl" text-anchor="middle">Coarse</text>
+              <text x="686.1" y="434" class="zone-lbl" text-anchor="middle">Gravel</text>
+              <text x="815.2" y="434" class="zone-lbl" text-anchor="middle">Cob.</text>
+
+              <!-- Zone dividers -->
+              <line x1="117.7" y1="20" x2="117.7" y2="420" stroke="#ccc" stroke-width="0.7" stroke-dasharray="3,3"/>
+              <line x1="345.5" y1="20" x2="345.5" y2="420" stroke="#ccc" stroke-width="0.7" stroke-dasharray="3,3"/>
+              <line x1="421.8" y1="20" x2="421.8" y2="420" stroke="#ccc" stroke-width="0.5" stroke-dasharray="2,4"/>
+              <line x1="494.3" y1="20" x2="494.3" y2="420" stroke="#ccc" stroke-width="0.5" stroke-dasharray="2,4"/>
+              <line x1="573.8" y1="20" x2="573.8" y2="420" stroke="#ccc" stroke-width="0.7" stroke-dasharray="3,3"/>
+              <line x1="798.3" y1="20" x2="798.3" y2="420" stroke="#ccc" stroke-width="0.7" stroke-dasharray="3,3"/>
+
+              <!-- Y Grid lines -->
+              <line x1="72" y1="60" x2="832" y2="60" class="grid-l"/>   <!-- 90% -->
+              <line x1="72" y1="100" x2="832" y2="100" class="grid-l"/> <!-- 80% -->
+              <line x1="72" y1="140" x2="832" y2="140" class="grid-l"/> <!-- 70% -->
+              <line x1="72" y1="180" x2="832" y2="180" class="grid-l"/> <!-- 60% -->
+              <line x1="72" y1="220" x2="832" y2="220" class="grid-l"/> <!-- 50% -->
+              <line x1="72" y1="260" x2="832" y2="260" class="grid-l"/> <!-- 40% -->
+              <line x1="72" y1="300" x2="832" y2="300" class="grid-l"/> <!-- 30% -->
+              <line x1="72" y1="340" x2="832" y2="340" class="grid-l"/> <!-- 20% -->
+              <line x1="72" y1="380" x2="832" y2="380" class="grid-l"/> <!-- 10% -->
+
+              <!-- X Grid lines (log decades + half-decades) -->
+              <line x1="224" y1="20" x2="224" y2="420" class="grid-l"/>  <!-- 0.01 -->
+              <line x1="376" y1="20" x2="376" y2="420" class="grid-l"/>  <!-- 0.1 -->
+              <line x1="528" y1="20" x2="528" y2="420" class="grid-l"/>  <!-- 1 -->
+              <line x1="680" y1="20" x2="680" y2="420" class="grid-l"/>  <!-- 10 -->
+
+              <!-- Y Axis ticks & labels -->
+              <text x="65" y="424" class="ax-tick" text-anchor="end">0</text>
+              <text x="65" y="384" class="ax-tick" text-anchor="end">10</text>
+              <text x="65" y="344" class="ax-tick" text-anchor="end">20</text>
+              <text x="65" y="304" class="ax-tick" text-anchor="end">30</text>
+              <text x="65" y="264" class="ax-tick" text-anchor="end">40</text>
+              <text x="65" y="224" class="ax-tick" text-anchor="end">50</text>
+              <text x="65" y="184" class="ax-tick" text-anchor="end">60</text>
+              <text x="65" y="144" class="ax-tick" text-anchor="end">70</text>
+              <text x="65" y="104" class="ax-tick" text-anchor="end">80</text>
+              <text x="65" y="64"  class="ax-tick" text-anchor="end">90</text>
+              <text x="65" y="24"  class="ax-tick" text-anchor="end">100</text>
+
+              <!-- X Axis tick labels -->
+              <text x="72"  y="453" class="ax-tick" text-anchor="middle">0.001</text>
+              <text x="224" y="453" class="ax-tick" text-anchor="middle">0.01</text>
+              <text x="376" y="453" class="ax-tick" text-anchor="middle">0.1</text>
+              <text x="528" y="453" class="ax-tick" text-anchor="middle">1</text>
+              <text x="680" y="453" class="ax-tick" text-anchor="middle">10</text>
+              <text x="832" y="453" class="ax-tick" text-anchor="middle">100</text>
+
+              <!-- Axis titles -->
+              <text x="452" y="472" class="ax-title" text-anchor="middle">Grain diameter (mm)</text>
+              <text x="16" y="220" class="ax-title" text-anchor="middle" transform="rotate(-90,16,220)">Cumulative finer (%)</text>
+
+              <!-- Plot border -->
+              <rect x="72" y="20" width="760" height="400" fill="none" stroke="#c8b898" stroke-width="1"/>
+
+              <!-- ── ACTIVE CURVE: Borehole_DK-07 (medium sand, D50≈0.42mm) ── -->
+              <!-- Points: (mm → x = 72+(log10(mm)+3)*152), (% → y = 420-pct*4) -->
+              <!-- 0.063→345.5,420  0.09→362,412  0.125→379,400  0.18→396,378  0.25→412,348  0.355→428,306 -->
+              <!-- 0.42→436,272    0.5→444,240    0.63→453,200   0.71→458,170  0.85→465,136  1.0→472,108   -->
+              <!-- 1.25→481,82     1.7→491,55     2.0→496,38     2.8→507,22    4.0→521,15    -->
+
+              <!-- Fill area under curve -->
+              <path d="M345.5,420 L362,412 L379,400 L396,378 L412,348 L428,306 L436,272 L444,240 L453,200 L458,170 L465,136 L472,108 L481,82 L491,55 L496,38 L507,22 L521,15 L521,420 Z"
+                fill="url(#curve-fill)" clip-path="url(#plot-clip)"/>
+
+              <!-- Curve line -->
+              <path d="M345.5,420 L362,412 L379,400 L396,378 L412,348 L428,306 L436,272 L444,240 L453,200 L458,170 L465,136 L472,108 L481,82 L491,55 L496,38 L507,22 L521,15"
+                class="curve" stroke="#3a7ea0" clip-path="url(#plot-clip)"/>
+
+              <!-- D10 line: ~0.16mm → x≈393, y=pct→y=420-pct*4 → at x=393, curve≈36%→y=276 -->
+              <line x1="393" y1="20" x2="393" y2="276" class="dline" stroke="#3a7ea0" clip-path="url(#plot-clip)"/>
+              <line x1="72" y1="276" x2="393" y2="276" class="dline" stroke="#3a7ea0" clip-path="url(#plot-clip)"/>
+              <text x="395" y="272" class="d-lbl" fill="#3a7ea0">D₁₀=0.16</text>
+
+              <!-- D30 line: ~0.30mm → x≈421, curve≈30%→y=300 -->
+              <line x1="421" y1="20" x2="421" y2="300" class="dline" stroke="#7a9ec0" clip-path="url(#plot-clip)"/>
+              <line x1="72" y1="300" x2="421" y2="300" class="dline" stroke="#7a9ec0" clip-path="url(#plot-clip)"/>
+              <text x="423" y="296" class="d-lbl" fill="#7a9ec0">D₃₀=0.30</text>
+
+              <!-- D60 line: ~0.56mm → x≈450, curve≈60%→y=180 -->
+              <line x1="450" y1="20" x2="450" y2="180" class="dline" stroke="#4a8eb0" clip-path="url(#plot-clip)"/>
+              <line x1="72" y1="180" x2="450" y2="180" class="dline" stroke="#4a8eb0" clip-path="url(#plot-clip)"/>
+              <text x="452" y="176" class="d-lbl" fill="#4a8eb0">D₆₀=0.56</text>
+
+              <!-- D50 dot on curve -->
+              <circle cx="444" cy="220" r="4" fill="#3a7ea0" stroke="white" stroke-width="1.5"/>
+              <text x="447" y="216" class="d-lbl" fill="#3a7ea0">D₅₀=0.42</text>
+
+              <!-- ── GHOST CURVES for other samples (lighter, for reference) ── -->
+              <!-- Sample_GW-2024-A: finer sample, D50≈0.18mm -->
+              <path d="M117.7,420 L180,416 L250,408 L310,392 L345.5,370 L365,342 L390,298 L410,250 L435,190 L456,140 L475,95 L495,62 L515,40 L535,25"
+                class="curve" stroke="#6b8e23" stroke-width="1.5" stroke-dasharray="5,3" opacity="0.45" clip-path="url(#plot-clip)"/>
+
+              <!-- Core_LC-11: coarser, D50≈0.89mm -->
+              <path d="M380,420 L406,412 L432,396 L450,372 L467,330 L485,276 L498,228 L514,178 L530,132 L550,90 L570,58 L595,32 L620,20"
+                class="curve" stroke="#b46428" stroke-width="1.5" stroke-dasharray="5,3" opacity="0.45" clip-path="url(#plot-clip)"/>
+
+            </svg>
+          </div><!-- /pw-chart -->
+        </div><!-- /pw-body -->
+      </div><!-- /pw -->
+    </div><!-- /ntab-plot -->
+
+    <!-- ─── RESULTS SUB-TAB ─── -->
+    <div class="ntab-content" id="ntab-results">
+      <div class="res-view">
+
+        <!-- Summary bar -->
+        <div class="res-bar">
+          <div class="res-stat">
+            <span class="res-stat-v hi">12.3</span>
+            <span class="res-stat-k">K̄ (m/d)</span>
+            <span class="res-stat-sub">geometric mean</span>
+          </div>
+          <div class="res-stat">
+            <span class="res-stat-v blue">1.42×10⁻⁴</span>
+            <span class="res-stat-k">K̄ (m/s)</span>
+          </div>
+          <div class="res-stat">
+            <span class="res-stat-v">14 / 14</span>
+            <span class="res-stat-k">Methods valid</span>
+          </div>
+          <div class="res-stat">
+            <span class="res-stat-v">0.42 mm</span>
+            <span class="res-stat-k">D50</span>
+          </div>
+          <div class="res-stat">
+            <span class="res-stat-v">20.0 °C</span>
+            <span class="res-stat-k">Temperature</span>
+          </div>
+          <div class="res-sp"></div>
+          <div class="res-toolbar">
+            <button class="res-btn"><i class="fa-solid fa-file-export"></i> Export</button>
+            <button class="res-btn"><i class="fa-solid fa-copy"></i> Copy</button>
+          </div>
+        </div>
+
+        <!-- Split: table + detail -->
+        <div class="res-split">
+
+          <!-- K-values table -->
+          <div class="k-table-wrap">
+            <table class="k-tbl">
+              <thead>
+                <tr>
+                  <th style="width:200px">Method</th>
+                  <th style="width:80px">Category</th>
+                  <th>K (cm/s)</th>
+                  <th>K (m/s)</th>
+                  <th>K (m/d)</th>
+                  <th style="width:80px">Status</th>
+                </tr>
+              </thead>
+              <tbody id="k-tbl-body">
+                <!-- Rows injected by JS -->
+              </tbody>
+            </table>
+          </div>
+
+          <!-- Method detail -->
+          <div class="meth-detail" id="meth-detail">
+            <div class="md-header">
+              <div class="md-name" id="md-name">Hazen (1892)</div>
+              <div class="md-cat" id="md-cat">Empirical · Sand</div>
+              <div class="md-k-big"><span id="md-k">1.42×10⁻⁴</span> <span class="md-k-unit">m/s</span></div>
+              <div style="display:flex;gap:6px;flex-wrap:wrap;margin-top:4px">
+                <span style="font-family:var(--fm);font-size:10.5px;color:var(--text-muted)">12.3 m/d</span>
+                <span style="font-family:var(--fm);font-size:10.5px;color:var(--text-muted)">1.42×10⁻² cm/s</span>
+              </div>
+            </div>
+
+            <div class="md-section">
+              <div class="md-sect-lbl">Parameters Used</div>
+              <div class="md-row"><span class="md-row-lbl">D10</span><span class="md-row-val">0.16 mm</span></div>
+              <div class="md-row"><span class="md-row-lbl">Temperature</span><span class="md-row-val">20.0 °C</span></div>
+              <div class="md-row"><span class="md-row-lbl">Coefficient C</span><span class="md-row-val">1.0</span></div>
+            </div>
+
+            <div class="md-section">
+              <div class="md-sect-lbl">Formula</div>
+              <div class="md-formula">K = C · D₁₀² · g/ν<br>K = 1.0 × 0.0256 × 9.81/10⁻⁶</div>
+            </div>
+
+            <div class="md-section">
+              <div class="md-sect-lbl">Applicability</div>
+              <p class="md-note">Valid for uniform fine to medium sands with D10 between 0.1–3.0 mm and Cu &lt; 5. Results may underestimate K for graded sediments.</p>
+            </div>
+
+            <div class="md-section">
+              <div class="md-sect-lbl">Reference</div>
+              <p class="md-note">Hazen, A. (1892). Some physical properties of sands and gravels, with special reference to their use in filtration.</p>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div><!-- /ntab-results -->
+
+    <!-- ─── STATS SUB-TAB ─── -->
+    <div class="ntab-content" id="ntab-stats">
+      <div class="stats-view">
+        <!-- Info strip -->
+        <div style="background:var(--bg-raised);border-bottom:1px solid var(--border);padding:6px 16px;display:flex;align-items:center;gap:14px;flex-shrink:0;font-size:12px">
+          <span style="font-weight:600;color:var(--text)">Borehole_DK-07</span>
+          <span class="soil-badge sand"><i class="fa-solid fa-circle" style="font-size:7px"></i>Medium Sand</span>
+          <span style="color:var(--text-muted)">Cu = 3.50 · Cc = 1.05 — Well-graded</span>
+          <span style="flex:1"></span>
+          <button style="display:flex;align-items:center;gap:4px;height:24px;padding:0 10px;border:1px solid var(--border);border-radius:var(--r);font-size:11.5px;color:var(--text-mid);background:rgba(255,255,255,.5);cursor:pointer;font-family:var(--fu)">
+            <i class="fa-solid fa-file-export" style="font-size:10px"></i> Export Stats
+          </button>
+        </div>
+
+        <div class="stats-body">
+
+          <!-- Percentile table -->
+          <div class="stat-card" style="width:340px">
+            <div class="stat-card-head"><i class="fa-solid fa-percent"></i>Grain Size Percentiles</div>
+            <table class="perc-tbl">
+              <thead><tr><th>Percentile</th><th>Diameter (mm)</th><th>Category</th></tr></thead>
+              <tbody>
+                <tr><td>D₅</td><td class="perc-hi">0.09</td><td>Fine Sand</td></tr>
+                <tr><td>D₁₀</td><td class="perc-hi">0.16</td><td>Fine Sand</td></tr>
+                <tr><td>D₂₀</td><td>0.24</td><td>Fine Sand</td></tr>
+                <tr><td>D₃₀</td><td>0.30</td><td>Med. Sand</td></tr>
+                <tr><td>D₅₀</td><td class="perc-hi">0.42</td><td>Med. Sand</td></tr>
+                <tr><td>D₆₀</td><td>0.56</td><td>Med. Sand</td></tr>
+                <tr><td>D₇₅</td><td>0.73</td><td>Coarse Sand</td></tr>
+                <tr><td>D₈₄</td><td>0.88</td><td>Coarse Sand</td></tr>
+                <tr><td>D₉₀</td><td>1.06</td><td>Coarse Sand</td></tr>
+              </tbody>
+            </table>
+          </div>
+
+          <!-- Gradation parameters -->
+          <div class="stat-card" style="width:310px">
+            <div class="stat-card-head"><i class="fa-solid fa-chart-simple"></i>Gradation Parameters</div>
+            <div class="grad-grid">
+              <div class="grad-cell"><div class="grad-v hi">3.50</div><div class="grad-k">Uniformity Coeff. Cu = D60/D10</div></div>
+              <div class="grad-cell"><div class="grad-v hi">1.05</div><div class="grad-k">Curvature Coeff. Cc = D30²/(D10·D60)</div></div>
+              <div class="grad-cell"><div class="grad-v blue">0.42</div><div class="grad-k">D50 — Median diameter (mm)</div></div>
+              <div class="grad-cell"><div class="grad-v">0.56</div><div class="grad-k">D60 — 60th percentile (mm)</div></div>
+              <div class="grad-cell"><div class="grad-v">0.16</div><div class="grad-k">D10 — Effective size (mm)</div></div>
+              <div class="grad-cell"><div class="grad-v">0.30</div><div class="grad-k">D30 — 30th percentile (mm)</div></div>
+            </div>
+          </div>
+
+          <!-- K statistics -->
+          <div class="stat-card" style="width:360px">
+            <div class="stat-card-head"><i class="fa-solid fa-water"></i>Hydraulic Conductivity Statistics</div>
+            <div class="kstat-grid">
+              <div class="kstat-cell"><div class="kstat-v">12.3</div><div class="kstat-k">K̄ geom. mean (m/d)</div></div>
+              <div class="kstat-cell"><div class="kstat-v">14.1</div><div class="kstat-k">K̄ arith. mean (m/d)</div></div>
+              <div class="kstat-cell"><div class="kstat-v">11.8</div><div class="kstat-k">K̄ median (m/d)</div></div>
+              <div class="kstat-cell"><div class="kstat-v">6.8</div><div class="kstat-k">K min (m/d)</div></div>
+              <div class="kstat-cell"><div class="kstat-v">24.3</div><div class="kstat-k">K max (m/d)</div></div>
+              <div class="kstat-cell"><div class="kstat-v">4.2</div><div class="kstat-k">Std. dev. (m/d)</div></div>
+            </div>
+          </div>
+
+          <!-- Soil classification -->
+          <div class="stat-card" style="width:300px">
+            <div class="stat-card-head"><i class="fa-solid fa-layer-group"></i>Soil Classification</div>
+            <div style="padding:12px">
+              <div style="display:flex;flex-direction:column;gap:8px">
+                <div style="display:flex;justify-content:space-between;align-items:center;font-size:12px">
+                  <span style="color:var(--text-mid)">USCS Class</span>
+                  <span class="soil-badge sand">SP — Poorly graded sand</span>
+                </div>
+                <div style="display:flex;justify-content:space-between;align-items:center;font-size:12px">
+                  <span style="color:var(--text-mid)">Dominant fraction</span>
+                  <span class="soil-badge sand">Medium Sand</span>
+                </div>
+                <div style="display:flex;justify-content:space-between;align-items:center;font-size:12px">
+                  <span style="color:var(--text-mid)">Gradation</span>
+                  <span style="font-family:var(--fm);font-size:11px;color:var(--text)">Uniform (Cu=3.50)</span>
+                </div>
+                <div style="display:flex;justify-content:space-between;align-items:center;font-size:12px">
+                  <span style="color:var(--text-mid)">Fine content (&lt;0.063mm)</span>
+                  <span style="font-family:var(--fm);font-size:11px;color:var(--text)">2.1%</span>
+                </div>
+                <div style="display:flex;justify-content:space-between;align-items:center;font-size:12px">
+                  <span style="color:var(--text-mid)">Permeability class</span>
+                  <span class="perm-badge perm-med">Medium (10–100 m/d)</span>
+                </div>
+              </div>
+            </div>
+          </div>
+
+        </div>
+      </div>
+    </div><!-- /ntab-stats -->
+
+  </div><!-- /tab-individual -->
+
+  <!-- ═══ COMPARISON TAB ═══ -->
+  <div class="tab-content" id="tab-comparison">
+
+    <!-- Header bar -->
+    <div class="cmp-header">
+      <i class="fa-solid fa-code-compare" style="color:var(--text-muted)"></i>
+      <span class="cmp-title">Grain Parameter Comparison</span>
+      <div style="display:flex;gap:6px;align-items:center;margin-left:8px">
+        <span class="s-chip chip-a"><span class="chip-dot"></span>Borehole_DK-07</span>
+        <span class="s-chip chip-b"><span class="chip-dot"></span>Sample_GW-2024-A</span>
+        <span class="s-chip chip-c"><span class="chip-dot"></span>Core_LC-11</span>
+      </div>
+      <div class="cmp-sp"></div>
+      <button class="cmp-btn"><i class="fa-solid fa-rotate"></i> Refresh</button>
+      <button class="cmp-btn"><i class="fa-solid fa-file-export"></i> Export</button>
+      <button class="cmp-btn go"><i class="fa-solid fa-chart-bar"></i> Plot Comparison</button>
+    </div>
+
+    <!-- Body: two panels side by side -->
+    <div class="cmp-body">
+
+      <!-- Panel 1: Grain parameters -->
+      <div class="cmp-panel">
+        <div class="cmp-panel-head">
+          <i class="fa-solid fa-ruler"></i>Grain Parameters
+        </div>
+        <div class="cmp-tbl-wrap">
+          <table class="cmp-tbl">
+            <thead>
+              <tr>
+                <th style="width:160px">Parameter</th>
+                <th>
+                  <span style="display:flex;align-items:center;gap:4px;justify-content:flex-end">
+                    <span class="chip-dot" style="width:7px;height:7px;border-radius:50%;background:#3a7ea0;flex-shrink:0;display:inline-block"></span>
+                    DK-07
+                  </span>
+                </th>
+                <th>
+                  <span style="display:flex;align-items:center;gap:4px;justify-content:flex-end">
+                    <span class="chip-dot" style="width:7px;height:7px;border-radius:50%;background:#6b8e23;flex-shrink:0;display:inline-block"></span>
+                    GW-2024-A
+                  </span>
+                </th>
+                <th>
+                  <span style="display:flex;align-items:center;gap:4px;justify-content:flex-end">
+                    <span class="chip-dot" style="width:7px;height:7px;border-radius:50%;background:#b46428;flex-shrink:0;display:inline-block"></span>
+                    LC-11
+                  </span>
+                </th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr>
+                <td><div class="param-name">D10</div><div class="param-desc">Effective size (mm)</div></td>
+                <td class="cv-a">0.160</td><td class="cv-b">0.062</td><td class="cv-c">0.420</td>
+              </tr>
+              <tr>
+                <td><div class="param-name">D30</div><div class="param-desc">30th percentile (mm)</div></td>
+                <td class="cv-a">0.300</td><td class="cv-b">0.110</td><td class="cv-c">0.680</td>
+              </tr>
+              <tr>
+                <td><div class="param-name">D50</div><div class="param-desc">Median diameter (mm)</div></td>
+                <td class="cv-a">0.420</td><td class="cv-b">0.180</td><td class="cv-c">0.890</td>
+              </tr>
+              <tr>
+                <td><div class="param-name">D60</div><div class="param-desc">60th percentile (mm)</div></td>
+                <td class="cv-a">0.560</td><td class="cv-b">0.220</td><td class="cv-c">1.100</td>
+              </tr>
+              <tr>
+                <td><div class="param-name">D90</div><div class="param-desc">90th percentile (mm)</div></td>
+                <td class="cv-a">1.060</td><td class="cv-b">0.380</td><td class="cv-c">2.400</td>
+              </tr>
+              <tr>
+                <td><div class="param-name">Cu</div><div class="param-desc">Uniformity coefficient</div></td>
+                <td class="cv-a">3.50</td><td class="cv-b">3.55</td><td class="cv-c">2.62</td>
+              </tr>
+              <tr>
+                <td><div class="param-name">Cc</div><div class="param-desc">Curvature coefficient</div></td>
+                <td class="cv-a">1.05</td><td class="cv-b">0.98</td><td class="cv-c">0.94</td>
+              </tr>
+              <tr>
+                <td><div class="param-name">Fines &lt;0.063mm</div><div class="param-desc">% passing sieve</div></td>
+                <td class="cv-a">2.1%</td><td class="cv-b">8.4%</td><td class="cv-c">0.8%</td>
+              </tr>
+              <tr>
+                <td><div class="param-name">Dominant class</div></td>
+                <td style="text-align:right"><span class="soil-badge sand" style="font-size:10px">Med. Sand</span></td>
+                <td style="text-align:right"><span class="soil-badge silt" style="font-size:10px">Fine Sand</span></td>
+                <td style="text-align:right"><span class="soil-badge gravel" style="font-size:10px">C. Sand</span></td>
+              </tr>
+              <tr>
+                <td><div class="param-name">USCS</div><div class="param-desc">Soil class</div></td>
+                <td style="text-align:right;font-family:var(--fm);font-size:11px" class="cv-a">SP</td>
+                <td style="text-align:right;font-family:var(--fm);font-size:11px" class="cv-b">SP-SM</td>
+                <td style="text-align:right;font-family:var(--fm);font-size:11px" class="cv-c">SP</td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+      </div><!-- /panel grain -->
+
+      <!-- Panel 2: Permeability comparison -->
+      <div class="cmp-panel">
+        <div class="cmp-panel-head">
+          <i class="fa-solid fa-water"></i>Hydraulic Conductivity
+        </div>
+        <div class="cmp-tbl-wrap">
+          <table class="cmp-tbl">
+            <thead>
+              <tr>
+                <th style="width:160px">Method</th>
+                <th>
+                  <span style="display:flex;align-items:center;gap:4px;justify-content:flex-end">
+                    <span class="chip-dot" style="width:7px;height:7px;border-radius:50%;background:#3a7ea0;flex-shrink:0;display:inline-block"></span>
+                    DK-07
+                  </span>
+                </th>
+                <th>
+                  <span style="display:flex;align-items:center;gap:4px;justify-content:flex-end">
+                    <span class="chip-dot" style="width:7px;height:7px;border-radius:50%;background:#6b8e23;flex-shrink:0;display:inline-block"></span>
+                    GW-2024-A
+                  </span>
+                </th>
+                <th>
+                  <span style="display:flex;align-items:center;gap:4px;justify-content:flex-end">
+                    <span class="chip-dot" style="width:7px;height:7px;border-radius:50%;background:#b46428;flex-shrink:0;display:inline-block"></span>
+                    LC-11
+                  </span>
+                </th>
+              </tr>
+            </thead>
+            <tbody>
+              <!-- K values in m/d for readability; color-coded by sample -->
+              <tr><td><div class="param-name">Hazen</div><div class="param-desc">K (m/d)</div></td>
+                <td class="cv-a">12.3</td><td class="cv-b">1.8</td><td class="cv-c">85.4</td></tr>
+              <tr><td><div class="param-name">Kozeny-Carman</div><div class="param-desc">K (m/d)</div></td>
+                <td class="cv-a">11.8</td><td class="cv-b">1.6</td><td class="cv-c">79.2</td></tr>
+              <tr><td><div class="param-name">USBR</div><div class="param-desc">K (m/d)</div></td>
+                <td class="cv-a">13.1</td><td class="cv-b">2.0</td><td class="cv-c">91.8</td></tr>
+              <tr><td><div class="param-name">Terzaghi</div><div class="param-desc">K (m/d)</div></td>
+                <td class="cv-a">10.9</td><td class="cv-b">1.5</td><td class="cv-c">71.6</td></tr>
+              <tr><td><div class="param-name">Slichter</div><div class="param-desc">K (m/d)</div></td>
+                <td class="cv-a">9.4</td><td class="cv-b">1.3</td><td class="cv-c">62.8</td></tr>
+              <tr><td><div class="param-name">Beyer</div><div class="param-desc">K (m/d)</div></td>
+                <td class="cv-a">14.6</td><td class="cv-b">2.2</td><td class="cv-c">97.3</td></tr>
+              <tr><td><div class="param-name">Seelheim</div><div class="param-desc">K (m/d)</div></td>
+                <td class="cv-a">11.2</td><td class="cv-b">1.7</td><td class="cv-c">76.4</td></tr>
+              <tr><td><div class="param-name">Pavchich</div><div class="param-desc">K (m/d)</div></td>
+                <td class="cv-a">15.8</td><td class="cv-b">2.5</td><td class="cv-c">—</td></tr>
+              <!-- Summary row -->
+              <tr style="background:rgba(212,196,168,.15);border-top:2px solid var(--border-dk)">
+                <td><div class="param-name" style="font-weight:700">K̄ geom. mean</div><div class="param-desc">m/d · All methods</div></td>
+                <td style="text-align:right;font-family:var(--fm);font-size:13px;font-weight:700;color:#3a7ea0">12.3</td>
+                <td style="text-align:right;font-family:var(--fm);font-size:13px;font-weight:700;color:#5a7e18">3.1</td>
+                <td style="text-align:right;font-family:var(--fm);font-size:13px;font-weight:700;color:#b46428">48.7</td>
+              </tr>
+              <!-- Permeability class row -->
+              <tr style="background:rgba(212,196,168,.08)">
+                <td><div class="param-name">Permeability class</div></td>
+                <td style="text-align:right"><span class="perm-badge perm-med">Medium</span></td>
+                <td style="text-align:right"><span class="perm-badge perm-low">Low–Med.</span></td>
+                <td style="text-align:right"><span class="perm-badge perm-high">High</span></td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+      </div><!-- /panel K -->
+
+    </div><!-- /cmp-body -->
+  </div><!-- /tab-comparison -->
+
+  <!-- ═══ REPORTS TAB (placeholder) ═══ -->
+  <div class="tab-content" id="tab-reports">
+    <div style="flex:1;display:flex;align-items:center;justify-content:center;flex-direction:column;gap:12px;color:var(--text-muted)">
+      <i class="fa-solid fa-file-contract" style="font-size:48px;opacity:.25"></i>
+      <p style="font-size:13px;font-style:italic">Reports tab — scope: 03_reports.html</p>
+    </div>
+  </div>
+
+  <!-- ═══ EXPORT TAB (placeholder) ═══ -->
+  <div class="tab-content" id="tab-export">
+    <div style="flex:1;display:flex;align-items:center;justify-content:center;flex-direction:column;gap:12px;color:var(--text-muted)">
+      <i class="fa-solid fa-file-export" style="font-size:48px;opacity:.25"></i>
+      <p style="font-size:13px;font-style:italic">Export tab — scope: 03_reports.html</p>
+    </div>
+  </div>
+
+</main>
+
+<!-- ═══════ STATUS BAR ═══════ -->
+<div class="st">
+  <div class="st-pill">
+    <div class="led ok"></div>
+    <span class="st-ready">Ready</span>
+  </div>
+  <div class="sseg"><span class="sk">SAMPLE</span><span class="sv hi" id="stsmp">Borehole_DK-07</span></div>
+  <div class="stsep"></div>
+  <div class="sseg"><span class="sk">D50</span><span class="sv bl">0.42 mm</span></div>
+  <div class="stsep"></div>
+  <div class="sseg"><span class="sk">K̄</span><span class="sv bl">12.3 m/d</span></div>
+  <div class="stsep"></div>
+  <div class="sseg"><span class="sk">TEMP</span><span class="sv">20.0 °C</span></div>
+  <div class="stsep"></div>
+  <div class="sseg"><span class="sk">METHODS</span><span class="sv">14 / 14</span></div>
+  <div class="stsep"></div>
+  <div class="sseg"><span class="sk">DATASETS</span><span class="sv hi" id="st-datasets">12</span></div>
+  <div class="stsp"></div>
+  <div class="st-ver">v0.9.0-beta</div>
+</div>
+
+</div><!-- /app -->
+
+<script>
+/* ══════════════════════════════════════════════
+   DATASET REGISTRY — single source of truth for sidebar + tabs
+══════════════════════════════════════════════ */
+const DATASETS = [
+  {id:'welcome',  label:'Welcome',              icon:'house',   closable:false, special:true},
+  {id:'dk07',     label:'Borehole_DK-07',       icon:'vial',    closable:true,  d50:'0.42',  k:'12.3',  fractions:47, status:'ok'},
+  {id:'gw24a',    label:'Sample_GW-2024-A',     icon:'vial',    closable:true,  d50:'0.18',  k:'3.1',   fractions:38, status:'ok'},
+  {id:'lc11',     label:'Core_LC-11',           icon:'vial',    closable:true,  d50:'0.89',  k:'48.7',  fractions:52, status:'ok'},
+  {id:'bh03',     label:'Borehole_BH-03',       icon:'vial',    closable:true,  d50:'0.31',  k:'7.2',   fractions:41, status:'ok'},
+  {id:'sp05',     label:'Soil_Profile_SP-05',   icon:'vial',    closable:true,  d50:'0.65',  k:'28.4',  fractions:29, status:'warn', warn:'2 sieves below detection limit'},
+  {id:'tr12',     label:'Trench_TR-12',         icon:'vial',    closable:true,  d50:'0.12',  k:'1.4',   fractions:33, status:'ok'},
+  {id:'cptu08',   label:'CPTU-08_Sample',       icon:'vial',    closable:true,  d50:'0.08',  k:'0.6',   fractions:22, status:'ok'},
+  {id:'dh14',     label:'Drillhole_DH-14',      icon:'vial',    closable:true,  d50:'1.20',  k:'112.3', fractions:55, status:'ok'},
+  {id:'ws22',     label:'WellScreen_WS-22',     icon:'vial',    closable:true,  d50:'0.55',  k:'21.8',  fractions:44, status:'ok'},
+  {id:'gp09',     label:'GravelPit_GP-09',      icon:'vial',    closable:true,  d50:'2.80',  k:'380.5', fractions:18, status:'ok'},
+  {id:'cl01',     label:'Clay_CL-01',           icon:'vial',    closable:true,  d50:'0.004', k:'0.002', fractions:62, status:'warn', warn:'Cu > 500, method applicability limited'},
+  {id:'rk15',     label:'RockCore_RK-15',       icon:'vial',    closable:true,  d50:'4.20',  k:'820.0', fractions:14, status:'ok'},
+];
+
+let currentId = 'dk07';
+
+/* ── Build sidebar sample list ── */
+function buildSidebar() {
+  const list = document.getElementById('s-list');
+  const samples = DATASETS.filter(d => !d.special);
+  list.innerHTML = samples.map(d => {
+    const isActive = d.id === currentId;
+    const isWarn = d.status === 'warn';
+    return `
+    <div class="s-item${isActive ? ' active expanded' : ''}" id="si-${d.id}" data-id="${d.id}">
+      <div class="s-item-main" onclick="selSample('${d.id}')">
+        <div class="s-ic"><i class="fa-solid fa-${d.icon}"></i></div>
+        <div class="s-info">
+          <div class="s-name">${d.label}</div>
+          <div class="s-meta">D50 ${d.d50} mm · K̄ ${d.k} m/d</div>
+        </div>
+        <div class="s-led ${d.status}"></div>
+        <button class="s-expand-btn" onclick="toggleExpand(event,'${d.id}')">
+          <i class="fa-solid fa-chevron-right"></i>
+        </button>
+      </div>
+      <div class="s-detail">
+        <div class="s-status-line${isWarn ? ' warn' : ''}">
+          <i class="fa-solid fa-${isWarn ? 'triangle-exclamation' : 'check-circle'}"></i>
+          ${isWarn ? d.warn : d.fractions + ' sieve fractions · All OK'}
+        </div>
+        <div class="s-act-row">
+          <button class="s-act-btn"><i class="fa-solid fa-table"></i> Inspect</button>
+          <button class="s-act-btn"><i class="fa-solid fa-terminal"></i> Log</button>
+          <button class="s-act-btn"><i class="fa-solid fa-sliders"></i> Props</button>
+          <button class="s-act-btn danger"><i class="fa-solid fa-xmark"></i> Remove</button>
+        </div>
+      </div>
+    </div>`;
+  }).join('');
+}
+
+/* ── Build dataset tab bar ── */
+function buildTabs() {
+  const bar = document.getElementById('dsbar');
+  bar.innerHTML = DATASETS.map(d => {
+    const isActive = d.id === currentId;
+    const isWelcome = d.special;
+    return `<div class="ds-tab${isActive && !isWelcome ? ' on' : ''}" id="dt-${d.id}" data-id="${d.id}"
+      onclick="selSample('${d.id}')">
+      <i class="fa-solid fa-${d.icon}"></i>&nbsp;${d.label}
+      ${d.closable ? '<span class="dx" onclick="event.stopPropagation()">✕</span>' : ''}
+    </div>`;
+  }).join('');
+}
+
+/* ── Build overflow dropdown ── */
+function buildDropdown() {
+  const menu = document.getElementById('ds-dropdown-menu');
+  const samples = DATASETS.filter(d => !d.special);
+  menu.innerHTML = '<div class="ds-dd-sep" style="margin-top:2px"></div>'
+    + samples.map(d => `
+    <div class="ds-dd-item${d.id === currentId ? ' on' : ''}" onclick="selSample('${d.id}');closeDropdown()">
+      <i class="fa-solid fa-vial"></i>
+      <span>${d.label}</span>
+      <span style="font-family:var(--fm);font-size:9.5px;color:var(--text-muted);margin-left:4px">${d.d50}mm</span>
+      <div class="ds-dd-led ${d.status}" style="margin-left:auto"></div>
+      ${d.id === currentId ? '<i class="fa-solid fa-check ds-dd-check" style="margin-left:6px"></i>' : ''}
+    </div>`).join('');
+}
+
+/* ── Select a sample — syncs sidebar + tabs + status bar ── */
+function selSample(id) {
+  const ds = DATASETS.find(d => d.id === id);
+  if (!ds) return;
+  currentId = id;
+
+  // Sidebar: update active state, auto-expand selected
+  document.querySelectorAll('.s-item').forEach(el => {
+    const isThis = el.dataset.id === id;
+    el.classList.toggle('active', isThis);
+    if (isThis) el.classList.add('expanded');
+  });
+
+  // Tabs: update active state
+  document.querySelectorAll('.ds-tab').forEach(t => {
+    t.classList.toggle('on', t.dataset.id === id);
+  });
+
+  // Scroll selected tab into view
+  const activeTab = document.getElementById('dt-' + id);
+  const wrap = document.getElementById('ds-scroll-wrap');
+  if (activeTab && wrap) {
+    const tLeft = activeTab.offsetLeft;
+    const tRight = tLeft + activeTab.offsetWidth;
+    const wLeft = wrap.scrollLeft;
+    const wRight = wLeft + wrap.clientWidth;
+    if (tLeft < wLeft) wrap.scrollLeft = tLeft - 8;
+    else if (tRight > wRight) wrap.scrollLeft = tRight - wrap.clientWidth + 8;
+  }
+
+  // Refresh overflow badge + dropdown
+  updateNav();
+  buildDropdown();
+
+  // Status bar
+  if (!ds.special) {
+    document.getElementById('stsmp').textContent = ds.label;
+    document.getElementById('std50').textContent = ds.d50 + ' mm';
+    document.getElementById('stk').textContent = ds.k + ' m/d';
+    document.getElementById('st-datasets').textContent = DATASETS.filter(d => !d.special).length;
+  }
+}
+
+/* ── Toggle expand on sidebar card ── */
+function toggleExpand(evt, id) {
+  evt.stopPropagation();
+  const el = document.getElementById('si-' + id);
+  if (el) el.classList.toggle('expanded');
+}
+
+/* ── Tab bar scroll ── */
+function scrollTabs(dir) {
+  const wrap = document.getElementById('ds-scroll-wrap');
+  wrap.scrollBy({left: dir * 160, behavior: 'smooth'});
+  setTimeout(updateNav, 220);
+}
+
+/* ── Update scroll arrow states + overflow badge ── */
+function updateNav() {
+  const wrap = document.getElementById('ds-scroll-wrap');
+  const bar  = document.getElementById('dsbar');
+  if (!wrap || !bar) return;
+
+  const prevBtn = document.getElementById('ds-prev');
+  const nextBtn = document.getElementById('ds-next');
+  const moreBtn = document.getElementById('ds-more-btn');
+  const moreCount = document.getElementById('ds-more-count');
+
+  prevBtn.disabled = wrap.scrollLeft <= 1;
+  nextBtn.disabled = wrap.scrollLeft >= bar.scrollWidth - wrap.clientWidth - 1;
+
+  // Count tabs not fully visible
+  const wrapRect = wrap.getBoundingClientRect();
+  let hidden = 0;
+  document.querySelectorAll('.ds-tab').forEach(tab => {
+    const r = tab.getBoundingClientRect();
+    if (r.right > wrapRect.right + 4 || r.left < wrapRect.left - 4) hidden++;
+  });
+  moreCount.textContent = hidden > 0 ? '+' + hidden : '';
+  moreBtn.style.display = hidden > 0 ? 'flex' : 'none';
+}
+
+/* ── Overflow dropdown toggle ── */
+function toggleDropdown() {
+  document.getElementById('ds-dropdown-menu').classList.toggle('open');
+}
+function closeDropdown() {
+  document.getElementById('ds-dropdown-menu').classList.remove('open');
+}
+document.addEventListener('click', e => {
+  if (!e.target.closest('.ds-more-wrap')) closeDropdown();
+});
+document.getElementById('ds-scroll-wrap').addEventListener('scroll', updateNav);
+
+/* ── Main tab switching ── */
+function swMainTab(id, el) {
+  document.querySelectorAll('.tab-content').forEach(c => c.classList.remove('active'));
+  document.querySelectorAll('.tab').forEach(t => t.classList.remove('on'));
+  document.getElementById('tab-' + id).classList.add('active');
+  el.classList.add('on');
+  const dsOuter = document.getElementById('ds-bar-outer');
+  const ntbar = document.querySelector('.ntab-bar');
+  const isInd = id === 'individual';
+  if (dsOuter) dsOuter.style.display = isInd ? 'flex' : 'none';
+  if (ntbar) ntbar.style.display = isInd ? 'flex' : 'none';
+}
+
+/* ── Nested sub-tab switching ── */
+function swNtab(id, el) {
+  document.querySelectorAll('.ntab-content').forEach(c => c.classList.remove('active'));
+  document.querySelectorAll('.ntab').forEach(t => t.classList.remove('on'));
+  document.getElementById('ntab-' + id).classList.add('active');
+  el.classList.add('on');
+}
+
+/* ── Plot sidebar toggle ── */
+let pwSideOpen = true;
+function togglePwSide() {
+  pwSideOpen = !pwSideOpen;
+  const side = document.getElementById('pw-side');
+  const chev = document.getElementById('sb-chevron');
+  side.classList.toggle('collapsed', !pwSideOpen);
+  if (chev) chev.className = pwSideOpen ? 'fa-solid fa-chevron-left' : 'fa-solid fa-chevron-right';
+}
+
+/* ── K-values table ── */
+const METHODS = [
+  {name:'Hazen',         cat:'Empirical',   ks:'1.42e-2', ksm:'1.42e-4', kmd:'12.3'},
+  {name:'Kozeny-Carman', cat:'Theoretical', ks:'1.37e-2', ksm:'1.37e-4', kmd:'11.8'},
+  {name:'USBR',          cat:'Empirical',   ks:'1.52e-2', ksm:'1.52e-4', kmd:'13.1'},
+  {name:'Terzaghi',      cat:'Empirical',   ks:'1.26e-2', ksm:'1.26e-4', kmd:'10.9'},
+  {name:'Slichter',      cat:'Empirical',   ks:'1.09e-2', ksm:'1.09e-4', kmd:'9.4'},
+  {name:'Beyer',         cat:'Empirical',   ks:'1.69e-2', ksm:'1.69e-4', kmd:'14.6'},
+  {name:'Seelheim',      cat:'Empirical',   ks:'1.30e-2', ksm:'1.30e-4', kmd:'11.2'},
+  {name:'Pavchich',      cat:'Empirical',   ks:'1.83e-2', ksm:'1.83e-4', kmd:'15.8'},
+  {name:'Chapuis',       cat:'Analytical',  ks:'1.55e-2', ksm:'1.55e-4', kmd:'13.4'},
+  {name:'Alyamani-Sen',  cat:'Empirical',   ks:'1.19e-2', ksm:'1.19e-4', kmd:'10.3'},
+  {name:'van Baaren',    cat:'Empirical',   ks:'1.48e-2', ksm:'1.48e-4', kmd:'12.8'},
+  {name:'Zamarin',       cat:'Empirical',   ks:'1.08e-2', ksm:'1.08e-4', kmd:'9.3'},
+  {name:'Zunker',        cat:'Empirical',   ks:'1.35e-2', ksm:'1.35e-4', kmd:'11.7'},
+  {name:'Breyer',        cat:'Empirical',   ks:'1.61e-2', ksm:'1.61e-4', kmd:'13.9'},
+];
+function buildKTable() {
+  const tbody = document.getElementById('k-tbl-body');
+  METHODS.forEach((m, i) => {
+    const tr = document.createElement('tr');
+    if (i === 0) tr.classList.add('sel-row');
+    tr.innerHTML = `
+      <td><div class="meth-name">${m.name}</div><div class="meth-cat">${m.cat}</div></td>
+      <td>${m.cat}</td><td>${m.ks}</td><td>${m.ksm}</td><td>${m.kmd}</td>
+      <td><span class="k-badge ok"><i class="fa-solid fa-check" style="font-size:8px"></i> Valid</span></td>`;
+    tr.style.cursor = 'pointer';
+    tr.addEventListener('click', () => {
+      document.querySelectorAll('#k-tbl-body tr').forEach(r => r.classList.remove('sel-row'));
+      tr.classList.add('sel-row');
+      document.getElementById('md-name').textContent = m.name;
+      document.getElementById('md-cat').textContent = m.cat + ' · Sand';
+      document.getElementById('md-k').textContent = m.ksm;
+    });
+    tbody.appendChild(tr);
+  });
+}
+
+/* ── Init ── */
+buildSidebar();
+buildTabs();
+buildDropdown();
+buildKTable();
+setTimeout(updateNav, 100); // after layout
+</script>
+</body>
+</html>

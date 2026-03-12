@@ -1,0 +1,746 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>GrainSize Analysis — Shell</title>
+
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Playfair+Display:wght@600;700&family=Source+Sans+3:wght@300;400;500;600&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/all.min.css">
+
+<style>
+/* ══════════════════════════════════════════════
+   TOKENS — anchored to the program's exact palette
+   #f5f5f0  bg · #d2b48c tan · #d4c4a8 beige
+   #6b8e23  olive · #2c5530 forest · #c4a574 amber
+   #8b7355  earth · #5d4e37 text · #ddbf94 hover
+══════════════════════════════════════════════ */
+:root {
+  /* Content — unchanged from real program */
+  --bg:        #f5f5f0;
+  --bg-raised: #eee8dc;
+  --bg-low:    #e8e0d0;
+  --border:    #d4c4a8;
+  --border-dk: #c0ae90;
+  --text:      #2f2f2f;
+  --text-mid:  #5d4e37;
+  --text-muted:#9a8c78;
+
+  /* Program accent colors */
+  --olive:     #6b8e23;
+  --olive-h:   #7fa02d;
+  --olive-dk:  #4f6a1a;
+  --forest:    #2c5530;
+  --tan:       #d2b48c;   /* exact program tab bg */
+  --tan-h:     #ddbf94;   /* exact program tab hover */
+  --amber:     #c4a574;   /* exact program scrollbar */
+  --earth:     #8b7355;   /* exact program dark border */
+
+  /* ── Sidebar — medium-light sandy/grainy, not dark */
+  --sb:        #ddd3be;
+  --sb-up:     #e5dcc8;
+  --sb-dn:     #d0c4ac;
+  --sb-act:    #c8ba9e;
+  --sb-bdr:    #c0ae90;
+  --sb-text:   #3a2e1c;
+  --sb-mid:    #6a5438;
+
+  /* ── Logo card — darker warm earth, like damp compacted loam */
+  --logo-bg:      #7a5e3e;   /* rich dark loam */
+  --logo-bg-top:  #8e6e4a;   /* slightly lighter top edge */
+  --logo-text:    #f4ece0;
+  --logo-sub:     #c8a87a;
+  --logo-mark-bg: rgba(255,255,255,0.13);
+  --logo-mark-bdr:rgba(255,255,255,0.22);
+  --sb-muted:  #9a8468;   /* muted text / labels */
+
+  /* Status bar — warm medium-dark earth (not black, not green) */
+  --st-bg:     #8b7355;   /* same as --earth */
+  --st-text:   #f0e8d8;
+  --st-muted:  #c4a882;
+  --st-dim:    #a89070;
+
+  /* Menubar — very close to existing #f0ebe5 */
+  --mb-bg:     #ede8de;
+  --mb-bdr:    #cfc0a4;
+
+  /* Toolbar — close to existing #e8dcc8, tan family */
+  --tb-bg:     #e4d8c0;
+  --tb-bdr:    #ccc0a0;
+
+  --sw: 258px;
+  --mbh: 24px;
+  --tbh: 40px;
+  --dth: 30px;
+  --sth: 24px;
+
+  --fu: 'Source Sans 3', system-ui, sans-serif;
+  --fd: 'Playfair Display', Georgia, serif;
+  --fm: 'JetBrains Mono', monospace;
+  --r: 4px;
+}
+
+/* ══════════════════════════════════════════════ RESET */
+*,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
+html,body{height:100%;overflow:hidden}
+body{font-family:var(--fu);font-size:13px;background:var(--bg);color:var(--text);-webkit-font-smoothing:antialiased}
+button,select,input{font-family:inherit;cursor:pointer}
+
+/* Sand/grain texture — sits over everything, very subtle */
+body::after{
+  content:'';position:fixed;inset:0;pointer-events:none;z-index:9998;
+  opacity:.18;
+  background-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='260' height='260'%3E%3Cfilter id='g'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.72' numOctaves='4' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='260' height='260' filter='url(%23g)' opacity='.07'/%3E%3C/svg%3E");
+}
+
+/* ══════════════════════════════════════════════ GRID */
+.app{
+  display:grid;height:100vh;
+  grid-template-rows:var(--mbh) 1fr var(--sth);
+  grid-template-columns:var(--sw) 1fr;
+  grid-template-areas:"mb mb" "sb main" "st st";
+  overflow:hidden;
+}
+
+/* ══════════════════════════════════════════════ MENU BAR */
+.mb{
+  grid-area:mb;display:flex;align-items:center;
+  background:var(--mb-bg);border-bottom:1px solid var(--mb-bdr);
+  padding:0 6px;user-select:none;position:relative;z-index:200;
+}
+.mb-title{
+  position:absolute;left:50%;transform:translateX(-50%);
+  font-size:11.5px;color:var(--text-muted);pointer-events:none;white-space:nowrap;
+}
+.mi{
+  display:flex;align-items:center;height:100%;padding:0 10px;
+  font-size:12.5px;color:var(--text-mid);cursor:pointer;
+  position:relative;border-radius:2px;transition:background .1s;
+}
+.mi:hover{background:rgba(107,142,35,.1);color:var(--text)}
+.dd{
+  display:none;position:absolute;top:calc(100% + 1px);left:0;min-width:215px;
+  background:var(--bg-raised);border:1px solid var(--border);border-radius:6px;
+  padding:4px 0;z-index:9000;
+  box-shadow:0 5px 18px rgba(40,24,8,.14),0 1px 3px rgba(40,24,8,.08);
+}
+.mi:hover .dd{display:block}
+.ddi{
+  display:flex;align-items:center;gap:10px;padding:5px 14px;
+  font-size:12.5px;color:var(--text-mid);transition:background .08s,color .08s;
+}
+.ddi i{width:14px;color:var(--text-muted);font-size:11px}
+.ddi:hover{background:rgba(107,142,35,.08);color:var(--text)}
+.ddi:hover i{color:var(--olive)}
+.ddi .k{
+  margin-left:auto;font-family:var(--fm);font-size:9.5px;
+  color:var(--text-muted);background:var(--bg-low);
+  border:1px solid var(--border);padding:1px 5px;border-radius:3px;
+}
+.dds{height:1px;background:var(--border);margin:3px 8px}
+.mb-sp{flex:1}
+
+/* ══════════════════════════════════════════════
+   SIDEBAR
+   Light sandy/grainy — warm medium tone, clearly distinct
+   from the content without being dark or heavy.
+   A right border + subtle inner shadow create the separation.
+══════════════════════════════════════════════ */
+.sb{
+  grid-area:sb;display:flex;flex-direction:column;
+  overflow:hidden;
+  background:var(--sb);
+  border-right:1px solid var(--sb-bdr);
+  /* Subtle inner shadow on right edge to emphasise depth */
+  box-shadow:inset -4px 0 8px rgba(100,60,20,.05);
+}
+
+/* Logo card — warm amber earth, fully in the sandy palette family */
+.sb-logo{
+  display:flex;align-items:center;gap:11px;
+  padding:11px 14px 10px;flex-shrink:0;
+  background:linear-gradient(160deg, var(--logo-bg-top) 0%, var(--logo-bg) 100%);
+  border-bottom:2px solid var(--sb-bdr);
+  box-shadow:0 2px 6px rgba(0,0,0,.08);
+}
+.logo-mark{
+  width:32px;height:32px;flex-shrink:0;
+  background:var(--logo-mark-bg);
+  border:1px solid var(--logo-mark-bdr);
+  border-radius:var(--r);
+  display:flex;align-items:center;justify-content:center;
+  box-shadow:inset 0 1px 0 rgba(255,255,255,.2), 0 1px 3px rgba(0,0,0,.15);
+}
+.logo-mark i{color:var(--logo-text);font-size:14px;opacity:.9}
+.logo-tx{display:flex;flex-direction:column;gap:2px}
+.logo-name{
+  font-family:var(--fd);font-size:14px;font-weight:700;
+  color:var(--logo-text);line-height:1.15;letter-spacing:.01em;
+}
+.logo-sub{
+  font-family:var(--fm);font-size:8.5px;
+  color:var(--logo-sub);letter-spacing:.06em;
+}
+
+/* Scrollable body */
+.sb-body{
+  flex:1;overflow-y:auto;overflow-x:hidden;
+  scrollbar-width:thin;
+  scrollbar-color:var(--sb-bdr) transparent;
+}
+::-webkit-scrollbar{width:5px}
+::-webkit-scrollbar-track{background:transparent}
+::-webkit-scrollbar-thumb{background:var(--sb-bdr);border-radius:99px}
+
+/* Section headers — slightly lighter band, uppercase label */
+.sb-sect{
+  padding:8px 13px 5px;
+  background:var(--sb-up);
+  border-bottom:1px solid var(--sb-bdr);
+  border-top:1px solid rgba(255,255,255,.45);
+  display:flex;align-items:center;justify-content:space-between;
+}
+.sb-sect-lbl{
+  font-size:9.5px;font-weight:600;
+  color:var(--sb-muted);letter-spacing:.09em;text-transform:uppercase;
+}
+.sb-sect-btn{
+  display:flex;align-items:center;gap:3px;
+  padding:2px 7px;border:1px solid var(--sb-bdr);
+  background:rgba(255,255,255,.35);border-radius:var(--r);
+  font-size:10.5px;color:var(--sb-mid);transition:all .12s;
+}
+.sb-sect-btn:hover{background:rgba(255,255,255,.6);border-color:var(--border-dk);color:var(--sb-text)}
+.sb-sect-btn i{font-size:9px}
+
+/* Content padding inside sections */
+.sb-pad{padding:8px 10px}
+
+/* Drop zone */
+.drop{
+  border:1.5px dashed var(--sb-bdr);border-radius:5px;
+  padding:11px 10px;text-align:center;cursor:pointer;
+  transition:all .15s;background:rgba(255,255,255,.25);
+  display:flex;flex-direction:column;align-items:center;gap:4px;
+}
+.drop:hover{border-color:var(--olive);background:rgba(107,142,35,.07)}
+.drop i{font-size:17px;color:var(--sb-muted);transition:color .15s}
+.drop:hover i{color:var(--olive)}
+.drop-t{font-size:11px;color:var(--sb-mid)}
+.drop-s{font-size:9.5px;color:var(--sb-muted)}
+
+/* Sample items */
+.s-list{display:flex;flex-direction:column;gap:1px;padding:4px 6px 2px}
+.s-item{
+  display:flex;align-items:center;gap:8px;
+  padding:7px 8px;border-radius:var(--r);cursor:pointer;
+  transition:background .1s;border:1px solid transparent;
+  position:relative;
+}
+.s-item:hover{background:rgba(255,255,255,.4)}
+.s-item.active{
+  background:var(--sb-act);
+  border-color:var(--sb-bdr);
+  box-shadow:inset 0 1px 0 rgba(255,255,255,.4);
+}
+.s-item.active::before{
+  content:'';position:absolute;left:-6px;top:50%;
+  transform:translateY(-50%);
+  width:3px;height:16px;background:var(--olive);border-radius:0 3px 3px 0;
+}
+.s-ic{
+  width:26px;height:26px;border-radius:3px;flex-shrink:0;
+  display:flex;align-items:center;justify-content:center;
+  background:rgba(255,255,255,.3);border:1px solid var(--sb-bdr);
+}
+.s-ic i{font-size:11px;color:var(--sb-mid)}
+.s-item.active .s-ic{background:rgba(107,142,35,.15);border-color:rgba(107,142,35,.3)}
+.s-item.active .s-ic i{color:var(--olive)}
+.s-info{flex:1;min-width:0}
+.s-name{font-size:12px;font-weight:500;color:var(--sb-text);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.s-meta{font-family:var(--fm);font-size:9px;color:var(--sb-muted);margin-top:1px}
+.s-led{width:6px;height:6px;border-radius:50%;flex-shrink:0}
+.s-led.ok{background:#5aaa3a;box-shadow:0 0 4px rgba(90,170,58,.4)}
+.s-led.err{background:#c03828}
+
+/* Parameter rows */
+.p-rows{display:flex;flex-direction:column;gap:5px;padding:6px 10px 6px}
+.p-row{display:flex;align-items:center;justify-content:space-between;gap:6px}
+.p-lbl{font-size:11.5px;color:var(--sb-mid)}
+.p-lbl i{width:14px;font-size:10px;margin-right:3px;color:var(--sb-muted)}
+.p-field{display:flex;align-items:center;gap:4px}
+.p-in{
+  width:60px;height:22px;
+  background:rgba(255,255,255,.55);
+  border:1px solid var(--sb-bdr);border-radius:3px;
+  color:var(--sb-text);font-family:var(--fm);font-size:11px;
+  text-align:right;padding:0 5px;
+  transition:border-color .12s,background .12s;
+}
+.p-in:focus{outline:none;border-color:var(--olive);background:rgba(255,255,255,.85)}
+.p-unit{font-family:var(--fm);font-size:10px;color:var(--sb-muted);min-width:18px}
+
+/* Sidebar buttons */
+.sb-btn{
+  display:flex;align-items:center;gap:7px;
+  width:calc(100% - 20px);margin:2px 10px;
+  padding:6px 10px;border:1px solid var(--sb-bdr);
+  background:rgba(255,255,255,.35);border-radius:var(--r);
+  font-size:12px;color:var(--sb-mid);transition:all .12s;text-align:left;
+}
+.sb-btn i{font-size:11px;width:14px;color:var(--sb-muted)}
+.sb-btn:hover{background:rgba(255,255,255,.6);border-color:var(--border-dk);color:var(--sb-text)}
+/* Primary button — exact existing program green style */
+.sb-btn.go{
+  background:var(--olive);border-color:var(--olive-dk);
+  color:#fff;font-weight:600;
+}
+.sb-btn.go i{color:rgba(255,255,255,.8)}
+.sb-btn.go:hover{background:var(--olive-h)}
+
+/* Decorative strata strip */
+.strata{
+  margin:4px 10px 6px;
+  border-radius:var(--r);overflow:hidden;
+  border:1px solid var(--sb-bdr);
+  opacity:.7;
+}
+.st-row{
+  display:flex;align-items:center;gap:7px;
+  padding:4px 8px;font-size:9px;font-family:var(--fm);
+  border-bottom:1px solid rgba(0,0,0,.07);
+}
+.st-row:last-child{border-bottom:none}
+.st-r1{background:#c4b090;color:#6a4820}
+.st-r2{background:#d4c098;color:#7a5c30}
+.st-r3{background:#c8b888;color:#6a5820}
+.st-r4{background:#a0b8c8;color:#2a5878}
+.st-dot{width:5px;height:5px;border-radius:50%;background:currentColor;flex-shrink:0}
+
+/* DTU attribution box */
+.dtu-box{
+  flex-shrink:0;
+  border-top:1px solid var(--sb-bdr);
+  background:var(--sb-dn);
+  padding:9px 13px 8px;
+  display:flex;align-items:center;gap:10px;
+}
+.dtu-logo{
+  /* DTU wordmark: white text on DTU red */
+  background:#C8002A;
+  color:#fff;
+  font-family:'Source Sans 3', sans-serif;
+  font-size:13px;
+  font-weight:700;
+  letter-spacing:.04em;
+  padding:3px 6px 2px;
+  border-radius:2px;
+  flex-shrink:0;
+  line-height:1.2;
+  user-select:none;
+}
+.dtu-info{
+  display:flex;flex-direction:column;gap:1px;min-width:0;
+}
+.dtu-prog{
+  font-size:10.5px;font-weight:600;
+  color:var(--sb-text);
+  white-space:nowrap;overflow:hidden;text-overflow:ellipsis;
+  line-height:1.3;
+}
+.dtu-dept{
+  font-size:9px;
+  color:var(--sb-muted);
+  white-space:nowrap;overflow:hidden;text-overflow:ellipsis;
+  font-family:var(--fm);
+  letter-spacing:.01em;
+}
+
+/* Sidebar footer */
+.sb-foot{
+  background:var(--sb-dn);
+  border-top:1px solid var(--sb-bdr);
+  padding:5px 6px;display:flex;gap:2px;flex-shrink:0;
+}
+.sf-btn{
+  flex:1;display:flex;flex-direction:column;align-items:center;gap:3px;
+  padding:5px 4px;border:none;background:transparent;
+  border-radius:var(--r);font-size:9.5px;color:var(--sb-muted);transition:all .12s;
+}
+.sf-btn i{font-size:12px}
+.sf-btn:hover{background:rgba(255,255,255,.5);color:var(--sb-text)}
+
+/* ══════════════════════════════════════════════ MAIN */
+.main{grid-area:main;display:flex;flex-direction:column;overflow:hidden}
+
+/* Toolbar — warm sandy, program-consistent */
+.tb{
+  height:var(--tbh);display:flex;align-items:center;
+  background:var(--tb-bg);border-bottom:1px solid var(--tb-bdr);
+  flex-shrink:0;padding:0 8px 0 6px;
+}
+.tb-tabs{display:flex;align-items:flex-end;height:100%;padding:0 8px 0 4px}
+.tab{
+  display:flex;align-items:center;gap:6px;height:100%;padding:0 15px;
+  font-size:12.5px;font-weight:500;color:var(--text-muted);
+  border-bottom:2px solid transparent;cursor:pointer;
+  transition:color .12s,border-color .12s;white-space:nowrap;
+}
+.tab i{font-size:11px}
+.tab:hover{color:var(--text-mid)}
+.tab.on{color:var(--olive);border-bottom-color:var(--olive)}
+.t-badge{
+  font-family:var(--fm);font-size:9px;font-weight:700;
+  padding:1px 5px;border-radius:99px;line-height:1.4;
+  background:var(--bg-low);color:var(--text-muted);
+  border:1px solid var(--border);
+}
+.tab.on .t-badge{background:rgba(107,142,35,.1);color:var(--olive);border-color:rgba(107,142,35,.3)}
+
+.tb-sep{width:1px;height:20px;background:var(--tb-bdr);margin:0 6px;flex-shrink:0}
+.tb-sp{flex:1}
+.tb-btn{
+  display:flex;align-items:center;gap:5px;height:26px;padding:0 11px;
+  border:1px solid transparent;background:transparent;
+  border-radius:var(--r);font-size:12px;color:var(--text-mid);
+  transition:all .1s;white-space:nowrap;
+}
+.tb-btn i{font-size:11px}
+/* Hover = program's tan style */
+.tb-btn:hover{background:var(--tan);border-color:var(--earth);color:var(--text)}
+/* Primary = exact existing #6b8e23 green button */
+.tb-btn.go{background:var(--olive);border-color:var(--olive-dk);color:#fff;font-weight:600}
+.tb-btn.go:hover{background:var(--olive-h)}
+
+/* Dataset sub-tabs */
+.ds-bar{
+  height:var(--dth);display:flex;align-items:flex-end;
+  background:var(--bg-raised);border-bottom:1px solid var(--border);
+  padding:0 8px 0 12px;gap:2px;overflow-x:auto;scrollbar-width:none;flex-shrink:0;
+}
+.ds-bar::-webkit-scrollbar{display:none}
+.ds-tab{
+  display:flex;align-items:center;gap:5px;padding:4px 10px;
+  border:1px solid transparent;border-bottom:none;
+  border-radius:var(--r) var(--r) 0 0;
+  font-size:11.5px;color:var(--text-muted);cursor:pointer;
+  white-space:nowrap;transition:all .1s;background:transparent;margin-bottom:-1px;
+}
+.ds-tab:hover{background:var(--bg-low);color:var(--text-mid);border-color:var(--border)}
+.ds-tab.on{background:var(--bg);border-color:var(--border);color:var(--text);font-weight:500}
+.ds-tab i{font-size:10px}
+.dx{
+  width:14px;height:14px;border-radius:50%;
+  display:flex;align-items:center;justify-content:center;
+  font-size:8px;color:transparent;transition:all .1s;
+}
+.ds-tab:hover .dx{color:var(--text-muted)}
+.dx:hover{background:var(--border);color:var(--text)!important}
+
+/* Content placeholder */
+.view{flex:1;overflow:hidden;display:flex;flex-direction:column}
+.view-ph{
+  flex:1;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:10px;
+  background:radial-gradient(ellipse at 60% 40%,rgba(107,142,35,.04) 0%,transparent 60%);
+}
+.view-ph i{font-size:42px;color:var(--border);opacity:.5}
+.view-ph p{font-size:13px;color:var(--text-muted);font-style:italic}
+.view-ph small{font-family:var(--fm);font-size:10.5px;color:var(--olive);opacity:.45}
+
+/* ══════════════════════════════════════════════
+   STATUS BAR — warm earth medium, not dark-dark
+   Uses --earth (#8b7355) as base for a sandy-warm feel
+══════════════════════════════════════════════ */
+.st{
+  grid-area:st;display:flex;align-items:center;
+  background:var(--st-bg);border-top:1px solid #7a6448;
+  padding:0 10px;font-family:var(--fm);font-size:10.5px;
+  color:var(--st-muted);overflow:hidden;
+}
+.st-pill{
+  display:flex;align-items:center;gap:5px;
+  padding-right:10px;border-right:1px solid rgba(255,255,255,.15);margin-right:10px;
+}
+.led{width:6px;height:6px;border-radius:50%;flex-shrink:0}
+.led.ok{background:#7dd050;box-shadow:0 0 5px rgba(125,208,80,.5);animation:blink 4s ease infinite}
+@keyframes blink{0%,100%{opacity:1}50%{opacity:.35}}
+.st-ready{color:#a0d070}
+
+.stsep{width:1px;height:12px;background:rgba(255,255,255,.15);margin:0 8px;flex-shrink:0}
+.stsp{flex:1}
+.sseg{display:flex;align-items:center;gap:4px;white-space:nowrap}
+.sk{color:var(--st-dim);font-size:9.5px}
+.sv{color:var(--st-text)}
+.sv.hi{color:#f0e0b0}
+.sv.bl{color:#90c8e8}
+.st-ver{
+  padding-left:10px;border-left:1px solid rgba(255,255,255,.15);
+  font-size:9.5px;color:var(--st-dim);
+}
+
+/* ══════════════════════════════════════════════ ANIMATION */
+.sb{animation:slin .28s ease both}
+.main{animation:fin .28s .06s ease both}
+@keyframes slin{from{opacity:0;transform:translateX(-4px)}to{opacity:1;transform:none}}
+@keyframes fin{from{opacity:0}to{opacity:1}}
+.s-item:nth-child(1){animation:fin .22s .1s ease both}
+.s-item:nth-child(2){animation:fin .22s .17s ease both}
+.s-item:nth-child(3){animation:fin .22s .24s ease both}
+</style>
+</head>
+<body>
+<div class="app">
+
+<!-- ═══════ MENU BAR ═══════ -->
+<div class="mb">
+  <div class="mi">File
+    <div class="dd">
+      <div class="ddi"><i class="fa-regular fa-folder-open"></i>Open Files…<span class="k">Ctrl+O</span></div>
+      <div class="ddi"><i class="fa-regular fa-file-lines"></i>Load Sample Data</div>
+      <div class="dds"></div>
+      <div class="ddi"><i class="fa-solid fa-file-export"></i>Export Results…<span class="k">Ctrl+E</span></div>
+      <div class="ddi"><i class="fa-regular fa-image"></i>Export Plot…</div>
+      <div class="dds"></div>
+      <div class="ddi"><i class="fa-solid fa-right-from-bracket"></i>Exit<span class="k">Ctrl+Q</span></div>
+    </div>
+  </div>
+  <div class="mi">Analysis
+    <div class="dd">
+      <div class="ddi"><i class="fa-solid fa-bolt"></i>Calculate K Values<span class="k">Ctrl+K</span></div>
+      <div class="ddi"><i class="fa-solid fa-rotate"></i>Recalculate All</div>
+      <div class="dds"></div>
+      <div class="ddi"><i class="fa-solid fa-sliders"></i>Manage Porosity…</div>
+      <div class="ddi"><i class="fa-solid fa-table-columns"></i>Update Comparison</div>
+    </div>
+  </div>
+  <div class="mi">View
+    <div class="dd">
+      <div class="ddi"><i class="fa-solid fa-sidebar"></i>Toggle Panel<span class="k">Ctrl+B</span></div>
+      <div class="dds"></div>
+      <div class="ddi"><i class="fa-solid fa-chart-line"></i>Distribution Plot</div>
+      <div class="ddi"><i class="fa-solid fa-bars-staggered"></i>K-Values Chart</div>
+    </div>
+  </div>
+  <div class="mi">Help
+    <div class="dd">
+      <div class="ddi"><i class="fa-solid fa-book"></i>Help Topics<span class="k">F1</span></div>
+      <div class="ddi"><i class="fa-solid fa-flask"></i>Methods Overview</div>
+      <div class="dds"></div>
+      <div class="ddi"><i class="fa-solid fa-circle-info"></i>About</div>
+    </div>
+  </div>
+  <span class="mb-sp"></span>
+  <span style="font-size:11px;color:var(--text-muted);font-family:var(--fm);padding-right:4px">
+    Grain Size Analysis — Hydraulic Conductivity Calculator
+  </span>
+</div>
+
+<!-- ═══════ SIDEBAR ═══════ -->
+<aside class="sb">
+
+  <!-- Logo — forest green (only green in sidebar) -->
+  <div class="sb-logo">
+    <div class="logo-mark"><i class="fa-solid fa-layer-group"></i></div>
+    <div class="logo-tx">
+      <span class="logo-name">GrainSize</span>
+      <span class="logo-sub">ANALYSIS · v0.9-β</span>
+    </div>
+  </div>
+
+  <div class="sb-body">
+
+    <!-- Files & Samples -->
+    <div class="sb-sect">
+      <span class="sb-sect-lbl">Files &amp; Samples</span>
+      <button class="sb-sect-btn"><i class="fa-solid fa-plus"></i> Add</button>
+    </div>
+    <div class="sb-pad" style="padding-bottom:4px">
+      <div class="drop">
+        <i class="fa-solid fa-cloud-arrow-up"></i>
+        <span class="drop-t">Drop files or click to browse</span>
+        <span class="drop-s">CSV · XLSX · TXT</span>
+      </div>
+    </div>
+    <div class="s-list">
+      <div class="s-item active" onclick="sel(this,'Borehole_DK-07','0.42','12.3')">
+        <div class="s-ic"><i class="fa-solid fa-vial"></i></div>
+        <div class="s-info">
+          <div class="s-name">Borehole_DK-07</div>
+          <div class="s-meta">D50 0.42 mm · K̄ 12.3 m/d</div>
+        </div>
+        <div class="s-led ok"></div>
+      </div>
+      <div class="s-item" onclick="sel(this,'Sample_GW-2024-A','0.18','3.1')">
+        <div class="s-ic"><i class="fa-solid fa-vial"></i></div>
+        <div class="s-info">
+          <div class="s-name">Sample_GW-2024-A</div>
+          <div class="s-meta">D50 0.18 mm · K̄ 3.1 m/d</div>
+        </div>
+        <div class="s-led ok"></div>
+      </div>
+      <div class="s-item" onclick="sel(this,'Core_LC-11','0.89','48.7')">
+        <div class="s-ic"><i class="fa-solid fa-vial"></i></div>
+        <div class="s-info">
+          <div class="s-name">Core_LC-11</div>
+          <div class="s-meta">D50 0.89 mm · K̄ 48.7 m/d</div>
+        </div>
+        <div class="s-led ok"></div>
+      </div>
+    </div>
+
+    <!-- Parameters -->
+    <div class="sb-sect" style="margin-top:6px">
+      <span class="sb-sect-lbl">Parameters</span>
+    </div>
+    <div class="p-rows">
+      <div class="p-row">
+        <span class="p-lbl"><i class="fa-solid fa-thermometer-half"></i>Temperature</span>
+        <div class="p-field">
+          <input class="p-in" type="number" value="20.0" step="0.5">
+          <span class="p-unit">°C</span>
+        </div>
+      </div>
+      <div class="p-row">
+        <span class="p-lbl"><i class="fa-solid fa-circle-nodes"></i>Porosity</span>
+        <div class="p-field">
+          <input class="p-in" type="number" value="0.40" step="0.01">
+          <span class="p-unit">—</span>
+        </div>
+      </div>
+    </div>
+    <button class="sb-btn">
+      <i class="fa-solid fa-sliders"></i> Manage Per-Sample Porosity…
+    </button>
+
+    <!-- Actions -->
+    <div class="sb-sect" style="margin-top:6px">
+      <span class="sb-sect-lbl">Actions</span>
+    </div>
+    <div style="padding:6px 0 2px">
+      <button class="sb-btn go">
+        <i class="fa-solid fa-bolt"></i> Calculate K Values
+      </button>
+    </div>
+
+    <!-- Stratigraphy decoration -->
+    <div class="sb-sect" style="margin-top:6px">
+      <span class="sb-sect-lbl">Stratigraphy</span>
+    </div>
+    <div style="padding:6px 0 4px">
+      <div class="strata">
+        <div class="st-row st-r1"><div class="st-dot"></div>Topsoil / Fill</div>
+        <div class="st-row st-r2"><div class="st-dot"></div>Fine Sand</div>
+        <div class="st-row st-r3"><div class="st-dot"></div>Coarse Gravel</div>
+        <div class="st-row st-r4"><div class="st-dot"></div>▼ Groundwater</div>
+      </div>
+    </div>
+
+  </div><!-- /sb-body -->
+
+  <!-- DTU branding -->
+  <div class="dtu-box">
+    <div class="dtu-logo">DTU</div>
+    <div class="dtu-info">
+      <span class="dtu-prog">Grain Size Analysis</span>
+      <span class="dtu-dept">Hydraulic Conductivity Calculator</span>
+    </div>
+  </div>
+
+  <div class="sb-foot">
+    <button class="sf-btn"><i class="fa-solid fa-book-open"></i>Help</button>
+    <button class="sf-btn"><i class="fa-solid fa-gears"></i>Settings</button>
+    <button class="sf-btn"><i class="fa-solid fa-circle-info"></i>About</button>
+  </div>
+
+</aside>
+
+<!-- ═══════ MAIN ═══════ -->
+<main class="main">
+
+  <div class="tb">
+    <div class="tb-tabs">
+      <div class="tab on" onclick="swTab(this,0)">
+        <i class="fa-solid fa-chart-area"></i>Individual Samples
+        <span class="t-badge">3</span>
+      </div>
+      <div class="tab" onclick="swTab(this,1)">
+        <i class="fa-solid fa-code-compare"></i>Comparison
+      </div>
+      <div class="tab" onclick="swTab(this,2)">
+        <i class="fa-solid fa-file-contract"></i>Reports
+      </div>
+      <div class="tab" onclick="swTab(this,3)">
+        <i class="fa-solid fa-file-export"></i>Export
+      </div>
+    </div>
+
+    <div class="tb-sep"></div>
+    <button class="tb-btn"><i class="fa-regular fa-folder-open"></i>&nbsp;Add Files</button>
+    <button class="tb-btn go"><i class="fa-solid fa-bolt"></i>&nbsp;Calculate K</button>
+
+    <div class="tb-sp"></div>
+
+    <button class="tb-btn" style="margin-right:4px"><i class="fa-solid fa-book"></i>&nbsp;Help</button>
+  </div>
+
+  <div class="ds-bar" id="dsbar">
+    <div class="ds-tab on" onclick="swDs(this)"><i class="fa-solid fa-house"></i> Welcome</div>
+    <div class="ds-tab" onclick="swDs(this)"><i class="fa-solid fa-vial"></i> Borehole_DK-07<span class="dx">✕</span></div>
+    <div class="ds-tab" onclick="swDs(this)"><i class="fa-solid fa-vial"></i> Sample_GW-2024-A<span class="dx">✕</span></div>
+    <div class="ds-tab" onclick="swDs(this)"><i class="fa-solid fa-vial"></i> Core_LC-11<span class="dx">✕</span></div>
+  </div>
+
+  <div class="view">
+    <div class="view-ph">
+      <i class="fa-solid fa-chart-area"></i>
+      <p>Plot workspace renders here — with its own toolbar &amp; controls</p>
+      <small>→ 02_individual_tab.html next</small>
+    </div>
+  </div>
+
+</main>
+
+<!-- ═══════ STATUS BAR ═══════ -->
+<div class="st">
+  <div class="st-pill">
+    <div class="led ok"></div>
+    <span class="st-ready">Ready</span>
+  </div>
+  <div class="sseg"><span class="sk">SAMPLE</span><span class="sv hi" id="stsmp">Borehole_DK-07</span></div>
+  <div class="stsep"></div>
+  <div class="sseg"><span class="sk">D50</span><span class="sv bl" id="std50">0.42 mm</span></div>
+  <div class="stsep"></div>
+  <div class="sseg"><span class="sk">K̄</span><span class="sv bl" id="stk">12.3 m/d</span></div>
+  <div class="stsep"></div>
+  <div class="sseg"><span class="sk">TEMP</span><span class="sv">20.0 °C</span></div>
+  <div class="stsep"></div>
+  <div class="sseg"><span class="sk">METHODS</span><span class="sv">14 / 14</span></div>
+  <div class="stsep"></div>
+  <div class="sseg"><span class="sk">DATASETS</span><span class="sv hi">3</span></div>
+  <div class="stsp"></div>
+  <div class="st-ver">v0.9.0-beta</div>
+</div>
+
+</div>
+<script>
+function sel(el,name,d50,k){
+  document.querySelectorAll('.s-item').forEach(s=>s.classList.remove('active'));
+  el.classList.add('active');
+  document.getElementById('stsmp').textContent=name;
+  document.getElementById('std50').textContent=d50+' mm';
+  document.getElementById('stk').textContent=k+' m/d';
+}
+function swTab(el,i){
+  document.querySelectorAll('.tab').forEach(t=>t.classList.remove('on'));
+  el.classList.add('on');
+  document.getElementById('dsbar').style.display=i===0?'flex':'none';
+}
+function swDs(el){
+  document.querySelectorAll('.ds-tab').forEach(t=>t.classList.remove('on'));
+  el.classList.add('on');
+}
+</script>
+</body>
+</html>

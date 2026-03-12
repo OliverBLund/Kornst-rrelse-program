@@ -52,7 +52,7 @@ class GrainSizeData:
     validation_messages: List[ValidationMessage] = field(default_factory=list)
     calculated_porosity: Optional[float] = field(default=None)  # Urumovic calculation
     current_porosity: Optional[float] = field(default=None)  # User can override this
-    
+
     def __post_init__(self):
         """Validate data after initialization"""
         if len(self.particle_sizes) != len(self.percent_passing):
@@ -60,11 +60,11 @@ class GrainSizeData:
 
         # Clean and validate percent passing values with smart tolerance
         self.percent_passing = self._clean_percent_passing_values(self.percent_passing)
-        
+
         # Validate particle sizes are positive and in reasonable range
         if not all(ps > 0 for ps in self.particle_sizes):
             raise ValueError("Particle sizes must be positive")
-        
+
         # Check for reasonable grain size range (0.001 mm to 1000 mm)
         if any(ps < 0.001 or ps > 1000 for ps in self.particle_sizes):
             min_size, max_size = min(self.particle_sizes), max(self.particle_sizes)
@@ -206,23 +206,23 @@ class GrainSizeData:
     def get_d10(self) -> Optional[float]:
         """Calculate D10 (grain size at 10% passing)"""
         return self._interpolate_grain_size(10.0)
-    
+
     def get_d20(self) -> Optional[float]:
         """Calculate D20 (grain size at 20% passing)"""
         return self._interpolate_grain_size(20.0)
-    
+
     def get_d30(self) -> Optional[float]:
         """Calculate D30 (grain size at 30% passing)"""
         return self._interpolate_grain_size(30.0)
-    
+
     def get_d50(self) -> Optional[float]:
         """Calculate D50 (median grain size at 50% passing)"""
         return self._interpolate_grain_size(50.0)
-    
+
     def get_d60(self) -> Optional[float]:
         """Calculate D60 (grain size at 60% passing)"""
         return self._interpolate_grain_size(60.0)
-    
+
     def get_uniformity_coefficient(self) -> Optional[float]:
         """Calculate uniformity coefficient Cu = D60/D10"""
         d10 = self.get_d10()
@@ -230,7 +230,7 @@ class GrainSizeData:
         if d10 and d60 and d10 > 0:
             return d60 / d10
         return None
-    
+
     def get_coefficient_of_curvature(self) -> Optional[float]:
         """Calculate coefficient of curvature Cc = (D30)²/(D10 × D60)"""
         d10 = self.get_d10()
@@ -239,7 +239,7 @@ class GrainSizeData:
         if d10 and d30 and d60 and d10 > 0 and d60 > 0:
             return (d30 ** 2) / (d10 * d60)
         return None
-    
+
     def _interpolate_grain_size(self, target_percent: float) -> Optional[float]:
         """Interpolate grain size at target percent passing using proper grain size distribution logic"""
         if not self.percent_passing or not self.particle_sizes:
@@ -307,7 +307,7 @@ class GrainSizeData:
                         return s1
 
         return None
-    
+
     def has_errors(self) -> bool:
         """Check if dataset has any error-level validation messages"""
         return any(msg.severity == ValidationSeverity.ERROR for msg in self.validation_messages)
@@ -354,7 +354,7 @@ class GrainSizeData:
         d60 = self.get_d60()
         cu = self.get_uniformity_coefficient()
         cc = self.get_coefficient_of_curvature()
-        
+
         # Basic size classification
         if d10 and d60:
             if d60 > 4.75:  # Larger than No. 4 sieve
@@ -365,7 +365,7 @@ class GrainSizeData:
                 base_type = "Fine-grained"
         else:
             return "Insufficient data for classification"
-        
+
         # Gradation classification
         if cu and cc and base_type in ["Sand", "Gravel"]:
             if base_type == "Sand":
@@ -378,9 +378,9 @@ class GrainSizeData:
                     gradation = "Well-graded"
                 else:
                     gradation = "Poorly-graded"
-            
+
             return f"{gradation} {base_type.lower()}"
-        
+
         return base_type
 
     def _calculate_simple_porosity(self) -> Optional[float]:
@@ -559,32 +559,32 @@ class GrainSizeData:
 
 class DataLoader:
     """Main data loader class for grain size analysis"""
-    
+
     def __init__(self):
         self.supported_formats = ['.csv', '.xlsx', '.xls']
         self.loaded_datasets: List[GrainSizeData] = []
-    
+
     def load_file(self, file_path: str) -> GrainSizeData:
         """Load a single file and return GrainSizeData object"""
         if not os.path.exists(file_path):
             raise FileNotFoundError(f"File not found: {file_path}")
-        
+
         file_ext = os.path.splitext(file_path)[1].lower()
         if file_ext not in self.supported_formats:
             raise ValueError(f"Unsupported file format: {file_ext}")
-        
+
         if file_ext == '.csv':
             return self._load_csv(file_path)
         elif file_ext in ['.xlsx', '.xls']:
             return self._load_excel(file_path)
-        
+
         raise NotImplementedError(f"Loader for {file_ext} not implemented")
-    
+
     def load_multiple_files(self, file_paths: List[str]) -> List[GrainSizeData]:
         """Load multiple files and return list of GrainSizeData objects"""
         datasets = []
         errors = []
-        
+
         for file_path in file_paths:
             try:
                 dataset = self.load_file(file_path)
@@ -594,13 +594,13 @@ class DataLoader:
                 error_msg = f"Error loading {os.path.basename(file_path)}: {str(e)}"
                 errors.append(error_msg)
                 logger.error(error_msg)
-        
+
         if errors:
             logger.warning(f"Failed to load {len(errors)} out of {len(file_paths)} files")
-        
+
         self.loaded_datasets.extend(datasets)
         return datasets
-    
+
     def _parse_european_float(self, value: str) -> float:
         """Parse float that might use European format (comma as decimal separator)"""
         try:
@@ -729,33 +729,33 @@ class DataLoader:
 
         except Exception as e:
             raise ValueError(f"Error reading CSV file {file_path}: {str(e)}")
-    
+
     def _load_csv_with_metadata(self, file_path: str, delimiter: str = ',') -> GrainSizeData:
         """Load CSV with metadata section (our format)"""
         metadata = {}
         particle_sizes = []
         percent_passing = []
-        
+
         with open(file_path, 'r', encoding='utf-8') as file:
             reader = csv.reader(file, delimiter=delimiter)
             data_section_started = False
-            
+
             for row in reader:
                 if not row or len(row) < 2:
                     continue
-                
+
                 # Check if this is the data header row (flexible matching)
                 first_cell = row[0].strip().lower()
-                if any(keyword in first_cell for keyword in 
+                if any(keyword in first_cell for keyword in
                        ['particle size', 'grain size', 'size', 'diameter', 'sieve']):
                     data_section_started = True
                     continue
-                
+
                 if not data_section_started:
                     # This is metadata
                     key = row[0].strip().lower()
                     value = row[1].strip()
-                    
+
                     # Flexible metadata parsing
                     if 'sample' in key or 'name' in key:
                         metadata['sample_name'] = value
@@ -780,14 +780,14 @@ class DataLoader:
                         percent_passing.append(percent)
                     except (ValueError, IndexError):
                         continue
-        
+
         return self._create_dataset(metadata, particle_sizes, percent_passing, file_path)
-    
+
     def _load_csv_simple_format(self, file_path: str, delimiter: str = ',') -> GrainSizeData:
         """Load simple two-column CSV (size, percent passing)"""
         particle_sizes = []
         percent_passing = []
-        
+
         with open(file_path, 'r', encoding='utf-8') as file:
             reader = csv.reader(file, delimiter=delimiter)
 
@@ -803,7 +803,7 @@ class DataLoader:
                 except (ValueError, IndexError):
                     # First row is probably a header, skip it
                     pass
-            
+
             # Read data rows
             for row in reader:
                 if not row or len(row) < 2:
@@ -815,10 +815,10 @@ class DataLoader:
                     percent_passing.append(percent)
                 except (ValueError, IndexError):
                     continue
-        
+
         metadata = {}
         return self._create_dataset(metadata, particle_sizes, percent_passing, file_path)
-    
+
     def _load_csv_multi_column(self, file_path: str, delimiter: str = ',') -> GrainSizeData:
         """Load multi-column CSV with flexible header detection"""
         with open(file_path, 'r', encoding='utf-8') as file:
@@ -830,62 +830,62 @@ class DataLoader:
                 rows.append(row)
                 if i >= 10:  # Look at first 10 rows
                     break
-        
+
         # Find header row and column indices
         size_col = None
         percent_col = None
         header_row_idx = None
-        
+
         for i, row in enumerate(rows):
             if len(row) < 2:
                 continue
-                
+
             # Check if this looks like a header row
             for j, cell in enumerate(row):
                 cell_lower = cell.strip().lower()
-                
+
                 # Look for size column
-                if size_col is None and any(keyword in cell_lower for keyword in 
+                if size_col is None and any(keyword in cell_lower for keyword in
                                           ['size', 'diameter', 'sieve', 'grain', 'particle', 'mm']):
                     size_col = j
                     header_row_idx = i
-                
+
                 # Look for percent passing column
-                if percent_col is None and any(keyword in cell_lower for keyword in 
+                if percent_col is None and any(keyword in cell_lower for keyword in
                                              ['percent', '%', 'passing', 'finer', 'cumulative']):
                     percent_col = j
                     header_row_idx = i
-            
+
             # If we found both columns, break
             if size_col is not None and percent_col is not None:
                 break
-        
+
         # If no headers found, assume first two columns
         if size_col is None or percent_col is None:
             size_col = 0
             percent_col = 1
             header_row_idx = 0
-        
+
         # Ensure header_row_idx is not None
         if header_row_idx is None:
             header_row_idx = 0
-        
+
         # Extract data
         particle_sizes = []
         percent_passing = []
-        
+
         # Re-read file and extract data
         with open(file_path, 'r', encoding='utf-8') as file:
             reader = csv.reader(file, delimiter=delimiter)
-            
+
             # Skip to data rows
             for i, row in enumerate(reader):
                 if i <= header_row_idx:
                     continue
-                    
+
                 if not row or len(row) <= max(size_col, percent_col):
                     continue
-                    
+
                 try:
                     size = self._parse_european_float(row[size_col])
                     percent = self._parse_european_float(row[percent_col])
@@ -893,10 +893,10 @@ class DataLoader:
                     percent_passing.append(percent)
                 except (ValueError, IndexError):
                     continue
-        
+
         metadata = {}
         return self._create_dataset(metadata, particle_sizes, percent_passing, file_path)
-    
+
     def _load_excel(self, file_path: str) -> GrainSizeData:
         """Load Excel file - conservative approach, requires manual mapping for complex files"""
         try:
@@ -909,7 +909,7 @@ class DataLoader:
         except Exception as e:
             # Always require manual column mapping for Excel files
             raise ValueError(f"Excel files require manual column mapping. Please use the column mapper to select the correct data columns.")
-    
+
     def _create_dataset(self, metadata: dict, particle_sizes: list, percent_passing: list, file_path: str) -> GrainSizeData:
         """Create GrainSizeData object with validation"""
         # Set defaults for missing metadata
@@ -919,7 +919,7 @@ class DataLoader:
             metadata['temperature'] = 20.0
         if 'porosity' not in metadata:
             metadata['porosity'] = 0.40
-        
+
         # Validate data
         if not particle_sizes or not percent_passing:
             raise ValueError(f"No valid grain size data found in {file_path}")
@@ -935,7 +935,7 @@ class DataLoader:
         # Extract sorted data
         particle_sizes = [item[0] for item in combined_data]
         percent_passing = [item[1] for item in combined_data]
-        
+
         # Create and return GrainSizeData object
         return GrainSizeData(
             sample_name=metadata['sample_name'],
@@ -1025,9 +1025,9 @@ class DataLoader:
             'soil_classification': dataset.classify_soil(),
             'comments': dataset.comments
         }
-        
+
         return summary
-    
+
     def validate_file_format(self, file_path: str) -> Tuple[bool, str]:
         """Validate if a file can be loaded"""
         try:
@@ -1035,17 +1035,101 @@ class DataLoader:
             return True, f"Valid file with {len(dataset.particle_sizes)} data points"
         except Exception as e:
             return False, str(e)
-    
+
     def get_loaded_datasets(self) -> List[GrainSizeData]:
         """Get all loaded datasets"""
         return self.loaded_datasets.copy()
-    
+
     def clear_loaded_datasets(self):
         """Clear all loaded datasets"""
         self.loaded_datasets.clear()
 
 
 # Utility functions for GUI integration
+def calculate_sieve_percent_passing(
+    sieve_sizes: List[float],
+    empty_weights: List[float],
+    full_weights: List[float]
+) -> Tuple[List[float], List[float]]:
+    """
+    Convert raw sieve weighing data into (sieve_size, cumulative % passing).
+
+    Takes the three directly-measured columns from a standard sieve analysis
+    (H.3 style) and returns the same two-column format the program uses
+    everywhere else, so nothing downstream needs to change.
+
+    Calculation:
+        retained_weight  = (weight of sieve + sample) - (weight of empty sieve)
+        total_weight     = sum of all retained weights
+        weight_%         = retained_weight / total_weight * 100   (per sieve)
+        % passing        = 100 - cumulative sum of weight_%        (coarsest → finest)
+
+    Args:
+        sieve_sizes:   Sieve opening sizes in mm (any order, will be sorted).
+        empty_weights: Weight of each empty sieve in grams.
+        full_weights:  Weight of each sieve + retained sample in grams.
+
+    Returns:
+        (sieve_sizes_sorted, percent_passing) sorted coarsest → finest,
+        matching the format expected by GrainSizeData / _create_dataset.
+
+    Raises:
+        ValueError: If inputs are inconsistent or the total weight is zero.
+    """
+    if not sieve_sizes or not empty_weights or not full_weights:
+        raise ValueError(
+            "All three columns (sieve size, empty sieve weight, sieve+sample weight) "
+            "must contain data."
+        )
+
+    if not (len(sieve_sizes) == len(empty_weights) == len(full_weights)):
+        raise ValueError(
+            f"Column length mismatch: sieve sizes ({len(sieve_sizes)}), "
+            f"empty weights ({len(empty_weights)}), "
+            f"full weights ({len(full_weights)}) must all be equal."
+        )
+
+    # Compute retained weight per sieve; skip rows with negative retained weight
+    valid_pairs: List[Tuple[float, float]] = []
+    for size, empty, full in zip(sieve_sizes, empty_weights, full_weights):
+        retained = full - empty
+        if retained < 0:
+            logger.warning(
+                f"Negative retained weight ({retained:.4f} g) for sieve {size} mm — row skipped."
+            )
+            continue
+        valid_pairs.append((size, retained))
+
+    if not valid_pairs:
+        raise ValueError(
+            "No valid sieve rows found after filtering negative retained weights."
+        )
+
+    total_weight = sum(w for _, w in valid_pairs)
+    if total_weight <= 0:
+        raise ValueError(
+            "Total sample weight is zero or negative.  "
+            "Check that 'Weight of Sieve + Sample' > 'Weight of Empty Sieve' "
+            "for at least one row."
+        )
+
+    # Sort coarsest → finest (largest sieve size first)
+    valid_pairs.sort(key=lambda x: x[0], reverse=True)
+
+    result_sizes: List[float] = []
+    result_passing: List[float] = []
+    cumulative_retained_pct = 0.0
+
+    for size, retained in valid_pairs:
+        weight_pct = (retained / total_weight) * 100.0
+        cumulative_retained_pct += weight_pct
+        passing = max(0.0, 100.0 - cumulative_retained_pct)
+        result_sizes.append(size)
+        result_passing.append(round(passing, 6))
+
+    return result_sizes, result_passing
+
+
 def format_grain_size_stats(dataset: GrainSizeData) -> str:
     """Format grain size statistics for display"""
     d10 = dataset.get_d10()
@@ -1053,7 +1137,7 @@ def format_grain_size_stats(dataset: GrainSizeData) -> str:
     d30 = dataset.get_d30()
     d50 = dataset.get_d50()
     d60 = dataset.get_d60()
-    
+
     stats_text = f"""Grain Size Analysis Results:
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
@@ -1078,7 +1162,7 @@ Suitable for empirical K calculations: {'Yes' if d10 is not None and d10 > 0.01 
 
     if dataset.comments:
         stats_text += f"\n\nComments: {dataset.comments}"
-    
+
     return stats_text
 
 
@@ -1086,10 +1170,10 @@ def get_test_data_files() -> List[str]:
     """Get list of available test data files"""
     test_data_dir = os.path.join(os.path.dirname(__file__), 'test_data')
     csv_files = []
-    
+
     if os.path.exists(test_data_dir):
         for file in os.listdir(test_data_dir):
             if file.endswith('.csv'):
                 csv_files.append(os.path.join(test_data_dir, file))
-    
+
     return sorted(csv_files)
