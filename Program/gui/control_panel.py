@@ -8,13 +8,548 @@ from PyQt6.QtWidgets import (QFrame, QVBoxLayout, QHBoxLayout, QGroupBox,
                             QProgressBar, QCheckBox, QSpinBox, QDoubleSpinBox,
                             QListWidget, QListWidgetItem, QSplitter, QWidget,
                             QFileDialog, QMessageBox, QHeaderView, QApplication,
-                            QMenu, QDialog, QDialogButtonBox)
+                            QMenu, QDialog, QDialogButtonBox, QScrollArea,
+                            QToolButton, QSizePolicy)
 from PyQt6.QtCore import QThread, QTimer
 from data_loader import DataLoader
 from gui.column_mapper import ColumnMapperDialog
 import os
-from PyQt6.QtCore import Qt, pyqtSignal
-from PyQt6.QtGui import QIcon, QFont, QAction
+from PyQt6.QtCore import Qt, pyqtSignal, QSize
+from PyQt6.QtGui import (QIcon, QFont, QAction, QPainter, QColor,
+                         QLinearGradient, QBrush, QPixmap)
+from gui.theme import C, F, SZ, icon
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# SIDEBAR HELPER WIDGETS
+# ─────────────────────────────────────────────────────────────────────────────
+
+class _LogoCard(QWidget):
+    """Branded logo card — matches _shared.css .sb-logo.
+
+    54px tall, diagonal gradient (160deg), icon container box,
+    Playfair Display title, JetBrains Mono subtitle.
+    """
+
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.setFixedHeight(56)
+
+        row = QHBoxLayout(self)
+        row.setContentsMargins(14, 0, 14, 0)
+        row.setSpacing(11)
+
+        # Icon container — .logo-mark in CSS
+        icon_box = QWidget()
+        icon_box.setFixedSize(32, 32)
+        icon_box.setStyleSheet(
+            "background: rgba(255,255,255,0.13); "
+            "border: 1px solid rgba(255,255,255,0.22); "
+            f"border-radius: {SZ.BORDER_RADIUS}px;")
+        icon_inner = QHBoxLayout(icon_box)
+        icon_inner.setContentsMargins(0, 0, 0, 0)
+        icon_lbl = QLabel()
+        try:
+            icon_lbl.setPixmap(
+                icon('fa6s.layer-group', C.LOGO_TEXT).pixmap(14, 14))
+        except Exception:
+            icon_lbl.setText("\u229e")
+            icon_lbl.setStyleSheet(f"color: {C.LOGO_TEXT}; font-size: 14px;")
+        icon_lbl.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        icon_lbl.setStyleSheet("background: transparent;")
+        icon_inner.addWidget(icon_lbl)
+        row.addWidget(icon_box)
+
+        # Title + subtitle
+        text_col = QVBoxLayout()
+        text_col.setSpacing(2)
+        title = QLabel("GrainSize")
+        title.setFont(QFont(F.DISP, F.SZ_2XL, QFont.Weight.Bold))
+        title.setStyleSheet(
+            f"color: {C.LOGO_TEXT}; background: transparent; "
+            "letter-spacing: 0.01em; line-height: 1.15;")
+        subtitle = QLabel("ANALYSIS \u00b7 v0.9-\u03b2")
+        subtitle.setFont(QFont(F.MONO, 7))
+        subtitle.setStyleSheet(
+            f"color: {C.LOGO_SUB}; background: transparent; "
+            "letter-spacing: 0.06em;")
+        text_col.addWidget(title)
+        text_col.addWidget(subtitle)
+        row.addLayout(text_col)
+        row.addStretch()
+
+    def paintEvent(self, event):
+        painter = QPainter(self)
+        painter.setRenderHint(QPainter.RenderHint.Antialiasing)
+        # Diagonal gradient matching CSS: linear-gradient(160deg, ...)
+        w, h = self.width(), self.height()
+        grad = QLinearGradient(0, 0, w * 0.3, h)
+        grad.setColorAt(0.0, QColor(C.LOGO_BG_TOP))
+        grad.setColorAt(1.0, QColor(C.LOGO_BG))
+        painter.fillRect(self.rect(), QBrush(grad))
+        painter.end()
+
+
+class _SectionHeader(QWidget):
+    """Section header band — matches _shared.css .sb-sect.
+
+    Uppercase label, optional right-side button.
+    """
+
+    def __init__(self, text: str, btn_text: str | None = None,
+                 btn_icon: str | None = None, parent=None):
+        super().__init__(parent)
+        self.setFixedHeight(28)
+        self.setAttribute(Qt.WidgetAttribute.WA_StyledBackground)
+        self.setStyleSheet(
+            f"background: {C.SB_UP}; "
+            f"border-bottom: 1px solid {C.SB_BDR}; "
+            f"border-top: 1px solid rgba(255,255,255,0.45);")
+        row = QHBoxLayout(self)
+        row.setContentsMargins(13, 0, 10, 0)
+        lbl = QLabel(text.upper())
+        lbl.setFont(QFont(F.UI, 7, QFont.Weight.DemiBold))
+        lbl.setStyleSheet(
+            f"color: {C.SB_MUTED}; background: transparent; "
+            "letter-spacing: 0.09em;")
+        row.addWidget(lbl)
+        row.addStretch()
+
+        self.action_btn = None
+        if btn_text:
+            self.action_btn = QPushButton(btn_text)
+            if btn_icon:
+                try:
+                    self.action_btn.setIcon(icon(btn_icon, C.SB_MID))
+                except Exception:
+                    pass
+            self.action_btn.setStyleSheet(
+                f"QPushButton {{ background: rgba(255,255,255,0.35); "
+                f"border: 1px solid {C.SB_BDR}; border-radius: {SZ.BORDER_RADIUS}px; "
+                f"padding: 2px 7px; font-size: 8pt; color: {C.SB_MID}; }}"
+                f"QPushButton:hover {{ background: rgba(255,255,255,0.6); "
+                f"border-color: {C.BORDER_DK}; color: {C.SB_TEXT}; }}")
+            self.action_btn.setFixedHeight(20)
+            self.action_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+            row.addWidget(self.action_btn)
+
+
+class _SampleCard(QWidget):
+    """Expandable sample card — matches _shared.css .s-item.
+
+    Two states: collapsed (main row only) / expanded (row + detail section).
+    Row: icon container + name/meta + status LED + selected toggle + expand chevron.
+    Active card: sb-act background + 3px olive left accent bar.
+    """
+
+    sig_clicked = pyqtSignal(str)          # file_path
+    sig_ctx = pyqtSignal(str, object)      # file_path, QPoint (global)
+    sig_selected = pyqtSignal(str, bool)   # file_path, is_selected
+
+    _STATUS_DOT = {
+        'pending': C.SB_MUTED,
+        'auto':    C.OLIVE,
+        'failed':  C.LED_ERR,
+        'review':  C.LED_WARN,
+        'loaded':  C.OLIVE,
+    }
+
+    def __init__(self, file_path: str, display_name: str, status: str,
+                 d50: str = "", k_val: str = "", parent=None):
+        super().__init__(parent)
+        self.file_path = file_path
+        self._display_name = display_name
+        self._status = status
+        self._active = False
+        self._selected = False
+        self._expanded = False
+        self._d50 = d50
+        self._k_val = k_val
+
+        self.setAttribute(Qt.WidgetAttribute.WA_StyledBackground)
+        self.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
+        self.customContextMenuRequested.connect(
+            lambda pos: self.sig_ctx.emit(self.file_path, self.mapToGlobal(pos)))
+
+        main_v = QVBoxLayout(self)
+        main_v.setContentsMargins(0, 0, 0, 0)
+        main_v.setSpacing(0)
+
+        # ── Main row (always visible) ──
+        self._main_row = QWidget()
+        row = QHBoxLayout(self._main_row)
+        row.setContentsMargins(8, 6, 8, 6)
+        row.setSpacing(8)
+
+        # Icon container — .s-ic in CSS
+        self._icon_box = QWidget()
+        self._icon_box.setFixedSize(26, 26)
+        self._icon_box.setStyleSheet(
+            f"background: rgba(255,255,255,0.3); "
+            f"border: 1px solid {C.SB_BDR}; border-radius: 3px;")
+        icon_inner = QHBoxLayout(self._icon_box)
+        icon_inner.setContentsMargins(0, 0, 0, 0)
+        self._icon_lbl = QLabel()
+        try:
+            self._icon_lbl.setPixmap(
+                icon('fa6s.vial', C.SB_MID).pixmap(11, 11))
+        except Exception:
+            self._icon_lbl.setText("\u2B24")
+        self._icon_lbl.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self._icon_lbl.setStyleSheet("background: transparent;")
+        icon_inner.addWidget(self._icon_lbl)
+        row.addWidget(self._icon_box)
+
+        # Name + meta column
+        info_col = QVBoxLayout()
+        info_col.setSpacing(1)
+        self._name = QLabel(display_name)
+        self._name.setTextFormat(Qt.TextFormat.PlainText)
+        self._name.setFont(QFont(F.UI, F.SZ_LG, QFont.Weight.Medium))
+        self._name.setStyleSheet(f"color: {C.SB_TEXT}; background: transparent;")
+        self._name.setSizePolicy(
+            QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Preferred)
+        info_col.addWidget(self._name)
+
+        # Meta row (D50, K value)
+        self._meta = QLabel()
+        self._meta.setFont(QFont(F.MONO, 7))
+        self._meta.setStyleSheet(f"color: {C.SB_MUTED}; background: transparent;")
+        self._update_meta_text()
+        info_col.addWidget(self._meta)
+        row.addLayout(info_col, 1)
+
+        # Status LED  — .s-led in CSS
+        self._led = QLabel()
+        self._led.setFixedSize(6, 6)
+        row.addWidget(self._led)
+
+        # Selected toggle — .s-pick-btn in CSS
+        self._sel_btn = QPushButton()
+        self._sel_btn.setObjectName("card-pick")
+        self._sel_btn.setFixedSize(18, 18)
+        self._sel_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        self._sel_btn.setToolTip("Toggle selection")
+        self._sel_btn.clicked.connect(self._toggle_selected)
+        row.addWidget(self._sel_btn)
+
+        # Expand chevron — .s-expand-btn in CSS
+        self._expand_btn = QPushButton()
+        self._expand_btn.setObjectName("card-expand")
+        self._expand_btn.setFixedSize(16, 16)
+        self._expand_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        self._expand_btn.setToolTip("Expand details")
+        try:
+            self._expand_btn.setIcon(icon('fa6s.chevron-right', C.SB_MUTED))
+            self._expand_btn.setIconSize(QSize(9, 9))
+        except Exception:
+            self._expand_btn.setText("\u25B8")
+        self._expand_btn.setStyleSheet(
+            f"QPushButton#card-expand {{ background: transparent; border: none; "
+            f"padding: 0; border-radius: 3px; color: {C.SB_MUTED}; }}"
+            f"QPushButton#card-expand:hover {{ background: rgba(0,0,0,0.07); color: {C.SB_TEXT}; }}")
+        self._expand_btn.clicked.connect(self._toggle_expand)
+        row.addWidget(self._expand_btn)
+
+        main_v.addWidget(self._main_row)
+
+        # ── Detail section (hidden by default) — .s-detail in CSS ──
+        self._detail = QWidget()
+        self._detail.setVisible(False)
+        detail_v = QVBoxLayout(self._detail)
+        detail_v.setContentsMargins(8, 0, 8, 7)
+        detail_v.setSpacing(5)
+
+        # Status line
+        self._status_line = QLabel()
+        self._status_line.setFont(QFont(F.MONO, F.SZ_BASE))
+        self._status_line.setStyleSheet(
+            f"background: rgba(255,255,255,0.35); color: {C.SB_MID}; "
+            f"padding: 3px 7px; border-radius: 3px; font-size: 8pt;")
+        detail_v.addWidget(self._status_line)
+
+        # Action buttons row — .s-act-row in CSS
+        act_row = QHBoxLayout()
+        act_row.setSpacing(3)
+        for btn_text, btn_icon_name, is_danger in [
+            ("Inspect", "fa6s.magnifying-glass", False),
+            ("Log", "fa6s.clipboard-list", False),
+            ("Props", "fa6s.sliders", False),
+            ("Remove", "fa6s.trash", True),
+        ]:
+            btn = QPushButton(btn_text)
+            btn.setObjectName("card-action")
+            btn.setFixedHeight(22)
+            try:
+                btn.setIcon(icon(btn_icon_name,
+                                 "#a03020" if is_danger else C.SB_MID))
+                btn.setIconSize(QSize(9, 9))
+            except Exception:
+                pass
+            danger_ss = (f"color: #a03020; border-color: rgba(160,48,32,0.28);"
+                         if is_danger else "")
+            btn.setStyleSheet(
+                f"QPushButton#card-action {{ background: rgba(255,255,255,0.38); "
+                f"border: 1px solid {C.SB_BDR}; border-radius: 3px; "
+                f"padding: 0 7px; font-size: 8pt; color: {C.SB_MID}; {danger_ss} }}"
+                f"QPushButton#card-action:hover {{ background: rgba(255,255,255,0.7); "
+                f"color: {C.SB_TEXT}; }}")
+            btn.setCursor(Qt.CursorShape.PointingHandCursor)
+            act_row.addWidget(btn)
+        act_row.addStretch()
+        detail_v.addLayout(act_row)
+
+        main_v.addWidget(self._detail)
+
+        self._refresh()
+
+    def set_status(self, status: str):
+        self._status = status
+        self._refresh()
+
+    def set_active(self, active: bool):
+        self._active = active
+        self._refresh()
+
+    @property
+    def is_selected(self) -> bool:
+        return self._selected
+
+    def set_selected(self, selected: bool):
+        self._selected = selected
+        self._refresh_sel_btn()
+
+    def set_meta(self, d50: str = "", k_val: str = ""):
+        self._d50 = d50
+        self._k_val = k_val
+        self._update_meta_text()
+
+    def _update_meta_text(self):
+        parts = []
+        if self._d50:
+            parts.append(f"D50: {self._d50}")
+        if self._k_val:
+            parts.append(f"K: {self._k_val}")
+        self._meta.setText(" \u00b7 ".join(parts) if parts else "")
+        self._meta.setVisible(bool(parts))
+
+    def _toggle_selected(self):
+        self._selected = not self._selected
+        self._refresh_sel_btn()
+        self.sig_selected.emit(self.file_path, self._selected)
+
+    def _toggle_expand(self):
+        self._expanded = not self._expanded
+        self._detail.setVisible(self._expanded)
+        try:
+            chevron = 'fa6s.chevron-down' if self._expanded else 'fa6s.chevron-right'
+            self._expand_btn.setIcon(icon(chevron, C.SB_MID if self._expanded else C.SB_MUTED))
+            self._expand_btn.setIconSize(QSize(9, 9))
+        except Exception:
+            pass
+
+    def _refresh_sel_btn(self):
+        if self._selected:
+            self._sel_btn.setStyleSheet(
+                f"QPushButton#card-pick {{ background: rgba(107,142,35,0.12); "
+                f"border: 1px solid rgba(107,142,35,0.34); border-radius: 4px; "
+                f"padding: 0; color: {C.OLIVE}; font-size: 9px; }}")
+            try:
+                self._sel_btn.setIcon(icon('fa6s.check', C.OLIVE))
+                self._sel_btn.setIconSize(QSize(9, 9))
+            except Exception:
+                self._sel_btn.setText("\u2713")
+        else:
+            self._sel_btn.setStyleSheet(
+                f"QPushButton#card-pick {{ background: rgba(255,255,255,0.42); "
+                f"border: 1px solid {C.SB_BDR}; border-radius: 4px; padding: 0; }}"
+                f"QPushButton#card-pick:hover {{ border-color: {C.BORDER_DK}; "
+                f"background: rgba(255,255,255,0.72); }}")
+            self._sel_btn.setIcon(QIcon())
+            self._sel_btn.setText("")
+
+    def _refresh(self):
+        led_color = self._STATUS_DOT.get(self._status, C.SB_MUTED)
+        shadow = f"box-shadow: 0 0 4px rgba(90,170,58,0.4);" if self._status in ('loaded', 'auto') else ""
+
+        # Card background and border
+        if self._active:
+            self.setStyleSheet(
+                f"_SampleCard {{ background: {C.SB_ACT}; "
+                f"border: 1px solid {C.SB_BDR}; "
+                f"border-radius: {SZ.BORDER_RADIUS}px; }}")
+            self._icon_box.setStyleSheet(
+                f"background: rgba(107,142,35,0.15); "
+                f"border: 1px solid rgba(107,142,35,0.3); border-radius: 3px;")
+            try:
+                self._icon_lbl.setPixmap(
+                    icon('fa6s.vial', C.OLIVE).pixmap(11, 11))
+            except Exception:
+                pass
+        else:
+            self.setStyleSheet(
+                f"_SampleCard {{ background: transparent; "
+                f"border: 1px solid transparent; "
+                f"border-radius: {SZ.BORDER_RADIUS}px; }}"
+                f"_SampleCard:hover {{ background: rgba(255,255,255,0.4); }}")
+            self._icon_box.setStyleSheet(
+                f"background: rgba(255,255,255,0.3); "
+                f"border: 1px solid {C.SB_BDR}; border-radius: 3px;")
+            try:
+                self._icon_lbl.setPixmap(
+                    icon('fa6s.vial', C.SB_MID).pixmap(11, 11))
+            except Exception:
+                pass
+
+        # LED
+        self._led.setStyleSheet(
+            f"background: {led_color}; border-radius: 3px;")
+
+        # Name color
+        name_color = C.SB_TEXT if self._active else C.SB_TEXT
+        self._name.setStyleSheet(f"color: {name_color}; background: transparent;")
+
+        # Selection button
+        self._refresh_sel_btn()
+
+        # Status line text
+        status_text = {
+            'pending': '\u23f3 Loading...',
+            'auto': '\u2705 Auto-loaded',
+            'failed': '\u274c Load failed',
+            'review': '\u26a0 Needs review',
+            'loaded': '\u2705 Loaded successfully',
+        }.get(self._status, self._status)
+        self._status_line.setText(status_text)
+
+    def mousePressEvent(self, event):
+        if event.button() == Qt.MouseButton.LeftButton:
+            self.sig_clicked.emit(self.file_path)
+        super().mousePressEvent(event)
+
+    def paintEvent(self, event):
+        """Paint the olive left accent bar when active."""
+        super().paintEvent(event)
+        if self._active:
+            painter = QPainter(self)
+            painter.setRenderHint(QPainter.RenderHint.Antialiasing)
+            painter.setBrush(QColor(C.OLIVE))
+            painter.setPen(Qt.PenStyle.NoPen)
+            # 3px wide bar on the left, vertically centered
+            bar_h = 16
+            y = (self.height() - bar_h) // 2
+            painter.drawRoundedRect(0, y, 3, bar_h, 1.5, 1.5)
+            painter.end()
+
+
+class _FileListWidget(QScrollArea):
+    """Scrollable container of _SampleCard widgets — matches _shared.css .s-list."""
+
+    card_clicked = pyqtSignal(str)         # file_path
+    card_ctx = pyqtSignal(str, object)     # file_path, QPoint (global)
+    selection_changed = pyqtSignal()       # emitted when any card's selected state changes
+
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self._cards: dict[str, _SampleCard] = {}
+        self._active_path: str | None = None
+
+        self.setWidgetResizable(True)
+        self.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+        self.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAsNeeded)
+        self.setFrameShape(QFrame.Shape.NoFrame)
+        self.setStyleSheet(
+            f"QScrollArea {{ background: transparent; border: none; }}"
+            f"QScrollBar:vertical {{ width: 5px; background: transparent; }}"
+            f"QScrollBar::handle:vertical {{ background: {C.SB_BDR};"
+            f"  border-radius: 2px; min-height: 16px; }}"
+            f"QScrollBar::add-line:vertical, QScrollBar::sub-line:vertical"
+            f"  {{ height: 0; }}"
+        )
+
+        container = QWidget()
+        container.setStyleSheet(f"background: {C.SB};")
+        self._layout = QVBoxLayout(container)
+        self._layout.setContentsMargins(6, 4, 4, 4)
+        self._layout.setSpacing(1)
+        self._layout.addStretch()
+        self.setWidget(container)
+
+    def add_card(self, file_path: str, display_name: str, status: str):
+        if file_path in self._cards:
+            return
+        card = _SampleCard(file_path, display_name, status)
+        card.sig_clicked.connect(self._on_card_clicked)
+        card.sig_ctx.connect(self.card_ctx)
+        card.sig_selected.connect(self._on_card_selected)
+        count = self._layout.count()
+        self._layout.insertWidget(count - 1, card)
+        self._cards[file_path] = card
+
+    def update_card_status(self, file_path: str, status: str):
+        if file_path in self._cards:
+            self._cards[file_path].set_status(status)
+
+    def update_card_meta(self, file_path: str, d50: str = "", k_val: str = ""):
+        if file_path in self._cards:
+            self._cards[file_path].set_meta(d50, k_val)
+
+    def remove_card(self, file_path: str):
+        if file_path in self._cards:
+            card = self._cards.pop(file_path)
+            card.setParent(None)
+            card.deleteLater()
+        if self._active_path == file_path:
+            self._active_path = None
+
+    def clear_cards(self):
+        for card in list(self._cards.values()):
+            card.setParent(None)
+            card.deleteLater()
+        self._cards.clear()
+        self._active_path = None
+
+    def set_active(self, file_path: str | None):
+        if self._active_path and self._active_path in self._cards:
+            self._cards[self._active_path].set_active(False)
+        self._active_path = file_path
+        if file_path and file_path in self._cards:
+            self._cards[file_path].set_active(True)
+
+    def get_selected_paths(self) -> list[str]:
+        """Return file paths of all selected cards."""
+        return [fp for fp, card in self._cards.items() if card.is_selected]
+
+    def get_loaded_count(self) -> int:
+        return len(self._cards)
+
+    def get_selected_count(self) -> int:
+        return sum(1 for card in self._cards.values() if card.is_selected)
+
+    def get_warning_count(self) -> int:
+        return sum(1 for card in self._cards.values()
+                   if card._status in ('review', 'failed'))
+
+    def apply_filter(self, filter_type: str):
+        """Show/hide cards based on filter: 'all', 'selected', 'warnings'."""
+        for card in self._cards.values():
+            if filter_type == 'all':
+                card.setVisible(True)
+            elif filter_type == 'selected':
+                card.setVisible(card.is_selected)
+            elif filter_type == 'warnings':
+                card.setVisible(card._status in ('review', 'failed'))
+
+    def _on_card_clicked(self, file_path: str):
+        self.set_active(file_path)
+        self.card_clicked.emit(file_path)
+
+    def _on_card_selected(self, file_path: str, selected: bool):
+        self.selection_changed.emit()
+
+
+# ─────────────────────────────────────────────────────────────────────────────
 
 
 class PorosityDialog(QDialog):
@@ -443,8 +978,62 @@ class ControlPanel(QFrame):
         self.temp_change_timer.timeout.connect(self._apply_temperature_change)
         self.pending_temperature = None
 
+        self.setAcceptDrops(True)
         self.setup_ui()
         self.setup_validation()
+
+    def dragEnterEvent(self, event):
+        if event.mimeData().hasUrls():
+            urls = event.mimeData().urls()
+            if any(u.toLocalFile().lower().endswith(('.csv', '.xlsx', '.xls', '.txt'))
+                   for u in urls):
+                event.acceptProposedAction()
+                return
+        event.ignore()
+
+    def dropEvent(self, event):
+        urls = event.mimeData().urls()
+        file_paths = [u.toLocalFile() for u in urls
+                      if u.toLocalFile().lower().endswith(('.csv', '.xlsx', '.xls', '.txt'))]
+        if file_paths:
+            self._handle_dropped_files(file_paths)
+            event.acceptProposedAction()
+
+    def _handle_dropped_files(self, file_paths: list):
+        """Process files dropped onto the sidebar — same pipeline as add_files."""
+        expanded_files = []
+        already_added = []
+        excel_files = [f for f in file_paths if f.endswith(('.xlsx', '.xls')) and f not in self.file_statuses]
+        other_files = [f for f in file_paths if not f.endswith(('.xlsx', '.xls')) and f not in self.file_statuses]
+        already_added = [os.path.basename(f) for f in file_paths if f in self.file_statuses]
+
+        if excel_files:
+            excel_expanded = self.handle_batch_multisheet_excel(excel_files)
+            if excel_expanded is None:
+                return
+            expanded_files.extend(excel_expanded)
+        expanded_files.extend(other_files)
+
+        if expanded_files:
+            for file_entry in expanded_files:
+                if isinstance(file_entry, tuple):
+                    file_path, sheet_name = file_entry
+                    sheet_key = f"{file_path}:::{sheet_name}"
+                    self.file_statuses[sheet_key] = 'pending'
+                else:
+                    self.file_statuses[file_entry] = 'pending'
+
+            for file_entry in expanded_files:
+                if isinstance(file_entry, tuple):
+                    file_path, sheet_name = file_entry
+                    sheet_key = f"{file_path}:::{sheet_name}"
+                    self.add_file_to_table(sheet_key, 'pending',
+                                           display_name=f"{os.path.basename(file_path)} [{sheet_name}]")
+                else:
+                    self.add_file_to_table(file_entry, 'pending')
+
+            self.process_files_with_immediate_tabs(expanded_files)
+            self.update_ui_state()
 
     def setup_validation(self):
         """Setup input validation for parameters"""
@@ -453,487 +1042,531 @@ class ControlPanel(QFrame):
         self.porosity_mode_combo.currentTextChanged.connect(self.on_porosity_mode_changed)
 
     def setup_ui(self):
-        """Setup the control panel layout"""
-        layout = QVBoxLayout(self)
-        layout.setSpacing(12)
-        layout.setContentsMargins(10, 10, 10, 10)
+        """Setup the control panel layout — new themed sidebar design."""
+        import sys
 
-        # Apply professional geotechnical styling
-        self.setStyleSheet("""
-            QFrame {
-                background-color: #f5f5f0;
-                border: 1px solid #d4c4a8;
-            }
-            QGroupBox {
-                font-weight: bold;
-                border: 2px solid #8b7355;
-                border-radius: 8px;
-                margin-top: 18px;
-                padding-top: 18px;
-                padding-left: 10px;
-                padding-right: 10px;
-                padding-bottom: 10px;
-                background-color: #fafaf7;
-                font-size: 12px;
-            }
-            QGroupBox::title {
-                subcontrol-origin: margin;
-                subcontrol-position: top left;
-                left: 18px;
-                top: 4px;
-                padding: 4px 10px 4px 10px;
-                color: #5d4e37;
-                background-color: #fafaf7;
-                border: 1px solid #8b7355;
-                border-radius: 4px;
-                font-weight: bold;
-                font-size: 11px;
-            }
-            QPushButton {
-                background-color: #d2b48c;
-                border: 1px solid #8b7355;
-                border-radius: 4px;
-                padding: 6px 12px;
-                font-weight: bold;
-                color: #2f2f2f;
-            }
-            QPushButton:hover {
-                background-color: #ddbf94;
-                border-color: #6b5b47;
-            }
-            QPushButton:pressed {
-                background-color: #c4a574;
-            }
-            QPushButton:disabled {
-                background-color: #e8e8e5;
-                color: #999999;
-                border-color: #cccccc;
-            }
-            QListWidget, QTableWidget {
-                background-color: #ffffff;
-                border: 1px solid #8b7355;
-                border-radius: 4px;
-                selection-background-color: #d2b48c;
-                gridline-color: #e0e0e0;
-            }
-            QTableWidget::item {
-                padding: 4px;
-            }
-            QTableWidget::item:selected {
-                background-color: #d2b48c;
-                color: #2f2f2f;
-            }
-            QHeaderView::section {
-                background-color: #f0f0ed;
-                color: #5d4e37;
-                padding: 4px 6px;
-                border: 1px solid #d0d0d0;
-                font-weight: bold;
-                font-size: 10px;
-            }
-            QLineEdit, QComboBox, QDoubleSpinBox {
-                background-color: #ffffff;
-                border: 1px solid #8b7355;
-                border-radius: 3px;
-                padding: 4px;
-            }
-            QLineEdit:focus, QComboBox:focus, QDoubleSpinBox:focus {
-                border-color: #5d4e37;
-                border-width: 2px;
-            }
-            QProgressBar {
-                border: 1px solid #8b7355;
-                border-radius: 4px;
-                background-color: #f0f0ed;
-            }
-            QProgressBar::chunk {
-                background-color: #6b8e23;
-                border-radius: 3px;
-            }
-            QCheckBox {
-                color: #2f2f2f;
-            }
-            QCheckBox::indicator:checked {
-                background-color: #6b8e23;
-                border: 1px solid #5d4e37;
-            }
-        """)
+        self.setStyleSheet(f"QFrame {{ background: {C.SB}; border: none; }}")
 
-        # === SAMPLE MANAGEMENT SECTION ===
-        samples_group = QGroupBox("📁 Sample Management")
-        samples_layout = QVBoxLayout(samples_group)
-        samples_layout.setSpacing(8)
-        samples_layout.setContentsMargins(8, 8, 8, 8)
+        root = QVBoxLayout(self)
+        root.setContentsMargins(0, 0, 0, 0)
+        root.setSpacing(0)
 
-        # File operation buttons - Primary action prominent
-        primary_button_layout = QHBoxLayout()
-        primary_button_layout.setSpacing(8)
+        # ── 1. Logo card ──────────────────────────────────────────────
+        root.addWidget(_LogoCard())
 
-        self.add_files_btn = QPushButton("➕ Add Files")
+        # ── 2. Scrollable body ────────────────────────────────────────
+        scroll = QScrollArea()
+        scroll.setWidgetResizable(True)
+        scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+        scroll.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAsNeeded)
+        scroll.setFrameShape(QFrame.Shape.NoFrame)
+        scroll.setStyleSheet(
+            f"QScrollArea {{ background: {C.SB}; border: none; }}"
+            f"QScrollBar:vertical {{ width: 5px; background: transparent; }}"
+            f"QScrollBar::handle:vertical {{ background: {C.SB_BDR};"
+            f"  border-radius: 2px; min-height: 16px; }}"
+            f"QScrollBar::add-line:vertical, QScrollBar::sub-line:vertical"
+            f"  {{ height: 0; }}"
+        )
+
+        body = QWidget()
+        body.setStyleSheet(f"background: {C.SB};")
+        body_v = QVBoxLayout(body)
+        body_v.setContentsMargins(0, 0, 0, 0)
+        body_v.setSpacing(0)
+        scroll.setWidget(body)
+        root.addWidget(scroll, 1)
+
+        # ── Drop zone — matches .drop in CSS ─────────────────────────
+        self._drop_zone = QFrame()
+        self._drop_zone.setCursor(Qt.CursorShape.PointingHandCursor)
+        self._drop_zone.setMinimumHeight(70)
+        self._drop_zone.setStyleSheet(
+            f"QFrame {{ border: 1.5px dashed {C.SB_BDR}; border-radius: 5px;"
+            f"  background: rgba(255,255,255,0.25); }}"
+            f"QFrame:hover {{ border-color: {C.OLIVE};"
+            f"  background: rgba(107,142,35,0.07); }}")
+        self._drop_zone.mousePressEvent = lambda e: self.add_files()
+
+        dz_v = QVBoxLayout(self._drop_zone)
+        dz_v.setContentsMargins(10, 11, 10, 11)
+        dz_v.setSpacing(4)
+        dz_v.setAlignment(Qt.AlignmentFlag.AlignCenter)
+
+        dz_icon = QLabel()
+        try:
+            dz_icon.setPixmap(icon('fa6s.cloud-arrow-up', C.SB_MUTED).pixmap(17, 17))
+        except Exception:
+            dz_icon.setText("\u2B06")
+        dz_icon.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        dz_icon.setStyleSheet("background: transparent; border: none;")
+        dz_v.addWidget(dz_icon)
+
+        dz_text = QLabel("Drop files or click to browse")
+        dz_text.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        dz_text.setStyleSheet(
+            f"font-size: 11px; color: {C.SB_MID};"
+            f"  background: transparent; border: none;")
+        dz_v.addWidget(dz_text)
+
+        dz_formats = QLabel("CSV \u00b7 XLSX \u00b7 TXT")
+        dz_formats.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        dz_formats.setStyleSheet(
+            f"font-size: 9.5px; color: {C.SB_MUTED};"
+            f"  background: transparent; border: none;")
+        dz_v.addWidget(dz_formats)
+
+        drop_wrap = QWidget()
+        drop_wrap.setStyleSheet(f"background: {C.SB};")
+        drop_wrap_v = QHBoxLayout(drop_wrap)
+        drop_wrap_v.setContentsMargins(10, 8, 10, 4)
+        drop_wrap_v.addWidget(self._drop_zone)
+        body_v.addWidget(drop_wrap)
+
+        # ── 2a. SAMPLES section header ────────────────────────────────
+        body_v.addWidget(_SectionHeader("SAMPLES", btn_text="+ Add",
+                                        btn_icon="fa6s.plus"))
+
+        # Connect the "+ Add" button in section header to add_files
+        samples_hdr = body_v.itemAt(body_v.count() - 1).widget()
+        if hasattr(samples_hdr, 'action_btn') and samples_hdr.action_btn:
+            samples_hdr.action_btn.clicked.connect(self.add_files)
+
+        # Filter pills row — matches .s-filter-row in CSS
+        pills_w = QWidget()
+        pills_w.setFixedHeight(30)
+        pills_w.setStyleSheet(f"background: {C.SB};")
+        pills_h = QHBoxLayout(pills_w)
+        pills_h.setContentsMargins(10, 4, 10, 0)
+        pills_h.setSpacing(4)
+
+        _PILL = (
+            f"QPushButton {{ height: 22px; padding: 0 9px;"
+            f"  border: 1px solid {C.SB_BDR}; border-radius: 99px;"
+            f"  background: rgba(255,255,255,0.32);"
+            f"  font-family: '{F.UI}'; font-size: 10px; color: {C.SB_MID}; }}"
+            f"QPushButton:hover {{ background: rgba(255,255,255,0.55);"
+            f"  border-color: {C.BORDER_DK}; color: {C.SB_TEXT}; }}"
+            f"QPushButton:checked {{ background: {C.SB_ACT}; border-color: {C.SB_BDR};"
+            f"  color: {C.SB_TEXT}; font-weight: 600; }}"
+        )
+        self._pill_all = QPushButton("All")
+        self._pill_all.setCheckable(True)
+        self._pill_all.setChecked(True)
+        self._pill_all.setStyleSheet(_PILL)
+        self._pill_sel = QPushButton("Selected")
+        self._pill_sel.setCheckable(True)
+        self._pill_sel.setStyleSheet(_PILL)
+        self._pill_rev = QPushButton("\u26a0 Review")
+        self._pill_rev.setCheckable(True)
+        self._pill_rev.setStyleSheet(_PILL)
+
+        # Exclusive pill logic
+        self._pill_all.clicked.connect(lambda: self._set_filter("all"))
+        self._pill_sel.clicked.connect(lambda: self._set_filter("selected"))
+        self._pill_rev.clicked.connect(lambda: self._set_filter("warnings"))
+
+        pills_h.addWidget(self._pill_all)
+        pills_h.addWidget(self._pill_sel)
+        pills_h.addWidget(self._pill_rev)
+        pills_h.addStretch()
+        body_v.addWidget(pills_w)
+
+        # Hidden add_files_btn kept for backward compat
+        self.add_files_btn = QPushButton("+ Add Files")
+        self.add_files_btn.setVisible(False)
         self.add_files_btn.clicked.connect(self.add_files)
-        self.add_files_btn.setToolTip("Add one or more grain size data files")
-        self.add_files_btn.setStyleSheet("""
-            QPushButton {
-                background-color: #6b8e23;
-                color: white;
-                font-weight: bold;
-                padding: 8px 16px;
-                font-size: 11px;
-            }
-            QPushButton:hover {
-                background-color: #7ba428;
-            }
-            QPushButton:pressed {
-                background-color: #5a7a1e;
-            }
-        """)
 
-        # Secondary actions - smaller and less prominent
-        secondary_buttons_layout = QHBoxLayout()
-        secondary_buttons_layout.setSpacing(4)
+        # ── 2b. Card list ─────────────────────────────────────────────
+        self._file_list = _FileListWidget()
+        self._file_list.setMinimumHeight(80)
+        self._file_list.card_clicked.connect(self._on_card_clicked)
+        self._file_list.card_ctx.connect(self._on_card_context_menu)
+        self._file_list.selection_changed.connect(self._update_inventory_bar)
+        body_v.addWidget(self._file_list, 1)
 
-        self.remove_file_btn = QPushButton("🗑️ Remove")
-        self.remove_file_btn.clicked.connect(self.remove_selected_file)
-        self.remove_file_btn.setEnabled(False)
-        self.remove_file_btn.setStyleSheet("font-size: 10px; padding: 4px 8px;")
+        # ── 2c. Batch box — matches .sb-batch in CSS ─────────────────
+        batch_box = QWidget()
+        batch_box.setStyleSheet(
+            f"background: rgba(255,255,255,0.32);"
+            f"border: 1px solid {C.SB_BDR}; border-radius: 5px;")
+        batch_box.setContentsMargins(0, 0, 0, 0)
+        batch_v = QVBoxLayout(batch_box)
+        batch_v.setContentsMargins(8, 8, 8, 8)
+        batch_v.setSpacing(7)
 
-        self.clear_all_btn = QPushButton("🧹 Clear All")
-        self.clear_all_btn.clicked.connect(self.clear_all_files)
-        self.clear_all_btn.setStyleSheet("font-size: 10px; padding: 4px 8px;")
+        # Stat chips row — .sb-batch-stats
+        stats_row = QHBoxLayout()
+        stats_row.setSpacing(4)
 
-        secondary_buttons_layout.addWidget(self.remove_file_btn)
-        secondary_buttons_layout.addWidget(self.clear_all_btn)
-        secondary_buttons_layout.addStretch()
+        _CHIP = (
+            f"QLabel {{ padding: 2px 7px; border-radius: 99px;"
+            f"  border: 1px solid {C.BORDER}; background: rgba(255,255,255,0.42);"
+            f"  font-family: '{F.MONO}'; font-size: 9px; color: {C.SB_MID}; }}"
+        )
+        _CHIP_WARN = (
+            f"QLabel {{ padding: 2px 7px; border-radius: 99px;"
+            f"  border: 1px solid rgba(208,128,32,0.28); background: rgba(208,128,32,0.08);"
+            f"  font-family: '{F.MONO}'; font-size: 9px; color: #7a5010; }}"
+        )
+        _CHIP_SEL = (
+            f"QLabel {{ padding: 2px 7px; border-radius: 99px;"
+            f"  border: 1px solid rgba(107,142,35,0.26); background: rgba(107,142,35,0.08);"
+            f"  font-family: '{F.MONO}'; font-size: 9px; color: {C.OLIVE}; }}"
+        )
 
-        primary_button_layout.addWidget(self.add_files_btn, 1)
+        self._chip_loaded = QLabel("0 loaded")
+        self._chip_loaded.setStyleSheet(_CHIP)
+        self._chip_selected = QLabel("0 selected")
+        self._chip_selected.setStyleSheet(_CHIP_SEL)
+        self._chip_warnings = QLabel("")
+        self._chip_warnings.setStyleSheet(_CHIP_WARN)
+        self._chip_warnings.setVisible(False)
 
-        samples_layout.addLayout(primary_button_layout)
-        samples_layout.addLayout(secondary_buttons_layout)
+        stats_row.addWidget(self._chip_loaded)
+        stats_row.addWidget(self._chip_selected)
+        stats_row.addWidget(self._chip_warnings)
+        stats_row.addStretch()
+        batch_v.addLayout(stats_row)
 
-        # Sample table with status tracking - SIMPLIFIED to 2 columns
-        self.samples_table = QTableWidget()
-        self.samples_table.setColumnCount(2)
-        self.samples_table.setHorizontalHeaderLabels(["Sample File", "Status"])
-        self.samples_table.setMinimumHeight(200)
-        self.samples_table.setMaximumHeight(400)
-        self.samples_table.setAlternatingRowColors(True)
-        self.samples_table.setSelectionBehavior(QTableWidget.SelectionBehavior.SelectRows)
-        self.samples_table.setSelectionMode(QTableWidget.SelectionMode.SingleSelection)
+        # Mini action buttons row — .sb-mini-actions
+        _MINI_BTN = (
+            f"QPushButton {{ height: 24px; padding: 0 8px;"
+            f"  border: 1px solid {C.SB_BDR}; border-radius: 4px;"
+            f"  background: rgba(255,255,255,0.48);"
+            f"  font-size: 10.5px; color: {C.SB_MID}; }}"
+            f"QPushButton:hover {{ background: rgba(255,255,255,0.75);"
+            f"  border-color: {C.BORDER_DK}; color: {C.SB_TEXT}; }}"
+            f"QPushButton:disabled {{ color: {C.SB_MUTED}; border-color: transparent;"
+            f"  background: rgba(255,255,255,0.2); }}"
+        )
 
-        # Enable context menu
-        self.samples_table.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
-        self.samples_table.customContextMenuRequested.connect(self.show_context_menu)
+        mini_btns = QHBoxLayout()
+        mini_btns.setSpacing(5)
 
-        # Set column widths
-        header = self.samples_table.horizontalHeader()
-        header.setSectionResizeMode(0, QHeaderView.ResizeMode.Stretch)  # File name - stretch to fill
-        header.setSectionResizeMode(1, QHeaderView.ResizeMode.ResizeToContents)  # Status - fit content
-
-        self.samples_table.itemSelectionChanged.connect(self.on_sample_selection_changed)
-        self.samples_table.setToolTip("Right-click on a file for options")
-
-        # Sample info display
-        self.sample_info_label = QLabel("No samples loaded")
-        self.sample_info_label.setStyleSheet("""
-            color: #666666;
-            font-style: italic;
-            font-size: 10px;
-            padding: 4px;
-            background-color: #f8f8f6;
-            border: 1px solid #e0e0e0;
-            border-radius: 3px;
-            margin-top: 4px;
-        """)
-
-        samples_layout.addWidget(self.samples_table)
-
-        # Batch action buttons - Organized by purpose
-        batch_buttons_layout = QVBoxLayout()
-        batch_buttons_layout.setSpacing(4)
-
-        self.load_auto_btn = QPushButton("✅ Load All Auto-Detected Files")
+        self.load_auto_btn = QPushButton("Load Auto")
         self.load_auto_btn.clicked.connect(self.load_auto_files)
         self.load_auto_btn.setEnabled(False)
-        self.load_auto_btn.setToolTip("Load all files that were automatically detected and validated")
-        self.load_auto_btn.setStyleSheet("""
-            QPushButton {
-                font-size: 10px;
-                padding: 6px 12px;
-                background-color: #5a9;
-                color: white;
-            }
-            QPushButton:hover {
-                background-color: #6ba;
-            }
-            QPushButton:disabled {
-                background-color: #e8e8e5;
-                color: #999999;
-            }
-        """)
+        self.load_auto_btn.setToolTip("Load all auto-detected files")
+        self.load_auto_btn.setStyleSheet(_MINI_BTN)
 
-        self.review_failed_btn = QPushButton("⚠️ Review Files Needing Attention")
+        self.review_failed_btn = QPushButton("\u26a0 Review")
         self.review_failed_btn.clicked.connect(self.review_failed_files)
         self.review_failed_btn.setEnabled(False)
-        self.review_failed_btn.setToolTip("Review and manually map files that failed auto-loading")
-        self.review_failed_btn.setStyleSheet("""
-            QPushButton {
-                font-size: 10px;
-                padding: 6px 12px;
-                background-color: #f39c12;
-                color: white;
-            }
-            QPushButton:hover {
-                background-color: #f5ab35;
-            }
-            QPushButton:disabled {
-                background-color: #e8e8e5;
-                color: #999999;
-            }
-        """)
+        self.review_failed_btn.setToolTip("Review files needing manual mapping")
+        self.review_failed_btn.setStyleSheet(_MINI_BTN)
 
-        batch_buttons_layout.addWidget(self.load_auto_btn)
-        batch_buttons_layout.addWidget(self.review_failed_btn)
+        self.clear_all_btn = QPushButton("Clear All")
+        self.clear_all_btn.clicked.connect(self.clear_all_files)
+        self.clear_all_btn.setStyleSheet(
+            f"QPushButton {{ background: transparent; border: none;"
+            f"  color: {C.SB_MUTED}; font-size: 9px;"
+            f"  font-family: '{F.UI}'; padding: 2px 4px; }}"
+            f"QPushButton:hover {{ color: {C.LED_ERR}; }}"
+        )
 
-        samples_layout.addLayout(batch_buttons_layout)
-        samples_layout.addWidget(self.sample_info_label)
+        mini_btns.addWidget(self.load_auto_btn, 1)
+        mini_btns.addWidget(self.review_failed_btn, 1)
+        mini_btns.addStretch()
+        mini_btns.addWidget(self.clear_all_btn)
+        batch_v.addLayout(mini_btns)
 
-        # === ANALYSIS PARAMETERS ===
-        params_group = QGroupBox("⚙️ Analysis Parameters")
-        params_layout = QVBoxLayout(params_group)
-        params_layout.setSpacing(8)
-        params_layout.setContentsMargins(8, 8, 8, 8)
+        batch_outer = QWidget()
+        batch_outer.setStyleSheet(f"background: {C.SB};")
+        batch_outer_v = QHBoxLayout(batch_outer)
+        batch_outer_v.setContentsMargins(10, 6, 10, 2)
+        batch_outer_v.addWidget(batch_box)
+        body_v.addWidget(batch_outer)
 
-        # Global parameters (apply to all samples)
-        global_params_label = QLabel("Global Parameters (applied to all samples):")
-        global_params_label.setFont(QFont("", 9, QFont.Weight.Bold))
-        global_params_label.setStyleSheet("color: #5d4e37; margin-bottom: 6px;")
-        params_layout.addWidget(global_params_label)
+        # ── 2d. PARAMETERS section ────────────────────────────────────
+        div1 = QFrame()
+        div1.setFrameShape(QFrame.Shape.HLine)
+        div1.setFixedHeight(1)
+        div1.setStyleSheet(f"background: {C.SB_BDR};")
+        body_v.addWidget(div1)
+        body_v.addWidget(_SectionHeader("PARAMETERS"))
 
-        # Temperature for density and viscosity calculations
-        temp_layout = QHBoxLayout()
-        temp_layout.setSpacing(8)
-        temp_label = QLabel("🌡️ Temperature:")
-        temp_label.setMinimumWidth(90)
-        temp_layout.addWidget(temp_label)
+        params_inner = QWidget()
+        params_inner.setStyleSheet(f"background: {C.SB};")
+        params_v = QVBoxLayout(params_inner)
+        params_v.setContentsMargins(12, 8, 12, 10)
+        params_v.setSpacing(8)
+
+        _LBL = (f"color: {C.SB_MID}; font-family: '{F.UI}';"
+                f"font-size: {F.SZ_SM}pt;")
+
+        # Temperature row
+        temp_row = QHBoxLayout()
+        temp_lbl = QLabel("Temperature")
+        temp_lbl.setStyleSheet(_LBL)
         self.temp_spinbox = QDoubleSpinBox()
         self.temp_spinbox.setRange(0, 50)
         self.temp_spinbox.setValue(20)
-        self.temp_spinbox.setSuffix(" °C")
-        self.temp_spinbox.setToolTip("Temperature affects both water density and viscosity in K-value calculations (Vuković & Soro, 1992)")
-        self.temp_spinbox.setMinimumWidth(80)
-        temp_layout.addWidget(self.temp_spinbox)
-        temp_layout.addStretch()
+        self.temp_spinbox.setSuffix(" \u00b0C")
+        self.temp_spinbox.setFixedWidth(82)
+        self.temp_spinbox.setToolTip(
+            "Temperature affects water density and viscosity in K calculations\n"
+            "(Vukovic & Soro, 1992)")
+        temp_row.addWidget(temp_lbl)
+        temp_row.addStretch()
+        temp_row.addWidget(self.temp_spinbox)
+        params_v.addLayout(temp_row)
 
-        # Porosity Calculation Mode
-        porosity_layout = QHBoxLayout()
-        porosity_layout.setSpacing(8)
-        porosity_label = QLabel("🕳️ Porosity Mode:")
-        porosity_label.setMinimumWidth(90)
-        porosity_layout.addWidget(porosity_label)
+        # Porosity mode
+        por_lbl = QLabel("Porosity Method")
+        por_lbl.setStyleSheet(_LBL)
         self.porosity_mode_combo = QComboBox()
         self.porosity_mode_combo.addItems([
             "Simple Formula (Excel Compatible)",
             "Urumovic Polynomial (Research)"
         ])
-        self.porosity_mode_combo.setCurrentIndex(0)  # Default to Excel compatible
-        self.porosity_mode_combo.setToolTip("Choose porosity calculation method:\nSimple: n = 0.255 * (1 + 0.83^U)\nUrumovic: Complex polynomial based on grain size distribution")
-        porosity_layout.addWidget(self.porosity_mode_combo)
-        porosity_layout.addStretch()
+        self.porosity_mode_combo.setCurrentIndex(0)
+        self.porosity_mode_combo.setToolTip(
+            "Simple: n = 0.255 x (1 + 0.83^U)\n"
+            "Urumovic: polynomial based on grain size distribution")
+        params_v.addWidget(por_lbl)
+        params_v.addWidget(self.porosity_mode_combo)
 
-        params_layout.addLayout(temp_layout)
-        params_layout.addLayout(porosity_layout)
-
-        # Porosity Settings Button
-        porosity_settings_layout = QHBoxLayout()
-        porosity_settings_layout.setSpacing(8)
-
-        self.porosity_settings_btn = QPushButton("🕳️ Manage Dataset Porosity...")
+        # Manage porosity button
+        self.porosity_settings_btn = QPushButton("Manage Dataset Porosity\u2026")
         self.porosity_settings_btn.clicked.connect(self.open_porosity_dialog)
-        self.porosity_settings_btn.setToolTip("Edit porosity values for each dataset individually")
-        self.porosity_settings_btn.setStyleSheet("""
-            QPushButton {
-                background-color: #6b8e23;
-                color: white;
-                padding: 8px 12px;
-                font-size: 10pt;
-                font-weight: bold;
-                border-radius: 4px;
-            }
-            QPushButton:hover {
-                background-color: #7fa02d;
-            }
-        """)
-        porosity_settings_layout.addWidget(self.porosity_settings_btn)
-        porosity_settings_layout.addStretch()
-
-        params_layout.addLayout(porosity_settings_layout)
-
-        # === SENSITIVITY ANALYSIS (Placeholder for future feature) ===
-        params_layout.addSpacing(10)
-        sensitivity_separator = QFrame()
-        sensitivity_separator.setFrameShape(QFrame.Shape.HLine)
-        sensitivity_separator.setStyleSheet("background-color: #d4c4a8; max-height: 1px;")
-        params_layout.addWidget(sensitivity_separator)
-
-        sensitivity_label = QLabel("<b>🔬 Sensitivity Analysis</b>")
-        sensitivity_label.setStyleSheet("font-size: 10px; color: #5d4e37; margin-top: 6px;")
-        params_layout.addWidget(sensitivity_label)
-
-        # Placeholder button
-        self.sensitivity_analysis_btn = QPushButton("📊 Run Sensitivity Analysis (Coming Soon)")
-        self.sensitivity_analysis_btn.setToolTip(
-            "Future feature: Run K calculations with varying temperature and porosity ranges\n"
-            "to analyze parameter sensitivity\n\n"
-            "Click to learn more about this planned feature"
+        self.porosity_settings_btn.setToolTip(
+            "Edit porosity values for each dataset individually")
+        self.porosity_settings_btn.setStyleSheet(
+            f"QPushButton {{ background: {C.SB_UP}; border: 1px solid {C.SB_BDR};"
+            f"  border-radius: 3px; padding: 4px 10px;"
+            f"  font-family: '{F.UI}'; font-size: {F.SZ_SM}pt; color: {C.SB_MID}; }}"
+            f"QPushButton:hover {{ background: {C.SB_ACT}; }}"
         )
-        self.sensitivity_analysis_btn.setStyleSheet("""
-            QPushButton {
-                background-color: #e8e8e5;
-                color: #777777;
-                padding: 6px 12px;
-                font-size: 9px;
-                border-radius: 4px;
-            }
-            QPushButton:hover {
-                background-color: #ddbf94;
-                color: #5d4e37;
-            }
-        """)
-        self.sensitivity_analysis_btn.setCursor(Qt.CursorShape.PointingHandCursor)
-        self.sensitivity_analysis_btn.clicked.connect(self.show_sensitivity_placeholder)
-        params_layout.addWidget(self.sensitivity_analysis_btn)
+        params_v.addWidget(self.porosity_settings_btn)
+        body_v.addWidget(params_inner)
 
-        # Info text
-        sensitivity_info = QLabel("Analyze how temperature and porosity variations affect K values")
-        sensitivity_info.setStyleSheet("font-size: 8px; color: #999999; font-style: italic; margin-left: 4px;")
-        sensitivity_info.setWordWrap(True)
-        params_layout.addWidget(sensitivity_info)
+        # ── 3. DTU box — matches .dtu-box in CSS ────────────────────────
+        dtu_w = QWidget()
+        dtu_w.setStyleSheet(
+            f"background: {C.SB_DN}; border-top: 1px solid {C.SB_BDR};")
+        dtu_h = QHBoxLayout(dtu_w)
+        dtu_h.setContentsMargins(13, 9, 13, 8)
+        dtu_h.setSpacing(10)
 
-        # Progress Bar
+        # DTU red pill label — .dtu-logo in CSS
+        dtu_pill = QLabel("DTU")
+        dtu_pill.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        dtu_pill.setStyleSheet(
+            f"background: {C.DTU_RED}; color: #fff;"
+            f"  font-family: '{F.UI}'; font-size: 13px; font-weight: 700;"
+            f"  letter-spacing: 0.04em; padding: 3px 6px 2px;"
+            f"  border-radius: 2px; line-height: 1.2;")
+        dtu_pill.setSizePolicy(QSizePolicy.Policy.Fixed, QSizePolicy.Policy.Fixed)
+        dtu_h.addWidget(dtu_pill)
+
+        # Info column — .dtu-info in CSS
+        dtu_info = QVBoxLayout()
+        dtu_info.setSpacing(1)
+        dtu_prog = QLabel("Grain Size Analysis")
+        dtu_prog.setStyleSheet(
+            f"font-size: 10.5px; font-weight: 600; color: {C.SB_TEXT};"
+            f"  background: transparent;")
+        dtu_dept = QLabel("DTU Environment \u00b7 Oliver Lund")
+        dtu_dept.setFont(QFont(F.MONO, 7))
+        dtu_dept.setStyleSheet(
+            f"color: {C.SB_MUTED}; background: transparent;"
+            f"  letter-spacing: 0.01em;")
+        dtu_info.addWidget(dtu_prog)
+        dtu_info.addWidget(dtu_dept)
+        dtu_h.addLayout(dtu_info, 1)
+        root.addWidget(dtu_w)
+
+        # ── 4. Footer bar — matches .sb-foot in CSS ──────────────────
+        footer = QWidget()
+        footer.setStyleSheet(
+            f"background: {C.SB_DN}; border-top: 1px solid {C.SB_BDR};")
+        foot_h = QHBoxLayout(footer)
+        foot_h.setContentsMargins(6, 5, 6, 5)
+        foot_h.setSpacing(2)
+
+        _SF_BTN = (
+            f"QPushButton {{ background: transparent; border: none;"
+            f"  border-radius: {SZ.BORDER_RADIUS}px; padding: 5px 4px;"
+            f"  font-size: 9.5px; color: {C.SB_MUTED}; }}"
+            f"QPushButton:hover {{ background: rgba(255,255,255,0.5);"
+            f"  color: {C.SB_TEXT}; }}"
+        )
+
+        for btn_label, btn_icon_name, btn_slot in [
+            ("Help", "fa6s.circle-question", self.show_help),
+            ("About", "fa6s.circle-info", self.show_about),
+            ("Settings", "fa6s.gear", None),
+        ]:
+            btn = QPushButton(btn_label)
+            btn.setStyleSheet(_SF_BTN)
+            try:
+                btn.setIcon(icon(btn_icon_name, C.SB_MUTED))
+            except Exception:
+                pass
+            if btn_slot:
+                btn.clicked.connect(btn_slot)
+            btn.setCursor(Qt.CursorShape.PointingHandCursor)
+            btn.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Preferred)
+            foot_h.addWidget(btn)
+
+        root.addWidget(footer)
+
+        # ── Hidden data model: QTableWidget ──────────────────────────
+        # Business logic reads/writes here; _file_list cards are the visual layer.
+        self.samples_table = QTableWidget()
+        self.samples_table.setColumnCount(2)
+        self.samples_table.setHorizontalHeaderLabels(["Sample File", "Status"])
+        self.samples_table.setVisible(False)
+        self.samples_table.setContextMenuPolicy(
+            Qt.ContextMenuPolicy.CustomContextMenu)
+        self.samples_table.customContextMenuRequested.connect(
+            self.show_context_menu)
+        hdr = self.samples_table.horizontalHeader()
+        hdr.setSectionResizeMode(0, QHeaderView.ResizeMode.Stretch)
+        hdr.setSectionResizeMode(1, QHeaderView.ResizeMode.ResizeToContents)
+        self.samples_table.itemSelectionChanged.connect(
+            self.on_sample_selection_changed)
+        root.addWidget(self.samples_table)
+
+        # ── Hidden legacy widgets kept for business logic ─────────────
+        self.remove_file_btn = QPushButton()
+        self.remove_file_btn.setVisible(False)
+        self.remove_file_btn.clicked.connect(self.remove_selected_file)
+
+        self.sample_info_label = QLabel()
+        self.sample_info_label.setVisible(False)
+
         self.progress_bar = QProgressBar()
         self.progress_bar.setVisible(False)
-        self.progress_label = QLabel("")
+
+        self.progress_label = QLabel()
         self.progress_label.setVisible(False)
 
-        # Add all groups to main layout
-        layout.addWidget(samples_group)
-        layout.addWidget(params_group)
-        layout.addWidget(self.progress_label)
-        layout.addWidget(self.progress_bar)
-        layout.addStretch()  # Push everything to top
+        self.export_results_cb = QCheckBox()   # used by get_analysis_parameters()
+        self.export_results_cb.setVisible(False)
 
-        # === HELP & ABOUT SECTION (Bottom of sidebar) ===
-        help_about_group = QGroupBox("ℹ️ Help & Information")
-        help_about_layout = QVBoxLayout(help_about_group)
-        help_about_layout.setSpacing(6)
-        help_about_layout.setContentsMargins(8, 8, 8, 8)
+        self.sensitivity_analysis_btn = QPushButton()
+        self.sensitivity_analysis_btn.setVisible(False)
+        self.sensitivity_analysis_btn.clicked.connect(
+            self.show_sensitivity_placeholder)
 
-        # Help and About buttons
-        buttons_layout = QHBoxLayout()
-        buttons_layout.setSpacing(8)
+        for _w in (self.remove_file_btn, self.sample_info_label,
+                   self.progress_bar, self.progress_label,
+                   self.export_results_cb, self.sensitivity_analysis_btn):
+            root.addWidget(_w)
 
-        help_btn = QPushButton("📚 Help")
-        help_btn.setToolTip("Open help documentation (F1)")
-        help_btn.setStyleSheet("""
-            QPushButton {
-                background-color: #6b8e23;
-                color: white;
-                padding: 6px 12px;
-                font-weight: bold;
-                border-radius: 4px;
-            }
-            QPushButton:hover {
-                background-color: #7fa02d;
-            }
-        """)
-        help_btn.clicked.connect(self.show_help)
 
-        about_btn = QPushButton("ℹ️ About")
-        about_btn.setToolTip("About this application")
-        about_btn.setStyleSheet("""
-            QPushButton {
-                background-color: #d2b48c;
-                padding: 6px 12px;
-                font-weight: bold;
-                border-radius: 4px;
-            }
-            QPushButton:hover {
-                background-color: #ddbf94;
-            }
-        """)
-        about_btn.clicked.connect(self.show_about)
+    # ─────────────────────────────────────────────────────────────────────────
+    # CARD LIST SYNC METHODS
+    # ─────────────────────────────────────────────────────────────────────────
 
-        buttons_layout.addWidget(help_btn)
-        buttons_layout.addWidget(about_btn)
-        help_about_layout.addLayout(buttons_layout)
+    def _on_card_clicked(self, file_path: str):
+        """Sync card click to the hidden table selection."""
+        for row in range(self.samples_table.rowCount()):
+            item = self.samples_table.item(row, 0)
+            if item and item.data(Qt.ItemDataRole.UserRole) == file_path:
+                self.samples_table.selectRow(row)
+                return
 
-        layout.addWidget(help_about_group)
+    def _on_card_context_menu(self, file_path: str, global_pos):
+        """Show context menu triggered from a _SampleCard right-click."""
+        status = self.file_statuses.get(file_path, 'pending')
+        menu = QMenu(self)
 
-        # === PROGRAM INFORMATION (Logo + Text footer-style) ===
-        # Add a subtle separator line
-        separator = QFrame()
-        separator.setFrameShape(QFrame.Shape.HLine)
-        separator.setStyleSheet("background-color: #d4c4a8; max-height: 1px;")
-        layout.addWidget(separator)
+        if status == 'review':
+            act = QAction("Map Columns\u2026", self)
+            act.triggered.connect(lambda: self.edit_file_mapping(file_path))
+            menu.addAction(act)
+        elif status in ('auto', 'loaded'):
+            act = QAction("Show Info\u2026", self)
+            act.triggered.connect(lambda: self.show_file_info(file_path))
+            menu.addAction(act)
+            menu.addSeparator()
+            act2 = QAction("Edit Mapping\u2026", self)
+            act2.triggered.connect(lambda: self.edit_file_mapping(file_path))
+            menu.addAction(act2)
+        elif status == 'failed':
+            act = QAction("Fix / Remap\u2026", self)
+            act.triggered.connect(lambda: self.edit_file_mapping(file_path))
+            menu.addAction(act)
 
-        # Horizontal layout: Logo on left, text on right
-        info_container = QWidget()
-        info_container.setStyleSheet("background-color: transparent;")
-        info_h_layout = QHBoxLayout(info_container)
-        info_h_layout.setSpacing(15)
-        info_h_layout.setContentsMargins(15, 12, 15, 12)
+        menu.addSeparator()
+        rem = QAction("Remove", self)
+        rem.triggered.connect(lambda: self._remove_card_by_path(file_path))
+        menu.addAction(rem)
+        menu.exec(global_pos)
 
-        # Logo on the left
-        logo_label = QLabel()
-        import os
-        import sys
+    def _remove_card_by_path(self, file_path: str):
+        """Remove a file by path — called from card context menu."""
+        for row in range(self.samples_table.rowCount()):
+            item = self.samples_table.item(row, 0)
+            if item and item.data(Qt.ItemDataRole.UserRole) == file_path:
+                self.remove_file_at_row(row)
+                return
 
-        # Get resource path (works for both script and PyInstaller bundle)
-        def get_resource_path(relative_path):
-            """Get absolute path to resource, works for dev and for PyInstaller"""
-            try:
-                # PyInstaller creates a temp folder and stores path in _MEIPASS
-                base_path = sys._MEIPASS
-            except AttributeError:
-                # In dev mode, go up from gui/ to Program/
-                base_path = os.path.dirname(os.path.dirname(__file__))
-            return os.path.join(base_path, relative_path)
+    def _set_filter(self, filter_type: str):
+        """Toggle filter pills (exclusive) and apply to file list."""
+        pills = {
+            "all": self._pill_all,
+            "selected": self._pill_sel,
+            "warnings": self._pill_rev,
+        }
+        for key, pill in pills.items():
+            pill.setChecked(key == filter_type)
+        self._file_list.apply_filter(filter_type)
 
-        # In PyInstaller: sys._MEIPASS/Program/resources/DTU_logo.png
-        # In dev mode: Program/resources/DTU_logo.png
-        if hasattr(sys, '_MEIPASS'):
-            logo_path = get_resource_path(os.path.join("Program", "resources", "DTU_logo.png"))
+    def _update_inventory_bar(self):
+        """Refresh stat chips from current file_statuses and card state."""
+        total = len(self.file_statuses)
+        selected = self._file_list.get_selected_count()
+        warnings = sum(1 for s in self.file_statuses.values()
+                       if s in ('review', 'failed'))
+
+        self._chip_loaded.setText(f"{total} loaded" if total else "0 loaded")
+        self._chip_selected.setText(f"{selected} selected")
+        if warnings > 0:
+            self._chip_warnings.setText(f"\u26a0 {warnings}")
+            self._chip_warnings.setVisible(True)
         else:
-            logo_path = get_resource_path(os.path.join("resources", "DTU_logo.png"))
+            self._chip_warnings.setVisible(False)
 
-        if os.path.exists(logo_path):
-            from PyQt6.QtGui import QPixmap
-            pixmap = QPixmap(logo_path)
-            # Scale logo to appropriate size (e.g., 60x60)
-            scaled_pixmap = pixmap.scaled(60, 60, Qt.AspectRatioMode.KeepAspectRatio, Qt.TransformationMode.SmoothTransformation)
-            logo_label.setPixmap(scaled_pixmap)
-        else:
-            # Placeholder if no logo exists
-            logo_label.setText("🔬")
-            logo_label.setStyleSheet("font-size: 40px;")
-
-        logo_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        logo_label.setFixedSize(60, 60)
-        info_h_layout.addWidget(logo_label)
-
-        # Text on the right (single label with word wrap)
-        info_text = QLabel(
-            "<b>Grain Size Analysis v0.9.0-beta</b><br>"
-            "Developed by Oliver Lund, DTU Environment, with supervision from Prof. Poul Løgstrup Bjerg.<br>"
-            "Program inspired by the work of J.F. Devlin and his HydroSieveXL Excel program.<br>"
-            "January 2025"
-        )
-        info_text.setStyleSheet("font-size: 10px; color: #666666; line-height: 1.4;")
-        info_text.setWordWrap(True)
-        info_text.setAlignment(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter)
-        info_h_layout.addWidget(info_text, 1)  # Stretch factor 1 to take remaining space
-
-        layout.addWidget(info_container)
+    def _push_card_meta(self, file_path: str):
+        """Extract D50/K from loaded dataset and update the card."""
+        sample_name = self.extract_sample_name(file_path)
+        entry = self.loaded_samples.get(sample_name)
+        if not entry:
+            return
+        dataset = entry.get('data')
+        if not dataset:
+            return
+        # D50 — always available from the grain size curve
+        d50_str = ""
+        try:
+            d50 = dataset.get_d50()
+            if d50 is not None:
+                d50_str = f"{d50:.2f} mm" if d50 >= 0.01 else f"{d50:.4f} mm"
+        except Exception:
+            pass
+        # K value — try the dataset tab's current_results first, then dataset attr
+        k_str = ""
+        try:
+            # Look for the tab widget that holds computed K-values
+            if hasattr(self, 'main_window') and hasattr(self.main_window, 'dataset_tabs_widget'):
+                for i in range(self.main_window.dataset_tabs_widget.count()):
+                    tab = self.main_window.dataset_tabs_widget.widget(i)
+                    if (hasattr(tab, 'dataset') and tab.dataset is dataset
+                            and hasattr(tab, 'current_results') and tab.current_results):
+                        k_vals = [v for v in tab.current_results.values()
+                                  if v is not None and isinstance(v, (int, float)) and v > 0]
+                        if k_vals:
+                            from statistics import geometric_mean
+                            k_mean = geometric_mean(k_vals)
+                            k_str = f"{k_mean:.1f} m/d" if k_mean >= 0.1 else f"{k_mean:.2e} m/d"
+                        break
+        except Exception:
+            pass
+        self._file_list.update_card_meta(file_path, d50_str, k_str)
 
     def add_files(self):
         """Add multiple files for batch processing"""
@@ -1131,6 +1764,9 @@ class ControlPanel(QFrame):
         status_item.setToolTip(self.get_status_tooltip(status))
         self.samples_table.setItem(row, 1, status_item)
 
+        # Update visual card list
+        self._file_list.add_card(file_path, file_name, status)
+
     def get_status_icon(self, status: str) -> str:
         """Get icon for file status"""
         icons = {
@@ -1231,11 +1867,14 @@ class ControlPanel(QFrame):
             if sample_name in self.loaded_samples:
                 del self.loaded_samples[sample_name]
 
+            # Remove from card list
+            self._file_list.remove_card(file_path)
+
             # Remove from table
             self.samples_table.removeRow(row)
 
             self.update_ui_state()
-            self.sample_info_label.setText(f"🗑️ Removed: {os.path.basename(file_path)}")
+            self.sample_info_label.setText(f"Removed: {os.path.basename(file_path)}")
 
     def edit_file_mapping(self, file_path: str):
         """Open column mapping dialog for a specific file"""
@@ -1274,15 +1913,17 @@ class ControlPanel(QFrame):
 
                 self.file_statuses[file_path] = 'loaded'
                 self.update_file_in_table(file_path, 'loaded')
+                self._push_card_meta(file_path)
+                self._update_inventory_bar()
 
                 for dataset in created_datasets:
                     self.dataset_loaded_successfully.emit(dataset, file_path)
 
                 if sheet_names:
                     summary = ", ".join(sheet_names)
-                    self.sample_info_label.setText(f"✅ Loaded {len(created_datasets)} sheet(s): {summary}")
+                    self.sample_info_label.setText(f"\u2705 Loaded {len(created_datasets)} sheet(s): {summary}")
                 else:
-                    self.sample_info_label.setText(f"✅ Loaded {len(created_datasets)} sheet(s)")
+                    self.sample_info_label.setText(f"\u2705 Loaded {len(created_datasets)} sheet(s)")
 
         except Exception as e:
             QMessageBox.warning(self, "Error", f"Failed to edit {os.path.basename(file_path)}:\n{str(e)}")
@@ -1448,6 +2089,8 @@ Uniformity Coefficient (Cu): {fmt(cu, '.2f')}
                 status_item.setData(Qt.ItemDataRole.UserRole, status)
                 status_item.setToolTip(self.get_status_tooltip(status))
                 break
+        # Update visual card
+        self._file_list.update_card_status(file_path, status)
 
     def register_external_file(self, file_path: str, dataset):
         """Register a file that was loaded externally (e.g., from recent files/sessions)"""
@@ -1469,6 +2112,8 @@ Uniformity Coefficient (Cu): {fmt(cu, '.2f')}
             # Add to table
             self.add_file_to_table(file_path, 'loaded')
 
+        self._push_card_meta(file_path)
+        self._update_inventory_bar()
         self.update_ui_state()
         self.sample_info_label.setText(f"{len(self.loaded_samples)} sample(s) loaded")
 
@@ -1529,6 +2174,8 @@ Uniformity Coefficient (Cu): {fmt(cu, '.2f')}
 
                     self.file_statuses[file_path] = 'loaded'
                     self.update_file_in_table(file_path, 'loaded')
+                    self._push_card_meta(file_path)
+                    self._update_inventory_bar()
 
             except Exception as e:
                 QMessageBox.warning(self, "Error", f"Failed to process {os.path.basename(file_path)}:\n{str(e)}")
@@ -1552,11 +2199,14 @@ Uniformity Coefficient (Cu): {fmt(cu, '.2f')}
             if sample_name in self.loaded_samples:
                 del self.loaded_samples[sample_name]
 
+            # Remove from card list
+            self._file_list.remove_card(file_path)
+
             # Remove from table
             self.samples_table.removeRow(current_row)
 
             self.update_ui_state()
-            self.sample_info_label.setText(f"🗑️ Removed: {os.path.basename(file_path)}")
+            self.sample_info_label.setText(f"Removed: {os.path.basename(file_path)}")
         else:
             self.remove_file_btn.setEnabled(False)
 
@@ -1574,8 +2224,9 @@ Uniformity Coefficient (Cu): {fmt(cu, '.2f')}
                 self.loaded_samples.clear()
                 self.file_statuses.clear()
                 self.samples_table.setRowCount(0)
+                self._file_list.clear_cards()
                 self.update_ui_state()
-                self.sample_info_label.setText("🧹 All files cleared")
+                self.sample_info_label.setText("All files cleared")
 
     def on_sample_selection_changed(self):
         """Handle sample selection change"""
@@ -1585,6 +2236,9 @@ Uniformity Coefficient (Cu): {fmt(cu, '.2f')}
             file_path = file_item.data(Qt.ItemDataRole.UserRole)
             status_item = self.samples_table.item(current_row, 1)
             status = status_item.data(Qt.ItemDataRole.UserRole)
+
+            # Highlight the active card
+            self._file_list.set_active(file_path)
 
             # Update sample info
             file_name = os.path.basename(file_path)
@@ -1598,6 +2252,7 @@ Uniformity Coefficient (Cu): {fmt(cu, '.2f')}
             if sample_name in self.loaded_samples and status in ['auto', 'loaded']:
                 self.sample_selected.emit(sample_name)
         else:
+            self._file_list.set_active(None)
             self.remove_file_btn.setEnabled(False)
 
 
@@ -1639,6 +2294,9 @@ Uniformity Coefficient (Cu): {fmt(cu, '.2f')}
 
             if not self.sample_info_label.text().startswith(("Processing", "✅", "⚠️", "🗑️", "🧹")):
                 self.sample_info_label.setText(summary)
+
+        # Update inventory summary bar
+        self._update_inventory_bar()
 
         # Trigger validation to determine if analysis buttons should be enabled
         self.perform_full_validation()
@@ -1981,6 +2639,8 @@ Uniformity Coefficient (Cu): {fmt(cu, '.2f')}
                     'status': status
                 }
                 self.update_file_in_table(file_key, status)
+                self._push_card_meta(file_key)
+                self._update_inventory_bar()
 
             except Exception as e:
                 # Failed - update error tab with real error message

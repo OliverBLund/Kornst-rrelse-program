@@ -14,19 +14,26 @@ from PyQt6.QtCore import QTimer, QThread, pyqtSignal
 from PyQt6.QtGui import QFont
 
 from Splash.simple_splash import SimpleSplash
+from gui.theme import load_fonts
 # MainWindow imported later to speed up splash appearance
 
 
 def _log_startup_error(source: str, exc: Exception) -> None:
     """Write startup exceptions to a temp file for debugging packaged builds."""
+    log_path = Path(tempfile.gettempdir()) / "grain_startup_error.log"
     try:
-        log_path = Path(tempfile.gettempdir()) / "grain_startup_error.log"
         with log_path.open("a", encoding="utf-8") as f:
             f.write(f"[{datetime.now().isoformat()}] {source}: {exc}\n")
             f.write("".join(traceback.format_exception(type(exc), exc, exc.__traceback__)))
             f.write("\n")
     except Exception:
         # Best-effort only
+        pass
+    try:
+        print(f"[startup-error] {source}: {exc}", file=sys.stderr)
+        print(f"[startup-error] log: {log_path}", file=sys.stderr)
+        traceback.print_exception(type(exc), exc, exc.__traceback__, file=sys.stderr)
+    except Exception:
         pass
 
 
@@ -58,16 +65,9 @@ def main() -> None:
     app.setOrganizationName("Geotechnical Engineering")
     app.setOrganizationDomain("grainsize.app")
 
-    # Set a modern default font to avoid DirectWrite warnings with legacy fonts like "MS Sans Serif"
-    # This prevents Qt from falling back to problematic legacy Windows fonts
-    default_font = QFont("Segoe UI", 9)
-    if not default_font.exactMatch():
-        # Fallback to other modern fonts if Segoe UI is not available
-        for fallback in ["Arial", "Helvetica", "Sans Serif"]:
-            default_font = QFont(fallback, 9)
-            if default_font.exactMatch():
-                break
-    app.setFont(default_font)
+    # Load bundled fonts (Source Sans 3, JetBrains Mono, Playfair Display)
+    load_fonts()
+    app.setFont(QFont("Source Sans 3", 9))
 
     # Create and show splash screen IMMEDIATELY (before heavy imports)
     splash = SimpleSplash()
@@ -97,8 +97,9 @@ def main() -> None:
         # Create and show main window
         try:
             window = MainWindow()
-            # Show window maximized (fullscreen)
-            window.showMaximized()
+            # Show window first, then maximize after native HWND is ready
+            window.show()
+            QTimer.singleShot(50, window.showMaximized)
             app.processEvents()
 
             # Close splash with fade

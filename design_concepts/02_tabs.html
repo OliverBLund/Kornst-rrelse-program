@@ -164,6 +164,8 @@ body::after{
 .s-meta{font-family:var(--fm);font-size:9px;color:var(--sb-muted);margin-top:1px}
 .s-led{width:6px;height:6px;border-radius:50%;flex-shrink:0}
 .s-led.ok{background:#5aaa3a;box-shadow:0 0 4px rgba(90,170,58,.4)}
+.s-led.warn{background:#d08020;box-shadow:0 0 4px rgba(208,128,32,.35)}
+.s-led.err{background:#b03a2e;box-shadow:0 0 4px rgba(176,58,46,.35)}
 .p-rows{display:flex;flex-direction:column;gap:5px;padding:6px 10px 6px}
 .p-row{display:flex;align-items:center;justify-content:space-between;gap:6px}
 .p-lbl{font-size:11.5px;color:var(--sb-mid)}
@@ -544,11 +546,15 @@ table.k-tbl tbody td.k-na{color:var(--text-muted);font-style:italic}
   padding:8px 16px;display:flex;align-items:center;gap:12px;flex-shrink:0;
 }
 .cmp-title{font-size:13px;font-weight:600;color:var(--text)}
+.cmp-title-block{display:flex;flex-direction:column;gap:2px}
+.cmp-sub{font-size:10.5px;color:var(--text-muted);line-height:1.35}
 .cmp-sp{flex:1}
 .cmp-btn{display:flex;align-items:center;gap:5px;height:26px;padding:0 11px;border:1px solid var(--border);border-radius:var(--r);font-size:12px;color:var(--text-mid);background:rgba(255,255,255,.5);transition:all .1s}
 .cmp-btn:hover{background:var(--bg-low);border-color:var(--border-dk)}
 .cmp-btn.go{background:var(--olive);border-color:var(--olive-dk);color:#fff;font-weight:600}
 .cmp-btn i{font-size:11px}
+.cmp-btn:disabled{opacity:.45;cursor:default}
+.cmp-btn:disabled:hover{background:rgba(255,255,255,.5);border-color:var(--border);color:var(--text-mid)}
 
 /* Sample color chips (used in comparison) */
 .s-chip{
@@ -591,6 +597,63 @@ table.cmp-tbl tbody td{padding:6px 12px;vertical-align:middle}
 table.cmp-tbl tbody td:nth-child(n+2){text-align:right;font-family:var(--fm);font-size:11.5px}
 table.cmp-tbl .param-name{font-weight:500;color:var(--text)}
 table.cmp-tbl .param-desc{font-size:10px;color:var(--text-muted);margin-top:1px}
+
+/* ── Comparison sub-tab bar ── */
+.cmp-ntab-bar{
+  display:flex;border-bottom:1px solid var(--border);background:var(--bg-raised);
+  flex-shrink:0;padding:0 12px;gap:2px;
+}
+.cmp-ntab{
+  height:34px;padding:0 14px;border:none;background:transparent;
+  font-size:12px;font-weight:500;color:var(--text-muted);
+  display:flex;align-items:center;gap:6px;cursor:pointer;
+  border-bottom:2px solid transparent;margin-bottom:-1px;transition:color .1s;
+}
+.cmp-ntab i{font-size:11px}
+.cmp-ntab:hover{color:var(--text)}
+.cmp-ntab.on{color:var(--text);border-bottom-color:var(--olive)}
+.cmp-ntab-content{display:none;flex:1;overflow:hidden;flex-direction:column}
+.cmp-ntab-content.active{display:flex}
+/* ── Comparison plot layout ── */
+.cmp-plot-layout{flex:1;display:flex;overflow:hidden}
+.cmp-plot-area{
+  flex:1;display:flex;align-items:stretch;overflow:hidden;
+  padding:12px 16px 8px;background:var(--bg);min-width:0;
+}
+.cmp-plot-area .plot-svg{width:100%;height:100%;display:block}
+.cmp-plot-side{
+  width:188px;flex-shrink:0;border-left:1px solid var(--border);
+  display:flex;flex-direction:column;background:var(--bg-raised);
+  overflow:hidden;transition:width .18s ease;
+}
+.cmp-plot-side.collapsed{width:28px}
+.cmp-side-hd{
+  padding:7px 8px;border-bottom:1px solid var(--border);
+  display:flex;align-items:center;justify-content:space-between;
+  font-size:10px;font-weight:600;color:var(--text-mid);
+  text-transform:uppercase;letter-spacing:.05em;white-space:nowrap;overflow:hidden;
+}
+.cmp-side-collapse{
+  border:none;background:none;color:var(--text-muted);cursor:pointer;padding:2px 3px;
+  display:flex;align-items:center;font-size:10px;flex-shrink:0;border-radius:3px;
+  transition:background .1s;
+}
+.cmp-side-collapse:hover{background:rgba(0,0,0,.06)}
+.cmp-ds-list{flex:1;overflow-y:auto;padding:3px 0}
+.cmp-ds-item{
+  display:flex;align-items:center;gap:7px;padding:5px 9px;
+  transition:background .08s;
+}
+.cmp-ds-item:hover{background:rgba(212,196,168,.18)}
+.cmp-ds-dot{width:8px;height:8px;border-radius:50%;flex-shrink:0}
+.cmp-ds-nm{flex:1;font-size:11px;color:var(--text-mid);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.cmp-ds-pin{
+  border:none;background:none;padding:2px 4px;cursor:pointer;
+  color:var(--text-muted);font-size:10px;border-radius:3px;flex-shrink:0;
+  transition:color .1s,background .1s;
+}
+.cmp-ds-pin:hover{background:rgba(107,142,35,.12);color:var(--olive)}
+.cmp-ds-pin.pinned{color:var(--olive)}
 
 /* Color-coded cells */
 .cv-a{color:#3a7ea0}
@@ -674,6 +737,62 @@ table.cmp-tbl .param-desc{font-size:10px;color:var(--text-muted);margin-top:1px}
 .s-act-btn:hover{background:rgba(255,255,255,.7);color:var(--sb-text)}
 .s-act-btn.danger{color:#a03020;border-color:rgba(160,48,32,.28)}
 .s-act-btn.danger:hover{background:rgba(160,48,32,.07)}
+.s-meta-row{display:flex;align-items:center;justify-content:space-between;gap:8px;margin-top:1px}
+.s-tags{display:flex;align-items:center;gap:4px;flex-shrink:0}
+.s-badge{
+  display:inline-flex;align-items:center;padding:1px 6px;border-radius:99px;
+  font-size:8.5px;font-weight:600;letter-spacing:.04em;text-transform:uppercase;
+  border:1px solid transparent;
+}
+.s-badge.open{background:rgba(210,180,140,.22);color:#6a4820;border-color:rgba(139,115,85,.22)}
+.s-badge.sel{background:rgba(107,142,35,.12);color:var(--olive);border-color:rgba(107,142,35,.28)}
+.s-pick-btn{
+  width:20px;height:20px;flex-shrink:0;border-radius:50%;
+  border:1px solid var(--sb-bdr);background:rgba(255,255,255,.38);
+  color:var(--sb-muted);display:flex;align-items:center;justify-content:center;
+  transition:all .12s;
+}
+.s-pick-btn i{font-size:9px}
+.s-pick-btn:hover{background:rgba(255,255,255,.72);color:var(--sb-text)}
+.s-pick-btn.on{background:rgba(107,142,35,.14);border-color:rgba(107,142,35,.35);color:var(--olive)}
+.s-filter-row{display:flex;gap:5px;padding:4px 10px 2px}
+.s-filter{
+  height:22px;padding:0 8px;border:1px solid var(--sb-bdr);border-radius:99px;
+  background:rgba(255,255,255,.28);font-size:10px;color:var(--sb-mid);transition:all .12s;
+}
+.s-filter:hover{background:rgba(255,255,255,.52);color:var(--sb-text)}
+.s-filter.on{background:rgba(107,142,35,.12);border-color:rgba(107,142,35,.35);color:var(--olive)}
+/* Inventory summary bar */
+.sb-inv{
+  margin:6px 10px 4px;padding:7px 10px;border:1px solid var(--sb-bdr);border-radius:5px;
+  background:rgba(255,255,255,.22);display:flex;flex-direction:column;gap:6px;
+}
+.sb-inv-row{display:flex;align-items:center;gap:5px;flex-wrap:wrap}
+.sb-inv-chip{font-size:10px;color:var(--sb-mid);font-family:var(--fm)}
+.sb-inv-chip.sel{color:var(--olive);font-weight:600}
+.sb-inv-chip.warn{color:#7a4818}
+.sb-inv-chip.warn i{font-size:9px}
+.sb-inv-sep{font-size:10px;color:var(--sb-bdr);user-select:none}
+.sb-mini-actions{display:flex;gap:6px}
+.sb-mini-btn{
+  flex:1;height:26px;padding:0 9px;border:1px solid var(--sb-bdr);border-radius:4px;
+  background:rgba(255,255,255,.45);font-size:10.5px;color:var(--sb-mid);
+  display:flex;align-items:center;justify-content:center;gap:5px;transition:all .12s;cursor:pointer;
+}
+.sb-mini-btn.go{background:var(--olive);border-color:var(--olive-dk);color:#fff;font-weight:600}
+.sb-mini-btn:hover:not(:disabled){background:rgba(255,255,255,.72);color:var(--sb-text)}
+.sb-mini-btn.go:hover:not(:disabled){background:var(--olive-h);color:#fff}
+.sb-mini-btn:disabled{opacity:.45;cursor:default}
+/* Selected toggle on sidebar sample cards */
+.s-sel-toggle{
+  width:17px;height:17px;border-radius:3px;border:1.5px solid var(--sb-bdr);
+  background:rgba(255,255,255,.4);display:flex;align-items:center;justify-content:center;
+  cursor:pointer;flex-shrink:0;transition:all .12s;padding:0;
+}
+.s-sel-toggle i{font-size:8px;color:transparent}
+.s-sel-toggle.on{background:var(--olive);border-color:var(--olive-dk)}
+.s-sel-toggle.on i{color:#fff}
+.s-sel-toggle:hover{border-color:var(--olive);background:rgba(107,142,35,.1)}
 
 /* ══════════════════════════════════════════════
    SCROLLABLE DATASET TAB BAR
@@ -800,7 +919,25 @@ table.cmp-tbl .param-desc{font-size:10px;color:var(--text-muted);margin-top:1px}
         <span class="drop-s">CSV · XLSX · TXT</span>
       </div>
     </div>
+    <div class="s-filter-row">
+      <button class="s-filter on" data-filter="all" onclick="setSampleFilter('all',this)">All</button>
+      <button class="s-filter" data-filter="selected" onclick="setSampleFilter('selected',this)">Selected</button>
+      <button class="s-filter" data-filter="warn" onclick="setSampleFilter('warn',this)">Warnings</button>
+    </div>
     <div class="s-list" id="s-list"><!-- JS generated --></div>
+    <div class="sb-inv" id="sb-batch">
+      <div class="sb-inv-row">
+        <span class="sb-inv-chip"><span id="sb-loaded-count">12</span> loaded</span>
+        <span class="sb-inv-sep">·</span>
+        <span class="sb-inv-chip sel"><span id="sb-selected-count">4</span> selected</span>
+        <span class="sb-inv-sep">·</span>
+        <span class="sb-inv-chip warn"><i class="fa-solid fa-triangle-exclamation"></i> <span id="sb-warn-count">2</span></span>
+      </div>
+      <div class="sb-mini-actions">
+        <button class="sb-mini-btn go" id="sb-compare-btn" onclick="swMainTab('comparison')"><i class="fa-solid fa-code-compare"></i>Compare</button>
+        <button class="sb-mini-btn" id="sb-export-btn" onclick="swMainTab('export')"><i class="fa-solid fa-file-export"></i>Export</button>
+      </div>
+    </div>
 
     <div class="sb-sect" style="margin-top:6px">
       <span class="sb-sect-lbl">Parameters</span>
@@ -870,10 +1007,11 @@ table.cmp-tbl .param-desc{font-size:10px;color:var(--text-muted);margin-top:1px}
     <div class="tb-tabs">
       <div class="tab on" onclick="swMainTab('individual',this)">
         <i class="fa-solid fa-chart-area"></i>Individual Samples
-        <span class="t-badge">12</span>
+        <span class="t-badge" id="tb-loaded-count">12</span>
       </div>
       <div class="tab" onclick="swMainTab('comparison',this)">
         <i class="fa-solid fa-code-compare"></i>Comparison
+        <span class="t-badge" id="tb-selected-count">4</span>
       </div>
       <div class="tab" onclick="swMainTab('reports',this)">
         <i class="fa-solid fa-file-contract"></i>Reports
@@ -1412,169 +1550,298 @@ table.cmp-tbl .param-desc{font-size:10px;color:var(--text-muted);margin-top:1px}
     <!-- Header bar -->
     <div class="cmp-header">
       <i class="fa-solid fa-code-compare" style="color:var(--text-muted)"></i>
-      <span class="cmp-title">Grain Parameter Comparison</span>
-      <div style="display:flex;gap:6px;align-items:center;margin-left:8px">
-        <span class="s-chip chip-a"><span class="chip-dot"></span>Borehole_DK-07</span>
-        <span class="s-chip chip-b"><span class="chip-dot"></span>Sample_GW-2024-A</span>
-        <span class="s-chip chip-c"><span class="chip-dot"></span>Core_LC-11</span>
+      <div class="cmp-title-block">
+        <span class="cmp-title">Batch Comparison</span>
+        <span class="cmp-sub"><span id="cmp-sel-count">4</span> selected · <span id="cmp-pin-count">3</span> pinned in view · pin/unpin in the dataset panel</span>
       </div>
       <div class="cmp-sp"></div>
-      <button class="cmp-btn"><i class="fa-solid fa-rotate"></i> Refresh</button>
-      <button class="cmp-btn"><i class="fa-solid fa-file-export"></i> Export</button>
-      <button class="cmp-btn go"><i class="fa-solid fa-chart-bar"></i> Plot Comparison</button>
+      <button class="cmp-btn"><i class="fa-solid fa-list-check"></i> Manage Datasets</button>
+      <button class="cmp-btn go" id="cmp-export-btn"><i class="fa-solid fa-file-export"></i> Export Selected</button>
     </div>
 
-    <!-- Body: two panels side by side -->
-    <div class="cmp-body">
+    <!-- Comparison sub-tab bar -->
+    <div class="cmp-ntab-bar">
+      <button class="cmp-ntab on" onclick="swCmpTab('plot',this)"><i class="fa-solid fa-chart-area"></i>Plot</button>
+      <button class="cmp-ntab" onclick="swCmpTab('details',this)"><i class="fa-solid fa-table"></i>Details</button>
+    </div>
 
-      <!-- Panel 1: Grain parameters -->
-      <div class="cmp-panel">
-        <div class="cmp-panel-head">
-          <i class="fa-solid fa-ruler"></i>Grain Parameters
-        </div>
-        <div class="cmp-tbl-wrap">
-          <table class="cmp-tbl">
-            <thead>
-              <tr>
-                <th style="width:160px">Parameter</th>
-                <th>
-                  <span style="display:flex;align-items:center;gap:4px;justify-content:flex-end">
-                    <span class="chip-dot" style="width:7px;height:7px;border-radius:50%;background:#3a7ea0;flex-shrink:0;display:inline-block"></span>
-                    DK-07
-                  </span>
-                </th>
-                <th>
-                  <span style="display:flex;align-items:center;gap:4px;justify-content:flex-end">
-                    <span class="chip-dot" style="width:7px;height:7px;border-radius:50%;background:#6b8e23;flex-shrink:0;display:inline-block"></span>
-                    GW-2024-A
-                  </span>
-                </th>
-                <th>
-                  <span style="display:flex;align-items:center;gap:4px;justify-content:flex-end">
-                    <span class="chip-dot" style="width:7px;height:7px;border-radius:50%;background:#b46428;flex-shrink:0;display:inline-block"></span>
-                    LC-11
-                  </span>
-                </th>
-              </tr>
-            </thead>
-            <tbody>
-              <tr>
-                <td><div class="param-name">D10</div><div class="param-desc">Effective size (mm)</div></td>
-                <td class="cv-a">0.160</td><td class="cv-b">0.062</td><td class="cv-c">0.420</td>
-              </tr>
-              <tr>
-                <td><div class="param-name">D30</div><div class="param-desc">30th percentile (mm)</div></td>
-                <td class="cv-a">0.300</td><td class="cv-b">0.110</td><td class="cv-c">0.680</td>
-              </tr>
-              <tr>
-                <td><div class="param-name">D50</div><div class="param-desc">Median diameter (mm)</div></td>
-                <td class="cv-a">0.420</td><td class="cv-b">0.180</td><td class="cv-c">0.890</td>
-              </tr>
-              <tr>
-                <td><div class="param-name">D60</div><div class="param-desc">60th percentile (mm)</div></td>
-                <td class="cv-a">0.560</td><td class="cv-b">0.220</td><td class="cv-c">1.100</td>
-              </tr>
-              <tr>
-                <td><div class="param-name">D90</div><div class="param-desc">90th percentile (mm)</div></td>
-                <td class="cv-a">1.060</td><td class="cv-b">0.380</td><td class="cv-c">2.400</td>
-              </tr>
-              <tr>
-                <td><div class="param-name">Cu</div><div class="param-desc">Uniformity coefficient</div></td>
-                <td class="cv-a">3.50</td><td class="cv-b">3.55</td><td class="cv-c">2.62</td>
-              </tr>
-              <tr>
-                <td><div class="param-name">Cc</div><div class="param-desc">Curvature coefficient</div></td>
-                <td class="cv-a">1.05</td><td class="cv-b">0.98</td><td class="cv-c">0.94</td>
-              </tr>
-              <tr>
-                <td><div class="param-name">Fines &lt;0.063mm</div><div class="param-desc">% passing sieve</div></td>
-                <td class="cv-a">2.1%</td><td class="cv-b">8.4%</td><td class="cv-c">0.8%</td>
-              </tr>
-              <tr>
-                <td><div class="param-name">Dominant class</div></td>
-                <td style="text-align:right"><span class="soil-badge sand" style="font-size:10px">Med. Sand</span></td>
-                <td style="text-align:right"><span class="soil-badge silt" style="font-size:10px">Fine Sand</span></td>
-                <td style="text-align:right"><span class="soil-badge gravel" style="font-size:10px">C. Sand</span></td>
-              </tr>
-              <tr>
-                <td><div class="param-name">USCS</div><div class="param-desc">Soil class</div></td>
-                <td style="text-align:right;font-family:var(--fm);font-size:11px" class="cv-a">SP</td>
-                <td style="text-align:right;font-family:var(--fm);font-size:11px" class="cv-b">SP-SM</td>
-                <td style="text-align:right;font-family:var(--fm);font-size:11px" class="cv-c">SP</td>
-              </tr>
-            </tbody>
-          </table>
-        </div>
-      </div><!-- /panel grain -->
+    <!-- ── Plot sub-tab ── -->
+    <div class="cmp-ntab-content active" id="cmp-ntab-plot">
+      <div class="cmp-plot-layout">
 
-      <!-- Panel 2: Permeability comparison -->
-      <div class="cmp-panel">
-        <div class="cmp-panel-head">
-          <i class="fa-solid fa-water"></i>Hydraulic Conductivity
+        <!-- SVG grain size overlay -->
+        <div class="cmp-plot-area">
+          <svg class="plot-svg" viewBox="0 0 860 480" xmlns="http://www.w3.org/2000/svg">
+            <defs>
+              <clipPath id="cmp-clip">
+                <rect x="72" y="20" width="760" height="400"/>
+              </clipPath>
+            </defs>
+            <!-- Plot background -->
+            <rect x="72" y="20" width="760" height="400" fill="white" rx="2"/>
+            <!-- Soil zone bands -->
+            <rect x="72"   y="20" width="45.7"  height="400" fill="#e8e4ee" opacity="0.5"/>
+            <rect x="117.7" y="20" width="227.8" height="400" fill="#e4ecdc" opacity="0.4"/>
+            <rect x="345.5" y="20" width="76.3"  height="400" fill="#fff8e8" opacity="0.5"/>
+            <rect x="421.8" y="20" width="72.5"  height="400" fill="#fdf0d8" opacity="0.5"/>
+            <rect x="494.3" y="20" width="79.5"  height="400" fill="#f8e8cc" opacity="0.45"/>
+            <rect x="573.8" y="20" width="224.5" height="400" fill="#ede0c8" opacity="0.45"/>
+            <rect x="798.3" y="20" width="33.7"  height="400" fill="#e0d4c0" opacity="0.5"/>
+            <!-- Zone labels -->
+            <text x="94.5"  y="434" class="zone-lbl" text-anchor="middle">Clay</text>
+            <text x="231.6" y="434" class="zone-lbl" text-anchor="middle">Silt</text>
+            <text x="383.7" y="434" class="zone-lbl" text-anchor="middle">Fine</text>
+            <text x="458.1" y="434" class="zone-lbl" text-anchor="middle">Med.</text>
+            <text x="534.0" y="434" class="zone-lbl" text-anchor="middle">Coarse</text>
+            <text x="686.1" y="434" class="zone-lbl" text-anchor="middle">Gravel</text>
+            <text x="815.2" y="434" class="zone-lbl" text-anchor="middle">Cob.</text>
+            <!-- Zone dividers -->
+            <line x1="117.7" y1="20" x2="117.7" y2="420" stroke="#ccc" stroke-width="0.7" stroke-dasharray="3,3"/>
+            <line x1="345.5" y1="20" x2="345.5" y2="420" stroke="#ccc" stroke-width="0.7" stroke-dasharray="3,3"/>
+            <line x1="421.8" y1="20" x2="421.8" y2="420" stroke="#ccc" stroke-width="0.5" stroke-dasharray="2,4"/>
+            <line x1="494.3" y1="20" x2="494.3" y2="420" stroke="#ccc" stroke-width="0.5" stroke-dasharray="2,4"/>
+            <line x1="573.8" y1="20" x2="573.8" y2="420" stroke="#ccc" stroke-width="0.7" stroke-dasharray="3,3"/>
+            <line x1="798.3" y1="20" x2="798.3" y2="420" stroke="#ccc" stroke-width="0.7" stroke-dasharray="3,3"/>
+            <!-- Y Grid -->
+            <line x1="72" y1="60"  x2="832" y2="60"  class="grid-l"/>
+            <line x1="72" y1="100" x2="832" y2="100" class="grid-l"/>
+            <line x1="72" y1="140" x2="832" y2="140" class="grid-l"/>
+            <line x1="72" y1="180" x2="832" y2="180" class="grid-l"/>
+            <line x1="72" y1="220" x2="832" y2="220" class="grid-l"/>
+            <line x1="72" y1="260" x2="832" y2="260" class="grid-l"/>
+            <line x1="72" y1="300" x2="832" y2="300" class="grid-l"/>
+            <line x1="72" y1="340" x2="832" y2="340" class="grid-l"/>
+            <line x1="72" y1="380" x2="832" y2="380" class="grid-l"/>
+            <!-- X Grid -->
+            <line x1="224" y1="20" x2="224" y2="420" class="grid-l"/>
+            <line x1="376" y1="20" x2="376" y2="420" class="grid-l"/>
+            <line x1="528" y1="20" x2="528" y2="420" class="grid-l"/>
+            <line x1="680" y1="20" x2="680" y2="420" class="grid-l"/>
+            <!-- Y labels -->
+            <text x="65" y="424" class="ax-tick" text-anchor="end">0</text>
+            <text x="65" y="384" class="ax-tick" text-anchor="end">10</text>
+            <text x="65" y="344" class="ax-tick" text-anchor="end">20</text>
+            <text x="65" y="304" class="ax-tick" text-anchor="end">30</text>
+            <text x="65" y="264" class="ax-tick" text-anchor="end">40</text>
+            <text x="65" y="224" class="ax-tick" text-anchor="end">50</text>
+            <text x="65" y="184" class="ax-tick" text-anchor="end">60</text>
+            <text x="65" y="144" class="ax-tick" text-anchor="end">70</text>
+            <text x="65" y="104" class="ax-tick" text-anchor="end">80</text>
+            <text x="65" y="64"  class="ax-tick" text-anchor="end">90</text>
+            <text x="65" y="24"  class="ax-tick" text-anchor="end">100</text>
+            <!-- X labels -->
+            <text x="72"  y="453" class="ax-tick" text-anchor="middle">0.001</text>
+            <text x="224" y="453" class="ax-tick" text-anchor="middle">0.01</text>
+            <text x="376" y="453" class="ax-tick" text-anchor="middle">0.1</text>
+            <text x="528" y="453" class="ax-tick" text-anchor="middle">1</text>
+            <text x="680" y="453" class="ax-tick" text-anchor="middle">10</text>
+            <text x="832" y="453" class="ax-tick" text-anchor="middle">100</text>
+            <!-- Axis titles -->
+            <text x="452" y="472" class="ax-title" text-anchor="middle">Grain diameter (mm)</text>
+            <text x="16" y="220" class="ax-title" text-anchor="middle" transform="rotate(-90,16,220)">Cumulative finer (%)</text>
+            <!-- Plot border -->
+            <rect x="72" y="20" width="760" height="400" fill="none" stroke="#c8b898" stroke-width="1"/>
+            <!-- Borehole_DK-07 (pinned): D50≈0.42mm — blue -->
+            <path d="M345.5,420 L362,412 L379,400 L396,378 L412,348 L428,306 L436,272 L444,240 L453,200 L458,170 L465,136 L472,108 L481,82 L491,55 L496,38 L507,22 L521,15"
+              class="curve" stroke="#3a7ea0" stroke-width="2" clip-path="url(#cmp-clip)"/>
+            <circle cx="444" cy="220" r="4.5" fill="#3a7ea0" stroke="white" stroke-width="1.5" clip-path="url(#cmp-clip)"/>
+            <text x="447" y="216" class="d-lbl" fill="#3a7ea0">D₅₀=0.42</text>
+            <!-- Sample_GW-2024-A (pinned): D50≈0.18mm — olive -->
+            <path d="M117.7,420 L180,416 L250,408 L310,392 L345.5,370 L365,342 L390,298 L410,250 L435,190 L456,140 L475,95 L495,62 L515,40 L535,25"
+              class="curve" stroke="#6b8e23" stroke-width="2" clip-path="url(#cmp-clip)"/>
+            <circle cx="410" cy="250" r="4.5" fill="#6b8e23" stroke="white" stroke-width="1.5" clip-path="url(#cmp-clip)"/>
+            <text x="413" y="246" class="d-lbl" fill="#6b8e23">D₅₀=0.18</text>
+            <!-- Core_LC-11 (pinned): D50≈0.89mm — amber -->
+            <path d="M380,420 L406,412 L432,396 L450,372 L467,330 L485,276 L498,228 L514,178 L530,132 L550,90 L570,58 L595,32 L620,20"
+              class="curve" stroke="#b46428" stroke-width="2" clip-path="url(#cmp-clip)"/>
+            <circle cx="498" cy="228" r="4.5" fill="#b46428" stroke="white" stroke-width="1.5" clip-path="url(#cmp-clip)"/>
+            <text x="501" y="224" class="d-lbl" fill="#b46428">D₅₀=0.89</text>
+            <!-- Borehole_BH-03 (selected but NOT pinned): dimmed -->
+            <path d="M310,420 L338,414 L365,404 L390,382 L415,348 L435,310 L452,268 L468,224 L484,178 L498,140 L513,105 L526,75 L537,52"
+              class="curve" stroke="#2a9d8f" stroke-width="1.5" stroke-dasharray="4,3" opacity="0.3" clip-path="url(#cmp-clip)"/>
+          </svg>
         </div>
-        <div class="cmp-tbl-wrap">
-          <table class="cmp-tbl">
-            <thead>
-              <tr>
-                <th style="width:160px">Method</th>
-                <th>
-                  <span style="display:flex;align-items:center;gap:4px;justify-content:flex-end">
-                    <span class="chip-dot" style="width:7px;height:7px;border-radius:50%;background:#3a7ea0;flex-shrink:0;display:inline-block"></span>
-                    DK-07
-                  </span>
-                </th>
-                <th>
-                  <span style="display:flex;align-items:center;gap:4px;justify-content:flex-end">
-                    <span class="chip-dot" style="width:7px;height:7px;border-radius:50%;background:#6b8e23;flex-shrink:0;display:inline-block"></span>
-                    GW-2024-A
-                  </span>
-                </th>
-                <th>
-                  <span style="display:flex;align-items:center;gap:4px;justify-content:flex-end">
-                    <span class="chip-dot" style="width:7px;height:7px;border-radius:50%;background:#b46428;flex-shrink:0;display:inline-block"></span>
-                    LC-11
-                  </span>
-                </th>
-              </tr>
-            </thead>
-            <tbody>
-              <!-- K values in m/d for readability; color-coded by sample -->
-              <tr><td><div class="param-name">Hazen</div><div class="param-desc">K (m/d)</div></td>
-                <td class="cv-a">12.3</td><td class="cv-b">1.8</td><td class="cv-c">85.4</td></tr>
-              <tr><td><div class="param-name">Kozeny-Carman</div><div class="param-desc">K (m/d)</div></td>
-                <td class="cv-a">11.8</td><td class="cv-b">1.6</td><td class="cv-c">79.2</td></tr>
-              <tr><td><div class="param-name">USBR</div><div class="param-desc">K (m/d)</div></td>
-                <td class="cv-a">13.1</td><td class="cv-b">2.0</td><td class="cv-c">91.8</td></tr>
-              <tr><td><div class="param-name">Terzaghi</div><div class="param-desc">K (m/d)</div></td>
-                <td class="cv-a">10.9</td><td class="cv-b">1.5</td><td class="cv-c">71.6</td></tr>
-              <tr><td><div class="param-name">Slichter</div><div class="param-desc">K (m/d)</div></td>
-                <td class="cv-a">9.4</td><td class="cv-b">1.3</td><td class="cv-c">62.8</td></tr>
-              <tr><td><div class="param-name">Beyer</div><div class="param-desc">K (m/d)</div></td>
-                <td class="cv-a">14.6</td><td class="cv-b">2.2</td><td class="cv-c">97.3</td></tr>
-              <tr><td><div class="param-name">Seelheim</div><div class="param-desc">K (m/d)</div></td>
-                <td class="cv-a">11.2</td><td class="cv-b">1.7</td><td class="cv-c">76.4</td></tr>
-              <tr><td><div class="param-name">Pavchich</div><div class="param-desc">K (m/d)</div></td>
-                <td class="cv-a">15.8</td><td class="cv-b">2.5</td><td class="cv-c">—</td></tr>
-              <!-- Summary row -->
-              <tr style="background:rgba(212,196,168,.15);border-top:2px solid var(--border-dk)">
-                <td><div class="param-name" style="font-weight:700">K̄ geom. mean</div><div class="param-desc">m/d · All methods</div></td>
-                <td style="text-align:right;font-family:var(--fm);font-size:13px;font-weight:700;color:#3a7ea0">12.3</td>
-                <td style="text-align:right;font-family:var(--fm);font-size:13px;font-weight:700;color:#5a7e18">3.1</td>
-                <td style="text-align:right;font-family:var(--fm);font-size:13px;font-weight:700;color:#b46428">48.7</td>
-              </tr>
-              <!-- Permeability class row -->
-              <tr style="background:rgba(212,196,168,.08)">
-                <td><div class="param-name">Permeability class</div></td>
-                <td style="text-align:right"><span class="perm-badge perm-med">Medium</span></td>
-                <td style="text-align:right"><span class="perm-badge perm-low">Low–Med.</span></td>
-                <td style="text-align:right"><span class="perm-badge perm-high">High</span></td>
-              </tr>
-            </tbody>
-          </table>
-        </div>
-      </div><!-- /panel K -->
 
-    </div><!-- /cmp-body -->
+        <!-- Pinned dataset sidebar -->
+        <div class="cmp-plot-side" id="cmp-plot-side">
+          <div class="cmp-side-hd">
+            <span id="cmp-side-label">Pinned (3/4)</span>
+            <button class="cmp-side-collapse" onclick="toggleCmpSide()" title="Collapse">
+              <i class="fa-solid fa-chevron-right" id="cmp-side-chev"></i>
+            </button>
+          </div>
+          <div class="cmp-ds-list">
+            <div class="cmp-ds-item">
+              <span class="cmp-ds-dot" style="background:#3a7ea0"></span>
+              <span class="cmp-ds-nm">DK-07</span>
+              <button class="cmp-ds-pin pinned" title="Unpin from view"><i class="fa-solid fa-thumbtack"></i></button>
+            </div>
+            <div class="cmp-ds-item">
+              <span class="cmp-ds-dot" style="background:#6b8e23"></span>
+              <span class="cmp-ds-nm">GW-2024-A</span>
+              <button class="cmp-ds-pin pinned" title="Unpin from view"><i class="fa-solid fa-thumbtack"></i></button>
+            </div>
+            <div class="cmp-ds-item">
+              <span class="cmp-ds-dot" style="background:#b46428"></span>
+              <span class="cmp-ds-nm">LC-11</span>
+              <button class="cmp-ds-pin pinned" title="Unpin from view"><i class="fa-solid fa-thumbtack"></i></button>
+            </div>
+            <div class="cmp-ds-item" style="opacity:.5">
+              <span class="cmp-ds-dot" style="background:#2a9d8f"></span>
+              <span class="cmp-ds-nm">BH-03</span>
+              <button class="cmp-ds-pin" title="Pin to view"><i class="fa-solid fa-thumbtack"></i></button>
+            </div>
+          </div>
+        </div>
+
+      </div>
+    </div><!-- /cmp-ntab-plot -->
+
+    <!-- ── Details sub-tab ── -->
+    <div class="cmp-ntab-content" id="cmp-ntab-details">
+      <div class="cmp-body">
+
+        <!-- Panel 1: Grain parameters -->
+        <div class="cmp-panel">
+          <div class="cmp-panel-head">
+            <i class="fa-solid fa-ruler"></i>Grain Parameters
+          </div>
+          <div class="cmp-tbl-wrap">
+            <table class="cmp-tbl">
+              <thead>
+                <tr>
+                  <th style="width:160px">Parameter</th>
+                  <th>
+                    <span style="display:flex;align-items:center;gap:4px;justify-content:flex-end">
+                      <span style="width:7px;height:7px;border-radius:50%;background:#3a7ea0;flex-shrink:0;display:inline-block"></span>DK-07
+                    </span>
+                  </th>
+                  <th>
+                    <span style="display:flex;align-items:center;gap:4px;justify-content:flex-end">
+                      <span style="width:7px;height:7px;border-radius:50%;background:#6b8e23;flex-shrink:0;display:inline-block"></span>GW-2024-A
+                    </span>
+                  </th>
+                  <th>
+                    <span style="display:flex;align-items:center;gap:4px;justify-content:flex-end">
+                      <span style="width:7px;height:7px;border-radius:50%;background:#b46428;flex-shrink:0;display:inline-block"></span>LC-11
+                    </span>
+                  </th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr>
+                  <td><div class="param-name">D10</div><div class="param-desc">Effective size (mm)</div></td>
+                  <td class="cv-a">0.160</td><td class="cv-b">0.062</td><td class="cv-c">0.420</td>
+                </tr>
+                <tr>
+                  <td><div class="param-name">D30</div><div class="param-desc">30th percentile (mm)</div></td>
+                  <td class="cv-a">0.300</td><td class="cv-b">0.110</td><td class="cv-c">0.680</td>
+                </tr>
+                <tr>
+                  <td><div class="param-name">D50</div><div class="param-desc">Median diameter (mm)</div></td>
+                  <td class="cv-a">0.420</td><td class="cv-b">0.180</td><td class="cv-c">0.890</td>
+                </tr>
+                <tr>
+                  <td><div class="param-name">D60</div><div class="param-desc">60th percentile (mm)</div></td>
+                  <td class="cv-a">0.560</td><td class="cv-b">0.220</td><td class="cv-c">1.100</td>
+                </tr>
+                <tr>
+                  <td><div class="param-name">D90</div><div class="param-desc">90th percentile (mm)</div></td>
+                  <td class="cv-a">1.060</td><td class="cv-b">0.380</td><td class="cv-c">2.400</td>
+                </tr>
+                <tr>
+                  <td><div class="param-name">Cu</div><div class="param-desc">Uniformity coefficient</div></td>
+                  <td class="cv-a">3.50</td><td class="cv-b">3.55</td><td class="cv-c">2.62</td>
+                </tr>
+                <tr>
+                  <td><div class="param-name">Cc</div><div class="param-desc">Curvature coefficient</div></td>
+                  <td class="cv-a">1.05</td><td class="cv-b">0.98</td><td class="cv-c">0.94</td>
+                </tr>
+                <tr>
+                  <td><div class="param-name">Fines &lt;0.063mm</div><div class="param-desc">% passing sieve</div></td>
+                  <td class="cv-a">2.1%</td><td class="cv-b">8.4%</td><td class="cv-c">0.8%</td>
+                </tr>
+                <tr>
+                  <td><div class="param-name">Dominant class</div></td>
+                  <td style="text-align:right"><span class="soil-badge sand" style="font-size:10px">Med. Sand</span></td>
+                  <td style="text-align:right"><span class="soil-badge silt" style="font-size:10px">Fine Sand</span></td>
+                  <td style="text-align:right"><span class="soil-badge gravel" style="font-size:10px">C. Sand</span></td>
+                </tr>
+                <tr>
+                  <td><div class="param-name">USCS</div><div class="param-desc">Soil class</div></td>
+                  <td style="text-align:right;font-family:var(--fm);font-size:11px" class="cv-a">SP</td>
+                  <td style="text-align:right;font-family:var(--fm);font-size:11px" class="cv-b">SP-SM</td>
+                  <td style="text-align:right;font-family:var(--fm);font-size:11px" class="cv-c">SP</td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+        </div><!-- /panel grain -->
+
+        <!-- Panel 2: Hydraulic Conductivity -->
+        <div class="cmp-panel">
+          <div class="cmp-panel-head">
+            <i class="fa-solid fa-water"></i>Hydraulic Conductivity
+          </div>
+          <div class="cmp-tbl-wrap">
+            <table class="cmp-tbl">
+              <thead>
+                <tr>
+                  <th style="width:160px">Method</th>
+                  <th>
+                    <span style="display:flex;align-items:center;gap:4px;justify-content:flex-end">
+                      <span style="width:7px;height:7px;border-radius:50%;background:#3a7ea0;flex-shrink:0;display:inline-block"></span>DK-07
+                    </span>
+                  </th>
+                  <th>
+                    <span style="display:flex;align-items:center;gap:4px;justify-content:flex-end">
+                      <span style="width:7px;height:7px;border-radius:50%;background:#6b8e23;flex-shrink:0;display:inline-block"></span>GW-2024-A
+                    </span>
+                  </th>
+                  <th>
+                    <span style="display:flex;align-items:center;gap:4px;justify-content:flex-end">
+                      <span style="width:7px;height:7px;border-radius:50%;background:#b46428;flex-shrink:0;display:inline-block"></span>LC-11
+                    </span>
+                  </th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr><td><div class="param-name">Hazen</div><div class="param-desc">K (m/d)</div></td>
+                  <td class="cv-a">12.3</td><td class="cv-b">1.8</td><td class="cv-c">85.4</td></tr>
+                <tr><td><div class="param-name">Kozeny-Carman</div><div class="param-desc">K (m/d)</div></td>
+                  <td class="cv-a">11.8</td><td class="cv-b">1.6</td><td class="cv-c">79.2</td></tr>
+                <tr><td><div class="param-name">USBR</div><div class="param-desc">K (m/d)</div></td>
+                  <td class="cv-a">13.1</td><td class="cv-b">2.0</td><td class="cv-c">91.8</td></tr>
+                <tr><td><div class="param-name">Terzaghi</div><div class="param-desc">K (m/d)</div></td>
+                  <td class="cv-a">10.9</td><td class="cv-b">1.5</td><td class="cv-c">71.6</td></tr>
+                <tr><td><div class="param-name">Slichter</div><div class="param-desc">K (m/d)</div></td>
+                  <td class="cv-a">9.4</td><td class="cv-b">1.3</td><td class="cv-c">62.8</td></tr>
+                <tr><td><div class="param-name">Beyer</div><div class="param-desc">K (m/d)</div></td>
+                  <td class="cv-a">14.6</td><td class="cv-b">2.2</td><td class="cv-c">97.3</td></tr>
+                <tr><td><div class="param-name">Seelheim</div><div class="param-desc">K (m/d)</div></td>
+                  <td class="cv-a">11.2</td><td class="cv-b">1.7</td><td class="cv-c">76.4</td></tr>
+                <tr><td><div class="param-name">Pavchich</div><div class="param-desc">K (m/d)</div></td>
+                  <td class="cv-a">15.8</td><td class="cv-b">2.5</td><td class="cv-c">—</td></tr>
+                <tr style="background:rgba(212,196,168,.15);border-top:2px solid var(--border-dk)">
+                  <td><div class="param-name" style="font-weight:700">K̄ geom. mean</div><div class="param-desc">m/d · All methods</div></td>
+                  <td style="text-align:right;font-family:var(--fm);font-size:13px;font-weight:700;color:#3a7ea0">12.3</td>
+                  <td style="text-align:right;font-family:var(--fm);font-size:13px;font-weight:700;color:#5a7e18">3.1</td>
+                  <td style="text-align:right;font-family:var(--fm);font-size:13px;font-weight:700;color:#b46428">48.7</td>
+                </tr>
+                <tr style="background:rgba(212,196,168,.08)">
+                  <td><div class="param-name">Permeability class</div></td>
+                  <td style="text-align:right"><span class="perm-badge perm-med">Medium</span></td>
+                  <td style="text-align:right"><span class="perm-badge perm-low">Low–Med.</span></td>
+                  <td style="text-align:right"><span class="perm-badge perm-high">High</span></td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+        </div><!-- /panel K -->
+
+      </div><!-- /cmp-body -->
+    </div><!-- /cmp-ntab-details -->
+
   </div><!-- /tab-comparison -->
 
   <!-- ═══ REPORTS TAB (placeholder) ═══ -->
@@ -1603,7 +1870,7 @@ table.cmp-tbl .param-desc{font-size:10px;color:var(--text-muted);margin-top:1px}
   </div>
   <div class="sseg"><span class="sk">SAMPLE</span><span class="sv hi" id="stsmp">Borehole_DK-07</span></div>
   <div class="stsep"></div>
-  <div class="sseg"><span class="sk">D50</span><span class="sv bl">0.42 mm</span></div>
+  <div class="sseg"><span class="sk">D50</span><span class="sv bl" id="std50">0.42 mm</span></div>
   <div class="stsep"></div>
   <div class="sseg"><span class="sk">K̄</span><span class="sv bl">12.3 m/d</span></div>
   <div class="stsep"></div>
@@ -1624,18 +1891,18 @@ table.cmp-tbl .param-desc{font-size:10px;color:var(--text-muted);margin-top:1px}
 ══════════════════════════════════════════════ */
 const DATASETS = [
   {id:'welcome',  label:'Welcome',              icon:'house',   closable:false, special:true},
-  {id:'dk07',     label:'Borehole_DK-07',       icon:'vial',    closable:true,  d50:'0.42',  k:'12.3',  fractions:47, status:'ok'},
-  {id:'gw24a',    label:'Sample_GW-2024-A',     icon:'vial',    closable:true,  d50:'0.18',  k:'3.1',   fractions:38, status:'ok'},
-  {id:'lc11',     label:'Core_LC-11',           icon:'vial',    closable:true,  d50:'0.89',  k:'48.7',  fractions:52, status:'ok'},
-  {id:'bh03',     label:'Borehole_BH-03',       icon:'vial',    closable:true,  d50:'0.31',  k:'7.2',   fractions:41, status:'ok'},
-  {id:'sp05',     label:'Soil_Profile_SP-05',   icon:'vial',    closable:true,  d50:'0.65',  k:'28.4',  fractions:29, status:'warn', warn:'2 sieves below detection limit'},
-  {id:'tr12',     label:'Trench_TR-12',         icon:'vial',    closable:true,  d50:'0.12',  k:'1.4',   fractions:33, status:'ok'},
-  {id:'cptu08',   label:'CPTU-08_Sample',       icon:'vial',    closable:true,  d50:'0.08',  k:'0.6',   fractions:22, status:'ok'},
-  {id:'dh14',     label:'Drillhole_DH-14',      icon:'vial',    closable:true,  d50:'1.20',  k:'112.3', fractions:55, status:'ok'},
-  {id:'ws22',     label:'WellScreen_WS-22',     icon:'vial',    closable:true,  d50:'0.55',  k:'21.8',  fractions:44, status:'ok'},
-  {id:'gp09',     label:'GravelPit_GP-09',      icon:'vial',    closable:true,  d50:'2.80',  k:'380.5', fractions:18, status:'ok'},
-  {id:'cl01',     label:'Clay_CL-01',           icon:'vial',    closable:true,  d50:'0.004', k:'0.002', fractions:62, status:'warn', warn:'Cu > 500, method applicability limited'},
-  {id:'rk15',     label:'RockCore_RK-15',       icon:'vial',    closable:true,  d50:'4.20',  k:'820.0', fractions:14, status:'ok'},
+  {id:'dk07',     label:'Borehole_DK-07',       icon:'vial',    closable:true,  d50:'0.42',  k:'12.3',  fractions:47, status:'ok',   selected:true,  pinned:true},
+  {id:'gw24a',    label:'Sample_GW-2024-A',     icon:'vial',    closable:true,  d50:'0.18',  k:'3.1',   fractions:38, status:'ok',   selected:true,  pinned:true},
+  {id:'lc11',     label:'Core_LC-11',           icon:'vial',    closable:true,  d50:'0.89',  k:'48.7',  fractions:52, status:'ok',   selected:true,  pinned:true},
+  {id:'bh03',     label:'Borehole_BH-03',       icon:'vial',    closable:true,  d50:'0.31',  k:'7.2',   fractions:41, status:'ok',   selected:true,  pinned:false},
+  {id:'sp05',     label:'Soil_Profile_SP-05',   icon:'vial',    closable:true,  d50:'0.65',  k:'28.4',  fractions:29, status:'warn', selected:false, pinned:false, warn:'2 sieves below detection limit'},
+  {id:'tr12',     label:'Trench_TR-12',         icon:'vial',    closable:true,  d50:'0.12',  k:'1.4',   fractions:33, status:'ok',   selected:false, pinned:false},
+  {id:'cptu08',   label:'CPTU-08_Sample',       icon:'vial',    closable:true,  d50:'0.08',  k:'0.6',   fractions:22, status:'ok',   selected:false, pinned:false},
+  {id:'dh14',     label:'Drillhole_DH-14',      icon:'vial',    closable:true,  d50:'1.20',  k:'112.3', fractions:55, status:'ok',   selected:false, pinned:false},
+  {id:'ws22',     label:'WellScreen_WS-22',     icon:'vial',    closable:true,  d50:'0.55',  k:'21.8',  fractions:44, status:'ok',   selected:false, pinned:false},
+  {id:'gp09',     label:'GravelPit_GP-09',      icon:'vial',    closable:true,  d50:'2.80',  k:'380.5', fractions:18, status:'ok',   selected:false, pinned:false},
+  {id:'cl01',     label:'Clay_CL-01',           icon:'vial',    closable:true,  d50:'0.004', k:'0.002', fractions:62, status:'warn', selected:false, pinned:false, warn:'Cu > 500, method applicability limited'},
+  {id:'rk15',     label:'RockCore_RK-15',       icon:'vial',    closable:true,  d50:'4.20',  k:'820.0', fractions:14, status:'ok',   selected:false, pinned:false},
 ];
 
 let currentId = 'dk07';
@@ -1656,6 +1923,11 @@ function buildSidebar() {
           <div class="s-meta">D50 ${d.d50} mm · K̄ ${d.k} m/d</div>
         </div>
         <div class="s-led ${d.status}"></div>
+        <button class="s-sel-toggle${d.selected ? ' on' : ''}" id="sel-${d.id}"
+          onclick="toggleSelected(event,'${d.id}')"
+          title="${d.selected ? 'Deselect' : 'Select'} for comparison/export">
+          <i class="fa-solid fa-check"></i>
+        </button>
         <button class="s-expand-btn" onclick="toggleExpand(event,'${d.id}')">
           <i class="fa-solid fa-chevron-right"></i>
         </button>
@@ -1804,12 +2076,84 @@ function swMainTab(id, el) {
   document.querySelectorAll('.tab-content').forEach(c => c.classList.remove('active'));
   document.querySelectorAll('.tab').forEach(t => t.classList.remove('on'));
   document.getElementById('tab-' + id).classList.add('active');
-  el.classList.add('on');
+  // el may be undefined when called from sidebar buttons
+  if (el) {
+    el.classList.add('on');
+  } else {
+    // find tab button by matching onclick text
+    document.querySelectorAll('.tab').forEach(t => {
+      if (t.getAttribute('onclick') && t.getAttribute('onclick').includes("'" + id + "'")) {
+        t.classList.add('on');
+      }
+    });
+  }
   const dsOuter = document.getElementById('ds-bar-outer');
   const ntbar = document.querySelector('.ntab-bar');
   const isInd = id === 'individual';
   if (dsOuter) dsOuter.style.display = isInd ? 'flex' : 'none';
   if (ntbar) ntbar.style.display = isInd ? 'flex' : 'none';
+}
+
+/* ── Comparison sub-tab switching ── */
+function swCmpTab(id, el) {
+  document.querySelectorAll('.cmp-ntab-content').forEach(c => c.classList.remove('active'));
+  document.querySelectorAll('.cmp-ntab').forEach(t => t.classList.remove('on'));
+  document.getElementById('cmp-ntab-' + id).classList.add('active');
+  if (el) el.classList.add('on');
+}
+
+/* ── Comparison plot side panel toggle ── */
+let cmpSideOpen = true;
+function toggleCmpSide() {
+  cmpSideOpen = !cmpSideOpen;
+  const side = document.getElementById('cmp-plot-side');
+  const chev = document.getElementById('cmp-side-chev');
+  const label = document.getElementById('cmp-side-label');
+  side.classList.toggle('collapsed', !cmpSideOpen);
+  if (chev) chev.className = cmpSideOpen ? 'fa-solid fa-chevron-right' : 'fa-solid fa-chevron-left';
+  if (label) label.style.display = cmpSideOpen ? '' : 'none';
+}
+
+/* ── Toggle dataset selected state ── */
+function toggleSelected(evt, id) {
+  evt.stopPropagation();
+  const ds = DATASETS.find(d => d.id === id);
+  if (!ds) return;
+  ds.selected = !ds.selected;
+  // Update toggle button
+  const btn = document.getElementById('sel-' + id);
+  if (btn) {
+    btn.classList.toggle('on', ds.selected);
+    btn.title = ds.selected ? 'Deselect for comparison/export' : 'Select for comparison/export';
+  }
+  // Update inventory counts
+  const selCount = DATASETS.filter(d => !d.special && d.selected).length;
+  const warnCount = DATASETS.filter(d => !d.special && d.status === 'warn').length;
+  const el = document.getElementById('sb-selected-count');
+  if (el) el.textContent = selCount;
+  const cmpEl = document.getElementById('cmp-sel-count');
+  if (cmpEl) cmpEl.textContent = selCount;
+  // Highlight inventory row
+  const invRow = document.querySelector('.sb-inv-chip.sel');
+  if (invRow) invRow.style.opacity = selCount > 0 ? '1' : '.5';
+}
+
+/* ── Sample filter (sidebar) ── */
+let currentFilter = 'all';
+function setSampleFilter(filter, el) {
+  currentFilter = filter;
+  document.querySelectorAll('.s-filter').forEach(b => b.classList.remove('on'));
+  if (el) el.classList.add('on');
+  const items = document.querySelectorAll('.s-item');
+  items.forEach(item => {
+    const id = item.dataset.id;
+    const ds = DATASETS.find(d => d.id === id);
+    if (!ds) return;
+    let show = true;
+    if (filter === 'selected') show = ds.selected;
+    if (filter === 'warn') show = ds.status === 'warn';
+    item.style.display = show ? '' : 'none';
+  });
 }
 
 /* ── Nested sub-tab switching ── */

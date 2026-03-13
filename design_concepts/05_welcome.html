@@ -55,6 +55,12 @@
   letter-spacing:.02em;line-height:1.2;margin-bottom:3px;
 }
 .wlc-title-sub{font-size:12px;color:var(--text-mid);font-weight:400}
+.wlc-title-note{
+  margin-top:8px;font-size:10.5px;color:var(--text-mid);
+  display:inline-flex;align-items:center;gap:6px;padding:4px 10px;
+  border-radius:99px;border:1px solid rgba(120,95,60,.16);background:rgba(255,255,255,.28);
+}
+.wlc-title-note i{font-size:9px;color:var(--olive)}
 .wlc-title-ver{
   font-family:var(--fm);font-size:9.5px;color:var(--text-muted);margin-top:5px;
   display:inline-block;
@@ -93,11 +99,11 @@
   display:flex;align-items:flex-start;gap:7px;padding:5px 7px;border-radius:4px;
   cursor:pointer;transition:background .1s;
 }
-.rec-item:hover{background:rgba(0,120,212,.06)}
+.rec-item:hover{background:rgba(107,142,35,.08)}
 .rec-item-ic{font-size:12px;color:var(--earth);margin-top:1px;flex-shrink:0}
 .rec-item-tx{flex:1;min-width:0}
 .rec-item-nm{
-  font-size:11.5px;font-weight:500;color:#0066cc;
+  font-size:11.5px;font-weight:500;color:var(--earth);
   overflow:hidden;text-overflow:ellipsis;white-space:nowrap;
 }
 .rec-item-meta{font-size:10px;color:var(--text-muted);font-family:var(--fm);margin-top:1px}
@@ -119,46 +125,47 @@
   padding-right:3px;scrollbar-width:thin;scrollbar-color:var(--border) transparent;
 }
 .cl-ver-hd{
-  font-size:11px;font-weight:600;color:#2c3e50;display:flex;align-items:center;gap:5px;
+  font-size:11px;font-weight:600;color:var(--text);display:flex;align-items:center;gap:5px;
 }
-.cl-ver-hd i{font-size:9px;color:#0078d4}
+.cl-ver-hd i{font-size:9px;color:var(--olive)}
 .cl-change{font-size:10.5px;color:#555;line-height:1.5;padding-left:12px}
 .cl-change::before{content:'• ';color:var(--earth)}
 .cl-changes{display:flex;flex-direction:column;gap:1px}
 .cl-more-btn{
   display:flex;align-items:center;justify-content:center;gap:5px;
-  border:1px solid #0078d4;border-radius:3px;padding:4px 10px;
-  color:#0078d4;background:transparent;font-size:10.5px;cursor:pointer;
+  border:1px solid rgba(107,142,35,.34);border-radius:3px;padding:4px 10px;
+  color:var(--olive);background:transparent;font-size:10.5px;cursor:pointer;
   transition:background .1s;margin-top:2px;
 }
-.cl-more-btn:hover{background:rgba(0,120,212,.07)}
+.cl-more-btn:hover{background:rgba(107,142,35,.08)}
 
 /* ── Quick Help 2×2 ── */
 .help-grid{display:grid;grid-template-columns:1fr 1fr;gap:5px}
 .help-btn{
   display:flex;align-items:center;justify-content:center;padding:5px 6px;
-  border:1px solid #0078d4;border-radius:3px;color:#0078d4;background:transparent;
+  border:1px solid rgba(107,142,35,.34);border-radius:3px;color:var(--olive);background:transparent;
   font-size:10.5px;cursor:pointer;transition:background .1s;min-height:26px;
 }
-.help-btn:hover{background:rgba(0,120,212,.08)}
+.help-btn:hover{background:rgba(107,142,35,.08)}
 
 /* ── Quick Actions ── */
 .qa-stack{display:flex;flex-direction:column;gap:8px}
 .qa-primary{
   display:flex;align-items:center;justify-content:center;gap:8px;
   padding:9px 18px;border:none;border-radius:5px;
-  background:#0078d4;color:#fff;
+  background:var(--olive);color:#fff;
   font-size:12px;font-weight:600;font-family:var(--fu);cursor:pointer;
   transition:background .12s;min-height:36px;
 }
-.qa-primary:hover{background:#006cc1}
+.qa-primary:hover{background:var(--olive-h)}
 .qa-secondary{
   display:flex;align-items:center;justify-content:center;gap:8px;
-  padding:7px 18px;border:2px solid #ccc;border-radius:5px;
-  background:#fff;color:#333;
+  padding:7px 18px;border:1.5px solid var(--border-dk);border-radius:5px;
+  background:#fff;color:var(--text-mid);
   font-size:12px;font-family:var(--fu);cursor:pointer;transition:all .12s;min-height:36px;
 }
-.qa-secondary:hover{border-color:#0078d4;color:#0078d4}
+.qa-secondary:hover{border-color:var(--earth);color:var(--earth);background:rgba(210,180,140,.18)}
+.qa-note{font-size:10.5px;color:var(--text-muted);line-height:1.45}
 
 /* ── Don't show again ── */
 .wlc-footer{
@@ -183,6 +190,7 @@
       <div class="wlc-title-card">
         <div class="wlc-title-main">Grain Size Analysis</div>
         <div class="wlc-title-sub">Hydraulic Conductivity Calculator</div>
+        <div class="wlc-title-note"><i class="fa-solid fa-layer-group"></i>Built for batch loading, rapid sample switching, comparison, and export.</div>
         <div class="wlc-title-ver">Version 0.9.0-beta</div>
       </div>
 
@@ -210,13 +218,13 @@
               <div>
                 <div class="cl-ver-hd"><i class="fa-solid fa-diamond"></i>v0.9.0-beta <span style="font-size:9.5px;color:var(--text-muted);font-weight:400">(2025-01-15)</span></div>
                 <div class="cl-changes">
-                  <div class="cl-change">New export tab with live data preview</div>
+                  <div class="cl-change">New batch export flow with scope selection</div>
                   <div class="cl-change">Wide format CSV export for statistical analysis</div>
-                  <div class="cl-change">Enhanced welcome screen with recent files</div>
+                  <div class="cl-change">Enhanced welcome screen with recent sessions</div>
                 </div>
               </div>
               <div>
-                <div class="cl-ver-hd"><i class="fa-solid fa-diamond"></i>v1.9.0-alpha <span style="font-size:9.5px;color:var(--text-muted);font-weight:400">(2024-12-20)</span></div>
+                <div class="cl-ver-hd"><i class="fa-solid fa-diamond"></i>v0.8.0-alpha <span style="font-size:9.5px;color:var(--text-muted);font-weight:400">(2024-12-20)</span></div>
                 <div class="cl-changes">
                   <div class="cl-change">Added comparison tab for multiple datasets</div>
                   <div class="cl-change">Improved calculation methods validation</div>
@@ -224,7 +232,7 @@
                 </div>
               </div>
               <div>
-                <div class="cl-ver-hd"><i class="fa-solid fa-diamond"></i>v1.8.0-alpha <span style="font-size:9.5px;color:var(--text-muted);font-weight:400">(2024-11-30)</span></div>
+                <div class="cl-ver-hd"><i class="fa-solid fa-diamond"></i>v0.7.0-alpha <span style="font-size:9.5px;color:var(--text-muted);font-weight:400">(2024-11-30)</span></div>
                 <div class="cl-changes">
                   <div class="cl-change">New help system with comprehensive guides</div>
                   <div class="cl-change">Enhanced reporting tab with templates</div>
@@ -232,7 +240,7 @@
                 </div>
               </div>
               <div>
-                <div class="cl-ver-hd"><i class="fa-solid fa-diamond"></i>v1.7.0-alpha <span style="font-size:9.5px;color:var(--text-muted);font-weight:400">(2024-11-10)</span></div>
+                <div class="cl-ver-hd"><i class="fa-solid fa-diamond"></i>v0.6.0-alpha <span style="font-size:9.5px;color:var(--text-muted);font-weight:400">(2024-11-10)</span></div>
                 <div class="cl-changes">
                   <div class="cl-change">Added statistics tab with grain analysis</div>
                   <div class="cl-change">Improved porosity calculation methods</div>
@@ -262,8 +270,9 @@
               <div class="wlc-sec-title"><i class="fa-solid fa-rocket"></i>Quick Actions</div>
             </div>
             <div class="qa-stack">
-              <button class="qa-primary"><i class="fa-solid fa-folder-open"></i>Load Files</button>
-              <button class="qa-secondary"><i class="fa-solid fa-flask"></i>Load Sample Data</button>
+              <button class="qa-primary"><i class="fa-solid fa-folder-open"></i>Load Batch Files</button>
+              <button class="qa-secondary"><i class="fa-solid fa-clock-rotate-left"></i>Resume Recent Session</button>
+              <div class="qa-note">Open one file or many. The sidebar becomes the batch inventory, while comparison and export operate on the selected subset.</div>
             </div>
           </div>
 
@@ -276,7 +285,7 @@
           <input type="checkbox">
           Don't show this welcome screen on startup
         </label>
-        <span class="wlc-attr">Background generated using Sora from OpenAI</span>
+        <span class="wlc-attr">Batch import · compare selected · export chosen scope</span>
       </div>
 
     </div><!-- /wlc-host -->
@@ -291,6 +300,16 @@ function _onPageInit() {
   const go = document.querySelector('.sb-btn.go');
   if (go) { go.disabled = true; go.style.opacity = '.45'; go.title = 'Load data first'; }
 
+  const compareBtn = document.getElementById('sb-compare-btn');
+  const exportBtn = document.getElementById('sb-export-btn');
+  if (compareBtn) compareBtn.disabled = true;
+  if (exportBtn) exportBtn.disabled = true;
+
+  const batch = document.getElementById('sb-batch');
+  if (batch) batch.style.opacity = '.55';
+
+  document.querySelectorAll('.s-filter').forEach(btn => btn.style.display = 'none');
+
   /* Replace sample list with empty-state */
   const sl = document.getElementById('s-list');
   if (sl) sl.innerHTML = `
@@ -298,8 +317,32 @@ function _onPageInit() {
       <div style="width:36px;height:36px;border-radius:4px;background:rgba(255,255,255,.3);border:1px dashed var(--sb-bdr);display:flex;align-items:center;justify-content:center">
         <i class="fa-solid fa-inbox" style="font-size:14px;color:var(--sb-muted)"></i>
       </div>
-      <div style="font-size:10.5px;color:var(--sb-muted);text-align:center;line-height:1.5">No samples loaded yet.</div>
+      <div style="font-size:10.5px;color:var(--sb-muted);text-align:center;line-height:1.5">No datasets loaded yet.<br>Start by loading a batch of CSV, XLSX, or TXT files.</div>
     </div>`;
+
+  const sample = document.getElementById('stsmp');
+  const d50 = document.getElementById('std50');
+  const k = document.getElementById('stk');
+  const loaded = document.getElementById('st-loaded');
+  const open = document.getElementById('st-open');
+  const selected = document.getElementById('st-selected');
+  if (sample) sample.textContent = 'No dataset loaded';
+  if (d50) d50.textContent = '—';
+  if (k) k.textContent = '—';
+  if (loaded) loaded.textContent = '0';
+  if (open) open.textContent = '0';
+  if (selected) selected.textContent = '0';
+
+  const sbLoaded = document.getElementById('sb-loaded-count');
+  const sbOpen = document.getElementById('sb-open-count');
+  const sbSelected = document.getElementById('sb-selected-count');
+  const sbWarn = document.getElementById('sb-warn-count');
+  const sbNote = document.getElementById('sb-mini-note');
+  if (sbLoaded) sbLoaded.textContent = '0';
+  if (sbOpen) sbOpen.textContent = '0';
+  if (sbSelected) sbSelected.textContent = '0';
+  if (sbWarn) sbWarn.textContent = '0';
+  if (sbNote) sbNote.textContent = 'Load a batch first. Comparison and export become available once datasets are selected.';
 
   buildRecent();
 }
@@ -307,10 +350,10 @@ function _onPageTab() {}
 
 /* Demo recent sessions */
 const SESSIONS = [
-  { name:'GW Survey 2024',       date:'2026-03-10', files:['GW_Samples_2024.csv'], count:12 },
-  { name:'Borehole Campaign',    date:'2026-03-07', files:['Boreholes_March.xlsx'], count:5 },
-  { name:'Rock Core Analysis',   date:'2026-03-05', files:['RockCore_RK-15.txt'], count:1 },
-  { name:'Archive 2022 Import',  date:'2026-02-14', files:['Archive_2022.xlsx'], count:3 },
+  { name:'GW Survey 2024',       date:'2026-03-10', datasets:12, selected:4, warnings:1 },
+  { name:'Borehole Campaign',    date:'2026-03-07', datasets:5,  selected:3, warnings:0 },
+  { name:'Rock Core Analysis',   date:'2026-03-05', datasets:1,  selected:1, warnings:0 },
+  { name:'Archive 2022 Import',  date:'2026-02-14', datasets:3,  selected:2, warnings:2 },
 ];
 function buildRecent() {
   const list = document.getElementById('rec-list');
@@ -324,12 +367,12 @@ function buildRecent() {
       <i class="fa-solid fa-folder rec-item-ic"></i>
       <div class="rec-item-tx">
         <div class="rec-item-nm">${s.name}</div>
-        <div class="rec-item-meta">${s.count} file${s.count!==1?'s':''} · ${s.date}</div>
+        <div class="rec-item-meta">${s.datasets} dataset${s.datasets!==1?'s':''} · ${s.selected} selected · ${s.warnings} warning${s.warnings!==1?'s':''} · ${s.date}</div>
       </div>
     </div>`).join('');
 }
 
-initShell({ activeTab: 'individual' });
+initShell({ activeTab: 'individual', currentId: 'welcome', showDatasetBar: false });
 </script>
 </body>
 </html>

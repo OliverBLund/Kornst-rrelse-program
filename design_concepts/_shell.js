@@ -10,18 +10,18 @@
 /* ── Shared dataset registry ── */
 const DATASETS = [
   {id:'welcome',  label:'Welcome',              icon:'house',   closable:false, special:true},
-  {id:'dk07',     label:'Borehole_DK-07',       icon:'vial',    closable:true,  d50:'0.42',  k:'12.3',  fractions:47,  status:'ok'},
-  {id:'gw24a',    label:'Sample_GW-2024-A',     icon:'vial',    closable:true,  d50:'0.18',  k:'3.1',   fractions:38,  status:'ok'},
-  {id:'lc11',     label:'Core_LC-11',           icon:'vial',    closable:true,  d50:'0.89',  k:'48.7',  fractions:52,  status:'ok'},
-  {id:'bh03',     label:'Borehole_BH-03',       icon:'vial',    closable:true,  d50:'0.31',  k:'7.2',   fractions:41,  status:'ok'},
-  {id:'sp05',     label:'Soil_Profile_SP-05',   icon:'vial',    closable:true,  d50:'0.65',  k:'28.4',  fractions:29,  status:'warn', warn:'2 sieves below detection limit'},
-  {id:'tr12',     label:'Trench_TR-12',         icon:'vial',    closable:true,  d50:'0.12',  k:'1.4',   fractions:33,  status:'ok'},
-  {id:'cptu08',   label:'CPTU-08_Sample',       icon:'vial',    closable:true,  d50:'0.08',  k:'0.6',   fractions:22,  status:'ok'},
-  {id:'dh14',     label:'Drillhole_DH-14',      icon:'vial',    closable:true,  d50:'1.20',  k:'112.3', fractions:55,  status:'ok'},
-  {id:'ws22',     label:'WellScreen_WS-22',     icon:'vial',    closable:true,  d50:'0.55',  k:'21.8',  fractions:44,  status:'ok'},
-  {id:'gp09',     label:'GravelPit_GP-09',      icon:'vial',    closable:true,  d50:'2.80',  k:'380.5', fractions:18,  status:'ok'},
-  {id:'cl01',     label:'Clay_CL-01',           icon:'vial',    closable:true,  d50:'0.004', k:'0.002', fractions:62,  status:'warn', warn:'Cu > 500, method applicability limited'},
-  {id:'rk15',     label:'RockCore_RK-15',       icon:'vial',    closable:true,  d50:'4.20',  k:'820.0', fractions:14,  status:'ok'},
+  {id:'dk07',     label:'Borehole_DK-07',       icon:'vial',    closable:true,  d50:'0.42',  k:'12.3',  fractions:47,  status:'ok',   open:true,  selected:true},
+  {id:'gw24a',    label:'Sample_GW-2024-A',     icon:'vial',    closable:true,  d50:'0.18',  k:'3.1',   fractions:38,  status:'ok',   open:true,  selected:true},
+  {id:'lc11',     label:'Core_LC-11',           icon:'vial',    closable:true,  d50:'0.89',  k:'48.7',  fractions:52,  status:'ok',   open:true,  selected:true},
+  {id:'bh03',     label:'Borehole_BH-03',       icon:'vial',    closable:true,  d50:'0.31',  k:'7.2',   fractions:41,  status:'ok',   open:true,  selected:false},
+  {id:'sp05',     label:'Soil_Profile_SP-05',   icon:'vial',    closable:true,  d50:'0.65',  k:'28.4',  fractions:29,  status:'warn', warn:'2 sieves below detection limit', selected:false},
+  {id:'tr12',     label:'Trench_TR-12',         icon:'vial',    closable:true,  d50:'0.12',  k:'1.4',   fractions:33,  status:'ok',   selected:true},
+  {id:'cptu08',   label:'CPTU-08_Sample',       icon:'vial',    closable:true,  d50:'0.08',  k:'0.6',   fractions:22,  status:'ok',   selected:false},
+  {id:'dh14',     label:'Drillhole_DH-14',      icon:'vial',    closable:true,  d50:'1.20',  k:'112.3', fractions:55,  status:'ok',   selected:false},
+  {id:'ws22',     label:'WellScreen_WS-22',     icon:'vial',    closable:true,  d50:'0.55',  k:'21.8',  fractions:44,  status:'ok',   selected:false},
+  {id:'gp09',     label:'GravelPit_GP-09',      icon:'vial',    closable:true,  d50:'2.80',  k:'380.5', fractions:18,  status:'ok',   selected:false},
+  {id:'cl01',     label:'Clay_CL-01',           icon:'vial',    closable:true,  d50:'0.004', k:'0.002', fractions:62,  status:'warn', warn:'Cu > 500, method applicability limited', selected:false},
+  {id:'rk15',     label:'RockCore_RK-15',       icon:'vial',    closable:true,  d50:'4.20',  k:'820.0', fractions:14,  status:'ok',   selected:false},
 ];
 
 /* Tab → page routing for cross-page navigation */
@@ -34,6 +34,30 @@ const TAB_ROUTES = {
 
 let _currentId   = 'dk07';
 let _activeTab   = 'individual';
+let _sampleFilter = 'all';
+let _showDatasetBar = true;
+
+function _loadedDatasets() {
+  return DATASETS.filter(d => !d.special);
+}
+
+function _openDatasets() {
+  return _loadedDatasets().filter(d => d.open);
+}
+
+function _selectedDatasets() {
+  return _loadedDatasets().filter(d => d.selected);
+}
+
+function _warnDatasets() {
+  return _loadedDatasets().filter(d => d.status === 'warn' || d.status === 'err');
+}
+
+function _visibleDatasets() {
+  if (_sampleFilter === 'selected') return _selectedDatasets();
+  if (_sampleFilter === 'warn') return _warnDatasets();
+  return _loadedDatasets();
+}
 
 /* ══════════════════════════════════════════════
    HTML BUILDERS
@@ -86,10 +110,11 @@ function _menubarHTML() {
 }
 
 function _sidebarHTML() {
-  const samples = DATASETS.filter(d => !d.special);
+  const samples = _visibleDatasets();
   const cards = samples.map(d => {
     const isActive = d.id === _currentId;
     const isWarn   = d.status === 'warn';
+    const isSelected = !!d.selected;
     return `
     <div class="s-item${isActive ? ' active expanded' : ''}" id="si-${d.id}" data-id="${d.id}">
       <div class="s-item-main" onclick="_selSample('${d.id}')">
@@ -426,4 +451,395 @@ function _toggleDropdown() {
 function _closeDropdown() {
   const m = document.getElementById('ds-dropdown-menu');
   if (m) m.classList.remove('open');
+}
+
+/* Batch-first overrides */
+function _sampleCardsHTML() {
+  return _visibleDatasets().map(d => {
+    const isActive = d.id === _currentId;
+    const isWarn = d.status === 'warn';
+    const isSelected = !!d.selected;
+    return `
+    <div class="s-item${isActive ? ' active expanded' : ''}" id="si-${d.id}" data-id="${d.id}">
+      <div class="s-item-main" onclick="_selSample('${d.id}')">
+        <div class="s-ic"><i class="fa-solid fa-${d.icon}"></i></div>
+        <div class="s-info">
+          <div class="s-name">${d.label}</div>
+          <div class="s-meta-row">
+            <div class="s-meta">D50 ${d.d50} mm · K mean ${d.k} m/d</div>
+            <div class="s-tags">
+              ${d.open ? '<span class="s-badge open">OPEN</span>' : ''}
+              ${isSelected ? '<span class="s-badge sel">SEL</span>' : ''}
+            </div>
+          </div>
+        </div>
+        <button class="s-pick-btn${isSelected ? ' on' : ''}" onclick="_toggleSelected(event,'${d.id}')" title="${isSelected ? 'Remove from selection' : 'Add to selection'}">
+          <i class="fa-solid fa-check"></i>
+        </button>
+        <div class="s-led ${d.status}"></div>
+        <button class="s-expand-btn" onclick="_toggleExpand(event,'${d.id}')">
+          <i class="fa-solid fa-chevron-right"></i>
+        </button>
+      </div>
+      <div class="s-detail">
+        <div class="s-status-line${isWarn ? ' warn' : ''}">
+          <i class="fa-solid fa-${isWarn ? 'triangle-exclamation' : 'check-circle'}"></i>
+          ${isWarn ? d.warn : d.fractions + ' sieve fractions · All OK'}
+        </div>
+        <div class="s-act-row">
+          <button class="s-act-btn"><i class="fa-solid fa-table"></i> Inspect</button>
+          <button class="s-act-btn"><i class="fa-solid fa-terminal"></i> Log</button>
+          <button class="s-act-btn"><i class="fa-solid fa-sliders"></i> Props</button>
+          <button class="s-act-btn danger"><i class="fa-solid fa-xmark"></i> Remove</button>
+        </div>
+      </div>
+    </div>`;
+  }).join('');
+}
+
+function _openTabsHTML() {
+  return _openDatasets().map(d => `
+    <div class="ds-tab${d.id === _currentId ? ' on' : ''}" id="dt-${d.id}" data-id="${d.id}" onclick="_selSample('${d.id}')">
+      <i class="fa-solid fa-${d.icon}"></i>&nbsp;${d.label}
+      <span class="dx" onclick="_closeTab(event,'${d.id}')">×</span>
+    </div>`).join('');
+}
+
+function _sidebarHTML() {
+  return `
+<aside class="sb">
+  <div class="sb-logo">
+    <div class="logo-mark"><i class="fa-solid fa-layer-group"></i></div>
+    <div class="logo-tx">
+      <span class="logo-name">GrainSize</span>
+      <span class="logo-sub">ANALYSIS · v0.9-beta</span>
+    </div>
+  </div>
+
+  <div class="sb-body">
+    <div class="sb-sect">
+      <span class="sb-sect-lbl">Files &amp; Samples</span>
+      <button class="sb-sect-btn"><i class="fa-solid fa-plus"></i> Add</button>
+    </div>
+    <div class="sb-pad" style="padding-bottom:4px">
+      <div class="drop">
+        <i class="fa-solid fa-cloud-arrow-up"></i>
+        <span class="drop-t">Drop files or click to browse</span>
+        <span class="drop-s">CSV · XLSX · TXT</span>
+      </div>
+    </div>
+    <div class="s-filter-row">
+      <button class="s-filter${_sampleFilter === 'all' ? ' on' : ''}" onclick="_setSampleFilter('all',this)">All</button>
+      <button class="s-filter${_sampleFilter === 'selected' ? ' on' : ''}" onclick="_setSampleFilter('selected',this)">Selected</button>
+      <button class="s-filter${_sampleFilter === 'warn' ? ' on' : ''}" onclick="_setSampleFilter('warn',this)">Warnings</button>
+    </div>
+    <div class="s-list" id="s-list">${_sampleCardsHTML()}</div>
+    <div class="sb-batch" id="sb-batch">
+      <div class="sb-batch-stats">
+        <span class="sb-stat-chip"><i class="fa-solid fa-database"></i><span id="sb-loaded-count">${_loadedDatasets().length}</span> loaded</span>
+        <span class="sb-stat-chip"><i class="fa-solid fa-folder-open"></i><span id="sb-open-count">${_openDatasets().length}</span> open</span>
+        <span class="sb-stat-chip sel"><i class="fa-solid fa-check"></i><span id="sb-selected-count">${_selectedDatasets().length}</span> selected</span>
+        <span class="sb-stat-chip warn"><i class="fa-solid fa-triangle-exclamation"></i><span id="sb-warn-count">${_warnDatasets().length}</span> warnings</span>
+      </div>
+      <div class="sb-mini-note" id="sb-mini-note">Batch actions run on the selected subset, not the entire loaded inventory.</div>
+      <div class="sb-mini-actions">
+        <button class="sb-mini-btn go" id="sb-compare-btn" onclick="_navTab('comparison')"><i class="fa-solid fa-code-compare"></i>Compare Selected</button>
+        <button class="sb-mini-btn" id="sb-export-btn" onclick="_navTab('export')"><i class="fa-solid fa-file-export"></i>Export Selected</button>
+      </div>
+    </div>
+
+    <div class="sb-sect" style="margin-top:6px">
+      <span class="sb-sect-lbl">Parameters</span>
+    </div>
+    <div class="p-rows">
+      <div class="p-row">
+        <span class="p-lbl"><i class="fa-solid fa-thermometer-half"></i>Temperature</span>
+        <div class="p-field">
+          <input class="p-in" type="number" value="20.0" step="0.5">
+          <span class="p-unit">°C</span>
+        </div>
+      </div>
+      <div class="p-row">
+        <span class="p-lbl"><i class="fa-solid fa-circle-nodes"></i>Porosity</span>
+        <div class="p-field">
+          <input class="p-in" type="number" value="0.40" step="0.01">
+          <span class="p-unit">-</span>
+        </div>
+      </div>
+    </div>
+    <button class="sb-btn">
+      <i class="fa-solid fa-sliders"></i> Manage Per-Sample Porosity...
+    </button>
+
+    <div class="sb-sect" style="margin-top:6px">
+      <span class="sb-sect-lbl">Actions</span>
+    </div>
+    <div style="padding:6px 0 2px">
+      <button class="sb-btn go">
+        <i class="fa-solid fa-bolt"></i> Calculate K Values
+      </button>
+    </div>
+
+    <div class="sb-sect" style="margin-top:6px">
+      <span class="sb-sect-lbl">Stratigraphy</span>
+    </div>
+    <div style="padding:6px 0 4px">
+      <div class="strata">
+        <div class="st-row st-r1"><div class="st-dot"></div>Topsoil / Fill</div>
+        <div class="st-row st-r2"><div class="st-dot"></div>Fine Sand</div>
+        <div class="st-row st-r3"><div class="st-dot"></div>Coarse Gravel</div>
+        <div class="st-row st-r4"><div class="st-dot"></div>Groundwater</div>
+      </div>
+    </div>
+  </div>
+
+  <div class="dtu-box">
+    <div class="dtu-logo">DTU</div>
+    <div class="dtu-info">
+      <span class="dtu-prog">Grain Size Analysis</span>
+      <span class="dtu-dept">Hydraulic Conductivity Calculator</span>
+    </div>
+  </div>
+
+  <div class="sb-foot">
+    <button class="sf-btn"><i class="fa-solid fa-book-open"></i>Help</button>
+    <button class="sf-btn"><i class="fa-solid fa-gears"></i>Settings</button>
+    <button class="sf-btn"><i class="fa-solid fa-circle-info"></i>About</button>
+  </div>
+</aside>`;
+}
+
+function _toolbarHTML(activeTab) {
+  const tabs = [
+    {id:'individual', icon:'chart-area', label:'Individual Samples', badge:_loadedDatasets().length},
+    {id:'comparison', icon:'code-compare', label:'Comparison'},
+    {id:'reports', icon:'file-contract', label:'Reports'},
+    {id:'export', icon:'file-export', label:'Export'},
+  ];
+  const tabsHTML = tabs.map(t => `
+    <div class="tab${t.id === activeTab ? ' on' : ''}" onclick="_navTab('${t.id}')">
+      <i class="fa-solid fa-${t.icon}"></i>${t.label}
+      ${t.badge ? `<span class="t-badge">${t.badge}</span>` : ''}
+    </div>`).join('');
+
+  return `
+<div class="tb">
+  <div class="tb-tabs">${tabsHTML}</div>
+  <div class="tb-sep"></div>
+  <button class="tb-btn"><i class="fa-regular fa-folder-open"></i>&nbsp;Add Files</button>
+  <button class="tb-btn go"><i class="fa-solid fa-bolt"></i>&nbsp;Calculate K</button>
+  <div class="tb-sp"></div>
+  <button class="tb-btn" style="margin-right:4px"><i class="fa-solid fa-book"></i>&nbsp;Help</button>
+</div>`;
+}
+
+function _dsBarHTML() {
+  return `
+<div class="ds-bar-outer" id="ds-bar-outer">
+  <button class="ds-nav" id="ds-prev" onclick="_scrollTabs(-1)" disabled title="Scroll left">
+    <i class="fa-solid fa-chevron-left"></i>
+  </button>
+  <div class="ds-scroll-wrap" id="ds-scroll-wrap">
+    <div class="ds-bar" id="dsbar">${_openTabsHTML()}</div>
+  </div>
+  <button class="ds-nav" id="ds-next" onclick="_scrollTabs(1)" title="Scroll right">
+    <i class="fa-solid fa-chevron-right"></i>
+  </button>
+  <div class="ds-more-wrap">
+    <button class="ds-more-btn" id="ds-more-btn" onclick="_toggleDropdown()" style="display:none">
+      <i class="fa-solid fa-ellipsis"></i><span id="ds-more-count"></span>
+    </button>
+    <div class="ds-dropdown-menu" id="ds-dropdown-menu"></div>
+  </div>
+</div>`;
+}
+
+function _statusbarHTML() {
+  const ds = DATASETS.find(d => d.id === _currentId);
+  const label = ds && !ds.special ? ds.label : 'No dataset loaded';
+  const d50 = ds && !ds.special ? ds.d50 + ' mm' : '—';
+  const k = ds && !ds.special ? ds.k + ' m/d' : '—';
+  return `
+<div class="st">
+  <div class="st-pill">
+    <div class="led ok"></div>
+    <span class="st-ready">Ready</span>
+  </div>
+  <div class="sseg"><span class="sk">SAMPLE</span><span class="sv hi" id="stsmp">${label}</span></div>
+  <div class="stsep"></div>
+  <div class="sseg"><span class="sk">D50</span><span class="sv bl" id="std50">${d50}</span></div>
+  <div class="stsep"></div>
+  <div class="sseg"><span class="sk">K</span><span class="sv bl" id="stk">${k}</span></div>
+  <div class="stsep"></div>
+  <div class="sseg"><span class="sk">TEMP</span><span class="sv">20.0 °C</span></div>
+  <div class="stsep"></div>
+  <div class="sseg"><span class="sk">LOADED</span><span class="sv hi" id="st-loaded">${_loadedDatasets().length}</span></div>
+  <div class="stsep"></div>
+  <div class="sseg"><span class="sk">OPEN</span><span class="sv" id="st-open">${_openDatasets().length}</span></div>
+  <div class="stsep"></div>
+  <div class="sseg"><span class="sk">SELECTED</span><span class="sv hi" id="st-selected">${_selectedDatasets().length}</span></div>
+  <div class="stsp"></div>
+  <div class="st-ver">v0.9.0-beta</div>
+</div>`;
+}
+
+function _renderSidebarList() {
+  const list = document.getElementById('s-list');
+  if (list) list.innerHTML = _sampleCardsHTML();
+  _updateBatchUI();
+}
+
+function _renderOpenTabs() {
+  const bar = document.getElementById('dsbar');
+  if (bar) bar.innerHTML = _openTabsHTML();
+  _updateNav();
+  _buildDropdown();
+}
+
+function _updateBatchUI() {
+  const loaded = _loadedDatasets().length;
+  const open = _openDatasets().length;
+  const selected = _selectedDatasets().length;
+  const warns = _warnDatasets().length;
+
+  const loadedEl = document.getElementById('sb-loaded-count');
+  const openEl = document.getElementById('sb-open-count');
+  const selectedEl = document.getElementById('sb-selected-count');
+  const warnEl = document.getElementById('sb-warn-count');
+  const compareBtn = document.getElementById('sb-compare-btn');
+  const exportBtn = document.getElementById('sb-export-btn');
+  const noteEl = document.getElementById('sb-mini-note');
+
+  if (loadedEl) loadedEl.textContent = loaded;
+  if (openEl) openEl.textContent = open;
+  if (selectedEl) selectedEl.textContent = selected;
+  if (warnEl) warnEl.textContent = warns;
+  if (compareBtn) {
+    compareBtn.disabled = selected === 0;
+    compareBtn.innerHTML = `<i class="fa-solid fa-code-compare"></i>Compare Selected${selected ? ` (${selected})` : ''}`;
+  }
+  if (exportBtn) {
+    exportBtn.disabled = selected === 0;
+    exportBtn.innerHTML = `<i class="fa-solid fa-file-export"></i>Export Selected${selected ? ` (${selected})` : ''}`;
+  }
+  if (noteEl) {
+    noteEl.textContent = selected
+      ? `${selected} dataset${selected === 1 ? '' : 's'} are ready for comparison/export. Open tabs remain a separate working set.`
+      : 'Select datasets in the inventory to compare or export them as a batch.';
+  }
+
+  const stLoaded = document.getElementById('st-loaded');
+  const stOpen = document.getElementById('st-open');
+  const stSelected = document.getElementById('st-selected');
+  if (stLoaded) stLoaded.textContent = loaded;
+  if (stOpen) stOpen.textContent = open;
+  if (stSelected) stSelected.textContent = selected;
+}
+
+function _setSampleFilter(filter, el) {
+  _sampleFilter = filter;
+  document.querySelectorAll('.s-filter').forEach(btn => btn.classList.remove('on'));
+  if (el) el.classList.add('on');
+  _renderSidebarList();
+}
+
+function _toggleSelected(evt, id) {
+  evt.stopPropagation();
+  const ds = DATASETS.find(d => d.id === id);
+  if (!ds || ds.special) return;
+  ds.selected = !ds.selected;
+  _renderSidebarList();
+}
+
+function _closeTab(evt, id) {
+  evt.stopPropagation();
+  const ds = DATASETS.find(d => d.id === id);
+  if (!ds || ds.special) return;
+  ds.open = false;
+  if (_currentId === id) {
+    const next = _openDatasets()[0] || _selectedDatasets()[0] || _loadedDatasets()[0];
+    if (next) {
+      next.open = true;
+      _currentId = next.id;
+    }
+  }
+  _renderSidebarList();
+  _renderOpenTabs();
+  _updateStatusBar();
+}
+
+function _buildDropdown() {
+  const menu = document.getElementById('ds-dropdown-menu');
+  if (!menu) return;
+  menu.innerHTML = _openDatasets().map(d => `
+    <div class="ds-dd-item${d.id === _currentId ? ' on' : ''}" onclick="_selSample('${d.id}');_closeDropdown()">
+      <i class="fa-solid fa-vial"></i>
+      <span>${d.label}</span>
+      <span style="font-family:var(--fm);font-size:9.5px;color:var(--text-muted);margin-left:4px">${d.d50}mm</span>
+      <div class="ds-dd-led ${d.status}" style="margin-left:auto"></div>
+      ${d.id === _currentId ? '<i class="fa-solid fa-check ds-dd-check" style="margin-left:6px"></i>' : ''}
+    </div>`).join('');
+}
+
+function _updateStatusBar() {
+  const ds = DATASETS.find(d => d.id === _currentId);
+  const sampleEl = document.getElementById('stsmp');
+  const d50El = document.getElementById('std50');
+  const kEl = document.getElementById('stk');
+  if (sampleEl) sampleEl.textContent = ds && !ds.special ? ds.label : 'No dataset loaded';
+  if (d50El) d50El.textContent = ds && !ds.special ? ds.d50 + ' mm' : '—';
+  if (kEl) kEl.textContent = ds && !ds.special ? ds.k + ' m/d' : '—';
+  _updateBatchUI();
+}
+
+function _selSample(id) {
+  const ds = DATASETS.find(d => d.id === id);
+  if (!ds || ds.special) return;
+  _currentId = id;
+  ds.open = true;
+  _renderSidebarList();
+  _renderOpenTabs();
+  _updateStatusBar();
+
+  const activeTab = document.getElementById('dt-' + id);
+  const wrap = document.getElementById('ds-scroll-wrap');
+  if (activeTab && wrap) {
+    const tL = activeTab.offsetLeft;
+    const tR = tL + activeTab.offsetWidth;
+    const wL = wrap.scrollLeft;
+    const wR = wL + wrap.clientWidth;
+    if (tL < wL) wrap.scrollLeft = tL - 8;
+    else if (tR > wR) wrap.scrollLeft = tR - wrap.clientWidth + 8;
+  }
+
+  if (typeof _onSampleChange === 'function') _onSampleChange(ds);
+}
+
+function initShell(config = {}) {
+  _activeTab = config.activeTab || 'individual';
+  _showDatasetBar = config.showDatasetBar !== false && _activeTab === 'individual';
+  if (config.currentId) _currentId = config.currentId;
+
+  const app = document.querySelector('.app');
+  const main = document.querySelector('.main');
+
+  app.insertAdjacentHTML('afterbegin', _sidebarHTML());
+  app.insertAdjacentHTML('afterbegin', _menubarHTML());
+  app.insertAdjacentHTML('beforeend', _statusbarHTML());
+  main.insertAdjacentHTML('afterbegin', _toolbarHTML(_activeTab));
+
+  if (_showDatasetBar) {
+    main.querySelector('.tb').insertAdjacentHTML('afterend', _dsBarHTML());
+    setTimeout(_updateNav, 100);
+    _buildDropdown();
+    const wrap = document.getElementById('ds-scroll-wrap');
+    if (wrap) wrap.addEventListener('scroll', _updateNav);
+  }
+
+  document.addEventListener('click', e => {
+    if (!e.target.closest('.ds-more-wrap')) _closeDropdown();
+  });
+
+  _updateBatchUI();
+  if (typeof _onPageInit === 'function') _onPageInit();
 }

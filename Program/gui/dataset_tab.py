@@ -64,39 +64,64 @@ class DatasetTab(QWidget):
     def init_ui(self):
         """Initialize the UI with nested tabs"""
         layout = QVBoxLayout(self)
-        layout.setContentsMargins(2, 2, 2, 2)  # Reduce margins
+        layout.setContentsMargins(0, 0, 0, 0)
+        layout.setSpacing(0)
 
         # Create nested tab widget
         self.nested_tabs = QTabWidget()
+        self.nested_tabs.setObjectName("nested-subtabs")
 
-        # Compact styling for nested tabs
-        self.nested_tabs.setStyleSheet("""
-            QTabBar::tab {
-                padding: 2px 8px;
-                font-size: 9px;
-                min-height: 16px;
-                max-height: 20px;
-            }
-            QTabWidget::pane {
-                border: 1px solid #cccccc;
-                margin-top: -1px;
-            }
+        # Style to match .ntab-bar concept: 32px bar, earth bottom border on active
+        from .theme import C, F, SZ
+        self.nested_tabs.setStyleSheet(f"""
+            QTabWidget#nested-subtabs::pane {{
+                border: none;
+                border-top: none;
+            }}
+            QTabWidget#nested-subtabs > QTabBar {{
+                background: {C.BG};
+                border-bottom: 2px solid {C.BORDER};
+                qproperty-drawBase: 0;
+            }}
+            QTabWidget#nested-subtabs > QTabBar::tab {{
+                background: transparent;
+                border: none;
+                border-bottom: 2px solid transparent;
+                border-radius: 0;
+                padding: 0 14px;
+                margin-bottom: -2px;
+                margin-right: 0;
+                font-family: "{F.UI}";
+                font-size: {F.SZ_LG}pt;
+                font-weight: 500;
+                color: {C.TEXT_MUTED};
+                min-height: {SZ.SUB_TABBAR_H}px;
+                max-height: {SZ.SUB_TABBAR_H}px;
+            }}
+            QTabWidget#nested-subtabs > QTabBar::tab:selected {{
+                color: {C.TEXT};
+                border-bottom: 2px solid {C.EARTH};
+            }}
+            QTabWidget#nested-subtabs > QTabBar::tab:hover:!selected {{
+                color: {C.TEXT_MID};
+            }}
         """)
 
         # Import here to avoid circular imports
         from .plot_workspace import PlotWorkspace
+        from .theme import icon
 
         # Plot Workspace tab
         self.plot_workspace = PlotWorkspace(self.dataset)
-        self.nested_tabs.addTab(self.plot_workspace, "Plot")
+        self.nested_tabs.addTab(self.plot_workspace, icon("fa6s.chart-line", C.TEXT_MID), "Plot")
 
         # Results tab
         self.results_widget = self.create_results_tab()
-        self.nested_tabs.addTab(self.results_widget, "Results")
+        self.nested_tabs.addTab(self.results_widget, icon("fa6s.table", C.TEXT_MID), "Results")
 
         # Statistics tab
         self.statistics_widget = self.create_statistics_tab()
-        self.nested_tabs.addTab(self.statistics_widget, "Stats")
+        self.nested_tabs.addTab(self.statistics_widget, icon("fa6s.chart-column", C.TEXT_MID), "Statistics")
 
         layout.addWidget(self.nested_tabs)
 

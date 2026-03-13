@@ -1,642 +1,798 @@
 """
-Plot workspace with collapsible sidebar and compact toolbar
+Plot workspace with styled inner toolbar, collapsible sidebar, and chart area.
+
+Matches the design concept in 02_tabs.html / _shared.css (.pw-* classes).
 """
 
 from PyQt6.QtWidgets import (
-    QWidget, QHBoxLayout, QVBoxLayout, QSplitter, QFrame,
-    QGroupBox, QComboBox, QCheckBox, QPushButton, QLabel,
-    QSpinBox, QSlider, QFileDialog, QMessageBox, QToolBar,
-    QToolButton
+    QWidget, QHBoxLayout, QVBoxLayout, QFrame, QComboBox,
+    QPushButton, QLabel, QFileDialog, QMessageBox, QLineEdit,
+    QSizePolicy, QButtonGroup,
 )
-from PyQt6.QtCore import Qt, pyqtSignal, QPropertyAnimation, QRect
-from PyQt6.QtGui import QAction
-from typing import Optional, Dict, List, Set
+from PyQt6.QtCore import (
+    Qt, pyqtSignal, QPropertyAnimation, QEasingCurve, QSize,
+)
+from typing import Optional, Dict, Set
 import numpy as np
 
 from data_loader import GrainSizeData
 from .plot_widget import PlotWidget
+from .toggle_switch import ToggleSwitch
+from .theme import C, F, SZ, icon
 from unit_conversions import HydraulicConductivityUnit, HydraulicConductivityConverter
 
 
+# ─────────────────────────────────────────────────────────────
+# Helpers
+# ─────────────────────────────────────────────────────────────
+
+def _pw_sep() -> QFrame:
+    """Vertical 1×16 separator for the inner toolbar."""
+    sep = QFrame()
+    sep.setObjectName("pw-sep")
+    sep.setFrameShape(QFrame.Shape.VLine)
+    sep.setFixedSize(1, 16)
+    return sep
+
+
+def _pw_btn(text: str = "", tooltip: str = "", icon_name: str = "") -> QPushButton:
+    """Small action button (.pw-btn)."""
+    btn = QPushButton(text)
+    btn.setProperty("pw-btn", True)
+    btn.setToolTip(tooltip)
+    btn.setCursor(Qt.CursorShape.PointingHandCursor)
+    if icon_name:
+        btn.setIcon(icon(icon_name, C.TEXT_MID))
+    return btn
+
+
+def _pw_chk(text: str, tooltip: str = "", checked: bool = False,
+            icon_name: str = "") -> QPushButton:
+    """Toggle check button (.pw-chk)."""
+    btn = QPushButton(text)
+    btn.setProperty("pw-chk", True)
+    btn.setProperty("active", checked)
+    btn.setCheckable(True)
+    btn.setChecked(checked)
+    btn.setToolTip(tooltip)
+    btn.setCursor(Qt.CursorShape.PointingHandCursor)
+    if icon_name:
+        btn._pw_icon_name = icon_name
+        btn.setIcon(icon(icon_name, C.OLIVE if checked else C.TEXT_MID))
+    # Keep the active property in sync with checked state
+    btn.toggled.connect(lambda on, b=btn: _sync_chk(b, on))
+    return btn
+
+
+def _sync_chk(btn: QPushButton, on: bool):
+    btn.setProperty("active", on)
+    btn.style().unpolish(btn)
+    btn.style().polish(btn)
+    icon_name = getattr(btn, '_pw_icon_name', None)
+    if icon_name:
+        btn.setIcon(icon(icon_name, C.OLIVE if on else C.TEXT_MID))
+
+
+# ─────────────────────────────────────────────────────────────
+# PlotWorkspace
+# ─────────────────────────────────────────────────────────────
+
 class PlotWorkspace(QWidget):
-    """
-    The plot workspace with collapsible sidebar and main plot area
-    """
-    
-    # Signals
-    plot_exported = pyqtSignal(str)  # Emitted when plot is exported
-    
+    """Plot workspace: inner toolbar + collapsible sidebar + matplotlib chart."""
+
+    plot_exported = pyqtSignal(str)
+
     def __init__(self, dataset: GrainSizeData, parent=None):
         super().__init__(parent)
         self.dataset = dataset
-        self.plot_widget = None
-        self.k_results = {}
+        self.plot_widget: Optional[PlotWidget] = None
+        self.k_results: Dict[str, float] = {}
         self.flagged_methods: Set[str] = set()
-        self.sidebar_visible = False  # Start with sidebar hidden
-        
+        self.sidebar_visible = False
+
         # Plot settings
         self.current_plot_type = "distribution"
         self.show_grid = True
         self.show_legend = True
         self.show_markers = False
         self.show_zones = False
+        self.show_dlines = False
+        self.fill_curve = False
         self.log_x_scale = True
-        
-        self.init_ui()
-    
-    def init_ui(self):
-        """Initialize the UI"""
-        main_layout = QVBoxLayout(self)
-        main_layout.setContentsMargins(2, 2, 2, 2)
-        main_layout.setSpacing(2)
-        
-        # Create compact toolbar at the top
-        toolbar = self.create_compact_toolbar()
-        main_layout.addWidget(toolbar)
-        
-        # Create horizontal layout for sidebar and plot
-        content_layout = QHBoxLayout()
-        content_layout.setSpacing(2)
-        
-        # Create collapsible sidebar
-        self.sidebar = self.create_sidebar()
-        self.sidebar.setMaximumWidth(250)
-        self.sidebar.setVisible(False)  # Hidden by default
-        
-        # Main plot area using existing PlotWidget
-        self.plot_widget = PlotWidget()
 
-        # Set default unit to m/d as specified in requirements
-        self.plot_widget.set_display_unit(HydraulicConductivityUnit.M_PER_DAY)
+        self._init_ui()
 
-        # Add to layout
-        content_layout.addWidget(self.sidebar)
-        content_layout.addWidget(self.plot_widget)
-        
-        main_layout.addLayout(content_layout)
-    
-    def create_compact_toolbar(self):
-        """Create a compact toolbar with essential controls"""
-        toolbar = QToolBar()
-        toolbar.setMovable(False)
-        toolbar.setStyleSheet("""
-            QToolBar {
-                background-color: #f5f5f0;
-                border: 1px solid #d4c4a8;
-                padding: 2px;
-                spacing: 2px;
-            }
-            QToolButton {
-                padding: 2px 4px;
-                font-size: 9px;
-            }
-            QComboBox {
-                padding: 2px 4px;
-                font-size: 9px;
-                max-height: 20px;
-            }
-            QCheckBox {
-                font-size: 9px;
-                spacing: 2px;
-            }
-        """)
-        
-        # Toggle sidebar button
-        self.toggle_sidebar_btn = QToolButton()
-        self.toggle_sidebar_btn.setText("☰")
-        self.toggle_sidebar_btn.setToolTip("Toggle Sidebar")
-        self.toggle_sidebar_btn.clicked.connect(self.toggle_sidebar)
-        toolbar.addWidget(self.toggle_sidebar_btn)
-        
-        toolbar.addSeparator()
-        
-        # Plot type selector
-        plot_label = QLabel("Plot:")
-        plot_label.setStyleSheet("font-size: 9px; padding: 0 4px;")
-        toolbar.addWidget(plot_label)
-        
-        self.plot_selector = QComboBox()
-        self.plot_selector.addItems([
-            "Distribution",
-            "K-Values",
-            "Combined",
-            "Cumulative",
-            "Histogram"
-        ])
-        self.plot_selector.setMaximumWidth(100)
-        self.plot_selector.currentTextChanged.connect(self.on_plot_type_changed_toolbar)
-        toolbar.addWidget(self.plot_selector)
+    # ── UI Construction ────────────────────────────────────────
 
-        toolbar.addSeparator()
+    def _init_ui(self):
+        root = QVBoxLayout(self)
+        root.setContentsMargins(0, 0, 0, 0)
+        root.setSpacing(0)
 
-        # Style selector
-        style_label = QLabel("Style:")
-        style_label.setStyleSheet("font-size: 9px; padding: 0 4px;")
-        toolbar.addWidget(style_label)
+        root.addWidget(self._build_toolbar())
+        root.addWidget(self._build_body(), 1)
 
-        self.style_selector = QComboBox()
+    # ── Toolbar ────────────────────────────────────────────────
+
+    def _build_toolbar(self) -> QWidget:
+        bar = QWidget()
+        bar.setObjectName("pw-toolbar")
+        lay = QHBoxLayout(bar)
+        lay.setContentsMargins(8, 0, 8, 0)
+        lay.setSpacing(4)
+
+        # ── Segmented control (Dist. Curve / K-Values) ──
+        seg_frame = QFrame()
+        seg_frame.setObjectName("pw-seg")
+        seg_lay = QHBoxLayout(seg_frame)
+        seg_lay.setContentsMargins(0, 0, 0, 0)
+        seg_lay.setSpacing(0)
+
+        self._seg_group = QButtonGroup(self)
+        self._seg_group.setExclusive(True)
+
+        self._seg_dist = QPushButton("  Dist. Curve")
+        self._seg_dist.setIcon(icon("fa6s.chart-line", C.TEXT))  # starts active
+        self._seg_dist.setProperty("pw-seg", True)
+        self._seg_dist.setProperty("active", True)
+        self._seg_dist.setCheckable(True)
+        self._seg_dist.setChecked(True)
+        self._seg_dist.setCursor(Qt.CursorShape.PointingHandCursor)
+
+        self._seg_kval = QPushButton("  K-Values")
+        self._seg_kval.setIcon(icon("fa6s.chart-bar", C.TEXT_MID))
+        self._seg_kval.setProperty("pw-seg", True)
+        self._seg_kval.setProperty("active", False)
+        self._seg_kval.setCheckable(True)
+        self._seg_kval.setCursor(Qt.CursorShape.PointingHandCursor)
+
+        self._seg_group.addButton(self._seg_dist, 0)
+        self._seg_group.addButton(self._seg_kval, 1)
+        seg_lay.addWidget(self._seg_dist)
+        seg_lay.addWidget(self._seg_kval)
+        self._seg_group.idToggled.connect(self._on_seg_changed)
+
+        lay.addWidget(seg_frame)
+        lay.addWidget(_pw_sep())
+
+        # ── More plot types dropdown ──
+        self._more_plots = QComboBox()
+        self._more_plots.setObjectName("pw-style-sel")
+        self._more_plots.addItems(["More Plots…", "Combined", "Cumulative", "Histogram"])
+        self._more_plots.setToolTip("Additional plot types")
+        self._more_plots.currentIndexChanged.connect(self._on_more_plot_changed)
+        lay.addWidget(self._more_plots)
+
+        lay.addWidget(_pw_sep())
+
+        # ── Style selector ──
+        self._style_sel = QComboBox()
+        self._style_sel.setObjectName("pw-style-sel")
         from .plot_styles import get_available_style_names
-        self.style_selector.addItems(get_available_style_names())
-        self.style_selector.setCurrentText("Professional")
-        self.style_selector.setMaximumWidth(110)
-        self.style_selector.currentTextChanged.connect(self.on_style_changed)
-        toolbar.addWidget(self.style_selector)
+        self._style_sel.addItems(get_available_style_names())
+        self._style_sel.setCurrentText("Professional")
+        self._style_sel.setToolTip("Plot style")
+        self._style_sel.currentTextChanged.connect(self._on_style_changed)
+        lay.addWidget(self._style_sel)
 
-        toolbar.addSeparator()
-        
-        # Quick options
-        self.grid_check = QCheckBox("Grid")
-        self.grid_check.setChecked(True)
-        self.grid_check.stateChanged.connect(self.update_display_options)
-        toolbar.addWidget(self.grid_check)
-        
-        self.legend_check = QCheckBox("Legend")
-        self.legend_check.setChecked(True)
-        self.legend_check.stateChanged.connect(self.update_display_options)
-        toolbar.addWidget(self.legend_check)
+        lay.addWidget(_pw_sep())
 
-        self.zones_check = QCheckBox("Zones")
-        self.zones_check.setChecked(False)
-        self.zones_check.setToolTip("Show grain size classification zones (clay/silt/sand/gravel)")
-        self.zones_check.stateChanged.connect(self.update_display_options)
-        toolbar.addWidget(self.zones_check)
+        # ── Toggle checks ──
+        self._chk_grid = _pw_chk("Grid", "Toggle grid", True, "fa6s.hashtag")
+        self._chk_legend = _pw_chk("Legend", "Toggle legend", True, "fa6s.list")
+        self._chk_zones = _pw_chk("Zones", "Toggle soil zones", False, "fa6s.layer-group")
+        self._chk_dlines = _pw_chk("D-lines", "Show D-value lines", False, "fa6s.crosshairs")
 
-        toolbar.addSeparator()
-        
-        # Zoom controls
-        zoom_in_btn = QToolButton()
-        zoom_in_btn.setText("🔍+")
-        zoom_in_btn.setToolTip("Zoom In")
-        zoom_in_btn.clicked.connect(self.zoom_in)
-        toolbar.addWidget(zoom_in_btn)
-        
-        zoom_out_btn = QToolButton()
-        zoom_out_btn.setText("🔍-")
-        zoom_out_btn.setToolTip("Zoom Out")
-        zoom_out_btn.clicked.connect(self.zoom_out)
-        toolbar.addWidget(zoom_out_btn)
-        
-        reset_btn = QToolButton()
-        reset_btn.setText("⟲")
-        reset_btn.setToolTip("Reset View")
-        reset_btn.clicked.connect(self.reset_view)
-        toolbar.addWidget(reset_btn)
-        
-        toolbar.addSeparator()
-        
-        # Export button
-        export_btn = QToolButton()
-        export_btn.setText("💾")
-        export_btn.setToolTip("Export Plot")
-        export_btn.clicked.connect(lambda: self.export_plot("png"))
-        toolbar.addWidget(export_btn)
-        
-        # Add stretch to push everything to the left
-        spacer = QWidget()
-        spacer.setSizePolicy(spacer.sizePolicy().horizontalPolicy(), spacer.sizePolicy().verticalPolicy())
-        toolbar.addWidget(spacer)
-        
-        return toolbar
-    
-    def create_sidebar(self):
-        """Create the collapsible sidebar with plot controls"""
+        for chk in (self._chk_grid, self._chk_legend, self._chk_zones, self._chk_dlines):
+            chk.toggled.connect(self._update_display_options)
+            lay.addWidget(chk)
+
+        lay.addWidget(_pw_sep())
+
+        # ── Zoom controls ──
+        btn_zin = _pw_btn("", "Zoom in", "fa6s.magnifying-glass-plus")
+        btn_zout = _pw_btn("", "Zoom out", "fa6s.magnifying-glass-minus")
+        btn_fit = _pw_btn(" Fit", "Reset zoom", "fa6s.arrows-to-circle")
+        btn_zin.clicked.connect(self.zoom_in)
+        btn_zout.clicked.connect(self.zoom_out)
+        btn_fit.clicked.connect(self.reset_view)
+        lay.addWidget(btn_zin)
+        lay.addWidget(btn_zout)
+        lay.addWidget(btn_fit)
+
+        lay.addWidget(_pw_sep())
+
+        # ── Export ──
+        btn_export = _pw_btn(" Export", "Export plot", "fa6s.download")
+        btn_export.clicked.connect(lambda: self.export_plot("png"))
+        lay.addWidget(btn_export)
+
+        # ── Spacer ──
+        lay.addStretch(1)
+
+        # ── Sidebar toggle (far right) ──
+        self._tb_sidebar_btn = _pw_btn("", "Toggle controls panel", "fa6s.sliders")
+        self._tb_sidebar_btn.clicked.connect(self._toggle_sidebar)
+        lay.addWidget(self._tb_sidebar_btn)
+
+        return bar
+
+    # ── Body (sidebar + chart) ─────────────────────────────────
+
+    def _build_body(self) -> QWidget:
+        body = QWidget()
+        body_lay = QHBoxLayout(body)
+        body_lay.setContentsMargins(0, 0, 0, 0)
+        body_lay.setSpacing(0)
+
+        self._sidebar = self._build_sidebar()
+        self._sidebar.setMaximumWidth(0)  # start collapsed
+
+        # Chart area — plot widget fills the space; toggle handle overlays
+        self._chart_area = QWidget()
+        chart_lay = QVBoxLayout(self._chart_area)
+        chart_lay.setContentsMargins(0, 0, 0, 0)
+        chart_lay.setSpacing(0)
+
+        self.plot_widget = PlotWidget()
+        self.plot_widget.set_display_unit(HydraulicConductivityUnit.M_PER_DAY)
+        chart_lay.addWidget(self.plot_widget, 1)
+
+        # Toggle handle — absolute overlay at left edge, vertically centered
+        self._toggle_handle = QPushButton(self._chart_area)
+        self._toggle_handle.setObjectName("pw-toggle-handle")
+        self._toggle_handle.setIcon(icon("fa6s.chevron-right", C.TEXT_MID, 8))
+        self._toggle_handle.setToolTip("Toggle sidebar")
+        self._toggle_handle.setCursor(Qt.CursorShape.PointingHandCursor)
+        self._toggle_handle.clicked.connect(self._toggle_sidebar)
+        self._toggle_handle.raise_()  # on top of plot
+
+        body_lay.addWidget(self._sidebar)
+        body_lay.addWidget(self._chart_area, 1)
+
+        # Sidebar collapse animation
+        self._sidebar_anim = QPropertyAnimation(self._sidebar, b"maximumWidth")
+        self._sidebar_anim.setDuration(200)
+        self._sidebar_anim.setEasingCurve(QEasingCurve.Type.InOutQuad)
+
+        return body
+
+    def resizeEvent(self, event):
+        """Reposition the toggle handle when the chart area resizes."""
+        super().resizeEvent(event)
+        self._position_toggle_handle()
+
+    def _position_toggle_handle(self):
+        """Place the toggle handle at left edge, vertically centered."""
+        if not hasattr(self, '_toggle_handle') or not hasattr(self, '_chart_area'):
+            return
+        h = self._chart_area.height()
+        handle_h = 40
+        handle_w = 14
+        y = max(0, (h - handle_h) // 2)
+        self._toggle_handle.setGeometry(0, y, handle_w, handle_h)
+
+    # ── Sidebar ────────────────────────────────────────────────
+
+    def _build_sidebar(self) -> QFrame:
         sidebar = QFrame()
-        sidebar.setFrameStyle(QFrame.Shape.Box)
-        sidebar.setStyleSheet("""
-            QFrame { 
-                background-color: #f5f5f0;
-                border: 1px solid #d4c4a8;
-            }
-            QGroupBox {
-                font-size: 9px;
-                padding-top: 15px;
-                margin-top: 10px;
-            }
-            QGroupBox::title {
-                font-size: 9px;
-                padding: 2px;
-            }
-            QLabel {
-                font-size: 9px;
-            }
-            QComboBox, QSpinBox, QPushButton, QCheckBox {
-                font-size: 9px;
-                padding: 2px;
-                max-height: 20px;
-            }
-        """)
-        
-        layout = QVBoxLayout(sidebar)
-        layout.setSpacing(5)
-        layout.setContentsMargins(5, 5, 5, 5)
-        
-        # Title
-        title = QLabel("Advanced Options")
-        title.setStyleSheet("font-weight: bold; font-size: 10px;")
-        layout.addWidget(title)
-        
-        # Axis Controls
-        axis_group = QGroupBox("Axis Controls")
-        axis_layout = QVBoxLayout(axis_group)
-        
-        axis_layout.addWidget(QLabel("X-Axis Scale:"))
-        self.x_scale_combo = QComboBox()
-        self.x_scale_combo.addItems(["Linear", "Logarithmic"])
-        self.x_scale_combo.setCurrentText("Logarithmic")
-        self.x_scale_combo.currentTextChanged.connect(self.update_axis_scale)
-        axis_layout.addWidget(self.x_scale_combo)
-        
-        axis_layout.addWidget(QLabel("Y-Axis Range:"))
-        y_range_layout = QHBoxLayout()
-        self.y_min_spin = QSpinBox()
-        self.y_min_spin.setRange(0, 100)
-        self.y_min_spin.setValue(0)
-        self.y_min_spin.valueChanged.connect(self.update_axis_range)
-        y_range_layout.addWidget(self.y_min_spin)
-        
-        y_range_layout.addWidget(QLabel("to"))
-        
-        self.y_max_spin = QSpinBox()
-        self.y_max_spin.setRange(0, 100)
-        self.y_max_spin.setValue(100)
-        self.y_max_spin.valueChanged.connect(self.update_axis_range)
-        y_range_layout.addWidget(self.y_max_spin)
-        
-        axis_layout.addLayout(y_range_layout)
-        
-        # Display Options
-        display_group = QGroupBox("Display Options")
-        display_layout = QVBoxLayout(display_group)
-        
-        self.markers_check = QCheckBox("Show Data Points")
-        self.markers_check.setChecked(False)
-        self.markers_check.stateChanged.connect(self.update_display_options)
-        display_layout.addWidget(self.markers_check)
+        sidebar.setObjectName("pw-sidebar")
+        sidebar.setMinimumWidth(0)
+        sidebar.setSizePolicy(QSizePolicy.Policy.Fixed, QSizePolicy.Policy.Expanding)
+        lay = QVBoxLayout(sidebar)
+        lay.setContentsMargins(0, 0, 0, 0)
+        lay.setSpacing(0)
 
-        # K-value unit selection
-        display_layout.addWidget(QLabel("K-Value Units:"))
-        self.unit_combo = QComboBox()
+        # ── Axis Controls ──
+        lay.addWidget(self._sect_label("Axis Controls"))
+        for label_text, default, attr in [
+            ("X min (mm)", "0.001", "_in_xmin"),
+            ("X max (mm)", "100",   "_in_xmax"),
+            ("Y min (%)",  "0",     "_in_ymin"),
+            ("Y max (%)",  "100",   "_in_ymax"),
+        ]:
+            row, inp = self._axis_row(label_text, default)
+            setattr(self, attr, inp)
+            inp.editingFinished.connect(self._on_axis_changed)
+            lay.addWidget(row)
+
+        # ── Display Options ──
+        lay.addWidget(self._sect_label("Display Options"))
+        for label_text, checked, attr in [
+            ("Show grid lines",      True,  "_sw_grid"),
+            ("Show soil zones",      False, "_sw_zones"),
+            ("Show D10 / D30 / D60", False, "_sw_dlines"),
+            ("Fill curve area",      False, "_sw_fill"),
+            ("Markers on curve",     False, "_sw_markers"),
+        ]:
+            row_w, sw = self._toggle_row(label_text, checked)
+            setattr(self, attr, sw)
+            lay.addWidget(row_w)
+
+        # ── Curve Color ──
+        lay.addWidget(self._sect_label("Curve Color"))
+        self._color_container = QWidget()
+        self._color_container_lay = QVBoxLayout(self._color_container)
+        self._color_container_lay.setContentsMargins(0, 0, 0, 0)
+        self._color_container_lay.setSpacing(0)
+        # Populate with current dataset
+        self._add_color_row(self.dataset.sample_name, C.SAMPLE_COLORS[0])
+        lay.addWidget(self._color_container)
+
+        # ── K-value unit selector ──
+        lay.addWidget(self._sect_label("K-Value Units"))
+        self._unit_combo = QComboBox()
+        self._unit_combo.setObjectName("pw-style-sel")
         all_units = HydraulicConductivityConverter.get_all_units()
         for unit, symbol in all_units.items():
-            self.unit_combo.addItem(symbol, unit)  # Display symbol, store unit enum
-        # Set default to m/d as specified in user requirements
+            self._unit_combo.addItem(symbol, unit)
         default_index = list(all_units.keys()).index(HydraulicConductivityUnit.M_PER_DAY)
-        self.unit_combo.setCurrentIndex(default_index)
-        self.unit_combo.currentTextChanged.connect(self.update_unit_display)
-        display_layout.addWidget(self.unit_combo)
-        
-        # Export Controls
-        export_group = QGroupBox("Export")
-        export_layout = QVBoxLayout(export_group)
-        
-        self.export_svg_btn = QPushButton("Export as SVG")
-        self.export_svg_btn.clicked.connect(lambda: self.export_plot("svg"))
-        
-        self.export_data_btn = QPushButton("Export Data")
-        self.export_data_btn.clicked.connect(self.export_data)
-        
-        export_layout.addWidget(self.export_svg_btn)
-        export_layout.addWidget(self.export_data_btn)
+        self._unit_combo.setCurrentIndex(default_index)
+        self._unit_combo.currentIndexChanged.connect(self._on_unit_changed)
+        unit_row = QWidget()
+        unit_lay = QHBoxLayout(unit_row)
+        unit_lay.setContentsMargins(10, 5, 10, 5)
+        unit_lay.addWidget(self._unit_combo)
+        lay.addWidget(unit_row)
 
-        # Custom Styling (Placeholder for future enhancement)
-        custom_style_group = QGroupBox("Custom Styling")
-        custom_style_layout = QVBoxLayout(custom_style_group)
+        # ── Export controls ──
+        lay.addWidget(self._sect_label("Export"))
+        export_w = QWidget()
+        export_lay = QVBoxLayout(export_w)
+        export_lay.setContentsMargins(10, 5, 10, 8)
+        export_lay.setSpacing(4)
+        btn_svg = QPushButton("Export as SVG")
+        btn_svg.setProperty("pw-btn", True)
+        btn_svg.clicked.connect(lambda: self.export_plot("svg"))
+        btn_data = QPushButton("Export Data")
+        btn_data.setProperty("pw-btn", True)
+        btn_data.clicked.connect(self.export_data)
+        export_lay.addWidget(btn_svg)
+        export_lay.addWidget(btn_data)
+        lay.addWidget(export_w)
 
-        placeholder_label = QLabel("Advanced styling controls\n(Coming in future update)")
-        placeholder_label.setStyleSheet("color: #999999; font-style: italic; font-size: 8px;")
-        placeholder_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        custom_style_layout.addWidget(placeholder_label)
-
-        customize_btn = QPushButton("Customize Colors & Fonts...")
-        customize_btn.setEnabled(False)  # Disabled placeholder
-        customize_btn.setToolTip("Feature coming soon: Customize individual plot elements")
-        custom_style_layout.addWidget(customize_btn)
-
-        # Add all groups to sidebar
-        layout.addWidget(axis_group)
-        layout.addWidget(display_group)
-        layout.addWidget(export_group)
-        layout.addWidget(custom_style_group)
-        layout.addStretch()
-        
+        lay.addStretch(1)
         return sidebar
-    
-    def toggle_sidebar(self):
-        """Toggle sidebar visibility"""
-        self.sidebar_visible = not self.sidebar_visible
-        self.sidebar.setVisible(self.sidebar_visible)
-        self.toggle_sidebar_btn.setText("✕" if self.sidebar_visible else "☰")
-    
-    def on_plot_type_changed_toolbar(self, text: str):
-        """Handle plot type change from toolbar"""
-        plot_map = {
-            "Distribution": "distribution",
-            "K-Values": "k-values",
-            "Combined": "combined",
-            "Cumulative": "cumulative",
-            "Histogram": "histogram"
-        }
 
-        self.current_plot_type = plot_map.get(text, "distribution")
+    # ── Sidebar sub-builders ───────────────────────────────────
+
+    def _sect_label(self, text: str) -> QLabel:
+        lbl = QLabel(text.upper())
+        lbl.setProperty("pws-sect", True)
+        return lbl
+
+    def _axis_row(self, label: str, default: str):
+        row = QWidget()
+        row.setStyleSheet(f"border-bottom: 1px solid rgba(212,196,168,0.4);")
+        lay = QHBoxLayout(row)
+        lay.setContentsMargins(10, 5, 10, 5)
+        lay.setSpacing(5)
+        lbl = QLabel(label)
+        lbl.setProperty("pws-lbl", True)
+        inp = QLineEdit(default)
+        inp.setProperty("pws-in", True)
+        inp.setAlignment(Qt.AlignmentFlag.AlignRight)
+        lay.addWidget(lbl, 1)
+        lay.addWidget(inp, 0)
+        return row, inp
+
+    def _toggle_row(self, label: str, checked: bool):
+        """Return (row_widget, ToggleSwitch) — caller adds to layout."""
+        row = QWidget()
+        row.setStyleSheet("border-bottom: 1px solid rgba(212,196,168,0.4);")
+        row.setCursor(Qt.CursorShape.PointingHandCursor)
+        lay = QHBoxLayout(row)
+        lay.setContentsMargins(10, 5, 10, 5)
+        lay.setSpacing(5)
+        lbl = QLabel(label)
+        lbl.setProperty("pws-lbl", True)
+        sw = ToggleSwitch(checked)
+        sw.toggled.connect(self._on_sidebar_toggle_changed)
+        lay.addWidget(lbl, 1)
+        lay.addWidget(sw, 0)
+        return row, sw
+
+    def _add_color_row(self, name: str, color: str):
+        row = QWidget()
+        row.setStyleSheet(f"border-bottom: 1px solid rgba(212,196,168,0.4);")
+        lay = QHBoxLayout(row)
+        lay.setContentsMargins(10, 5, 10, 5)
+        lay.setSpacing(5)
+        lbl = QLabel(name)
+        lbl.setProperty("pws-lbl", True)
+        dot = QLabel()
+        dot.setFixedSize(12, 12)
+        dot.setStyleSheet(
+            f"background: {color}; border-radius: 6px; "
+            f"border: 1px solid rgba(0,0,0,0.1);"
+        )
+        lay.addWidget(lbl, 1)
+        lay.addWidget(dot, 0)
+        self._color_container_lay.addWidget(row)
+
+    # ── Sidebar toggle ─────────────────────────────────────────
+
+    def _toggle_sidebar(self):
+        self.sidebar_visible = not self.sidebar_visible
+        target = SZ.PLOT_SIDEBAR_W if self.sidebar_visible else 0
+        self._sidebar_anim.stop()
+        self._sidebar_anim.setStartValue(self._sidebar.maximumWidth())
+        self._sidebar_anim.setEndValue(target)
+        self._sidebar_anim.start()
+        # Update handle chevron direction
+        chevron = "fa6s.chevron-left" if self.sidebar_visible else "fa6s.chevron-right"
+        self._toggle_handle.setIcon(icon(chevron, C.TEXT_MID, 8))
+
+    # ── Toolbar callbacks ──────────────────────────────────────
+
+    def _on_seg_changed(self, btn_id: int, checked: bool):
+        if not checked:
+            return
+        # Update active property for styling
+        self._seg_dist.setProperty("active", btn_id == 0)
+        self._seg_kval.setProperty("active", btn_id == 1)
+        self._seg_dist.style().unpolish(self._seg_dist)
+        self._seg_dist.style().polish(self._seg_dist)
+        self._seg_kval.style().unpolish(self._seg_kval)
+        self._seg_kval.style().polish(self._seg_kval)
+        # Update icon colors: active seg uses TEXT, inactive uses TEXT_MID
+        self._seg_dist.setIcon(icon("fa6s.chart-line", C.TEXT if btn_id == 0 else C.TEXT_MID))
+        self._seg_kval.setIcon(icon("fa6s.chart-bar", C.TEXT if btn_id == 1 else C.TEXT_MID))
+
+        self.current_plot_type = "distribution" if btn_id == 0 else "k-values"
+        # Reset "More Plots" dropdown
+        self._more_plots.blockSignals(True)
+        self._more_plots.setCurrentIndex(0)
+        self._more_plots.blockSignals(False)
         self.refresh_plot()
 
-    def on_style_changed(self, style_name: str):
-        """Handle style change from toolbar"""
+    def _on_more_plot_changed(self, index: int):
+        if index == 0:
+            return  # "More Plots…" header
+        plot_map = {1: "combined", 2: "cumulative", 3: "histogram"}
+        self.current_plot_type = plot_map.get(index, "distribution")
+        # Deselect segment buttons visually
+        self._seg_group.setExclusive(False)
+        self._seg_dist.setChecked(False)
+        self._seg_kval.setChecked(False)
+        self._seg_dist.setProperty("active", False)
+        self._seg_kval.setProperty("active", False)
+        for btn in (self._seg_dist, self._seg_kval):
+            btn.style().unpolish(btn)
+            btn.style().polish(btn)
+        self._seg_group.setExclusive(True)
+        self.refresh_plot()
+
+    def _on_style_changed(self, style_name: str):
         if self.plot_widget:
             from .plot_styles import get_style
             self.plot_widget.set_style(get_style(style_name))
             self.refresh_plot()
-    
-    def zoom_in(self):
-        """Zoom in on the plot"""
-        if self.plot_widget and self.plot_widget.grain_size_ax:
-            xlim = self.plot_widget.grain_size_ax.get_xlim()
-            ylim = self.plot_widget.grain_size_ax.get_ylim()
-            
-            # Zoom in by 20%
-            x_center = (xlim[0] + xlim[1]) / 2
-            y_center = (ylim[0] + ylim[1]) / 2
-            x_range = (xlim[1] - xlim[0]) * 0.4
-            y_range = (ylim[1] - ylim[0]) * 0.4
-            
-            self.plot_widget.grain_size_ax.set_xlim(x_center - x_range, x_center + x_range)
-            self.plot_widget.grain_size_ax.set_ylim(y_center - y_range, y_center + y_range)
-            self.plot_widget.canvas.draw()
-    
-    def zoom_out(self):
-        """Zoom out on the plot"""
-        if self.plot_widget and self.plot_widget.grain_size_ax:
-            xlim = self.plot_widget.grain_size_ax.get_xlim()
-            ylim = self.plot_widget.grain_size_ax.get_ylim()
-            
-            # Zoom out by 20%
-            x_center = (xlim[0] + xlim[1]) / 2
-            y_center = (ylim[0] + ylim[1]) / 2
-            x_range = (xlim[1] - xlim[0]) * 0.6
-            y_range = (ylim[1] - ylim[0]) * 0.6
-            
-            self.plot_widget.grain_size_ax.set_xlim(x_center - x_range, x_center + x_range)
-            self.plot_widget.grain_size_ax.set_ylim(y_center - y_range, y_center + y_range)
-            self.plot_widget.canvas.draw()
-    
-    def reset_view(self):
-        """Reset the plot view"""
-        if self.plot_widget:
-            self.plot_widget.reset_view()
-    
-    def update_display_options(self):
-        """Update display options"""
-        self.show_grid = self.grid_check.isChecked()
-        self.show_legend = self.legend_check.isChecked()
-        self.show_markers = self.markers_check.isChecked() if hasattr(self, 'markers_check') else False
-        self.show_zones = self.zones_check.isChecked() if hasattr(self, 'zones_check') else False
 
-        # Update plot widget setting
+    def _update_display_options(self):
+        self.show_grid = self._chk_grid.isChecked()
+        self.show_legend = self._chk_legend.isChecked()
+        self.show_zones = self._chk_zones.isChecked()
+        self.show_dlines = self._chk_dlines.isChecked()
+        # Sync sidebar toggle switches (if visible)
+        self._sw_grid.setChecked(self.show_grid, animate=False)
+        self._sw_zones.setChecked(self.show_zones, animate=False)
+        self._sw_dlines.setChecked(self.show_dlines, animate=False)
+
         if self.plot_widget:
             self.plot_widget.show_classification_zones = self.show_zones
-
         self.refresh_plot()
-    
-    def update_axis_scale(self, text: str):
-        """Update axis scale"""
-        self.log_x_scale = (text == "Logarithmic")
-        self.refresh_plot()
-    
-    def update_axis_range(self):
-        """Update axis range"""
-        y_min = self.y_min_spin.value()
-        y_max = self.y_max_spin.value()
 
-        if self.plot_widget and self.plot_widget.grain_size_ax:
-            self.plot_widget.grain_size_ax.set_ylim(y_min, y_max)
+    def _on_sidebar_toggle_changed(self, _on: bool):
+        """Sync sidebar toggle switches back to toolbar checks."""
+        self.show_grid = self._sw_grid.isChecked()
+        self.show_zones = self._sw_zones.isChecked()
+        self.show_dlines = self._sw_dlines.isChecked()
+        self.fill_curve = self._sw_fill.isChecked()
+        self.show_markers = self._sw_markers.isChecked()
+
+        # Sync toolbar check buttons
+        self._chk_grid.blockSignals(True)
+        self._chk_grid.setChecked(self.show_grid)
+        self._chk_grid.setProperty("active", self.show_grid)
+        self._chk_grid.style().unpolish(self._chk_grid)
+        self._chk_grid.style().polish(self._chk_grid)
+        self._chk_grid.blockSignals(False)
+
+        self._chk_zones.blockSignals(True)
+        self._chk_zones.setChecked(self.show_zones)
+        self._chk_zones.setProperty("active", self.show_zones)
+        self._chk_zones.style().unpolish(self._chk_zones)
+        self._chk_zones.style().polish(self._chk_zones)
+        self._chk_zones.blockSignals(False)
+
+        self._chk_dlines.blockSignals(True)
+        self._chk_dlines.setChecked(self.show_dlines)
+        self._chk_dlines.setProperty("active", self.show_dlines)
+        self._chk_dlines.style().unpolish(self._chk_dlines)
+        self._chk_dlines.style().polish(self._chk_dlines)
+        self._chk_dlines.blockSignals(False)
+
+        if self.plot_widget:
+            self.plot_widget.show_classification_zones = self.show_zones
+        self.refresh_plot()
+
+    def _on_axis_changed(self):
+        if not self.plot_widget or not self.plot_widget.grain_size_ax:
+            return
+        try:
+            xmin = float(self._in_xmin.text())
+            xmax = float(self._in_xmax.text())
+            ymin = float(self._in_ymin.text())
+            ymax = float(self._in_ymax.text())
+            self.plot_widget.grain_size_ax.set_xlim(xmin, xmax)
+            self.plot_widget.grain_size_ax.set_ylim(ymin, ymax)
             self.plot_widget.canvas.draw()
+        except ValueError:
+            pass
 
-    def update_unit_display(self):
-        """Update K-value unit display"""
+    def _on_unit_changed(self):
         if not self.plot_widget:
             return
-
-        # Get selected unit from combo box
-        selected_unit = self.unit_combo.currentData()
+        selected_unit = self._unit_combo.currentData()
         if selected_unit:
             self.plot_widget.set_display_unit(selected_unit)
 
+    # ── Plot logic (preserved from original) ───────────────────
+
     def refresh_plot(self):
-        """Refresh the plot based on current settings"""
         if not self.plot_widget:
             return
-        
-        # Clear and recreate plot based on type
+
         if self.current_plot_type == "distribution":
             self.plot_widget.update_plot(
                 self.dataset.particle_sizes,
                 self.dataset.percent_passing,
                 self.dataset.sample_name,
-                grain_size_data=self.dataset  # Pass the GrainSizeData object for correct D-value calculations
+                grain_size_data=self.dataset,
             )
         elif self.current_plot_type == "k-values":
             if self.k_results:
                 self.plot_widget.flagged_methods = set(self.flagged_methods)
                 self.plot_widget.plot_k_values_only(self.k_results)
             else:
-                # Show message that K-values need to be calculated
                 self.plot_widget.figure.clear()
                 ax = self.plot_widget.figure.add_subplot(1, 1, 1)
-                ax.text(0.5, 0.5, 'Please calculate K-values first\n(Go to Results tab and click Recalculate)',
-                       transform=ax.transAxes, ha='center', va='center',
-                       fontsize=12, color='gray')
+                ax.text(0.5, 0.5,
+                        'Please calculate K-values first\n(Go to Results tab and click Recalculate)',
+                        transform=ax.transAxes, ha='center', va='center',
+                        fontsize=12, color='gray')
                 ax.set_xticks([])
                 ax.set_yticks([])
                 self.plot_widget.canvas.draw()
         elif self.current_plot_type == "combined":
-            # First ensure grain data is loaded
             self.plot_widget.update_plot(
                 self.dataset.particle_sizes,
                 self.dataset.percent_passing,
-                self.dataset.sample_name
+                self.dataset.sample_name,
             )
-            # Then show combined view
             self.plot_widget.flagged_methods = set(self.flagged_methods)
             self.plot_widget.plot_combined_view(self.k_results)
         elif self.current_plot_type == "cumulative":
-            self.plot_cumulative_distribution()
+            self._plot_cumulative_distribution()
         elif self.current_plot_type == "histogram":
-            self.plot_histogram()
-        
+            self._plot_histogram()
+
         # Apply display settings
         if self.plot_widget.grain_size_ax:
-            self.plot_widget.grain_size_ax.grid(self.show_grid, which='both', alpha=0.3)
+            self.plot_widget.grain_size_ax.grid(
+                self.show_grid, which='both', alpha=0.3)
             if hasattr(self.plot_widget.grain_size_ax, 'legend_'):
                 legend = self.plot_widget.grain_size_ax.legend_
                 if legend:
                     legend.set_visible(self.show_legend)
-        
+
         self.plot_widget.canvas.draw()
-    
-    def plot_cumulative_distribution(self):
-        """Plot cumulative distribution"""
+
+    def _plot_cumulative_distribution(self):
         if not self.plot_widget:
             return
-        
         self.plot_widget.figure.clear()
         ax = self.plot_widget.figure.add_subplot(111)
-
-        # Draw classification zones if enabled
         if self.show_zones and self.plot_widget:
             self.plot_widget.draw_classification_zones(ax)
 
-        # Create cumulative distribution with current style
         cumulative = np.array(self.dataset.percent_passing)
         sizes = np.array(self.dataset.particle_sizes)
-
-        # Get style from plot_widget
         style = self.plot_widget.current_style if self.plot_widget else None
-        if style:
-            ax.plot(sizes, cumulative, color=style.curve_color, linewidth=style.curve_linewidth,
-                   label=self.dataset.sample_name, marker=style.curve_marker,
-                   markersize=style.curve_markersize, markeredgecolor=style.curve_markeredgecolor,
-                   markeredgewidth=style.curve_markeredgewidth)
-            ax.set_xlabel('Grain Size (mm)', fontsize=style.label_fontsize, fontfamily=style.font_family)
-            ax.set_ylabel('Cumulative Percent Passing (%)', fontsize=style.label_fontsize, fontfamily=style.font_family)
-            ax.set_title(f'Cumulative Distribution - {self.dataset.sample_name}',
-                        fontsize=style.title_fontsize, fontweight=style.title_fontweight, fontfamily=style.font_family)
 
+        if style:
+            ax.plot(sizes, cumulative, color=style.curve_color,
+                    linewidth=style.curve_linewidth,
+                    label=self.dataset.sample_name,
+                    marker=style.curve_marker,
+                    markersize=style.curve_markersize,
+                    markeredgecolor=style.curve_markeredgecolor,
+                    markeredgewidth=style.curve_markeredgewidth)
+            ax.set_xlabel('Grain Size (mm)', fontsize=style.label_fontsize,
+                          fontfamily=style.font_family)
+            ax.set_ylabel('Cumulative Percent Passing (%)',
+                          fontsize=style.label_fontsize,
+                          fontfamily=style.font_family)
+            ax.set_title(f'Cumulative Distribution - {self.dataset.sample_name}',
+                         fontsize=style.title_fontsize,
+                         fontweight=style.title_fontweight,
+                         fontfamily=style.font_family)
             if self.log_x_scale:
                 ax.set_xscale('log')
-
             ax.set_facecolor(style.axes_facecolor)
             ax.tick_params(labelsize=style.tick_fontsize)
             if self.show_grid and style.grid_show:
-                ax.grid(True, which='major', alpha=style.grid_alpha, linestyle=style.grid_linestyle,
-                       color=style.grid_color, linewidth=style.grid_linewidth)
+                ax.grid(True, which='major', alpha=style.grid_alpha,
+                        linestyle=style.grid_linestyle,
+                        color=style.grid_color, linewidth=style.grid_linewidth)
             if self.show_legend:
                 ax.legend(loc=style.legend_loc, fontsize=style.legend_fontsize,
-                         framealpha=style.legend_framealpha, edgecolor=style.legend_edgecolor)
+                          framealpha=style.legend_framealpha,
+                          edgecolor=style.legend_edgecolor)
         else:
-            # Fallback if no style
-            ax.plot(sizes, cumulative, 'g-', linewidth=2, label=self.dataset.sample_name)
+            ax.plot(sizes, cumulative, 'g-', linewidth=2,
+                    label=self.dataset.sample_name)
             ax.set_xlabel('Grain Size (mm)')
             ax.set_ylabel('Cumulative Percent Passing (%)')
-            ax.set_title(f'Cumulative Distribution - {self.dataset.sample_name}')
-
+            ax.set_title(
+                f'Cumulative Distribution - {self.dataset.sample_name}')
             if self.log_x_scale:
                 ax.set_xscale('log')
-
             ax.grid(self.show_grid, which='both', alpha=0.3)
             if self.show_legend:
                 ax.legend()
-        
+
         self.plot_widget.grain_size_ax = ax
         self.plot_widget.figure.tight_layout()
         self.plot_widget.canvas.draw()
-    
-    def plot_histogram(self):
-        """Plot histogram of grain sizes"""
+
+    def _plot_histogram(self):
         if not self.plot_widget:
             return
-        
         self.plot_widget.figure.clear()
         ax = self.plot_widget.figure.add_subplot(111)
-        
-        # Create histogram data
         sizes = np.array(self.dataset.particle_sizes)
         passing = np.array(self.dataset.percent_passing)
-
-        # Calculate frequency for each size class
         freq = np.diff(passing, prepend=0)
-
-        # Get style from plot_widget
         style = self.plot_widget.current_style if self.plot_widget else None
+
         if style:
-            # Create bar plot with style
-            ax.bar(range(len(sizes)), freq, tick_label=[f"{s:.3f}" for s in sizes],
-                  color=style.curve_color, alpha=0.8, edgecolor='black', linewidth=0.8)
-            ax.set_xlabel('Grain Size (mm)', fontsize=style.label_fontsize, fontfamily=style.font_family)
-            ax.set_ylabel('Frequency (%)', fontsize=style.label_fontsize, fontfamily=style.font_family)
-            ax.set_title(f'Grain Size Histogram - {self.dataset.sample_name}',
-                        fontsize=style.title_fontsize, fontweight=style.title_fontweight, fontfamily=style.font_family)
-            ax.set_xticklabels(ax.get_xticklabels(), rotation=45, ha='right', fontsize=style.tick_fontsize)
+            ax.bar(range(len(sizes)), freq,
+                   tick_label=[f"{s:.3f}" for s in sizes],
+                   color=style.curve_color, alpha=0.8,
+                   edgecolor='black', linewidth=0.8)
+            ax.set_xlabel('Grain Size (mm)', fontsize=style.label_fontsize,
+                          fontfamily=style.font_family)
+            ax.set_ylabel('Frequency (%)', fontsize=style.label_fontsize,
+                          fontfamily=style.font_family)
+            ax.set_title(
+                f'Grain Size Histogram - {self.dataset.sample_name}',
+                fontsize=style.title_fontsize,
+                fontweight=style.title_fontweight,
+                fontfamily=style.font_family)
+            ax.set_xticklabels(ax.get_xticklabels(), rotation=45,
+                               ha='right', fontsize=style.tick_fontsize)
             ax.set_facecolor(style.axes_facecolor)
             ax.tick_params(labelsize=style.tick_fontsize)
             if self.show_grid and style.grid_show:
-                ax.grid(True, alpha=style.grid_alpha, linestyle=style.grid_linestyle,
-                       color=style.grid_color, linewidth=style.grid_linewidth)
+                ax.grid(True, alpha=style.grid_alpha,
+                        linestyle=style.grid_linestyle,
+                        color=style.grid_color, linewidth=style.grid_linewidth)
         else:
-            # Fallback if no style
-            ax.bar(range(len(sizes)), freq, tick_label=[f"{s:.3f}" for s in sizes])
+            ax.bar(range(len(sizes)), freq,
+                   tick_label=[f"{s:.3f}" for s in sizes])
             ax.set_xlabel('Grain Size (mm)')
             ax.set_ylabel('Frequency (%)')
-            ax.set_title(f'Grain Size Histogram - {self.dataset.sample_name}')
-            ax.set_xticklabels(ax.get_xticklabels(), rotation=45, ha='right')
+            ax.set_title(
+                f'Grain Size Histogram - {self.dataset.sample_name}')
+            ax.set_xticklabels(ax.get_xticklabels(), rotation=45,
+                               ha='right')
             ax.grid(self.show_grid, alpha=0.3)
-        
+
         self.plot_widget.grain_size_ax = ax
         self.plot_widget.figure.tight_layout()
         self.plot_widget.canvas.draw()
-    
-    def update_plot(self, particle_sizes, percent_passing, sample_name):
-        """Update the plot with new data"""
+
+    # ── Zoom ───────────────────────────────────────────────────
+
+    def zoom_in(self):
+        if self.plot_widget and self.plot_widget.grain_size_ax:
+            xlim = self.plot_widget.grain_size_ax.get_xlim()
+            ylim = self.plot_widget.grain_size_ax.get_ylim()
+            x_center = (xlim[0] + xlim[1]) / 2
+            y_center = (ylim[0] + ylim[1]) / 2
+            x_range = (xlim[1] - xlim[0]) * 0.4
+            y_range = (ylim[1] - ylim[0]) * 0.4
+            self.plot_widget.grain_size_ax.set_xlim(
+                x_center - x_range, x_center + x_range)
+            self.plot_widget.grain_size_ax.set_ylim(
+                y_center - y_range, y_center + y_range)
+            self.plot_widget.canvas.draw()
+
+    def zoom_out(self):
+        if self.plot_widget and self.plot_widget.grain_size_ax:
+            xlim = self.plot_widget.grain_size_ax.get_xlim()
+            ylim = self.plot_widget.grain_size_ax.get_ylim()
+            x_center = (xlim[0] + xlim[1]) / 2
+            y_center = (ylim[0] + ylim[1]) / 2
+            x_range = (xlim[1] - xlim[0]) * 0.6
+            y_range = (ylim[1] - ylim[0]) * 0.6
+            self.plot_widget.grain_size_ax.set_xlim(
+                x_center - x_range, x_center + x_range)
+            self.plot_widget.grain_size_ax.set_ylim(
+                y_center - y_range, y_center + y_range)
+            self.plot_widget.canvas.draw()
+
+    def reset_view(self):
         if self.plot_widget:
-            self.plot_widget.update_plot(particle_sizes, percent_passing, sample_name)
+            self.plot_widget.reset_view()
+
+    # ── Public API (unchanged interface) ───────────────────────
+
+    def update_plot(self, particle_sizes, percent_passing, sample_name):
+        if self.plot_widget:
+            self.plot_widget.update_plot(
+                particle_sizes, percent_passing, sample_name)
             self.refresh_plot()
-    
-    def add_k_results(self, k_results: Dict[str, float], flagged_methods: Optional[Set[str]] = None):
-        """Add K-calculation results to the plot"""
+
+    def add_k_results(self, k_results: Dict[str, float],
+                      flagged_methods=None):
         self.k_results = k_results
         self.flagged_methods = set(flagged_methods or [])
         if self.plot_widget:
             self.plot_widget.flagged_methods = set(self.flagged_methods)
         if self.current_plot_type in ["combined", "k-values"]:
             self.refresh_plot()
-    
+
     def export_plot(self, format: str):
-        """Export the plot to file"""
         if not self.plot_widget:
             return
-        
         file_filter = {
             "png": "PNG Files (*.png)",
-            "svg": "SVG Files (*.svg)"
+            "svg": "SVG Files (*.svg)",
         }
-        
         file_path, _ = QFileDialog.getSaveFileName(
             self,
             f"Export Plot as {format.upper()}",
             f"{self.dataset.sample_name}_plot.{format}",
-            file_filter.get(format, "All Files (*)")
+            file_filter.get(format, "All Files (*)"),
         )
-        
         if file_path:
             try:
-                self.plot_widget.figure.savefig(file_path, dpi=300, bbox_inches='tight')
+                self.plot_widget.figure.savefig(
+                    file_path, dpi=300, bbox_inches='tight')
                 self.plot_exported.emit(file_path)
-                QMessageBox.information(self, "Export Successful", 
-                                      f"Plot exported to:\n{file_path}")
+                QMessageBox.information(
+                    self, "Export Successful",
+                    f"Plot exported to:\n{file_path}")
             except Exception as e:
-                QMessageBox.critical(self, "Export Error", 
-                                   f"Failed to export plot:\n{str(e)}")
-    
+                QMessageBox.critical(
+                    self, "Export Error",
+                    f"Failed to export plot:\n{str(e)}")
+
     def export_data(self):
-        """Export the plot data to CSV"""
         file_path, _ = QFileDialog.getSaveFileName(
             self,
             "Export Data as CSV",
             f"{self.dataset.sample_name}_data.csv",
-            "CSV Files (*.csv)"
+            "CSV Files (*.csv)",
         )
-        
         if file_path:
             try:
                 import csv
                 with open(file_path, 'w', newline='') as f:
                     writer = csv.writer(f)
                     writer.writerow(["Grain Size (mm)", "Percent Passing (%)"])
-                    for size, passing in zip(self.dataset.particle_sizes, 
-                                           self.dataset.percent_passing):
+                    for size, passing in zip(
+                        self.dataset.particle_sizes,
+                        self.dataset.percent_passing,
+                    ):
                         writer.writerow([size, passing])
-                
-                QMessageBox.information(self, "Export Successful", 
-                                      f"Data exported to:\n{file_path}")
+                QMessageBox.information(
+                    self, "Export Successful",
+                    f"Data exported to:\n{file_path}")
             except Exception as e:
-                QMessageBox.critical(self, "Export Error", 
-                                   f"Failed to export data:\n{str(e)}")
+                QMessageBox.critical(
+                    self, "Export Error",
+                    f"Failed to export data:\n{str(e)}")
