@@ -8,7 +8,7 @@ from PyQt6.QtWidgets import (
     QMainWindow, QWidget, QHBoxLayout, QVBoxLayout,
     QStatusBar, QStackedWidget, QTabWidget, QMessageBox,
     QProgressBar, QLabel, QFrame, QFileDialog, QDialog,
-    QPushButton, QSizePolicy, QToolButton, QMenu,
+    QPushButton, QSizePolicy, QToolButton, QMenu, QSplitter,
 )
 from PyQt6.QtCore import Qt, pyqtSignal, QSettings, QSize, QTimer
 from PyQt6.QtGui import QAction, QColor, QFont
@@ -267,7 +267,7 @@ class _RichStatusBar(QStatusBar):
         # Status text (e.g. "Ready")
         self._status_lbl = QLabel("Ready")
         self._status_lbl.setStyleSheet(
-            f"color: #a0d070; font-family: '{F.UI}'; font-size: {F.SZ_BASE}pt;")
+            f"color: #a0d070; font-family: '{F.MONO}'; font-size: {F.SZ_XS}pt;")
         layout.addWidget(self._status_lbl)
 
         # Segments: SAMPLE · D50 · K̄ · TEMP · METHODS · DATASETS
@@ -332,7 +332,7 @@ class _RichStatusBar(QStatusBar):
         text_color = "#a0d070" if ok else C.LED_WARN
         self._led.setStyleSheet(f"background: {color}; border-radius: 3px;")
         self._status_lbl.setStyleSheet(
-            f"color: {text_color}; font-family: '{F.UI}'; font-size: {F.SZ_BASE}pt;")
+            f"color: {text_color}; font-family: '{F.MONO}'; font-size: {F.SZ_XS}pt;")
 
     def set_segment(self, key: str, value: str) -> None:
         if key in self._seg_vals:
@@ -390,14 +390,15 @@ class MainWindow(FramelessMainWindowMixin, QMainWindow):
         root.setContentsMargins(0, 0, 0, 0)
         root.setSpacing(0)
 
-        # ── Sidebar (fixed width) ──────────────────────────────────
+        # ── Sidebar (resizable via splitter) ───────────────────────
         self.control_panel = ControlPanel()
-        self.control_panel.setFixedWidth(SZ.SIDEBAR_W)
+        self.control_panel.setMinimumWidth(280)
         self.control_panel.files_loaded.connect(self.on_files_loaded)
         self.control_panel.error_dataset.connect(self.add_error_tab)
         self.control_panel.dataset_loaded_successfully.connect(self.replace_error_tab_with_dataset)
         self.control_panel.update_error_tab_message.connect(self.update_error_tab_message)
         self.control_panel.sample_selected.connect(self._on_sidebar_sample_selected)
+        self.control_panel.selection_changed.connect(self._on_sidebar_selection_changed)
 
         # ── Main area ──────────────────────────────────────────────
         main_widget = QWidget()
@@ -457,22 +458,26 @@ class MainWindow(FramelessMainWindowMixin, QMainWindow):
         self.export_tab = ExportTab()
         self.content_stack.addWidget(self.export_tab)
 
-        root.addWidget(self.control_panel)
+        shell_splitter = QSplitter(Qt.Orientation.Horizontal)
+        shell_splitter.setObjectName("shell-splitter")
+        shell_splitter.setChildrenCollapsible(False)
+        shell_splitter.setHandleWidth(6)
+        shell_splitter.addWidget(self.control_panel)
+        shell_splitter.addWidget(main_widget)
+        shell_splitter.setStretchFactor(0, 0)
+        shell_splitter.setStretchFactor(1, 1)
+        shell_splitter.setSizes([SZ.SIDEBAR_W, 1200])
+        self._shell_splitter = shell_splitter
 
-        # 1px divider between sidebar and main area
-        _divider = QFrame()
-        _divider.setFrameShape(QFrame.Shape.VLine)
-        _divider.setFixedWidth(1)
-        _divider.setStyleSheet(f"background: {C.SB_BDR}; border: none;")
-        root.addWidget(_divider)
-
-        root.addWidget(main_widget)
+        root.addWidget(shell_splitter)
 
     def setup_menus(self):
         """Build the menu bar."""
         menu_widget = QWidget()
         menu_widget.setObjectName("app-menubar")
         menu_widget.setAttribute(Qt.WidgetAttribute.WA_StyledBackground, True)
+        menu_widget.setFixedHeight(SZ.MENUBAR_H)
+        menu_widget.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
         menu_layout = QHBoxLayout(menu_widget)
         menu_layout.setContentsMargins(6, 0, 4, 0)
         menu_layout.setSpacing(0)
@@ -626,6 +631,7 @@ class MainWindow(FramelessMainWindowMixin, QMainWindow):
         btn.setMenu(menu)
         btn.setToolButtonStyle(Qt.ToolButtonStyle.ToolButtonTextOnly)
         btn.setAutoRaise(True)
+        btn.setFixedHeight(SZ.MENUBAR_H)
         return btn
 
     def _make_window_control_button(self, role: str) -> QToolButton:
@@ -953,6 +959,21 @@ class MainWindow(FramelessMainWindowMixin, QMainWindow):
                 QMessageBox.critical(self, "Mapping Error", f"Error creating dataset:\n{str(e)}")
         return []
 
+    def _get_selected_dataset_tabs(self) -> List[DatasetTab]:
+        """Return dataset tabs for sidebar-selected cards, or all tabs if none selected."""
+        selected_paths = self.control_panel.get_selected_paths()
+        if not selected_paths:
+            return self.dataset_tabs
+        path_set = set(selected_paths)
+        filtered = [t for t in self.dataset_tabs
+                    if hasattr(t, 'dataset') and hasattr(t.dataset, 'file_path')
+                    and t.dataset.file_path in path_set]
+        return filtered if filtered else self.dataset_tabs
+
+    def _on_sidebar_selection_changed(self):
+        """Push the current selected-tab subset to the comparison tab."""
+        self.comparison_tab.set_dataset_tabs(self._get_selected_dataset_tabs())
+
     def add_dataset_tab(self, dataset: GrainSizeData):
         self.dataset_counter += 1
         dataset_tab = DatasetTab(dataset)
@@ -968,7 +989,7 @@ class MainWindow(FramelessMainWindowMixin, QMainWindow):
         self.dataset_tabs_widget.setCurrentIndex(self.dataset_tabs_widget.count() - 1)
         self._refresh_dataset_tab_icons()
 
-        self.comparison_tab.set_dataset_tabs(self.dataset_tabs)
+        self.comparison_tab.set_dataset_tabs(self._get_selected_dataset_tabs())
         self.reporting_tab.set_dataset_tabs(self.dataset_tabs)
         self._update_export_tab()
 
@@ -1049,7 +1070,7 @@ class MainWindow(FramelessMainWindowMixin, QMainWindow):
             self.dataset_tabs.pop(dataset_index)
         self.dataset_tabs_widget.removeTab(index)
         self._refresh_dataset_tab_icons()
-        self.comparison_tab.set_dataset_tabs(self.dataset_tabs)
+        self.comparison_tab.set_dataset_tabs(self._get_selected_dataset_tabs())
         self.reporting_tab.set_dataset_tabs(self.dataset_tabs)
         self._update_export_tab()
         n = len(self.dataset_tabs)

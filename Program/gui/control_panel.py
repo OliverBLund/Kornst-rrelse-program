@@ -206,7 +206,7 @@ class _SampleCard(QWidget):
         info_col.setSpacing(1)
         self._name = QLabel(display_name)
         self._name.setTextFormat(Qt.TextFormat.PlainText)
-        self._name.setFont(QFont(F.UI, F.SZ_LG, QFont.Weight.Medium))
+        self._name.setFont(QFont(F.UI, F.SZ_SM, QFont.Weight.Medium))
         self._name.setStyleSheet(f"color: {C.SB_TEXT}; background: transparent;")
         self._name.setSizePolicy(
             QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Preferred)
@@ -964,6 +964,7 @@ class ControlPanel(QFrame):
     dataset_loaded_successfully = pyqtSignal(object, str)  # Emitted when dataset loads successfully (dataset, file_path)
     update_error_tab_message = pyqtSignal(str, str)  # Update existing error tab with new message
     dataset_fix_requested = pyqtSignal(str)  # Emitted when user wants to fix/remap a dataset (file_path)
+    selection_changed = pyqtSignal()  # Emitted when card selected-toggle state changes
 
     def __init__(self):
         super().__init__()
@@ -981,6 +982,10 @@ class ControlPanel(QFrame):
         self.setAcceptDrops(True)
         self.setup_ui()
         self.setup_validation()
+
+    def get_selected_paths(self) -> list[str]:
+        """Return file paths of all sidebar-selected sample cards."""
+        return self._file_list.get_selected_paths()
 
     def dragEnterEvent(self, event):
         if event.mimeData().hasUrls():
@@ -1183,6 +1188,7 @@ class ControlPanel(QFrame):
         self._file_list.card_clicked.connect(self._on_card_clicked)
         self._file_list.card_ctx.connect(self._on_card_context_menu)
         self._file_list.selection_changed.connect(self._update_inventory_bar)
+        self._file_list.selection_changed.connect(self.selection_changed)
         body_v.addWidget(self._file_list, 1)
 
         # ── 2c. Batch box — matches .sb-batch in CSS ─────────────────

@@ -24,19 +24,49 @@ import qtawesome as qta
 from PyQt6.QtGui import QColor, QIcon, QFontDatabase
 
 
+_MATPLOTLIB_FONTS_REGISTERED = False
+
+
+def _font_base_dir() -> Path:
+    """Return the bundled font directory for dev and frozen builds."""
+    if getattr(sys, "frozen", False):
+        return Path(sys._MEIPASS) / "resources" / "fonts"  # type: ignore[attr-defined]
+    return Path(__file__).resolve().parent.parent / "resources" / "fonts"
+
+
+def _register_matplotlib_fonts(base: Path) -> None:
+    """Register bundled fonts with matplotlib for the current process."""
+    global _MATPLOTLIB_FONTS_REGISTERED
+
+    if _MATPLOTLIB_FONTS_REGISTERED or not base.is_dir():
+        return
+
+    try:
+        from matplotlib import font_manager
+    except Exception:
+        return
+
+    for font_file in sorted(base.glob("*.ttf")):
+        try:
+            font_manager.fontManager.addfont(str(font_file))
+        except Exception as exc:
+            print(f"[theme] WARNING: Failed to register matplotlib font: {font_file.name} ({exc})")
+
+    _MATPLOTLIB_FONTS_REGISTERED = True
+
+
 def load_fonts() -> None:
     """Load bundled font files from resources/fonts/ via QFontDatabase.
 
     Must be called after QApplication is created but before build_stylesheet().
     Supports both development and PyInstaller frozen builds.
     """
-    if getattr(sys, "frozen", False):
-        base = Path(sys._MEIPASS) / "resources" / "fonts"  # type: ignore[attr-defined]
-    else:
-        base = Path(__file__).resolve().parent.parent / "resources" / "fonts"
+    base = _font_base_dir()
 
     if not base.is_dir():
         return
+
+    _register_matplotlib_fonts(base)
 
     for font_file in base.glob("*.ttf"):
         font_id = QFontDatabase.addApplicationFont(str(font_file))
@@ -185,7 +215,7 @@ MATPLOTLIB_RCPARAMS: dict = {
     "grid.color":       C.BORDER,
     "grid.linewidth":   0.5,
     "grid.alpha":       0.7,
-    "font.family":      [F.UI, "Source Sans Pro", "DejaVu Sans"],
+    "font.family":      [F.UI, "DejaVu Sans"],
     "font.size":        11,
     "axes.titlesize":   12,
     "axes.titlecolor":  C.TEXT_MID,
@@ -199,6 +229,7 @@ MATPLOTLIB_RCPARAMS: dict = {
 
 def apply_matplotlib_style() -> None:
     """Apply MATPLOTLIB_RCPARAMS to global matplotlib rcParams."""
+    _register_matplotlib_fonts(_font_base_dir())
     import matplotlib as mpl
     mpl.rcParams.update(MATPLOTLIB_RCPARAMS)
 
@@ -332,7 +363,7 @@ QToolButton[menubaritem="true"] {{
     background: transparent;
     color: {C.TEXT_MID};
     font-family: "{F.UI}";
-    font-size: {F.SZ_LG}pt;
+    font-size: {F.SZ_SM}pt;
 }}
 QToolButton[menubaritem="true"]:hover,
 QToolButton[menubaritem="true"]:pressed,
@@ -374,7 +405,7 @@ QToolButton[windowcontrol="true"][controlrole="close"]:hover {{
 QMenuBar {{
     background-color: {C.MB_BG};
     border-bottom: 1px solid {C.MB_BDR};
-    font-size: {F.SZ_LG}pt;
+    font-size: {F.SZ_SM}pt;
     color: {C.TEXT_MID};
     padding: 0 6px;
     max-height: {SZ.MENUBAR_H}px;
@@ -394,7 +425,7 @@ QMenu {{
     border: 1px solid {C.BORDER};
     border-radius: 6px;
     padding: 4px 0;
-    font-size: {F.SZ_LG}pt;
+    font-size: {F.SZ_SM}pt;
     color: {C.TEXT_MID};
 }}
 QMenu::item {{
@@ -439,7 +470,7 @@ QWidget#app-toolbar QPushButton[navtab="true"] {{
     border-radius: 0;
     color: {C.TEXT_MUTED};
     font-family: "{F.UI}";
-    font-size: {F.SZ_LG}pt;
+    font-size: {F.SZ_SM}pt;
     font-weight: 500;
     padding: 0 15px;
     min-height: {SZ.TOOLBAR_H}px;
@@ -458,7 +489,7 @@ QWidget#app-toolbar QPushButton[toolaction="true"] {{
     border: 1px solid transparent;
     border-radius: {r}px;
     color: {C.TEXT_MID};
-    font-size: {F.SZ_LG}pt;
+    font-size: {F.SZ_SM}pt;
     padding: 0 11px;
     min-height: 26px;
     max-height: 28px;
@@ -475,7 +506,7 @@ QWidget#app-toolbar QPushButton[toolprimary="true"] {{
     border-radius: {r}px;
     color: white;
     font-weight: 600;
-    font-size: {F.SZ_LG}pt;
+    font-size: {F.SZ_SM}pt;
     padding: 0 13px;
     min-height: 26px;
     max-height: 28px;
@@ -495,7 +526,7 @@ QStatusBar {{
     border-top: 1px solid #7a6448;
     color: {C.ST_TEXT};
     font-family: "{F.MONO}";
-    font-size: {F.SZ_BASE}pt;
+    font-size: {F.SZ_XS}pt;
     min-height: {SZ.STATUS_H}px;
     max-height: {SZ.STATUS_H}px;
     padding: 0;
@@ -530,6 +561,7 @@ QFrame#sidebar QComboBox {{
     border-radius: {r}px;
     color: {C.SB_TEXT};
     font-family: "{F.MONO}";
+    font-size: {F.SZ_SM}pt;
 }}
 QFrame#sidebar QLineEdit:focus,
 QFrame#sidebar QSpinBox:focus,
@@ -814,6 +846,26 @@ QProgressBar::chunk {{
 }}
 
 /* ════════════════════════════════════════
+   TEXT EDIT
+════════════════════════════════════════ */
+QTextEdit {{
+    background: white;
+    border: 1px solid {C.BORDER};
+    border-radius: {r}px;
+    padding: 4px;
+    font-family: "{F.MONO}";
+    font-size: {F.SZ_SM}pt;
+    color: {C.TEXT};
+}}
+QTextEdit:focus {{
+    border-color: {C.OLIVE};
+}}
+QTextEdit:read-only {{
+    background: {C.BG};
+    border-color: {C.BORDER};
+}}
+
+/* ════════════════════════════════════════
    GROUP BOX
 ════════════════════════════════════════ */
 QGroupBox {{
@@ -857,6 +909,16 @@ QSplitter::handle:vertical {{
 QSplitter::handle:hover {{
     background: {C.BORDER_DK};
 }}
+QSplitter#shell-splitter::handle {{
+    background: {C.SB_BDR};
+}}
+QSplitter#shell-splitter::handle:horizontal {{
+    width: 6px;
+    margin: 0;
+}}
+QSplitter#shell-splitter::handle:hover {{
+    background: {C.BORDER_DK};
+}}
 
 /* ════════════════════════════════════════
    TAB WIDGET (dataset tabs)
@@ -878,7 +940,7 @@ QTabBar::tab {{
     margin-right: 1px;
     margin-bottom: -1px;
     font-family: "{F.UI}";
-    font-size: {F.SZ_BASE}pt;
+    font-size: {F.SZ_SM}pt;
     color: {C.TEXT_MUTED};
     min-height: {SZ.DS_TABBAR_H - 8}px;
     max-height: {SZ.DS_TABBAR_H - 2}px;
@@ -968,6 +1030,7 @@ QWidget#pw-toolbar QDoubleSpinBox {{
     border: 1px solid {C.BORDER};
     border-radius: {r}px;
     color: {C.TEXT_MID};
+    font-size: {F.SZ_SM}pt;
 }}
 
 /* Segmented control container — clipping border so inner radii work */
@@ -1094,6 +1157,7 @@ QFrame#pw-sidebar QDoubleSpinBox {{
     border: 1px solid {C.BORDER};
     border-radius: {r}px;
     color: {C.TEXT_MID};
+    font-size: {F.SZ_SM}pt;
 }}
 /* Section header bands */
 QLabel[pws-sect="true"] {{
@@ -1107,7 +1171,7 @@ QLabel[pws-sect="true"] {{
 }}
 /* Row labels */
 QLabel[pws-lbl="true"] {{
-    font-size: {F.SZ_MD}pt;
+    font-size: {F.SZ_SM}pt;
     color: {C.TEXT_MID};
     background: transparent;
 }}
@@ -1120,7 +1184,7 @@ QFrame#pw-sidebar QLineEdit[pws-in="true"] {{
     border: 1px solid {C.BORDER};
     border-radius: 3px;
     font-family: "{F.MONO}";
-    font-size: {F.SZ_BASE}pt;
+    font-size: {F.SZ_SM}pt;
     color: {C.TEXT};
     padding: 0 4px;
 }}

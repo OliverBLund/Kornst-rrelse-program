@@ -22,515 +22,420 @@ class ReportGenerator:
     """
 
     def __init__(self):
-        # Ultra-clean minimalistic styling - Professional engineering report format
+        # Brand-aware professional report stylesheet.
+        # --brand is the single color token; _get_branded_style() overrides it.
         self.report_style = """
         <style>
-            /* ============================================
-               PROFESSIONAL REPORT STYLING - VERSION 3.0
-               Ultra-clean minimalistic design
-               Inspired by ASTM/ISO standard reports
-               ============================================ */
+            :root {
+                --brand:       #2c3e50;
+                --brand-light: rgba(44,62,80,0.08);
+                --text:        #1a1a1a;
+                --text-mid:    #444444;
+                --text-muted:  #6c757d;
+                --border:      #d0d0d0;
+                --bg:          #ffffff;
+                --bg-alt:      #f7f7f7;
+            }
 
-            * {
-                box-sizing: border-box;
-                margin: 0;
-                padding: 0;
+            * { box-sizing: border-box; margin: 0; padding: 0; }
+
+            @page {
+                size: A4;
+                margin: 20mm 20mm 25mm 20mm;
+                @bottom-right {
+                    content: "Page " counter(page) " of " counter(pages);
+                    font-size: 8pt;
+                    color: #6c757d;
+                }
             }
 
             @media print {
-                body {
-                    margin: 0;
-                    padding: 20mm;
-                }
-
-                .page-break {
-                    page-break-before: always;
-                }
-
-                .no-break {
-                    page-break-inside: avoid;
-                }
-
-                h1, h2 {
-                    page-break-after: avoid;
-                }
-
-                table {
-                    page-break-inside: avoid;
-                }
+                body { margin: 0; padding: 15mm 20mm; }
+                .page-break { page-break-before: always; }
+                .no-break   { page-break-inside: avoid; }
+                h1, h2, h3  { page-break-after: avoid; }
+                table       { page-break-inside: avoid; }
+                .page-header { display: flex !important; }
+                .report-top-bar { display: none; }
             }
 
             body {
-                font-family: 'Calibri', 'Arial', sans-serif;
-                line-height: 1.5;
-                color: #000000;
-                background-color: #ffffff;
-                max-width: 800px;
+                font-family: 'Calibri', 'Georgia', serif;
+                line-height: 1.55;
+                color: var(--text);
+                background: var(--bg);
+                max-width: 820px;
                 margin: 0 auto;
-                padding: 40px 50px;
-                font-size: 11pt;
+                padding: 0 50px 60px 50px;
+                font-size: 10.5pt;
             }
 
-            /* ==================== COVER PAGE ==================== */
+            /* ── Branded top bar — bleeds to body edges ──────── */
+            .report-top-bar {
+                height: 6px;
+                background: var(--brand);
+                margin: 0 -50px 40px -50px;
+            }
+
+            /* ── Cover page — bleeds to body edges ───────────── */
             .cover-page {
-                text-align: center;
-                padding: 80px 40px;
-                min-height: 600px;
+                padding: 50px 0 48px;
+                min-height: 560px;
                 display: flex;
                 flex-direction: column;
-                justify-content: center;
-                border-bottom: 3px solid #2c3e50;
+                border-bottom: 1px solid var(--border);
                 margin-bottom: 40px;
             }
 
+            .cover-brand-block {
+                margin-bottom: 64px;
+            }
+
             .cover-title {
-                font-size: 42px;
-                font-weight: 300;
-                color: #2c3e50;
-                margin-bottom: 20px;
-                letter-spacing: -1px;
-                text-transform: uppercase;
+                font-size: 34px;
+                font-weight: 700;
+                color: var(--brand);
+                margin-bottom: 10px;
+                letter-spacing: -0.5px;
+                line-height: 1.15;
             }
 
             .cover-subtitle {
-                font-size: 20px;
-                color: #7f8c8d;
-                font-weight: 300;
-                margin-bottom: 60px;
+                font-size: 15px;
+                color: var(--text-mid);
+                font-weight: 400;
+                margin-bottom: 0;
             }
 
             .cover-meta {
-                font-size: 14px;
-                color: #34495e;
+                margin-top: auto;
+                font-size: 10pt;
+                color: var(--text-mid);
                 line-height: 2;
-                margin-top: 40px;
+                border-top: 1px solid var(--border);
+                padding-top: 18px;
             }
 
-            /* ==================== TYPOGRAPHY ==================== */
+            /* ── Typography ──────────────────────────────────── */
             h1 {
                 font-size: 20pt;
-                font-weight: bold;
-                color: #000000;
-                margin: 0 0 30px 0;
-                padding: 0;
-                border: none;
-                letter-spacing: 0;
-                text-transform: none;
+                font-weight: 700;
+                color: var(--text);
+                margin: 0 0 8px 0;
+                padding-bottom: 10px;
+                border-bottom: 3px solid var(--brand);
             }
 
             h2 {
-                font-size: 14pt;
-                font-weight: bold;
-                color: #000000;
-                margin: 30px 0 15px 0;
-                padding: 0;
-                border: none;
+                font-size: 13pt;
+                font-weight: 700;
+                color: var(--brand);
+                margin: 32px 0 12px 0;
+                padding-bottom: 5px;
+                border-bottom: 1px solid var(--border);
             }
 
             h3 {
-                font-size: 12pt;
-                font-weight: bold;
-                color: #000000;
-                margin: 20px 0 10px 0;
+                font-size: 11pt;
+                font-weight: 700;
+                color: var(--text);
+                margin: 20px 0 8px 0;
             }
 
             h4 {
-                font-size: 11pt;
-                font-weight: bold;
-                color: #000000;
-                margin: 15px 0 8px 0;
-            }
-
-            p {
-                margin: 8px 0;
-                line-height: 1.5;
-                text-align: left;
-            }
-
-            /* ==================== APPENDIX STYLING ==================== */
-            .appendix-section {
-                margin-top: 50px;
-                padding-top: 30px;
-                border-top: 3px double #95a5a6;
-            }
-
-            .appendix-title {
-                font-size: 24px;
-                font-weight: 300;
-                color: #2c3e50;
-                margin-bottom: 15px;
-                text-transform: uppercase;
-                letter-spacing: 1px;
-            }
-
-            .appendix-item {
-                margin: 30px 0;
-                padding: 20px;
-                background-color: #fafafa;
-                border-left: 3px solid #3498db;
-                border-radius: 3px;
-            }
-
-            .appendix-item-title {
-                font-size: 14px;
+                font-size: 10.5pt;
                 font-weight: 600;
-                color: #34495e;
-                margin-bottom: 15px;
+                color: var(--text-mid);
+                margin: 14px 0 6px 0;
+            }
+
+            p { margin: 8px 0; line-height: 1.55; }
+
+            /* ── Stat cards ───────────────────────────────────── */
+            .summary-stats {
+                display: grid;
+                grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
+                gap: 12px;
+                margin: 20px 0;
+            }
+
+            .stat-card {
+                background: var(--bg);
+                padding: 14px 12px 10px;
+                border: 1px solid var(--border);
+                border-top: 3px solid var(--brand);
+                text-align: center;
+            }
+
+            .stat-label {
+                font-size: 8.5pt;
+                color: var(--text-muted);
+                font-weight: 600;
                 text-transform: uppercase;
                 letter-spacing: 0.5px;
+                margin-bottom: 6px;
             }
 
-            /* ==================== METADATA & INFO BOXES ==================== */
+            .stat-value {
+                font-size: 19pt;
+                font-weight: 700;
+                color: var(--brand);
+                line-height: 1.1;
+            }
+
+            .stat-unit {
+                font-size: 8.5pt;
+                color: var(--text-muted);
+                margin-top: 3px;
+            }
+
+            /* ── Tables ───────────────────────────────────────── */
+            table {
+                border-collapse: collapse;
+                width: 100%;
+                margin: 14px 0;
+                font-size: 9.5pt;
+                background: var(--bg);
+            }
+
+            thead { background: var(--brand); }
+
+            th {
+                color: white;
+                padding: 8px 10px;
+                text-align: left;
+                font-weight: 600;
+                font-size: 9pt;
+                letter-spacing: 0.3px;
+            }
+
+            td {
+                padding: 6px 10px;
+                border-bottom: 1px solid var(--border);
+                vertical-align: top;
+                color: var(--text);
+            }
+
+            tr:nth-child(even) td { background: var(--bg-alt); }
+            tbody tr:last-child td { border-bottom: 2px solid var(--brand); }
+
+            .table-compact th { padding: 5px 8px; font-size: 8.5pt; }
+            .table-compact td { padding: 4px 8px; }
+
+            /* ── Metadata box ─────────────────────────────────── */
             .metadata {
-                background-color: #ffffff;
-                border: 1px solid #000000;
-                border-radius: 0;
-                padding: 15px;
-                margin: 20px 0;
-                font-size: 10pt;
+                background: var(--bg-alt);
+                border: 1px solid var(--border);
+                border-left: 3px solid var(--brand);
+                padding: 14px 16px;
+                margin: 18px 0;
+                font-size: 9.5pt;
             }
 
             .metadata-grid {
                 display: grid;
                 grid-template-columns: 140px 1fr;
-                gap: 8px 15px;
+                gap: 6px 12px;
                 line-height: 1.6;
             }
 
-            .metadata-label {
-                font-weight: bold;
-                color: #000000;
-            }
+            .metadata-label { font-weight: 700; color: var(--text-mid); }
+            .metadata-value { color: var(--text); }
 
-            .metadata-value {
-                color: #000000;
-            }
-
+            /* ── Info / status boxes ──────────────────────────── */
             .info-box {
-                background-color: #f5f5f5;
-                border: 1px solid #cccccc;
-                padding: 15px;
-                margin: 15px 0;
-                border-radius: 0;
+                background: var(--bg-alt);
+                border: 1px solid var(--border);
+                border-left: 3px solid var(--brand);
+                padding: 12px 14px;
+                margin: 12px 0;
             }
 
-            .info-box h3 {
-                margin-top: 0;
-                color: #000000;
-                font-size: 11pt;
-            }
-
-            .info-box p {
-                margin: 6px 0;
-                color: #000000;
-            }
+            .info-box h3 { margin-top: 0; font-size: 10pt; color: var(--brand); }
+            .info-box p  { margin: 4px 0; }
 
             .warning-box {
-                background-color: #fff9e6;
-                border: 1px solid #ffcc00;
-                padding: 15px;
-                margin: 15px 0;
-                border-radius: 0;
+                background: #fffbf0;
+                border: 1px solid #e6c200;
+                border-left: 3px solid #e6a200;
+                padding: 12px 14px;
+                margin: 12px 0;
             }
 
             .success-box {
-                background-color: #f0f8f0;
-                border: 1px solid #66cc66;
-                padding: 15px;
-                margin: 15px 0;
-                border-radius: 0;
+                background: #f4f9f4;
+                border: 1px solid #85c285;
+                border-left: 3px solid #4caf50;
+                padding: 12px 14px;
+                margin: 12px 0;
             }
 
             .error-box {
-                background-color: #fff0f0;
-                border: 1px solid #cc6666;
-                padding: 15px;
-                margin: 15px 0;
-                border-radius: 0;
+                background: #fff4f4;
+                border: 1px solid #e08080;
+                border-left: 3px solid #cc3333;
+                padding: 12px 14px;
+                margin: 12px 0;
             }
 
-            /* ==================== TABLES ==================== */
-            table {
-                border-collapse: collapse;
-                width: 100%;
-                margin: 15px 0;
-                background-color: #ffffff;
-                border: none;
-                font-size: 10pt;
-            }
-
-            thead {
-                background-color: #ffffff;
-                border-bottom: 2px solid #000000;
-            }
-
-            th {
-                color: #000000;
-                padding: 8px 10px;
-                text-align: left;
-                font-weight: bold;
-                font-size: 10pt;
-                text-transform: none;
-                letter-spacing: 0;
-                border-bottom: 2px solid #000000;
-            }
-
-            td {
-                padding: 6px 10px;
-                border-bottom: 1px solid #cccccc;
-                font-size: 10pt;
-                vertical-align: top;
-            }
-
-            tr:nth-child(even) {
-                background-color: #ffffff;
-            }
-
-            tr:hover {
-                background-color: #f9f9f9;
-            }
-
-            tbody tr:last-child td {
-                border-bottom: 1px solid #000000;
-            }
-
-            /* Compact table style for appendix */
-            .table-compact {
-                font-size: 9pt;
-            }
-
-            .table-compact th {
-                padding: 6px 8px;
-                font-size: 9pt;
-            }
-
-            .table-compact td {
-                padding: 4px 8px;
-            }
-
-            /* ==================== STAT CARDS ==================== */
-            .summary-stats {
-                display: grid;
-                grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
-                gap: 10px;
-                margin: 20px 0;
-            }
-
-            .stat-card {
-                background-color: #ffffff;
-                padding: 12px;
-                border: 1px solid #000000;
-                border-radius: 0;
-                text-align: center;
-                box-shadow: none;
-            }
-
-            .stat-card:hover {
-                box-shadow: none;
-            }
-
-            .stat-label {
-                font-size: 9pt;
-                color: #000000;
-                text-transform: none;
-                letter-spacing: 0;
-                font-weight: bold;
-                margin-bottom: 6px;
-            }
-
-            .stat-value {
-                font-size: 18pt;
-                font-weight: bold;
-                color: #000000;
-                margin-top: 4px;
-                font-family: 'Calibri', 'Arial', sans-serif;
-            }
-
-            .stat-unit {
-                font-size: 9pt;
-                color: #666666;
-                margin-top: 2px;
-            }
-
-            /* ==================== PLOTS & FIGURES ==================== */
+            /* ── Plots ────────────────────────────────────────── */
             .plot-container {
                 text-align: center;
-                margin: 25px 0;
-                padding: 15px;
-                background-color: #ffffff;
-                border: 1px solid #dee2e6;
-                border-radius: 4px;
+                margin: 20px 0;
+                padding: 12px;
+                background: var(--bg);
+                border: 1px solid var(--border);
             }
 
-            .plot-container img {
-                max-width: 100%;
-                height: auto;
-                border-radius: 2px;
-            }
+            .plot-container img { max-width: 100%; height: auto; }
 
             .figure-caption {
-                font-size: 10pt;
-                color: #6c757d;
+                font-size: 9pt;
+                color: var(--text-muted);
                 font-style: italic;
-                margin-top: 10px;
-                text-align: center;
+                margin-top: 8px;
             }
 
-            /* ==================== LISTS ==================== */
-            ul, ol {
-                margin: 12px 0;
-                padding-left: 25px;
+            /* ── Appendix ─────────────────────────────────────── */
+            .appendix-section {
+                margin-top: 48px;
+                padding-top: 24px;
+                border-top: 2px solid var(--brand);
             }
 
-            li {
-                margin: 6px 0;
+            .appendix-title {
+                font-size: 20px;
+                font-weight: 700;
+                color: var(--brand);
+                margin-bottom: 12px;
+                text-transform: uppercase;
+                letter-spacing: 1px;
+            }
+
+            .appendix-item {
+                margin: 24px 0;
+                padding: 16px;
+                background: var(--bg-alt);
+                border-left: 3px solid var(--brand);
+            }
+
+            .appendix-item-title {
+                font-size: 10pt;
+                font-weight: 700;
+                color: var(--brand);
+                margin-bottom: 10px;
+                text-transform: uppercase;
+                letter-spacing: 0.5px;
+            }
+
+            /* ── Footer ───────────────────────────────────────── */
+            .footer {
+                margin-top: 56px;
+                padding-top: 12px;
+                border-top: 2px solid var(--brand);
+                display: flex;
+                justify-content: space-between;
+                color: var(--text-muted);
+                font-size: 8.5pt;
                 line-height: 1.6;
             }
 
-            /* ==================== FOOTER & HEADERS ==================== */
-            .footer {
-                margin-top: 60px;
-                padding-top: 20px;
-                border-top: 1px solid #dee2e6;
-                text-align: center;
-                color: #6c757d;
-                font-size: 9pt;
-                line-height: 1.5;
-            }
-
+            /* ── Page header (print only) ─────────────────────── */
             .page-header {
-                display: none; /* Hidden in web view, shown in print */
-                font-size: 9pt;
-                color: #6c757d;
-                padding-bottom: 10px;
-                border-bottom: 1px solid #dee2e6;
-                margin-bottom: 20px;
+                display: none;
+                font-size: 8.5pt;
+                color: var(--text-muted);
+                padding-bottom: 8px;
+                border-bottom: 1px solid var(--border);
+                margin-bottom: 16px;
+                justify-content: space-between;
             }
 
-            @media print {
-                .page-header {
-                    display: block;
-                }
-            }
-
-            /* ==================== DIVIDERS ==================== */
-            .section-divider {
-                height: 1px;
-                background-color: #dee2e6;
-                margin: 35px 0;
-                border: none;
-            }
-
-            hr {
+            /* ── Dividers ─────────────────────────────────────── */
+            .section-divider, hr {
                 border: none;
                 height: 1px;
-                background-color: #dee2e6;
-                margin: 20px 0;
+                background: var(--border);
+                margin: 28px 0;
             }
 
-            /* ==================== UTILITY CLASSES ==================== */
-            .text-center {
-                text-align: center;
-            }
+            /* ── Lists ────────────────────────────────────────── */
+            ul, ol { margin: 10px 0; padding-left: 22px; }
+            li { margin: 4px 0; line-height: 1.55; }
 
-            .text-right {
-                text-align: right;
-            }
-
-            .text-muted {
-                color: #6c757d;
-            }
-
-            .highlight {
-                background-color: #fff3cd;
-                padding: 2px 5px;
-                border-radius: 2px;
-            }
-
+            /* ── Badges ───────────────────────────────────────── */
             .badge {
                 display: inline-block;
-                padding: 2px 6px;
-                font-size: 9pt;
-                font-weight: normal;
-                border-radius: 0;
-                text-transform: none;
-                letter-spacing: 0;
-                border: 1px solid #000000;
-                background-color: #ffffff;
-            }
-
-            .badge-success {
-                background-color: #ffffff;
-                color: #000000;
-                border: 1px solid #000000;
-            }
-
-            .badge-warning {
-                background-color: #ffffff;
-                color: #000000;
-                border: 1px solid #000000;
-            }
-
-            .badge-danger {
-                background-color: #ffffff;
-                color: #000000;
-                border: 1px solid #000000;
-            }
-
-            .badge-info {
-                background-color: #ffffff;
-                color: #000000;
-                border: 1px solid #000000;
-            }
-
-            .badge-secondary {
-                background-color: #ffffff;
-                color: #000000;
-                border: 1px solid #000000;
-            }
-
-            strong, b {
+                padding: 2px 8px;
+                font-size: 8.5pt;
                 font-weight: 600;
-                color: #212529;
+                border-radius: 2px;
+                background: var(--brand-light);
+                color: var(--brand);
+                border: 1px solid var(--brand);
             }
+
+            .badge-success  { background: #edf7ed; color: #2a7a2a; border-color: #4caf50; }
+            .badge-warning  { background: #fffbf0; color: #8a6200; border-color: #e6a200; }
+            .badge-danger   { background: #fff4f4; color: #aa2222; border-color: #cc3333; }
+            .badge-info     { background: var(--brand-light); color: var(--brand); border-color: var(--brand); }
+            .badge-secondary{ background: #f0f0f0; color: #666;   border-color: #ccc; }
+
+            /* ── Utilities ────────────────────────────────────── */
+            .text-center { text-align: center; }
+            .text-right  { text-align: right; }
+            .text-muted  { color: var(--text-muted); }
+            .highlight   { background: #fff8cc; padding: 1px 4px; }
+            strong, b    { font-weight: 700; }
 
             code {
-                font-family: 'Roboto Mono', 'Courier New', monospace;
-                background-color: #f8f9fa;
-                padding: 2px 6px;
-                border-radius: 3px;
-                font-size: 10pt;
-            }
-
-            /* ==================== RESPONSIVE ==================== */
-            @media (max-width: 768px) {
-                body {
-                    padding: 15px;
-                }
-
-                .summary-stats {
-                    grid-template-columns: repeat(auto-fit, minmax(120px, 1fr));
-                    gap: 10px;
-                }
-
-                .stat-value {
-                    font-size: 20px;
-                }
-
-                h1 {
-                    font-size: 24px;
-                }
-
-                h2 {
-                    font-size: 18px;
-                }
+                font-family: 'Courier New', monospace;
+                background: var(--bg-alt);
+                padding: 1px 5px;
+                border-radius: 2px;
+                font-size: 9pt;
             }
         </style>
         """
 
-    def _create_cover_page(self, title: str, subtitle: str, metadata: Dict[str, str]) -> str:
+    def _get_branded_style(self, brand=None) -> str:
+        """Return report CSS with --brand CSS variable set to the brand color."""
+        if brand is None:
+            return self.report_style
+        color = brand.primary_color
+        # Compute a transparent tint for --brand-light
+        try:
+            r = int(color[1:3], 16)
+            g = int(color[3:5], 16)
+            b = int(color[5:7], 16)
+            light = f"rgba({r},{g},{b},0.08)"
+        except (ValueError, IndexError):
+            light = "rgba(44,62,80,0.08)"
+        return (
+            self.report_style
+            .replace("--brand:       #2c3e50;", f"--brand:       {color};")
+            .replace("--brand-light: rgba(44,62,80,0.08);", f"--brand-light: {light};")
+        )
+
+    def _create_cover_page(self, title: str, subtitle: str,
+                           metadata: Dict[str, str], brand=None) -> str:
         """Create a professional cover page"""
         html = '<div class="cover-page page-break">'
+
+        # Brand header (logo + org name) if branding provided
+        if brand is not None:
+            html += f'<div style="margin-bottom:24px;">{brand.get_logo_html(56)}</div>'
+            html += (
+                f'<div style="font-size:13px;font-weight:600;'
+                f'color:{brand.primary_color};margin-bottom:4px;">'
+                f'{brand.org_name}</div>'
+            )
+            if brand.org_subtitle:
+                html += (
+                    f'<div style="font-size:11px;color:#7f8c8d;'
+                    f'margin-bottom:28px;">{brand.org_subtitle}</div>'
+                )
+
         html += f'<div class="cover-title">{title}</div>'
         html += f'<div class="cover-subtitle">{subtitle}</div>'
 
@@ -834,7 +739,8 @@ class ReportGenerator:
     def generate_grain_size_report(self, dataset: GrainSizeData,
                                   metadata: Optional[Dict[str, str]] = None,
                                   sections: Optional[Dict[str, bool]] = None,
-                                  report_template: str = "standard") -> str:
+                                  report_template: str = "standard",
+                                  brand=None) -> str:
         """
         Generate a grain size analysis report for a single sample
 
@@ -924,9 +830,10 @@ class ReportGenerator:
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Grain Size Analysis Report - {dataset.sample_name}</title>
-    {self.report_style}
+    {self._get_branded_style(brand)}
 </head>
 <body>
+<div class="report-top-bar"></div>
 """
 
         # Cover Page (optional)
@@ -934,7 +841,7 @@ class ReportGenerator:
             html += self._create_cover_page(
                 "Grain Size Analysis",
                 f"Sample: {dataset.sample_name}",
-                metadata
+                metadata, brand
             )
 
         # Main Title (if no cover page)
@@ -1148,9 +1055,8 @@ class ReportGenerator:
         # Footer
         html += """
 <div class="footer">
-    <p><strong>Grain Size Analysis Report</strong></p>
-    <p>Generated by Grain Size Analysis Tool - Hydraulic Conductivity Calculator</p>
-    <p>© 2024 - Geotechnical Analysis Suite</p>
+    <span><strong>Grain Size Analysis Report</strong></span>
+    <span>Generated by Grain Size Analysis &amp; Hydraulic Conductivity Calculator</span>
 </div>
 </body>
 </html>
@@ -1164,7 +1070,8 @@ class ReportGenerator:
                                porosity: float,
                                metadata: Optional[Dict[str, str]] = None,
                                sections: Optional[Dict[str, bool]] = None,
-                               report_template: str = "standard") -> str:
+                               report_template: str = "standard",
+                               brand=None) -> str:
         """
         Generate a hydraulic conductivity (K-value) report for a single sample
 
@@ -1248,9 +1155,10 @@ class ReportGenerator:
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Hydraulic Conductivity Report - {dataset.sample_name}</title>
-    {self.report_style}
+    {self._get_branded_style(brand)}
 </head>
 <body>
+<div class="report-top-bar"></div>
 """
 
         # Cover Page (optional)
@@ -1258,7 +1166,7 @@ class ReportGenerator:
             html += self._create_cover_page(
                 "Hydraulic Conductivity Analysis",
                 f"Sample: {dataset.sample_name}",
-                metadata
+                metadata, brand
             )
 
         # Main Title (if no cover page)
@@ -1438,8 +1346,8 @@ class ReportGenerator:
         # Add footer
         html += """
             <div class="footer">
-                <p>Generated by Grain Size Analysis Tool - Hydraulic Conductivity Calculator</p>
-                <p>© 2024 - Geotechnical Analysis Suite</p>
+                <span><strong>Hydraulic Conductivity Report</strong></span>
+                <span>Generated by Grain Size Analysis &amp; Hydraulic Conductivity Calculator</span>
             </div>
         </body>
         </html>
@@ -1452,7 +1360,8 @@ class ReportGenerator:
                                 temperature: float,
                                 porosity: float,
                                 metadata: Optional[Dict[str, str]] = None,
-                                sections: Optional[Dict[str, bool]] = None) -> str:
+                                sections: Optional[Dict[str, bool]] = None,
+                                brand=None) -> str:
         """Generate a combined report with both grain size and K-value analysis"""
 
         # Set defaults
@@ -1469,9 +1378,9 @@ class ReportGenerator:
             }
 
         # Generate both reports with shared metadata and sections
-        grain_report = self.generate_grain_size_report(dataset, metadata=metadata, sections=sections)
+        grain_report = self.generate_grain_size_report(dataset, metadata=metadata, sections=sections, brand=brand)
         k_report = self.generate_k_value_report(dataset, k_results, temperature, porosity,
-                                                metadata=metadata, sections=sections)
+                                                metadata=metadata, sections=sections, brand=brand)
 
         # Extract body content from both reports
         grain_body = grain_report.split('<body>')[1].split('</body>')[0]
@@ -1483,7 +1392,7 @@ class ReportGenerator:
         <html>
         <head>
             <title>Complete Analysis Report - {dataset.sample_name}</title>
-            {self.report_style}
+            {self._get_branded_style(brand)}
         </head>
         <body>
             {grain_body.replace('</body>', '').replace('</html>', '')}
@@ -1503,7 +1412,8 @@ class ReportGenerator:
                                   temperature: float,
                                   porosity: float,
                                   metadata: Optional[Dict[str, str]] = None,
-                                  sections: Optional[Dict[str, bool]] = None) -> str:
+                                  sections: Optional[Dict[str, bool]] = None,
+                                  brand=None) -> str:
         """Generate a comparison report for multiple samples"""
 
         # Set defaults
@@ -1534,9 +1444,10 @@ class ReportGenerator:
         <html>
         <head>
             <title>Multi-Sample Comparison Report</title>
-            {self.report_style}
+            {self._get_branded_style(brand)}
         </head>
         <body>
+        <div class="report-top-bar"></div>
         """
 
         # Add cover page if requested
@@ -1544,7 +1455,7 @@ class ReportGenerator:
             html += self._create_cover_page(
                 title="Multi-Sample Comparison Report",
                 subtitle=f"Hydraulic Conductivity Analysis - {len(datasets)} Samples",
-                metadata=metadata
+                metadata=metadata, brand=brand
             )
 
         html += f"""
@@ -1756,8 +1667,8 @@ class ReportGenerator:
         # Add footer
         html += """
             <div class="footer">
-                <p>Generated by Grain Size Analysis Tool - Hydraulic Conductivity Calculator</p>
-                <p>© 2024 - Geotechnical Analysis Suite</p>
+                <span><strong>Multi-Sample Comparison Report</strong></span>
+                <span>Generated by Grain Size Analysis &amp; Hydraulic Conductivity Calculator</span>
             </div>
         </body>
         </html>

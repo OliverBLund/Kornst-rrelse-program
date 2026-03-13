@@ -73,56 +73,56 @@ PROFESSIONAL_STYLE = PlotStyle(
     name="Professional",
     description="Clean, publication-ready style with professional colors",
 
-    # Main curve - Navy blue, clean and professional
-    curve_color="#1f4788",
-    curve_linewidth=2.5,
+    # Main curve - Steel blue that complements the earthy UI palette
+    curve_color="#2b5797",
+    curve_linewidth=2.0,
     curve_marker="o",
-    curve_markersize=5,
+    curve_markersize=4,
     curve_markeredgecolor="white",
     curve_markeredgewidth=0.8,
 
-    # D-value lines - Deep, saturated colors
-    d10_color="#c62828",  # Deep red
-    d30_color="#2e7d32",  # Forest green
-    d60_color="#6a1b9a",  # Deep purple
+    # D-value lines - warm but distinct
+    d10_color="#b83232",  # Muted red
+    d30_color="#2e6b30",  # Forest green
+    d60_color="#5c3d8f",  # Muted purple
     d10_line_style="--",
     d30_line_style="--",
     d60_line_style="--",
-    d_line_width=1.5,
-    d_line_alpha=0.75,
+    d_line_width=1.2,
+    d_line_alpha=0.70,
 
-    # Grid - Subtle but visible
+    # Grid - warm, matches --border (#d4c4a8)
     grid_show=True,
-    grid_color="#cccccc",
-    grid_alpha=0.4,
-    grid_linestyle="--",
-    grid_linewidth=0.8,
+    grid_color="#d4c4a8",
+    grid_alpha=0.6,
+    grid_linestyle="-",
+    grid_linewidth=0.5,
 
-    # Typography - Readable, professional
-    title_fontsize=13,
-    title_fontweight="bold",
+    # Typography - matches theme font stack
+    title_fontsize=12,
+    title_fontweight="600",
     label_fontsize=11,
     tick_fontsize=10,
     legend_fontsize=9,
-    font_family="DejaVu Sans",
+    font_family="Source Sans 3",
 
-    # Legend - Upper left, semi-transparent
+    # Legend - upper left, warm frame
     legend_loc="upper left",
-    legend_framealpha=0.9,
-    legend_edgecolor="#cccccc",
+    legend_framealpha=0.92,
+    legend_edgecolor="#d4c4a8",
 
-    # Figure colors
-    figure_facecolor="#fafaf7",
-    axes_facecolor="white",
+    # Figure colors - match C.BG / white axes
+    figure_facecolor="#f5f5f0",
+    axes_facecolor="#ffffff",
 
-    # K-value bar chart - use colorful method-specific colors
+    # K-value bar chart
     use_method_specific_colors=True,
-    k_bar_valid_color="#1f4788",  # Fallback if not using method colors
-    k_bar_flagged_color="#d32f2f",  # Red for errors
+    k_bar_valid_color="#2b5797",
+    k_bar_flagged_color="#b83232",
 
     # Minor grid
     show_minor_grid=True,
-    minor_grid_alpha=0.2,
+    minor_grid_alpha=0.18,
 )
 
 

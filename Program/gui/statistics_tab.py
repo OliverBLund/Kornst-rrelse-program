@@ -31,6 +31,7 @@ import numpy as np
 
 from data_loader import GrainSizeData
 from k_calculations import KCalculationResult
+from .theme import C, F
 
 
 class CompactInfoBar(QFrame):
@@ -46,13 +47,13 @@ class CompactInfoBar(QFrame):
     def init_ui(self):
         """Initialize compact info bar UI"""
         self.setFrameStyle(QFrame.Shape.StyledPanel | QFrame.Shadow.Plain)
-        self.setStyleSheet("""
-            QFrame {
-                background-color: #f5f5f0;
-                border: 1px solid #d4c4a8;
+        self.setStyleSheet(f"""
+            QFrame {{
+                background-color: {C.BG};
+                border: 1px solid {C.BORDER};
                 border-radius: 4px;
-                padding: 6px 12px;
-            }
+                padding: 4px 12px;
+            }}
         """)
 
         layout = QHBoxLayout(self)
@@ -61,12 +62,12 @@ class CompactInfoBar(QFrame):
 
         # Create info label
         self.info_label = QLabel("Load data to view statistics")
-        self.info_label.setStyleSheet("""
-            QLabel {
-                font-size: 10pt;
-                font-family: 'Consolas', 'Courier New', monospace;
-                color: #333;
-            }
+        self.info_label.setStyleSheet(f"""
+            QLabel {{
+                font-size: {F.SZ_SM}pt;
+                font-family: "{F.MONO}";
+                color: {C.TEXT_MID};
+            }}
         """)
 
         layout.addWidget(self.info_label)
@@ -120,22 +121,6 @@ class PercentileTableWidget(QGroupBox):
 
     def __init__(self, parent=None):
         super().__init__("Grain Size Percentiles", parent)
-        self.setStyleSheet("""
-            QGroupBox {
-                font-weight: bold;
-                font-size: 11pt;
-                border: 2px solid #d4c4a8;
-                border-radius: 5px;
-                margin-top: 8px;
-                padding-top: 12px;
-            }
-            QGroupBox::title {
-                subcontrol-origin: margin;
-                subcontrol-position: top left;
-                padding: 2px 8px;
-                color: #2c5530;
-            }
-        """)
         self.init_ui()
 
     def init_ui(self):
@@ -160,29 +145,11 @@ class PercentileTableWidget(QGroupBox):
         self.table.setColumnWidth(0, 80)
         self.table.setColumnWidth(1, 100)
 
-        self.table.setStyleSheet("""
-            QTableWidget {
-                gridline-color: #d0d0d0;
-                font-size: 9pt;
-                background-color: white;
-            }
-            QTableWidget::item {
-                padding: 4px;
-            }
-            QHeaderView::section {
-                background-color: #e8e8e8;
-                padding: 5px;
-                border: 1px solid #c0c0c0;
-                font-weight: bold;
-                font-size: 9pt;
-            }
-        """)
-
         layout.addWidget(self.table)
 
         # Info text below table
         self.info_text = QLabel("Load data to view percentiles")
-        self.info_text.setStyleSheet("color: #666; font-size: 9pt; font-style: italic;")
+        self.info_text.setStyleSheet(f"color: {C.TEXT_MUTED}; font-size: {F.SZ_SM}pt; font-style: italic;")
         self.info_text.setAlignment(Qt.AlignmentFlag.AlignCenter)
         layout.addWidget(self.info_text)
 
@@ -221,7 +188,7 @@ class PercentileTableWidget(QGroupBox):
             percentile_item = QTableWidgetItem(percentile_text)
             percentile_item.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
             if p in key_percentiles:
-                percentile_item.setBackground(QColor(255, 250, 205))  # Light yellow
+                percentile_item.setBackground(QColor(107, 142, 35, 30))  # Warm olive tint
             self.table.setItem(row, 0, percentile_item)
 
             # Size column
@@ -253,22 +220,6 @@ class GradationAnalysisWidget(QGroupBox):
 
     def __init__(self, parent=None):
         super().__init__("Gradation Analysis", parent)
-        self.setStyleSheet("""
-            QGroupBox {
-                font-weight: bold;
-                font-size: 11pt;
-                border: 2px solid #d4c4a8;
-                border-radius: 5px;
-                margin-top: 8px;
-                padding-top: 12px;
-            }
-            QGroupBox::title {
-                subcontrol-origin: margin;
-                subcontrol-position: top left;
-                padding: 2px 8px;
-                color: #2c5530;
-            }
-        """)
         self.init_ui()
 
     def init_ui(self):
@@ -279,15 +230,6 @@ class GradationAnalysisWidget(QGroupBox):
         self.text_display = QTextEdit()
         self.text_display.setReadOnly(True)
         self.text_display.setMaximumHeight(200)
-        self.text_display.setStyleSheet("""
-            QTextEdit {
-                background-color: #fafafa;
-                border: 1px solid #d0d0d0;
-                padding: 8px;
-                font-family: 'Consolas', 'Courier New', monospace;
-                font-size: 9pt;
-            }
-        """)
 
         self.text_display.setPlainText(
             "Gradation Parameters:\n"
@@ -323,22 +265,6 @@ class KStatisticsWidget(QGroupBox):
 
     def __init__(self, parent=None):
         super().__init__("Hydraulic Conductivity Statistics", parent)
-        self.setStyleSheet("""
-            QGroupBox {
-                font-weight: bold;
-                font-size: 11pt;
-                border: 2px solid #d4c4a8;
-                border-radius: 5px;
-                margin-top: 8px;
-                padding-top: 12px;
-            }
-            QGroupBox::title {
-                subcontrol-origin: margin;
-                subcontrol-position: top left;
-                padding: 2px 8px;
-                color: #2c5530;
-            }
-        """)
         self.init_ui()
 
     def init_ui(self):
@@ -355,33 +281,12 @@ class KStatisticsWidget(QGroupBox):
         header = self.summary_table.horizontalHeader()
         header.setSectionResizeMode(QHeaderView.ResizeMode.Stretch)
 
-        self.summary_table.setStyleSheet("""
-            QTableWidget {
-                gridline-color: #d0d0d0;
-                font-size: 9pt;
-            }
-            QHeaderView::section {
-                background-color: #e8e8e8;
-                padding: 5px;
-                border: 1px solid #c0c0c0;
-                font-weight: bold;
-            }
-        """)
-
         layout.addWidget(self.summary_table)
 
         # Method agreement section
         self.agreement_text = QTextEdit()
         self.agreement_text.setReadOnly(True)
         self.agreement_text.setMaximumHeight(180)
-        self.agreement_text.setStyleSheet("""
-            QTextEdit {
-                background-color: #fafafa;
-                border: 1px solid #d0d0d0;
-                padding: 8px;
-                font-size: 9pt;
-            }
-        """)
         self.agreement_text.setPlainText(
             "Method Agreement Analysis:\n"
             "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n\n"
@@ -394,13 +299,13 @@ class KStatisticsWidget(QGroupBox):
         self.classification_label = QLabel(
             "Permeability Classification: Not calculated"
         )
-        self.classification_label.setStyleSheet("""
-            font-size: 10pt;
-            font-weight: bold;
-            color: #2c5530;
+        self.classification_label.setStyleSheet(f"""
+            font-size: {F.SZ_BASE}pt;
+            font-weight: 600;
+            color: {C.OLIVE};
             padding: 8px;
-            background-color: #f0f8ff;
-            border: 1px solid #6b8e23;
+            background-color: rgba(107,142,35,0.06);
+            border: 1px solid {C.OLIVE_DK};
             border-radius: 4px;
         """)
         self.classification_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
@@ -414,22 +319,6 @@ class DataQualityWidget(QGroupBox):
 
     def __init__(self, parent=None):
         super().__init__("Data Quality Assessment", parent)
-        self.setStyleSheet("""
-            QGroupBox {
-                font-weight: bold;
-                font-size: 11pt;
-                border: 2px solid #d4c4a8;
-                border-radius: 5px;
-                margin-top: 8px;
-                padding-top: 12px;
-            }
-            QGroupBox::title {
-                subcontrol-origin: margin;
-                subcontrol-position: top left;
-                padding: 2px 8px;
-                color: #2c5530;
-            }
-        """)
         self.init_ui()
 
     def init_ui(self):
@@ -439,14 +328,6 @@ class DataQualityWidget(QGroupBox):
         self.quality_text = QTextEdit()
         self.quality_text.setReadOnly(True)
         self.quality_text.setMaximumHeight(150)
-        self.quality_text.setStyleSheet("""
-            QTextEdit {
-                background-color: #fafafa;
-                border: 1px solid #d0d0d0;
-                padding: 8px;
-                font-size: 9pt;
-            }
-        """)
 
         self.quality_text.setPlainText(
             "Data Quality Indicators:\n"
@@ -467,22 +348,6 @@ class SoilClassificationWidget(QGroupBox):
 
     def __init__(self, parent=None):
         super().__init__("USCS Soil Classification", parent)
-        self.setStyleSheet("""
-            QGroupBox {
-                font-weight: bold;
-                font-size: 11pt;
-                border: 2px solid #d4c4a8;
-                border-radius: 5px;
-                margin-top: 8px;
-                padding-top: 12px;
-            }
-            QGroupBox::title {
-                subcontrol-origin: margin;
-                subcontrol-position: top left;
-                padding: 2px 8px;
-                color: #2c5530;
-            }
-        """)
         self.init_ui()
 
     def init_ui(self):
@@ -492,14 +357,6 @@ class SoilClassificationWidget(QGroupBox):
         self.classification_text = QTextEdit()
         self.classification_text.setReadOnly(True)
         self.classification_text.setMaximumHeight(150)
-        self.classification_text.setStyleSheet("""
-            QTextEdit {
-                background-color: #fafafa;
-                border: 1px solid #d0d0d0;
-                padding: 8px;
-                font-size: 9pt;
-            }
-        """)
 
         self.classification_text.setPlainText(
             "USCS Classification:\n"
@@ -577,33 +434,6 @@ class StatisticsTab(QWidget):
         main_layout = QHBoxLayout(widget)
         main_layout.setSpacing(8)
 
-        groupbox_style = """
-            QGroupBox {
-                font-weight: bold;
-                font-size: 10pt;
-                border: 2px solid #d4c4a8;
-                border-radius: 5px;
-                margin-top: 8px;
-                padding-top: 12px;
-            }
-            QGroupBox::title {
-                subcontrol-origin: margin;
-                subcontrol-position: top left;
-                padding: 2px 8px;
-                color: #2c5530;
-            }
-        """
-
-        textedit_style = """
-            QTextEdit {
-                background-color: #fafafa;
-                border: 1px solid #d0d0d0;
-                padding: 8px;
-                font-family: 'Consolas', 'Courier New', monospace;
-                font-size: 9pt;
-            }
-        """
-
         # Left side: Grain Size Percentiles + Percentile Usage Reference
         left_side = QWidget()
         left_layout = QHBoxLayout(left_side)
@@ -611,13 +441,11 @@ class StatisticsTab(QWidget):
 
         # Percentiles values
         percentiles_group = QGroupBox("Grain Size Percentiles")
-        percentiles_group.setStyleSheet(groupbox_style)
         percentiles_layout = QVBoxLayout(percentiles_group)
 
         self.percentiles_text = QTextEdit()
         self.percentiles_text.setReadOnly(True)
         self.percentiles_text.setMinimumHeight(200)
-        self.percentiles_text.setStyleSheet(textedit_style)
         self.percentiles_text.setPlainText(
             "Calculate K-values to see grain size percentiles"
         )
@@ -627,14 +455,12 @@ class StatisticsTab(QWidget):
 
         # Percentile usage reference
         usage_group = QGroupBox("Percentile Usage by Methods")
-        usage_group.setStyleSheet(groupbox_style)
         usage_layout = QVBoxLayout(usage_group)
 
         self.percentile_usage_text = QTextEdit()
         self.percentile_usage_text.setReadOnly(True)
         self.percentile_usage_text.setMinimumHeight(200)
-        self.percentile_usage_text.setStyleSheet(textedit_style)
-        usage_ref = """<pre style='font-family: Consolas, monospace; font-size: 9pt;'>
+        usage_ref = f"""<pre style='font-family: {F.MONO}, monospace; font-size: {F.SZ_SM}pt;'>
 <b>Percentile Usage by Methods:</b>
 
 <b>D₅:</b>   Barr
@@ -669,13 +495,11 @@ class StatisticsTab(QWidget):
 
         # Gradation parameters
         gradation_group = QGroupBox("Gradation Parameters")
-        gradation_group.setStyleSheet(groupbox_style)
         gradation_layout = QVBoxLayout(gradation_group)
 
         self.gradation_text = QTextEdit()
         self.gradation_text.setReadOnly(True)
         self.gradation_text.setMinimumHeight(200)
-        self.gradation_text.setStyleSheet(textedit_style)
         self.gradation_text.setPlainText(
             "Calculate K-values to see gradation parameters"
         )
@@ -685,14 +509,12 @@ class StatisticsTab(QWidget):
 
         # Classification criteria
         criteria_group = QGroupBox("Classification Criteria")
-        criteria_group.setStyleSheet(groupbox_style)
         criteria_layout = QVBoxLayout(criteria_group)
 
         self.classification_criteria_text = QTextEdit()
         self.classification_criteria_text.setReadOnly(True)
         self.classification_criteria_text.setMinimumHeight(200)
-        self.classification_criteria_text.setStyleSheet(textedit_style)
-        criteria_ref = """<pre style='font-family: Consolas, monospace; font-size: 9pt;'>
+        criteria_ref = f"""<pre style='font-family: {F.MONO}, monospace; font-size: {F.SZ_SM}pt;'>
 <b>Classification Criteria:</b>
 
 <b>Uniformity Coefficient (Cu):</b>
@@ -724,42 +546,13 @@ class StatisticsTab(QWidget):
         layout = QHBoxLayout(widget)
         layout.setSpacing(8)
 
-        groupbox_style = """
-            QGroupBox {
-                font-weight: bold;
-                font-size: 10pt;
-                border: 2px solid #d4c4a8;
-                border-radius: 5px;
-                margin-top: 8px;
-                padding-top: 12px;
-            }
-            QGroupBox::title {
-                subcontrol-origin: margin;
-                subcontrol-position: top left;
-                padding: 2px 8px;
-                color: #2c5530;
-            }
-        """
-
-        textedit_style = """
-            QTextEdit {
-                background-color: #fafafa;
-                border: 1px solid #d0d0d0;
-                padding: 8px;
-                font-family: 'Consolas', 'Courier New', monospace;
-                font-size: 9pt;
-            }
-        """
-
         # Special Method Diameters
         special_group = QGroupBox("Special Method Diameters")
-        special_group.setStyleSheet(groupbox_style)
         special_layout = QVBoxLayout(special_group)
 
         self.special_diameters_text = QTextEdit()
         self.special_diameters_text.setReadOnly(True)
         self.special_diameters_text.setMinimumHeight(120)
-        self.special_diameters_text.setStyleSheet(textedit_style)
         self.special_diameters_text.setPlainText(
             "Calculate K-values to see special method diameters"
         )
@@ -769,13 +562,11 @@ class StatisticsTab(QWidget):
 
         # Environmental Parameters (READ-ONLY)
         env_group = QGroupBox("Environmental Parameters")
-        env_group.setStyleSheet(groupbox_style)
         env_layout = QVBoxLayout(env_group)
 
         self.env_text = QTextEdit()
         self.env_text.setReadOnly(True)
         self.env_text.setMinimumHeight(120)
-        self.env_text.setStyleSheet(textedit_style)
         env_layout.addWidget(self.env_text)
 
         # Populate environmental parameters immediately
@@ -849,45 +640,12 @@ class StatisticsTab(QWidget):
 
         export_excel_btn = QPushButton("Export to Excel")
         export_excel_btn.clicked.connect(self.export_to_excel)
-        export_excel_btn.setStyleSheet("""
-            QPushButton {
-                background-color: #d2b48c;
-                padding: 6px 12px;
-                border-radius: 4px;
-                font-size: 10pt;
-            }
-            QPushButton:hover {
-                background-color: #ddbf94;
-            }
-        """)
 
         export_csv_btn = QPushButton("Export to CSV")
         export_csv_btn.clicked.connect(self.export_to_csv)
-        export_csv_btn.setStyleSheet("""
-            QPushButton {
-                background-color: #d2b48c;
-                padding: 6px 12px;
-                border-radius: 4px;
-                font-size: 10pt;
-            }
-            QPushButton:hover {
-                background-color: #ddbf94;
-            }
-        """)
 
         copy_btn = QPushButton("Copy Statistics")
         copy_btn.clicked.connect(self.copy_to_clipboard)
-        copy_btn.setStyleSheet("""
-            QPushButton {
-                background-color: #d2b48c;
-                padding: 6px 12px;
-                border-radius: 4px;
-                font-size: 10pt;
-            }
-            QPushButton:hover {
-                background-color: #ddbf94;
-            }
-        """)
 
         layout.addWidget(export_excel_btn)
         layout.addWidget(export_csv_btn)
@@ -1080,7 +838,7 @@ Classification based on:
                 percentiles[p] = value
 
         # === UPDATE PERCENTILES DISPLAY ===
-        html_text = "<pre style='font-family: Consolas, monospace; font-size: 9pt;'>"
+        html_text = f"<pre style='font-family: {F.MONO}, monospace; font-size: {F.SZ_SM}pt;'>"
         html_text += "<b>Grain Size Percentiles (Linear Interpolation):</b>\n"
         html_text += "━" * 45 + "\n\n"
 
@@ -1154,7 +912,7 @@ Classification based on:
             gradation_text += f"  └─ D95/D5 = {d95:.3f}/{d5:.3f}\n"
 
         # Wrap in HTML pre tag
-        gradation_html = f"<pre style='font-family: Consolas, monospace; font-size: 9pt;'>{gradation_text}</pre>"
+        gradation_html = f"<pre style='font-family: {F.MONO}, monospace; font-size: {F.SZ_SM}pt;'>{gradation_text}</pre>"
         self.gradation_text.setHtml(gradation_html)
 
         # === UPDATE SPECIAL METHOD DIAMETERS DISPLAY ===
@@ -1182,7 +940,7 @@ Classification based on:
         if not any([kruger_de, harmonic_de, zunker_de, zamarin_de, geom_mean]):
             special_text += "No special diameters calculated (insufficient data)\n"
 
-        special_html = f"<pre style='font-family: Consolas, monospace; font-size: 9pt;'>{special_text}</pre>"
+        special_html = f"<pre style='font-family: {F.MONO}, monospace; font-size: {F.SZ_SM}pt;'>{special_text}</pre>"
         self.special_diameters_text.setHtml(special_html)
 
     # ===== EXPORT METHODS (Placeholders for now) =====

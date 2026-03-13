@@ -1,0 +1,712 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>Statistics Tab — Concepts A/B/C</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Source+Sans+3:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500;600&family=Playfair+Display:wght@600&display=swap" rel="stylesheet">
+<style>
+:root {
+  --bg:#f5f5f0; --bg-raised:#eee8dc; --bg-low:#e8e0d0;
+  --border:#d4c4a8; --border-dk:#c0ae90;
+  --text:#2f2f2f; --text-mid:#5d4e37; --text-muted:#9a8c78;
+  --olive:#6b8e23; --olive-h:#7fa02d; --olive-dk:#4f6a1a;
+  --tan:#d2b48c; --tan-h:#ddbf94; --amber:#c4a574; --earth:#8b7355;
+  --tb-bg:#e4d8c0; --tb-bdr:#ccc0a0;
+  --fu:'Source Sans 3',system-ui,sans-serif;
+  --fm:'JetBrains Mono',monospace;
+  --fd:'Playfair Display',Georgia,serif;
+  --r:4px;
+}
+*,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
+html,body{height:100%;overflow:hidden}
+body{font-family:var(--fu);font-size:13px;background:var(--bg);color:var(--text);-webkit-font-smoothing:antialiased;display:flex;flex-direction:column}
+::-webkit-scrollbar{width:6px;height:6px}
+::-webkit-scrollbar-thumb{background:var(--amber);border-radius:3px}
+::-webkit-scrollbar-track{background:transparent}
+
+/* ── TOOLBAR CHROME ── */
+.chrome{height:34px;background:var(--tb-bg);border-bottom:1px solid var(--tb-bdr);display:flex;align-items:center;padding:0 14px;gap:22px;flex-shrink:0}
+.chrome-tab{font-size:10px;color:var(--text-muted)}
+.chrome-tab.act{font-weight:600;color:var(--olive);border-bottom:2px solid var(--olive);padding-bottom:1px}
+
+/* ── CONCEPT SWITCHER ── */
+.switcher{display:flex;align-items:center;background:var(--bg-raised);border-bottom:2px solid var(--border-dk);padding:0 14px;flex-shrink:0}
+.sw-lbl{font-size:9px;font-weight:700;color:var(--text-muted);text-transform:uppercase;letter-spacing:.1em;margin-right:10px}
+.sw-btn{padding:7px 14px;background:transparent;border:none;border-bottom:2px solid transparent;font-family:var(--fu);font-size:10px;font-weight:600;color:var(--text-muted);cursor:pointer;margin-bottom:-2px;transition:color .12s}
+.sw-btn:hover{color:var(--text-mid)}
+.sw-btn.on{color:var(--olive);border-bottom-color:var(--olive)}
+
+/* ── PANEL VISIBILITY ── */
+.panel{display:none;flex:1;flex-direction:column;overflow:hidden;min-height:0}
+.panel.on{display:flex}
+
+/* ── SHARED: FOOTER ── */
+.footer{flex-shrink:0;display:flex;align-items:center;gap:6px;padding:7px 12px;background:var(--bg-raised);border-top:1px solid var(--border)}
+.btn{padding:4px 12px;border-radius:var(--r);font-family:var(--fu);font-size:10px;font-weight:600;cursor:pointer;border:1px solid;transition:all .12s}
+.btn-sec{background:rgba(255,255,255,.65);border-color:var(--border-dk);color:var(--text-mid)}
+.btn-sec:hover{background:white;border-color:var(--earth);color:var(--text)}
+.ft-meta{margin-left:auto;font-size:9px;color:var(--text-muted);font-family:var(--fm)}
+
+/* ── SHARED: SECTION CARD ── */
+.card{background:white;border:1px solid var(--border);border-radius:5px;overflow:hidden}
+.card-hd{display:flex;align-items:center;gap:7px;padding:6px 10px;background:var(--bg-raised);border-bottom:1px solid var(--border)}
+.card-title{font-size:9px;font-weight:700;color:var(--text-mid);text-transform:uppercase;letter-spacing:.08em;flex:1}
+.card-bd{padding:10px}
+
+/* ── SHARED: BADGES ── */
+.bdg{display:inline-flex;align-items:center;padding:1px 6px;border-radius:99px;font-size:8px;font-weight:700;letter-spacing:.03em}
+.bdg-ok{background:rgba(107,142,35,.10);color:var(--olive-dk);border:1px solid rgba(107,142,35,.22)}
+.bdg-warn{background:rgba(196,165,116,.18);color:#7a5a1a;border:1px solid rgba(196,165,116,.35)}
+.bdg-info{background:rgba(58,126,160,.09);color:#2a5a7a;border:1px solid rgba(58,126,160,.20)}
+
+/* ═══════════════════════════════════════════
+   CONCEPT A — COMPACT DASHBOARD
+═══════════════════════════════════════════ */
+
+/* hero stat strip */
+.a-hero{flex-shrink:0;display:flex;align-items:center;gap:5px;padding:6px 12px;background:var(--bg-raised);border-bottom:1px solid var(--border)}
+.a-sample{display:flex;align-items:center;gap:6px;padding-right:10px;border-right:1px solid var(--border-dk);margin-right:4px}
+.a-dot{width:7px;height:7px;background:var(--olive);border-radius:50%}
+.a-name{font-family:var(--fm);font-size:10px;font-weight:600;color:var(--text)}
+.a-chip{display:flex;align-items:baseline;gap:4px;padding:3px 8px;background:rgba(255,255,255,.55);border:1px solid var(--border);border-radius:99px}
+.a-chip.hi{background:rgba(107,142,35,.07);border-color:rgba(107,142,35,.25)}
+.a-cl{font-size:9px;font-weight:700;color:var(--text-muted);text-transform:uppercase;letter-spacing:.04em}
+.a-chip.hi .a-cl{color:rgba(107,142,35,.65)}
+.a-cv{font-family:var(--fm);font-size:10px;font-weight:600;color:var(--text)}
+.a-chip.hi .a-cv{color:var(--olive)}
+.a-cu{font-size:8px;color:var(--text-muted);font-family:var(--fm)}
+.a-soil{margin-left:auto;padding:3px 10px;background:rgba(139,115,85,.09);border:1px solid rgba(139,115,85,.22);border-radius:99px;font-size:10px;font-weight:600;color:var(--earth)}
+
+/* 2-col body */
+.a-body{flex:1;display:grid;grid-template-columns:1fr 360px;overflow:hidden}
+.a-left{overflow-y:auto;padding:10px;display:flex;flex-direction:column;gap:10px;border-right:1px solid var(--border)}
+.a-right{overflow-y:auto;padding:10px;display:flex;flex-direction:column;gap:10px}
+
+/* compact D-value table: two columns in one card */
+.a-dtable{display:grid;grid-template-columns:1fr 1px 1fr}
+.a-dt-divider{background:var(--border);margin:0 8px}
+.a-dt-col{display:flex;flex-direction:column}
+.a-dr{display:flex;align-items:baseline;gap:0;padding:3px 5px 3px 3px;border-radius:3px;transition:background .08s}
+.a-dr:hover{background:rgba(212,196,168,.18)}
+.a-dr.k{background:rgba(107,142,35,.05)}
+.a-dr.k:hover{background:rgba(107,142,35,.10)}
+.a-mark{width:5px;height:5px;border-radius:50%;background:var(--olive);margin-right:5px;flex-shrink:0;opacity:0;margin-bottom:1px}
+.a-dr.k .a-mark{opacity:1}
+.a-dl{font-family:var(--fm);font-size:10px;font-weight:500;color:var(--text-muted);min-width:28px}
+.a-dr.k .a-dl{color:var(--olive-dk);font-weight:600}
+.a-dv{font-family:var(--fm);font-size:10px;font-weight:600;color:var(--text);flex:1;text-align:right}
+.a-dr.k .a-dv{color:var(--olive)}
+.a-du{font-family:var(--fm);font-size:8px;color:var(--text-muted);margin-left:2px}
+.a-dfoot{margin-top:8px;padding-top:7px;border-top:1px solid var(--border);display:flex;gap:8px;align-items:center;flex-wrap:wrap}
+.a-dfoot span{font-size:9px;color:var(--text-muted)}
+.a-dfoot .hi{color:var(--olive);font-weight:600}
+
+/* gradation rows */
+.a-grad-rows{display:flex;flex-direction:column}
+.a-gr{display:flex;align-items:center;gap:8px;padding:9px 10px;border-bottom:1px solid rgba(212,196,168,.4)}
+.a-gr:last-child{border-bottom:none}
+.a-gr-name{font-size:10px;font-weight:600;color:var(--text-mid);min-width:120px}
+.a-gr-formula{font-family:var(--fm);font-size:9px;color:var(--text-muted);flex:1}
+.a-gr-num{font-family:var(--fm);font-size:18px;font-weight:600;color:var(--text);letter-spacing:-.02em;min-width:48px;text-align:right}
+
+/* K table */
+.a-ktbl{width:100%;border-collapse:collapse}
+.a-ktbl th{padding:5px 8px;text-align:right;font-size:8px;font-weight:700;color:var(--text-muted);text-transform:uppercase;letter-spacing:.06em;border-bottom:1px solid var(--border);background:var(--bg-raised)}
+.a-ktbl th:first-child{text-align:left}
+.a-ktbl td{padding:5px 8px;text-align:right;font-family:var(--fm);font-size:10px;color:var(--text-mid);border-bottom:1px solid rgba(212,196,168,.3)}
+.a-ktbl td:first-child{text-align:left;font-family:var(--fu);font-size:10px;font-weight:600;color:var(--text)}
+.a-ktbl tr:last-child td{border-bottom:none}
+.a-ktbl tr.hi td{background:rgba(107,142,35,.04);font-weight:600}
+.a-ktbl tr.hi td:first-child{color:var(--olive-dk)}
+.a-ktbl tr:hover td{background:rgba(212,196,168,.10)}
+
+/* perm banner */
+.a-perm{display:flex;align-items:center;gap:10px;padding:9px 10px;background:rgba(107,142,35,.06);border:1px solid rgba(107,142,35,.20);border-radius:5px}
+.a-perm-ico{width:30px;height:30px;border-radius:50%;background:rgba(107,142,35,.10);border:1.5px solid rgba(107,142,35,.25);display:flex;align-items:center;justify-content:center;font-size:13px;flex-shrink:0}
+.a-perm-lbl{font-size:8px;font-weight:700;color:rgba(107,142,35,.6);text-transform:uppercase;letter-spacing:.07em;margin-bottom:2px}
+.a-perm-class{font-size:11px;font-weight:600;color:var(--olive-dk)}
+.a-perm-range{margin-left:auto;font-family:var(--fm);font-size:10px;color:var(--text-muted)}
+
+/* USCS */
+.a-uscs{display:flex;align-items:center;gap:10px;padding:10px}
+.a-uscs-sym{width:40px;height:40px;border-radius:6px;background:linear-gradient(135deg,rgba(139,115,85,.10),rgba(139,115,85,.20));border:1.5px solid rgba(139,115,85,.28);display:flex;align-items:center;justify-content:center;font-family:var(--fm);font-size:16px;font-weight:700;color:var(--earth);flex-shrink:0}
+.a-uscs-name{font-size:11px;font-weight:600;color:var(--text);margin-bottom:2px}
+.a-uscs-basis{font-size:9px;color:var(--text-muted);line-height:1.4}
+
+/* quality rows */
+.a-qrow{display:flex;align-items:center;gap:8px;padding:6px 10px;border-bottom:1px solid rgba(212,196,168,.3)}
+.a-qrow:last-child{border-bottom:none}
+.a-qmark{font-size:11px;width:16px;text-align:center}
+.a-qlbl{font-size:10px;color:var(--text-mid);flex:1}
+.a-qbar{width:48px;height:3px;background:var(--border);border-radius:2px;overflow:hidden;flex-shrink:0}
+.a-qfill{height:100%;background:var(--olive);border-radius:2px}
+.a-qbdg{font-size:8px;font-weight:700;padding:1px 5px;border-radius:99px;min-width:52px;text-align:center}
+
+/* env */
+.a-env{display:grid;grid-template-columns:1fr 1fr;gap:6px;padding:10px}
+.a-ev{padding:7px 8px;background:var(--bg);border:1px solid var(--border);border-radius:4px}
+.a-ev-l{font-size:8px;font-weight:700;color:var(--text-muted);text-transform:uppercase;letter-spacing:.05em;margin-bottom:2px}
+.a-ev-v{font-family:var(--fm);font-size:11px;font-weight:600;color:var(--text)}
+.a-ev-n{font-size:8px;color:var(--text-muted)}
+
+/* ═══════════════════════════════════════════
+   CONCEPT B — KEY METRICS SIDEBAR
+═══════════════════════════════════════════ */
+
+.b-root{flex:1;display:flex;overflow:hidden}
+
+/* dark warm sidebar */
+.b-sb{width:210px;flex-shrink:0;background:#2e2318;border-right:1px solid #1a1208;overflow-y:auto;display:flex;flex-direction:column}
+.b-sb-top{padding:13px 13px 11px;border-bottom:1px solid rgba(255,255,255,.08)}
+.b-sb-lbl{font-size:8px;font-weight:700;color:rgba(196,165,116,.5);text-transform:uppercase;letter-spacing:.12em;margin-bottom:3px}
+.b-sb-name{font-family:var(--fm);font-size:11px;font-weight:600;color:#f0e8d8;line-height:1.3}
+.b-sec{padding:10px 13px 8px;border-bottom:1px solid rgba(255,255,255,.06)}
+.b-sec-title{font-size:7px;font-weight:700;color:rgba(196,165,116,.4);text-transform:uppercase;letter-spacing:.13em;margin-bottom:8px}
+.b-feat{margin-bottom:9px}
+.b-feat-l{font-size:8px;color:rgba(196,165,116,.5);text-transform:uppercase;letter-spacing:.06em;font-weight:600}
+.b-feat-v{font-family:var(--fm);font-size:22px;font-weight:600;color:#6b8e23;line-height:1;letter-spacing:-.02em}
+.b-feat-u{font-family:var(--fm);font-size:9px;color:rgba(154,140,120,.8)}
+.b-row{display:flex;align-items:baseline;justify-content:space-between;padding:3px 0;border-bottom:1px solid rgba(255,255,255,.04)}
+.b-row:last-child{border-bottom:none}
+.b-row-l{font-size:9px;color:rgba(196,165,116,.55)}
+.b-row-v{font-family:var(--fm);font-size:10px;font-weight:600;color:#c8b078}
+.b-uscs{display:flex;align-items:center;gap:8px;padding:7px 8px;background:rgba(107,142,35,.12);border:1px solid rgba(107,142,35,.22);border-radius:4px;margin-top:2px}
+.b-uscs-sym{font-family:var(--fm);font-size:16px;font-weight:700;color:#7fa02d}
+.b-uscs-nm{font-size:9px;color:#c8b078;line-height:1.3}
+.b-qrow{display:flex;align-items:center;justify-content:space-between;padding:3px 0}
+.b-qrow-l{font-size:9px;color:rgba(196,165,116,.5)}
+.b-qrow-s{font-size:9px;color:#6b8e23;letter-spacing:1px}
+
+/* main content */
+.b-main{flex:1;overflow-y:auto;padding:12px;display:flex;flex-direction:column;gap:10px}
+
+/* full percentile table */
+.b-ptbl{width:100%;border-collapse:collapse}
+.b-ptbl th{padding:5px 10px;font-size:9px;font-weight:700;color:var(--text-muted);text-transform:uppercase;letter-spacing:.07em;border-bottom:2px solid var(--border-dk);background:var(--bg-raised);text-align:left}
+.b-ptbl th:not(:first-child){text-align:right}
+.b-ptbl td{padding:4px 10px;font-family:var(--fm);font-size:10px;color:var(--text-mid);border-bottom:1px solid rgba(212,196,168,.28);text-align:right}
+.b-ptbl td:first-child{text-align:left;font-size:10px;font-weight:600;color:var(--text-muted)}
+.b-ptbl tr.k td{background:rgba(107,142,35,.05)}
+.b-ptbl tr.k td:first-child{color:var(--olive-dk);font-weight:700}
+.b-ptbl tr.k td:nth-child(2){color:var(--olive);font-weight:600}
+.b-ptbl tr:hover td{background:rgba(212,196,168,.12)}
+.b-ptbl tr.k:hover td{background:rgba(107,142,35,.09)}
+
+/* grad cards */
+.b-gcards{display:grid;grid-template-columns:repeat(3,1fr);gap:8px}
+.b-gc{padding:10px 12px;background:white;border:1px solid var(--border);border-left:3px solid var(--olive);border-radius:0 4px 4px 0}
+.b-gc-n{font-size:9px;font-weight:700;color:var(--text-muted);text-transform:uppercase;letter-spacing:.06em;margin-bottom:1px}
+.b-gc-f{font-family:var(--fm);font-size:8px;color:var(--text-muted);margin-bottom:5px}
+.b-gc-v{font-family:var(--fm);font-size:20px;font-weight:600;color:var(--text);letter-spacing:-.02em;margin-bottom:5px}
+
+/* K table B */
+.b-ktbl{width:100%;border-collapse:collapse}
+.b-ktbl th{padding:5px 10px;text-align:right;font-size:8px;font-weight:700;color:var(--text-muted);text-transform:uppercase;letter-spacing:.06em;border-bottom:2px solid var(--border-dk);background:var(--bg-raised)}
+.b-ktbl th:first-child{text-align:left}
+.b-ktbl td{padding:5px 10px;text-align:right;font-family:var(--fm);font-size:10px;color:var(--text-mid);border-bottom:1px solid rgba(212,196,168,.3)}
+.b-ktbl td:first-child{text-align:left;font-family:var(--fu);font-size:10px;font-weight:600;color:var(--text)}
+.b-ktbl tr:last-child td{border-bottom:none}
+.b-ktbl tr.hi td{background:rgba(107,142,35,.05);font-weight:600}
+.b-ktbl tr.hi td:first-child{color:var(--olive-dk)}
+
+/* perm banner B */
+.b-perm{display:flex;align-items:center;gap:12px;padding:9px 12px;background:rgba(107,142,35,.06);border:1px solid rgba(107,142,35,.18);border-radius:4px}
+.b-perm-ico{font-size:18px}
+.b-perm-l{font-size:8px;font-weight:700;color:rgba(107,142,35,.6);text-transform:uppercase;letter-spacing:.08em;margin-bottom:2px}
+.b-perm-c{font-size:12px;font-weight:600;color:var(--olive-dk)}
+.b-perm-r{margin-left:auto;font-family:var(--fm);font-size:10px;color:var(--text-muted)}
+
+/* ═══════════════════════════════════════════
+   CONCEPT C — MINIMAL ROWS
+═══════════════════════════════════════════ */
+
+.c-root{flex:1;overflow-y:auto;display:flex;flex-direction:column}
+
+.c-hdr{display:flex;align-items:center;gap:10px;padding:9px 16px;background:var(--bg-raised);border-bottom:2px solid var(--border-dk);flex-shrink:0}
+.c-hdot{width:8px;height:8px;background:var(--olive);border-radius:50%}
+.c-hname{font-family:var(--fm);font-size:11px;font-weight:600;color:var(--text)}
+.c-hchips{display:flex;gap:4px;margin-left:auto}
+.c-hchip{padding:2px 8px;background:rgba(255,255,255,.6);border:1px solid var(--border);border-radius:99px;font-family:var(--fm);font-size:9px;font-weight:600;color:var(--text-mid)}
+
+.c-sh{display:flex;align-items:center;justify-content:space-between;padding:6px 16px;background:var(--bg-raised);border-bottom:1px solid var(--border)}
+.c-sh-t{font-size:9px;font-weight:700;text-transform:uppercase;letter-spacing:.1em;color:var(--text-muted)}
+.c-sh-m{font-family:var(--fm);font-size:9px;color:var(--text-muted)}
+
+/* key strip */
+.c-ks{display:flex;align-items:stretch;border-bottom:1px solid var(--border);background:white}
+.c-ksi{display:flex;flex-direction:column;align-items:center;justify-content:center;padding:10px 0;flex:1;border-right:1px solid var(--border);cursor:default;transition:background .1s}
+.c-ksi:last-child{border-right:none}
+.c-ksi:hover{background:rgba(212,196,168,.12)}
+.c-ksi.k{background:rgba(107,142,35,.04)}
+.c-ksi.k:hover{background:rgba(107,142,35,.09)}
+.c-ksl{font-size:9px;font-weight:700;color:var(--text-muted);text-transform:uppercase;letter-spacing:.04em;margin-bottom:3px}
+.c-ksi.k .c-ksl{color:rgba(107,142,35,.65)}
+.c-ksv{font-family:var(--fm);font-size:13px;font-weight:600;color:var(--text);line-height:1}
+.c-ksi.k .c-ksv{color:var(--olive)}
+.c-ksu{font-size:8px;color:var(--text-muted);font-family:var(--fm);margin-top:2px}
+
+/* percentile 2-col block */
+.c-pblock{display:grid;grid-template-columns:1fr 1fr;border-bottom:1px solid var(--border)}
+.c-pcol:first-child{border-right:1px solid var(--border)}
+.c-prow{display:flex;align-items:center;padding:5px 16px;border-bottom:1px solid rgba(212,196,168,.22);transition:background .08s}
+.c-prow:last-child{border-bottom:none}
+.c-prow:hover{background:rgba(212,196,168,.12)}
+.c-prow.k{background:rgba(107,142,35,.04)}
+.c-prow.k:hover{background:rgba(107,142,35,.09)}
+.c-pl{font-family:var(--fm);font-size:10px;font-weight:500;color:var(--text-muted);min-width:36px}
+.c-prow.k .c-pl{color:var(--olive-dk);font-weight:700}
+.c-pv{font-family:var(--fm);font-size:11px;font-weight:600;color:var(--text);flex:1;text-align:right}
+.c-prow.k .c-pv{color:var(--olive)}
+.c-pu{font-family:var(--fm);font-size:8px;color:var(--text-muted);margin-left:3px}
+
+/* gradation rows */
+.c-grad-row{display:flex;align-items:center;gap:12px;padding:9px 16px;border-bottom:1px solid rgba(212,196,168,.3);background:white}
+.c-grad-row:last-child{border-bottom:none}
+.c-gr-name{font-size:11px;font-weight:600;color:var(--text);min-width:210px}
+.c-gr-f{font-family:var(--fm);font-size:9px;color:var(--text-muted);flex:1}
+.c-gr-v{font-family:var(--fm);font-size:20px;font-weight:600;color:var(--text);letter-spacing:-.02em;min-width:55px;text-align:right}
+.c-gr-b{min-width:130px;text-align:right}
+
+/* K table C */
+.c-ktbl{width:100%;border-collapse:collapse}
+.c-ktbl th{padding:5px 16px;text-align:right;font-size:8px;font-weight:700;color:var(--text-muted);text-transform:uppercase;letter-spacing:.08em;border-bottom:1px solid var(--border-dk);background:var(--bg-raised)}
+.c-ktbl th:first-child{text-align:left}
+.c-ktbl td{padding:6px 16px;text-align:right;font-family:var(--fm);font-size:10px;color:var(--text-mid);border-bottom:1px solid rgba(212,196,168,.22);background:white}
+.c-ktbl td:first-child{text-align:left;font-family:var(--fu);font-size:10px;font-weight:600;color:var(--text)}
+.c-ktbl tr:last-child td{border-bottom:none}
+.c-ktbl tr.hi td{background:rgba(107,142,35,.04);font-weight:600}
+.c-ktbl tr.hi td:first-child{color:var(--olive-dk)}
+.c-ktbl tr:hover td{background:rgba(212,196,168,.12)}
+
+/* perm banner C */
+.c-perm{display:flex;align-items:center;gap:16px;padding:11px 16px;background:rgba(107,142,35,.05);border-bottom:2px solid rgba(107,142,35,.15)}
+.c-perm-l{font-size:9px;font-weight:700;color:rgba(107,142,35,.55);text-transform:uppercase;letter-spacing:.09em;margin-bottom:2px}
+.c-perm-c{font-size:13px;font-weight:600;color:var(--olive-dk)}
+.c-perm-r{margin-left:auto;font-family:var(--fm);font-size:10px;color:var(--text-muted)}
+
+/* bottom 3-col */
+.c-bot{display:grid;grid-template-columns:1fr 1fr 1fr;border-top:1px solid var(--border)}
+.c-bc{padding:12px 16px;border-right:1px solid var(--border)}
+.c-bc:last-child{border-right:none}
+.c-bc-t{font-size:9px;font-weight:700;color:var(--text-muted);text-transform:uppercase;letter-spacing:.08em;margin-bottom:8px}
+.c-uscs{display:flex;align-items:center;gap:10px;margin-bottom:5px}
+.c-uscs-sym{font-family:var(--fm);font-size:22px;font-weight:700;color:var(--earth)}
+.c-uscs-nm{font-size:12px;font-weight:600;color:var(--text)}
+.c-uscs-b{font-size:9px;color:var(--text-muted);line-height:1.4}
+.c-qrow{display:flex;align-items:center;gap:6px;padding:4px 0}
+.c-qmark{font-size:10px}
+.c-qlbl{font-size:10px;color:var(--text-mid);flex:1}
+.c-qb{font-size:8px;font-weight:700;padding:1px 5px;border-radius:99px}
+.c-erow{display:flex;justify-content:space-between;padding:5px 0;border-bottom:1px solid rgba(212,196,168,.28)}
+.c-erow:last-child{border-bottom:none}
+.c-el{font-size:10px;color:var(--text-muted)}
+.c-ev{font-family:var(--fm);font-size:10px;font-weight:600;color:var(--text)}
+</style>
+</head>
+<body>
+
+<div class="chrome">
+  <span class="chrome-tab">Plot</span>
+  <span class="chrome-tab">Results</span>
+  <span class="chrome-tab act">Statistics</span>
+</div>
+
+<div class="switcher">
+  <span class="sw-lbl">Concept</span>
+  <button class="sw-btn on" data-t="a">A — Compact Dashboard</button>
+  <button class="sw-btn" data-t="b">B — Key Metrics Sidebar</button>
+  <button class="sw-btn" data-t="c">C — Minimal Rows</button>
+</div>
+
+<!-- ═══════════════════════════════
+     CONCEPT A
+═══════════════════════════════ -->
+<div id="pa" class="panel on">
+  <div class="a-hero">
+    <div class="a-sample"><div class="a-dot"></div><span class="a-name">Sample_1_Odong</span></div>
+    <div class="a-chip hi"><span class="a-cl">D₅₀</span><span class="a-cv">1.181</span><span class="a-cu">mm</span></div>
+    <div class="a-chip hi"><span class="a-cl">D₁₀</span><span class="a-cv">0.341</span><span class="a-cu">mm</span></div>
+    <div class="a-chip"><span class="a-cl">Cu</span><span class="a-cv">5.53</span></div>
+    <div class="a-chip"><span class="a-cl">Cc</span><span class="a-cv">0.51</span></div>
+    <div class="a-chip"><span class="a-cl">σ</span><span class="a-cv">2.35</span></div>
+    <div class="a-chip hi"><span class="a-cl">Mean K</span><span class="a-cv">1.38e-3</span><span class="a-cu">m/s</span></div>
+    <div class="a-soil">SP — Poorly-graded sand</div>
+  </div>
+
+  <div class="a-body">
+    <div class="a-left">
+
+      <!-- Compact D-value table -->
+      <div class="card">
+        <div class="card-hd">
+          <span class="card-title">Grain Size Percentiles</span>
+          <span class="bdg bdg-info">linear interpolation</span>
+        </div>
+        <div class="card-bd">
+          <div class="a-dtable">
+            <div class="a-dt-col">
+              <div class="a-dr"><div class="a-mark"></div><span class="a-dl">D₅</span><span class="a-dv">0.244</span><span class="a-du">mm</span></div>
+              <div class="a-dr k"><div class="a-mark"></div><span class="a-dl">D₁₀</span><span class="a-dv">0.341</span><span class="a-du">mm</span></div>
+              <div class="a-dr"><div class="a-mark"></div><span class="a-dl">D₁₆</span><span class="a-dv">0.408</span><span class="a-du">mm</span></div>
+              <div class="a-dr"><div class="a-mark"></div><span class="a-dl">D₁₇</span><span class="a-dv">0.419</span><span class="a-du">mm</span></div>
+              <div class="a-dr"><div class="a-mark"></div><span class="a-dl">D₂₀</span><span class="a-dv">0.524</span><span class="a-du">mm</span></div>
+              <div class="a-dr"><div class="a-mark"></div><span class="a-dl">D₂₅</span><span class="a-dv">0.563</span><span class="a-du">mm</span></div>
+              <div class="a-dr k"><div class="a-mark"></div><span class="a-dl">D₃₀</span><span class="a-dv">0.590</span><span class="a-du">mm</span></div>
+              <div class="a-dr"><div class="a-mark"></div><span class="a-dl">D₄₀</span><span class="a-dv">0.840</span><span class="a-du">mm</span></div>
+            </div>
+            <div class="a-dt-divider"></div>
+            <div class="a-dt-col">
+              <div class="a-dr k"><div class="a-mark"></div><span class="a-dl">D₅₀</span><span class="a-dv">1.181</span><span class="a-du">mm</span></div>
+              <div class="a-dr k"><div class="a-mark"></div><span class="a-dl">D₆₀</span><span class="a-dv">1.886</span><span class="a-du">mm</span></div>
+              <div class="a-dr"><div class="a-mark"></div><span class="a-dl">D₇₅</span><span class="a-dv">3.899</span><span class="a-du">mm</span></div>
+              <div class="a-dr"><div class="a-mark"></div><span class="a-dl">D₈₀</span><span class="a-dv">5.149</span><span class="a-du">mm</span></div>
+              <div class="a-dr"><div class="a-mark"></div><span class="a-dl">D₈₄</span><span class="a-dv">6.218</span><span class="a-du">mm</span></div>
+              <div class="a-dr"><div class="a-mark"></div><span class="a-dl">D₉₀</span><span class="a-dv">9.787</span><span class="a-du">mm</span></div>
+              <div class="a-dr"><div class="a-mark"></div><span class="a-dl">D₉₅</span><span class="a-dv">10.000</span><span class="a-du">mm</span></div>
+            </div>
+          </div>
+          <div class="a-dfoot">
+            <span>Range: 0.244 – 10.000 mm</span>
+            <span>·</span><span>Span ×41</span>
+            <span>·</span><span class="hi">● = key value (used by ≥3 methods)</span>
+          </div>
+        </div>
+      </div>
+
+      <!-- Gradation -->
+      <div class="card">
+        <div class="card-hd"><span class="card-title">Gradation Analysis</span></div>
+        <div class="a-grad-rows">
+          <div class="a-gr">
+            <span class="a-gr-name">Uniformity (Cu)</span>
+            <span class="a-gr-formula">D₆₀ / D₁₀ = 1.886 / 0.341</span>
+            <span class="a-gr-num">5.53</span>
+            <span class="bdg bdg-warn" style="margin-left:8px">Moderately graded</span>
+          </div>
+          <div class="a-gr">
+            <span class="a-gr-name">Curvature (Cc)</span>
+            <span class="a-gr-formula">D₃₀² / (D₁₀·D₆₀)</span>
+            <span class="a-gr-num">0.51</span>
+            <span class="bdg bdg-warn" style="margin-left:8px">Outside 1–3 range</span>
+          </div>
+          <div class="a-gr">
+            <span class="a-gr-name">Sorting coeff. (σ)</span>
+            <span class="a-gr-formula">√(D₈₄ / D₁₆)</span>
+            <span class="a-gr-num">2.35</span>
+            <span class="bdg bdg-warn" style="margin-left:8px">Mod. sorted</span>
+          </div>
+        </div>
+      </div>
+    </div><!-- /a-left -->
+
+    <div class="a-right">
+      <!-- K Stats -->
+      <div class="card">
+        <div class="card-hd"><span class="card-title">Hydraulic Conductivity</span></div>
+        <table class="a-ktbl">
+          <thead><tr><th>Metric</th><th>m/s</th><th>cm/s</th><th>m/d</th></tr></thead>
+          <tbody>
+            <tr class="hi"><td>Mean</td><td>1.38e-3</td><td>1.38e-1</td><td>119.2</td></tr>
+            <tr><td>Median</td><td>1.21e-3</td><td>1.21e-1</td><td>104.5</td></tr>
+            <tr><td>Std dev</td><td>4.10e-4</td><td>4.10e-2</td><td>35.4</td></tr>
+            <tr><td>Min</td><td>8.20e-4</td><td>8.20e-2</td><td>70.8</td></tr>
+            <tr><td>Max</td><td>2.10e-3</td><td>2.10e-1</td><td>181.4</td></tr>
+          </tbody>
+        </table>
+        <div style="padding:8px 10px">
+          <div class="a-perm">
+            <div class="a-perm-ico">💧</div>
+            <div><div class="a-perm-lbl">Permeability class</div><div class="a-perm-class">High Permeability — Clean Sand</div></div>
+            <span class="a-perm-range">10⁻⁴–10⁻² m/s</span>
+          </div>
+        </div>
+      </div>
+
+      <!-- USCS -->
+      <div class="card">
+        <div class="card-hd"><span class="card-title">USCS Classification</span></div>
+        <div class="a-uscs">
+          <div class="a-uscs-sym">SP</div>
+          <div>
+            <div class="a-uscs-name">Poorly-graded sand</div>
+            <div class="a-uscs-basis">Cu=5.53 (needs ≥6) · Cc=0.51 (outside 1–3)<br>Based on grain size distribution</div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Data Quality -->
+      <div class="card">
+        <div class="card-hd"><span class="card-title">Data Quality</span><span class="bdg bdg-ok">Good ★★★★☆</span></div>
+        <div>
+          <div class="a-qrow"><span class="a-qmark">✓</span><span class="a-qlbl">Curve monotonicity</span><div class="a-qbar"><div class="a-qfill" style="width:98%"></div></div><span class="a-qbdg bdg-ok">Excellent</span></div>
+          <div class="a-qrow"><span class="a-qmark">✓</span><span class="a-qlbl">Data coverage</span><div class="a-qbar"><div class="a-qfill" style="width:80%"></div></div><span class="a-qbdg bdg-ok">Good</span></div>
+          <div class="a-qrow"><span class="a-qmark">✓</span><span class="a-qlbl">Point density</span><div class="a-qbar"><div class="a-qfill" style="width:65%"></div></div><span class="a-qbdg bdg-warn">Adequate</span></div>
+          <div class="a-qrow"><span class="a-qmark">✓</span><span class="a-qlbl">Interpolation reliability</span><div class="a-qbar"><div class="a-qfill" style="width:92%"></div></div><span class="a-qbdg bdg-ok">Reliable</span></div>
+        </div>
+      </div>
+
+      <!-- Env -->
+      <div class="card">
+        <div class="card-hd"><span class="card-title">Environmental Parameters</span><span style="font-size:9px;color:var(--text-muted)">Edit in Results tab</span></div>
+        <div class="a-env">
+          <div class="a-ev"><div class="a-ev-l">Temperature</div><div class="a-ev-v">20.0 °C</div></div>
+          <div class="a-ev"><div class="a-ev-l">Porosity</div><div class="a-ev-v">0.3499</div><div class="a-ev-n">calculated</div></div>
+        </div>
+      </div>
+    </div><!-- /a-right -->
+  </div><!-- /a-body -->
+
+  <div class="footer">
+    <button class="btn btn-sec">Export to Excel</button>
+    <button class="btn btn-sec">Export to CSV</button>
+    <button class="btn btn-sec">Copy Statistics</button>
+    <span class="ft-meta">15 values · 5 methods · T=20.0°C · n=0.3499</span>
+  </div>
+</div>
+
+<!-- ═══════════════════════════════
+     CONCEPT B
+═══════════════════════════════ -->
+<div id="pb" class="panel">
+  <div class="b-root">
+    <div class="b-sb">
+      <div class="b-sb-top">
+        <div class="b-sb-lbl">Active sample</div>
+        <div class="b-sb-name">Sample_1_Odong</div>
+      </div>
+      <div class="b-sec">
+        <div class="b-sec-title">Key Percentiles</div>
+        <div class="b-feat"><div class="b-feat-l">D₅₀ — median grain</div><div class="b-feat-v">1.181 <span class="b-feat-u">mm</span></div></div>
+        <div class="b-row"><span class="b-row-l">D₁₀</span><span class="b-row-v">0.341 mm</span></div>
+        <div class="b-row"><span class="b-row-l">D₃₀</span><span class="b-row-v">0.590 mm</span></div>
+        <div class="b-row"><span class="b-row-l">D₆₀</span><span class="b-row-v">1.886 mm</span></div>
+        <div class="b-row"><span class="b-row-l">D₈₄</span><span class="b-row-v">6.218 mm</span></div>
+      </div>
+      <div class="b-sec">
+        <div class="b-sec-title">Gradation</div>
+        <div class="b-row"><span class="b-row-l">Cu (uniformity)</span><span class="b-row-v">5.53</span></div>
+        <div class="b-row"><span class="b-row-l">Cc (curvature)</span><span class="b-row-v">0.51</span></div>
+        <div class="b-row"><span class="b-row-l">σ (sorting)</span><span class="b-row-v">2.35</span></div>
+      </div>
+      <div class="b-sec">
+        <div class="b-sec-title">Hydraulic Conductivity</div>
+        <div class="b-feat"><div class="b-feat-l">Mean K</div><div class="b-feat-v">1.38e-3 <span class="b-feat-u">m/s</span></div></div>
+        <div class="b-row"><span class="b-row-l">Class</span><span style="font-size:8px;color:#7fa02d;font-weight:700">High permeability</span></div>
+      </div>
+      <div class="b-sec">
+        <div class="b-sec-title">Classification</div>
+        <div class="b-uscs"><span class="b-uscs-sym">SP</span><div class="b-uscs-nm">Poorly-graded<br>sand</div></div>
+      </div>
+      <div class="b-sec">
+        <div class="b-sec-title">Data Quality</div>
+        <div class="b-qrow"><span class="b-qrow-l">Monotonicity</span><span class="b-qrow-s">★★★★★</span></div>
+        <div class="b-qrow"><span class="b-qrow-l">Coverage</span><span class="b-qrow-s">★★★★☆</span></div>
+        <div class="b-qrow"><span class="b-qrow-l">Point density</span><span class="b-qrow-s">★★★☆☆</span></div>
+      </div>
+      <div class="b-sec" style="border-bottom:none">
+        <div class="b-sec-title">Environment</div>
+        <div class="b-row"><span class="b-row-l">Temperature</span><span class="b-row-v">20.0 °C</span></div>
+        <div class="b-row"><span class="b-row-l">Porosity</span><span class="b-row-v">0.3499</span></div>
+      </div>
+    </div>
+
+    <div class="b-main">
+      <!-- Full percentile table -->
+      <div class="card">
+        <div class="card-hd"><span class="card-title">All Grain Size Percentiles</span><span class="bdg bdg-info">15 values · linear interpolation</span></div>
+        <div style="padding:6px 8px 4px">
+          <table class="b-ptbl">
+            <thead><tr><th>Percentile</th><th>Size (mm)</th><th>Methods using this value</th></tr></thead>
+            <tbody>
+              <tr><td>D₅</td><td>0.244</td><td>Barr</td></tr>
+              <tr class="k"><td>D₁₀</td><td>0.341</td><td>Hazen, Slichter, Terzaghi, Beyer, Kozeny-Carman, Zunker, Zamarin, Chapuis…</td></tr>
+              <tr><td>D₁₆</td><td>0.408</td><td>Sorting coeff. (σ)</td></tr>
+              <tr><td>D₁₇</td><td>0.419</td><td>Sauerbrei</td></tr>
+              <tr><td>D₂₀</td><td>0.524</td><td>USBR</td></tr>
+              <tr><td>D₂₅</td><td>0.563</td><td>—</td></tr>
+              <tr class="k"><td>D₃₀</td><td>0.590</td><td>Cc calculation</td></tr>
+              <tr><td>D₄₀</td><td>0.840</td><td>—</td></tr>
+              <tr class="k"><td>D₅₀</td><td>1.181</td><td>Kruger, Shepherd, Alyamani-Sen</td></tr>
+              <tr class="k"><td>D₆₀</td><td>1.886</td><td>Beyer, Barr, Cu calculation</td></tr>
+              <tr><td>D₇₅</td><td>3.899</td><td>—</td></tr>
+              <tr><td>D₈₀</td><td>5.149</td><td>—</td></tr>
+              <tr><td>D₈₄</td><td>6.218</td><td>Sorting coeff. (σ), Krumbein-Monk</td></tr>
+              <tr><td>D₉₀</td><td>9.787</td><td>—</td></tr>
+              <tr><td>D₉₅</td><td>10.000</td><td>Krumbein-Monk</td></tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+
+      <!-- Gradation cards -->
+      <div class="card">
+        <div class="card-hd"><span class="card-title">Gradation Parameters</span></div>
+        <div style="padding:10px">
+          <div class="b-gcards">
+            <div class="b-gc"><div class="b-gc-n">Uniformity</div><div class="b-gc-f">Cu = D₆₀ / D₁₀</div><div class="b-gc-v">5.53</div><span class="bdg bdg-warn">Moderately graded</span></div>
+            <div class="b-gc"><div class="b-gc-n">Curvature</div><div class="b-gc-f">Cc = D₃₀² / (D₁₀·D₆₀)</div><div class="b-gc-v">0.51</div><span class="bdg bdg-warn">Outside 1–3</span></div>
+            <div class="b-gc"><div class="b-gc-n">Sorting σ</div><div class="b-gc-f">√(D₈₄ / D₁₆)</div><div class="b-gc-v">2.35</div><span class="bdg bdg-warn">Mod. sorted</span></div>
+          </div>
+        </div>
+      </div>
+
+      <!-- K stats -->
+      <div class="card">
+        <div class="card-hd"><span class="card-title">Hydraulic Conductivity Statistics</span></div>
+        <table class="b-ktbl">
+          <thead><tr><th>Metric</th><th>m/s</th><th>cm/s</th><th>m/d</th></tr></thead>
+          <tbody>
+            <tr class="hi"><td>Mean</td><td>1.38e-3</td><td>1.38e-1</td><td>119.2</td></tr>
+            <tr><td>Median</td><td>1.21e-3</td><td>1.21e-1</td><td>104.5</td></tr>
+            <tr><td>Std dev</td><td>4.10e-4</td><td>4.10e-2</td><td>35.4</td></tr>
+            <tr><td>Min</td><td>8.20e-4</td><td>8.20e-2</td><td>70.8</td></tr>
+            <tr><td>Max</td><td>2.10e-3</td><td>2.10e-1</td><td>181.4</td></tr>
+          </tbody>
+        </table>
+        <div style="padding:8px 10px">
+          <div class="b-perm">
+            <span class="b-perm-ico">💧</span>
+            <div><div class="b-perm-l">Permeability classification</div><div class="b-perm-c">High Permeability — Clean Sand</div></div>
+            <span class="b-perm-r">10⁻⁴–10⁻² m/s</span>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div class="footer">
+    <button class="btn btn-sec">Export to Excel</button>
+    <button class="btn btn-sec">Export to CSV</button>
+    <button class="btn btn-sec">Copy Statistics</button>
+    <span class="ft-meta">15 values · 5 methods · T=20.0°C · n=0.3499</span>
+  </div>
+</div>
+
+<!-- ═══════════════════════════════
+     CONCEPT C
+═══════════════════════════════ -->
+<div id="pc" class="panel">
+  <div class="c-root">
+    <div class="c-hdr">
+      <div class="c-hdot"></div>
+      <span class="c-hname">Sample_1_Odong</span>
+      <div class="c-hchips">
+        <span class="c-hchip">D₅₀ 1.181 mm</span>
+        <span class="c-hchip">Cu 5.53</span>
+        <span class="c-hchip">K̄ 1.38e-3 m/s</span>
+        <span class="c-hchip">SP</span>
+      </div>
+    </div>
+
+    <!-- Key values strip -->
+    <div>
+      <div class="c-sh"><span class="c-sh-t">Key Grain Size Values</span><span class="c-sh-m">used by ≥3 methods</span></div>
+      <div class="c-ks">
+        <div class="c-ksi k"><span class="c-ksl">D₁₀</span><span class="c-ksv">0.341</span><span class="c-ksu">mm</span></div>
+        <div class="c-ksi"><span class="c-ksl">D₂₀</span><span class="c-ksv">0.524</span><span class="c-ksu">mm</span></div>
+        <div class="c-ksi k"><span class="c-ksl">D₃₀</span><span class="c-ksv">0.590</span><span class="c-ksu">mm</span></div>
+        <div class="c-ksi k"><span class="c-ksl">D₅₀</span><span class="c-ksv">1.181</span><span class="c-ksu">mm</span></div>
+        <div class="c-ksi k"><span class="c-ksl">D₆₀</span><span class="c-ksv">1.886</span><span class="c-ksu">mm</span></div>
+        <div class="c-ksi"><span class="c-ksl">D₈₄</span><span class="c-ksv">6.218</span><span class="c-ksu">mm</span></div>
+        <div class="c-ksi"><span class="c-ksl">D₉₅</span><span class="c-ksv">10.000</span><span class="c-ksu">mm</span></div>
+      </div>
+    </div>
+
+    <!-- All percentiles 2-col -->
+    <div>
+      <div class="c-sh"><span class="c-sh-t">All Percentile Values</span><span class="c-sh-m">15 values · linear interpolation</span></div>
+      <div class="c-pblock">
+        <div class="c-pcol">
+          <div class="c-prow"><span class="c-pl">D₅</span><span class="c-pv">0.244</span><span class="c-pu">mm</span></div>
+          <div class="c-prow k"><span class="c-pl">D₁₀</span><span class="c-pv">0.341</span><span class="c-pu">mm</span></div>
+          <div class="c-prow"><span class="c-pl">D₁₆</span><span class="c-pv">0.408</span><span class="c-pu">mm</span></div>
+          <div class="c-prow"><span class="c-pl">D₁₇</span><span class="c-pv">0.419</span><span class="c-pu">mm</span></div>
+          <div class="c-prow"><span class="c-pl">D₂₀</span><span class="c-pv">0.524</span><span class="c-pu">mm</span></div>
+          <div class="c-prow"><span class="c-pl">D₂₅</span><span class="c-pv">0.563</span><span class="c-pu">mm</span></div>
+          <div class="c-prow k"><span class="c-pl">D₃₀</span><span class="c-pv">0.590</span><span class="c-pu">mm</span></div>
+          <div class="c-prow"><span class="c-pl">D₄₀</span><span class="c-pv">0.840</span><span class="c-pu">mm</span></div>
+        </div>
+        <div class="c-pcol">
+          <div class="c-prow k"><span class="c-pl">D₅₀</span><span class="c-pv">1.181</span><span class="c-pu">mm</span></div>
+          <div class="c-prow k"><span class="c-pl">D₆₀</span><span class="c-pv">1.886</span><span class="c-pu">mm</span></div>
+          <div class="c-prow"><span class="c-pl">D₇₅</span><span class="c-pv">3.899</span><span class="c-pu">mm</span></div>
+          <div class="c-prow"><span class="c-pl">D₈₀</span><span class="c-pv">5.149</span><span class="c-pu">mm</span></div>
+          <div class="c-prow"><span class="c-pl">D₈₄</span><span class="c-pv">6.218</span><span class="c-pu">mm</span></div>
+          <div class="c-prow"><span class="c-pl">D₉₀</span><span class="c-pv">9.787</span><span class="c-pu">mm</span></div>
+          <div class="c-prow"><span class="c-pl">D₉₅</span><span class="c-pv">10.000</span><span class="c-pu">mm</span></div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Gradation -->
+    <div>
+      <div class="c-sh"><span class="c-sh-t">Gradation Analysis</span></div>
+      <div class="c-grad-row"><span class="c-gr-name">Uniformity Coefficient (Cu)</span><span class="c-gr-f">D₆₀ / D₁₀ = 1.886 / 0.341</span><span class="c-gr-v">5.53</span><span class="c-gr-b"><span class="bdg bdg-warn">Moderately graded</span></span></div>
+      <div class="c-grad-row"><span class="c-gr-name">Coefficient of Curvature (Cc)</span><span class="c-gr-f">D₃₀² / (D₁₀·D₆₀)</span><span class="c-gr-v">0.51</span><span class="c-gr-b"><span class="bdg bdg-warn">Outside 1–3 range</span></span></div>
+      <div class="c-grad-row"><span class="c-gr-name">Sorting Coefficient (σ)</span><span class="c-gr-f">√(D₈₄ / D₁₆) = √(6.218 / 0.408)</span><span class="c-gr-v">2.35</span><span class="c-gr-b"><span class="bdg bdg-warn">Moderately sorted</span></span></div>
+    </div>
+
+    <!-- K -->
+    <div>
+      <div class="c-sh"><span class="c-sh-t">Hydraulic Conductivity</span><span class="c-sh-m">5 empirical methods</span></div>
+      <div class="c-perm">
+        <div><div class="c-perm-l">Permeability classification</div><div class="c-perm-c">High Permeability — Clean Sand</div></div>
+        <span class="c-perm-r">10⁻⁴ – 10⁻² m/s</span>
+      </div>
+      <table class="c-ktbl">
+        <thead><tr><th>Metric</th><th>m/s</th><th>cm/s</th><th>m/d</th></tr></thead>
+        <tbody>
+          <tr class="hi"><td>Mean</td><td>1.38e-3</td><td>1.38e-1</td><td>119.2</td></tr>
+          <tr><td>Median</td><td>1.21e-3</td><td>1.21e-1</td><td>104.5</td></tr>
+          <tr><td>Std dev</td><td>4.10e-4</td><td>4.10e-2</td><td>35.4</td></tr>
+          <tr><td>Min</td><td>8.20e-4</td><td>8.20e-2</td><td>70.8</td></tr>
+          <tr><td>Max</td><td>2.10e-3</td><td>2.10e-1</td><td>181.4</td></tr>
+        </tbody>
+      </table>
+    </div>
+
+    <!-- Bottom 3-col -->
+    <div class="c-bot">
+      <div class="c-bc">
+        <div class="c-bc-t">USCS Classification</div>
+        <div class="c-uscs"><span class="c-uscs-sym">SP</span><span class="c-uscs-nm">Poorly-graded sand</span></div>
+        <div class="c-uscs-b">Cu=5.53 (needs ≥6 for SW) · Cc=0.51 (outside 1–3 range). Classification based on grain size distribution.</div>
+      </div>
+      <div class="c-bc">
+        <div class="c-bc-t">Data Quality</div>
+        <div class="c-qrow"><span class="c-qmark">✓</span><span class="c-qlbl">Curve monotonicity</span><span class="c-qb bdg-ok">Excellent</span></div>
+        <div class="c-qrow"><span class="c-qmark">✓</span><span class="c-qlbl">Data coverage</span><span class="c-qb bdg-ok">Good</span></div>
+        <div class="c-qrow"><span class="c-qmark">✓</span><span class="c-qlbl">Point density</span><span class="c-qb bdg-warn">Adequate</span></div>
+        <div class="c-qrow"><span class="c-qmark">✓</span><span class="c-qlbl">Interpolation</span><span class="c-qb bdg-ok">Reliable</span></div>
+      </div>
+      <div class="c-bc">
+        <div class="c-bc-t">Environmental Parameters</div>
+        <div class="c-erow"><span class="c-el">Temperature</span><span class="c-ev">20.0 °C</span></div>
+        <div class="c-erow"><span class="c-el">Porosity</span><span class="c-ev">0.3499</span></div>
+        <div class="c-erow"><span class="c-el">Source</span><span class="c-ev" style="font-size:9px;color:var(--text-muted)">calculated</span></div>
+        <div style="margin-top:8px;padding:5px 7px;background:rgba(212,196,168,.15);border:1px solid var(--border);border-radius:3px;font-size:9px;color:var(--text-muted)">Edit porosity in the Results tab</div>
+      </div>
+    </div>
+  </div>
+
+  <div class="footer">
+    <button class="btn btn-sec">Export to Excel</button>
+    <button class="btn btn-sec">Export to CSV</button>
+    <button class="btn btn-sec">Copy Statistics</button>
+    <span class="ft-meta">15 values · 5 methods · T=20.0°C · n=0.3499</span>
+  </div>
+</div>
+
+<script>
+document.querySelectorAll('.sw-btn').forEach(btn => {
+  btn.addEventListener('click', () => {
+    document.querySelectorAll('.sw-btn').forEach(b => b.classList.remove('on'));
+    document.querySelectorAll('.panel').forEach(p => p.classList.remove('on'));
+    btn.classList.add('on');
+    document.getElementById('p' + btn.dataset.t).classList.add('on');
+  });
+});
+</script>
+</body>
+</html>

@@ -5,8 +5,8 @@ Plot widget with real matplotlib integration for grain size distribution visuali
 from PyQt6.QtWidgets import QWidget, QVBoxLayout, QHBoxLayout, QPushButton, QLabel
 from PyQt6.QtCore import Qt
 import matplotlib
-matplotlib.use('Qt5Agg')
-from matplotlib.backends.backend_qt5agg import FigureCanvasQTAgg as FigureCanvas
+matplotlib.use('QtAgg')
+from matplotlib.backends.backend_qtagg import FigureCanvasQTAgg as FigureCanvas
 from matplotlib.backends.backend_qt5agg import NavigationToolbar2QT as NavigationToolbar
 from matplotlib.figure import Figure
 import matplotlib.pyplot as plt
@@ -14,6 +14,7 @@ import numpy as np
 from typing import Optional, List, Dict
 from unit_conversions import HydraulicConductivityConverter, HydraulicConductivityUnit, get_default_plot_unit
 from .plot_styles import PlotStyle, PROFESSIONAL_STYLE
+from .theme import C, apply_matplotlib_style
 
 
 class PlotWidget(QWidget):
@@ -64,58 +65,60 @@ class PlotWidget(QWidget):
         
     def setup_ui(self):
         """Setup the matplotlib widget layout"""
+        # Apply theme-consistent rcParams (fonts, colors, grid) before any figure is created
+        apply_matplotlib_style()
+
         layout = QVBoxLayout(self)
-        layout.setSpacing(5)
-        
-        # Create matplotlib figure with subplots
+        layout.setContentsMargins(0, 0, 0, 0)
+        layout.setSpacing(0)
+
+        # Create matplotlib figure
         self.figure = Figure(figsize=(12, 8), tight_layout=True)
-        self.figure.patch.set_facecolor('#fafaf7')
-        
+        self.figure.patch.set_facecolor(C.BG)
+
         # Create canvas
         self.canvas = FigureCanvas(self.figure)
-        self.canvas.setStyleSheet("background-color: #ffffff;")
-        
-        # Hide matplotlib toolbar to save space
+        self.canvas.setStyleSheet("background: transparent;")
+
+        # Hide matplotlib toolbar (replaced by our custom pw-toolbar)
         self.toolbar = NavigationToolbar(self.canvas, self)
         self.toolbar.setVisible(False)
-        
-        # Add only canvas to layout (no toolbar)
+
         layout.addWidget(self.canvas)
-        
+
         # Initialize empty plots
         self.setup_plots()
 
     def set_style(self, style: PlotStyle):
-        """Apply a new plot style"""
+        """Apply a new plot style and redraw."""
         self.current_style = style
-        # Update figure background
         self.figure.patch.set_facecolor(style.figure_facecolor)
 
     def setup_plots(self):
-        """Setup initial single plot area"""
+        """Setup initial empty plot area."""
         self.figure.clear()
-        
-        # Create single axes for current plot
-        self.current_ax = self.figure.add_subplot(1, 1, 1)
-        
-        # Setup default grain size distribution plot
-        self.current_ax.set_xlabel('Grain Diameter (mm)', fontsize=10)
-        self.current_ax.set_ylabel('Cumulative % Passing', fontsize=10)
-        self.current_ax.set_title('Grain Size Distribution Curve', fontsize=12, fontweight='bold')
-        self.current_ax.grid(True, alpha=0.3, linestyle='--')
-        self.current_ax.set_xscale('log')
-        self.current_ax.set_xlim(0.001, 100)
-        self.current_ax.set_ylim(0, 100)
-        
-        # Add empty state message
-        self.current_ax.text(0.5, 0.5, 'Load grain size data to view distribution curve',
-                            transform=self.current_ax.transAxes,
-                            ha='center', va='center', fontsize=12, color='gray')
-        
-        # Store reference for compatibility
-        self.grain_size_ax = self.current_ax
+        ax = self.figure.add_subplot(1, 1, 1)
+        self.current_ax = ax
+        self.grain_size_ax = ax
         self.k_value_ax = None
-        
+
+        ax.set_xlabel('Grain Diameter (mm)')
+        ax.set_ylabel('Cumulative % Passing')
+        ax.set_title('Grain Size Distribution Curve')
+        ax.set_xscale('log')
+        ax.set_xlim(0.001, 100)
+        ax.set_ylim(0, 100)
+        ax.set_facecolor('#ffffff')
+        ax.grid(True, which='major', linestyle='-',
+                color='#d4c4a8', linewidth=0.5, alpha=0.6)
+
+        ax.text(
+            0.5, 0.5, 'Load grain size data to view distribution curve',
+            transform=ax.transAxes,
+            ha='center', va='center', fontsize=11,
+            color=C.TEXT_MUTED, fontstyle='italic',
+        )
+
         self.canvas.draw()
 
     def draw_classification_zones(self, ax):

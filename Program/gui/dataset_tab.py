@@ -92,7 +92,7 @@ class DatasetTab(QWidget):
                 margin-bottom: -2px;
                 margin-right: 0;
                 font-family: "{F.UI}";
-                font-size: {F.SZ_LG}pt;
+                font-size: {F.SZ_SM}pt;
                 font-weight: 500;
                 color: {C.TEXT_MUTED};
                 min-height: {SZ.SUB_TABBAR_H}px;

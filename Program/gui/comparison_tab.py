@@ -1,1085 +1,1244 @@
 """
-Comparison tab for comparing multiple datasets
+comparison_tab.py — Multi-dataset comparison tab for Grain Size Analyser.
+
+Provides side-by-side comparison of grain size parameters, hydraulic
+conductivity estimates, and statistical summaries for 2+ datasets.
+
+Layout:
+    ┌─ Header bar (44px) ───────────────────────────────────────────┐
+    │  "Comparison"   N datasets   [spacer]  [Update]  [Export…]    │
+    └───────────────────────────────────────────────────────────────┘
+    ┌─ QTabWidget ──────────────────────────────────────────────────┐
+    │  [Plot] [Details] [Statistics]                                 │
+    └───────────────────────────────────────────────────────────────┘
 """
 
-from PyQt6.QtWidgets import (
-    QWidget, QVBoxLayout, QHBoxLayout, QTabWidget, QTableWidget,
-    QTableWidgetItem, QTextEdit, QCheckBox, QPushButton, QLabel,
-    QGroupBox, QMessageBox, QHeaderView
-)
-from PyQt6.QtCore import Qt, pyqtSignal
-from PyQt6.QtGui import QIcon, QColor
-from typing import List, Dict, Optional
+from __future__ import annotations
+
+import math
 import numpy as np
+from typing import Optional, List
 
-from data_loader import GrainSizeData
-from k_calculations import KCalculationResult
+# ── matplotlib backend must be set before importing backends ──────────────────
+import matplotlib
+try:
+    matplotlib.use("QtAgg")
+    from matplotlib.backends.backend_qtagg import FigureCanvasQTAgg as FigureCanvas
+except ImportError:
+    matplotlib.use("Qt5Agg")
+    from matplotlib.backends.backend_qt5agg import FigureCanvasQTAgg as FigureCanvas  # type: ignore
+from matplotlib.figure import Figure
+
+# ── PyQt6 ─────────────────────────────────────────────────────────────────────
+from PyQt6.QtWidgets import (
+    QWidget, QVBoxLayout, QHBoxLayout, QLabel, QPushButton,
+    QTabWidget, QTableWidget, QTableWidgetItem, QHeaderView,
+    QScrollArea, QSizePolicy, QFileDialog, QFrame,
+)
+from PyQt6.QtCore import Qt, pyqtSignal, QSize
+from PyQt6.QtGui import QColor, QFont, QBrush, QPixmap, QPainter, QIcon
+
+# ── Internal ──────────────────────────────────────────────────────────────────
 from .comparison_plot_widget import ComparisonPlotWidget
-from .dataset_selection_dialog import DatasetSelectionDialog
+from .theme import C, F, icon as theme_icon
 
+
+def _dot_icon(color_hex: str, size: int = 8) -> QIcon:
+    """Create a small filled-circle QIcon in the given hex color."""
+    pix = QPixmap(size, size)
+    pix.fill(Qt.GlobalColor.transparent)
+    p = QPainter(pix)
+    p.setRenderHint(QPainter.RenderHint.Antialiasing)
+    p.setBrush(QColor(color_hex))
+    p.setPen(Qt.PenStyle.NoPen)
+    p.drawEllipse(0, 0, size, size)
+    p.end()
+    return QIcon(pix)
+
+
+# ── Dataset color palette (warm-earth, consistent with design spec) ────────────
+DATASET_COLORS: List[str] = [
+    '#3a7ea0', '#6b8e23', '#b46428', '#2a9d8f',
+    '#8b4513', '#c45c2e', '#4a6fa5', '#5e7b1a',
+    '#8b6914', '#2e6b7d',
+]
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Helper functions
+# ─────────────────────────────────────────────────────────────────────────────
+
+def _get_fines_pct(dataset) -> Optional[float]:
+    """Return % passing at 0.063 mm via log-linear interpolation.
+
+    particle_sizes is stored largest→smallest; we sort ascending for interp.
+    Returns None if there are fewer than 2 data points or 0.063 is out of range.
+    """
+    sizes = list(dataset.particle_sizes)
+    pcts = list(dataset.percent_passing)
+    if len(sizes) < 2:
+        return None
+
+    # Sort ascending by particle size
+    pairs = sorted(zip(sizes, pcts), key=lambda p: p[0])
+    xs = [p[0] for p in pairs]
+    ys = [p[1] for p in pairs]
+
+    target = 0.063  # mm
+
+    # Clamp check
+    if target <= xs[0]:
+        return ys[0]
+    if target >= xs[-1]:
+        return ys[-1]
+
+    # Find bracketing interval
+    for i in range(len(xs) - 1):
+        x0, x1 = xs[i], xs[i + 1]
+        y0, y1 = ys[i], ys[i + 1]
+        if x0 <= target <= x1:
+            if x0 <= 0 or x1 <= 0:
+                # Fallback to linear if log undefined
+                t = (target - x0) / (x1 - x0) if x1 != x0 else 0.0
+            else:
+                t = (math.log(target) - math.log(x0)) / (math.log(x1) - math.log(x0))
+            return y0 + t * (y1 - y0)
+
+    return None
+
+
+def _heat_color(norm: float) -> QColor:
+    """Map norm ∈ [0, 1] to a semi-transparent heat color (alpha=70).
+
+    0.0  → green  (0, 180, 80)
+    0.5  → yellow (220, 180, 80)
+    1.0  → red    (220, 0, 80)
+    """
+    norm = max(0.0, min(1.0, norm))
+    if norm <= 0.5:
+        t = norm / 0.5          # 0→1
+        r = int(0 + t * 220)    # 0 → 220
+        g = 180
+        b = 80
+    else:
+        t = (norm - 0.5) / 0.5  # 0→1
+        r = 220
+        g = int(180 - t * 180)  # 180 → 0
+        b = 80
+    return QColor(r, g, b, 70)
+
+
+def _perm_class(mean_k: float) -> str:
+    """Return a human-readable permeability classification for mean_k (m/s)."""
+    if mean_k > 1e-2:
+        return "Very High (Gravel)"
+    if mean_k > 1e-4:
+        return "High (Clean Sand)"
+    if mean_k > 1e-5:
+        return "Moderate (Fine Sand)"
+    if mean_k > 1e-7:
+        return "Low (Silt)"
+    return "Very Low (Clay)"
+
+
+def _perm_color(valid_k_list: list) -> str:
+    """Return hex color for the permeability class based on geometric mean."""
+    if not valid_k_list:
+        return C.TEXT_MUTED
+    mean_k = float(np.exp(np.mean(np.log(valid_k_list))))
+    if mean_k > 1e-2:
+        return "#2e7d32"   # dark green
+    if mean_k > 1e-4:
+        return "#558b2f"   # olive green
+    if mean_k > 1e-5:
+        return "#f57f17"   # amber
+    if mean_k > 1e-7:
+        return "#e65100"   # deep orange
+    return "#b71c1c"       # dark red
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Details tab panel header
+# ─────────────────────────────────────────────────────────────────────────────
+
+class _DetailsPanelHeader(QWidget):
+    """Header band for the two side-by-side panels in the Details tab.
+
+    Matches .cmp-panel-head from design concept: warm low background,
+    icon + bold label.
+    """
+
+    def __init__(self, title: str, parent=None):
+        super().__init__(parent)
+        self.setFixedHeight(30)
+        self.setAttribute(Qt.WidgetAttribute.WA_StyledBackground)
+        self.setStyleSheet(
+            f"background: {C.BG_LOW};"
+            f"border-bottom: 2px solid {C.BORDER_DK};"
+        )
+        lay = QHBoxLayout(self)
+        lay.setContentsMargins(12, 0, 12, 0)
+        lay.setSpacing(6)
+        lbl = QLabel(title)
+        lbl.setStyleSheet(
+            f"font-family: '{F.UI}'; font-size: {F.SZ_SM}pt; font-weight: 600;"
+            f"letter-spacing: 0.04em; color: {C.TEXT_MID};"
+            f"background: transparent; border: none;"
+        )
+        lay.addWidget(lbl)
+        lay.addStretch()
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# ComparisonTab
+# ─────────────────────────────────────────────────────────────────────────────
 
 class ComparisonTab(QWidget):
-    """
-    Tab for comparing multiple datasets side by side
-    """
+    """Main comparison widget — wires 3 sub-tabs: Plot, Details, Statistics."""
 
-    # Signals
+    # Emitted whenever update_comparison() completes successfully
     comparison_updated = pyqtSignal()
+
+    # ── Grain parameter definitions ──────────────────────────────────────────
+    # (label, tooltip, bold, olive-highlight)
+    _GRAIN_ROWS = [
+        ("D10",    "Effective size (mm)",           True,  True),
+        ("D16",    "16th percentile (mm)",           False, False),
+        ("D30",    "30th percentile (mm)",           True,  True),
+        ("D50",    "Median (mm)",                    True,  True),
+        ("D60",    "60th percentile (mm)",           True,  True),
+        ("D84",    "84th percentile (mm)",           False, False),
+        ("D90",    "90th percentile (mm)",           False, False),
+        ("D95",    "95th percentile (mm)",           False, False),
+        ("Cu",     "Uniformity coeff. D60/D10",      True,  True),
+        ("Cc",     "Curvature coeff.",               True,  True),
+        ("σ",      "Sorting coeff. √(D84/D16)",      False, False),
+        ("Fines%", "% passing 0.063 mm",             False, False),
+        ("USCS",   "Soil classification",            False, False),
+        ("Class",  "Gradation class",                False, False),
+    ]
 
     def __init__(self, parent=None):
         super().__init__(parent)
-        self.dataset_tabs = []  # Will be populated by main window
-        self.selected_datasets = []
 
-        self.init_ui()
+        self.dataset_tabs: list = []
+        self.selected_datasets: list = []
+        self._pinned: set[str] = set()
+        self._heat_on: bool = True
 
-    def init_ui(self):
-        """Initialize the UI"""
-        layout = QVBoxLayout(self)
+        self._build_ui()
 
-        # Control bar for selecting datasets
-        control_bar = self.create_control_bar()
-        layout.addLayout(control_bar)
+    # ── UI construction ───────────────────────────────────────────────────────
 
-        # Content tabs for different comparison views
-        self.content_tabs = QTabWidget()
+    def _build_ui(self) -> None:
+        root = QVBoxLayout(self)
+        root.setContentsMargins(0, 0, 0, 0)
+        root.setSpacing(0)
 
-        # Overlay plots tab
-        self.overlay_widget = self.create_overlay_plots_tab()
-        self.content_tabs.addTab(self.overlay_widget, "📊 Overlay Plots")
+        root.addWidget(self._build_header())
 
-        # Comparison table tab
-        self.comparison_table_widget = self.create_comparison_table_tab()
-        self.content_tabs.addTab(self.comparison_table_widget, "📋 Comparison Table")
+        self._tabs = QTabWidget()
+        self._tabs.setStyleSheet(
+            f"""
+            QTabWidget::pane {{
+                border: none;
+                background: {C.BG};
+            }}
+            QTabBar {{
+                background: {C.BG_RAISED};
+                border-bottom: 1px solid {C.BORDER};
+            }}
+            QTabBar::tab {{
+                background: transparent;
+                border: 1px solid transparent;
+                border-bottom: none;
+                border-radius: 3px 3px 0 0;
+                padding: 4px 18px;
+                margin-right: 1px;
+                margin-bottom: -1px;
+                font-family: "{F.UI}";
+                font-size: {F.SZ_SM}pt;
+                color: {C.TEXT_MUTED};
+                min-height: 26px;
+            }}
+            QTabBar::tab:selected {{
+                background: {C.BG};
+                border-color: {C.BORDER};
+                color: {C.TEXT};
+                font-weight: 600;
+            }}
+            QTabBar::tab:hover:!selected {{
+                background: {C.BG_LOW};
+                color: {C.TEXT_MID};
+                border-color: {C.BORDER};
+            }}
+            """
+        )
+        root.addWidget(self._tabs, 1)
 
-        # Statistical analysis tab
-        self.stats_widget = self.create_statistical_analysis_tab()
-        self.content_tabs.addTab(self.stats_widget, "📈 Statistical Analysis")
+        for page, label, fa_name in [
+            (self._build_plot_tab(),       "Plot",       "fa6s.chart-area"),
+            (self._build_details_tab(),    "Details",    "fa6s.table"),
+            (self._build_statistics_tab(), "Statistics", "fa6s.chart-bar"),
+        ]:
+            try:
+                self._tabs.addTab(page, theme_icon(fa_name, C.TEXT_MUTED), label)
+            except Exception:
+                self._tabs.addTab(page, label)
+        self._tabs.setIconSize(QSize(12, 12))
 
-        layout.addWidget(self.content_tabs)
+    def _build_header(self) -> QWidget:
+        """Top 52 px header bar — title/subtitle block + action buttons."""
+        bar = QWidget()
+        bar.setFixedHeight(52)
+        bar.setAttribute(Qt.WidgetAttribute.WA_StyledBackground)
+        bar.setStyleSheet(
+            f"background: {C.BG_RAISED}; border-bottom: 1px solid {C.BORDER_DK};"
+        )
+        lay = QHBoxLayout(bar)
+        lay.setContentsMargins(14, 0, 10, 0)
+        lay.setSpacing(8)
 
-    def create_control_bar(self):
-        """Create the control bar for dataset selection"""
-        control_layout = QHBoxLayout()
+        # Title + subtitle block
+        title_block = QWidget()
+        title_block.setStyleSheet("background: transparent;")
+        tb_v = QVBoxLayout(title_block)
+        tb_v.setContentsMargins(0, 0, 0, 0)
+        tb_v.setSpacing(1)
 
-        control_layout.addWidget(QLabel("Select Datasets to Compare:"))
+        title = QLabel("Batch Comparison")
+        title.setStyleSheet(
+            f"font-family: '{F.UI}'; font-size: {F.SZ_LG}pt; font-weight: 700;"
+            f"color: {C.TEXT}; background: transparent; border: none;"
+        )
+        tb_v.addWidget(title)
 
-        # Container for selection UI (either checkboxes or dialog button)
-        self.selection_container = QHBoxLayout()
-        control_layout.addLayout(self.selection_container)
+        self._count_label = QLabel("Load datasets to compare")
+        self._count_label.setStyleSheet(
+            f"font-family: '{F.UI}'; font-size: {F.SZ_XS}pt; color: {C.TEXT_MUTED};"
+            f"background: transparent; border: none;"
+        )
+        tb_v.addWidget(self._count_label)
 
-        # Dataset checkboxes layout (for ≤5 datasets)
-        self.dataset_checks_layout = QHBoxLayout()
+        lay.addWidget(title_block)
+        lay.addStretch(1)
 
-        # Dialog button (for >5 datasets)
-        self.dataset_dialog_btn = QPushButton("📋 Select Datasets...")
-        self.dataset_dialog_btn.clicked.connect(self.open_dataset_selection_dialog)
-        self.dataset_dialog_btn.setToolTip("Open dialog to select from multiple datasets")
+        # Manage Datasets button (placeholder)
+        self._manage_btn = QPushButton("Manage Datasets")
+        self._manage_btn.setFixedHeight(28)
+        try:
+            self._manage_btn.setIcon(theme_icon("fa6s.list-check", C.TEXT_MID))
+            self._manage_btn.setIconSize(QSize(11, 11))
+        except Exception:
+            pass
+        self._manage_btn.setEnabled(False)
+        self._manage_btn.setToolTip("Coming soon — manage which datasets appear in comparison")
+        self._manage_btn.clicked.connect(self._on_manage_datasets)
 
-        # Selection summary label (for dialog mode)
-        self.selection_summary_label = QLabel("No datasets selected")
-        self.selection_summary_label.setStyleSheet("color: #666; font-style: italic; margin-left: 8px;")
+        self._update_btn = QPushButton("Update")
+        self._update_btn.setProperty("primary", "true")
+        self._update_btn.setFixedHeight(28)
+        self._update_btn.setEnabled(False)
+        self._update_btn.clicked.connect(self.update_comparison)
 
-        control_layout.addStretch()
+        self._export_btn = QPushButton("Export Selected")
+        self._export_btn.setFixedHeight(28)
+        self._export_btn.setEnabled(False)
+        self._export_btn.clicked.connect(self._export_plot)
+        try:
+            self._export_btn.setIcon(theme_icon("fa6s.file-export", C.TEXT_MID))
+            self._export_btn.setIconSize(QSize(11, 11))
+        except Exception:
+            pass
 
-        # Update button
-        self.update_btn = QPushButton("🔄 Update Comparison")
-        self.update_btn.clicked.connect(self.update_comparison)
-        control_layout.addWidget(self.update_btn)
+        lay.addWidget(self._manage_btn)
+        lay.addWidget(self._update_btn)
+        lay.addWidget(self._export_btn)
+        return bar
 
-        # Export button
-        self.export_btn = QPushButton("📤 Export Comparison")
-        self.export_btn.clicked.connect(self.export_comparison)
-        control_layout.addWidget(self.export_btn)
+    # ── Plot tab ──────────────────────────────────────────────────────────────
 
-        return control_layout
+    def _build_plot_tab(self) -> QWidget:
+        """Plot tab: canvas on left, pinned-dataset sidebar on right."""
+        page = QWidget()
+        h = QHBoxLayout(page)
+        h.setContentsMargins(0, 0, 0, 0)
+        h.setSpacing(0)
 
-    def create_overlay_plots_tab(self):
-        """Create the enhanced plots tab with ComparisonPlotWidget"""
-        # Use the new ComparisonPlotWidget
-        self.comparison_plot_widget = ComparisonPlotWidget()
-        return self.comparison_plot_widget
+        # Main plot widget
+        self._plot_widget = ComparisonPlotWidget()
+        self._plot_widget.dataset_colors = DATASET_COLORS
+        h.addWidget(self._plot_widget, 1)
 
-    def create_comparison_table_tab(self):
-        """Create the enhanced comparison table tab with 2x2 grid layout"""
-        widget = QWidget()
-        from PyQt6.QtWidgets import QGridLayout
-        layout = QGridLayout(widget)
-        layout.setSpacing(8)
-        layout.setContentsMargins(8, 8, 8, 8)
+        # Right sidebar — fixed 180 px
+        sidebar = QFrame()
+        sidebar.setFixedWidth(180)
+        sidebar.setStyleSheet(
+            f"background: {C.BG_RAISED}; border-left: 1px solid {C.BORDER};"
+        )
+        sb_lay = QVBoxLayout(sidebar)
+        sb_lay.setContentsMargins(0, 0, 0, 0)
+        sb_lay.setSpacing(0)
 
-        # Section A: Dataset Overview
-        overview_group = QGroupBox("📋 Dataset Overview")
-        overview_group.setStyleSheet("""
-            QGroupBox {
-                font-weight: bold;
-                font-size: 11pt;
-                border: 2px solid #8b7355;
-                border-radius: 5px;
-                margin-top: 8px;
-                padding-top: 12px;
-            }
-            QGroupBox::title {
-                subcontrol-origin: margin;
-                subcontrol-position: top left;
-                padding: 2px 8px;
-                color: #5d4e37;
-            }
-        """)
-        overview_layout = QVBoxLayout(overview_group)
+        # "DATASETS" header band
+        hdr = QLabel("DATASETS")
+        hdr.setFixedHeight(30)
+        hdr.setAlignment(Qt.AlignmentFlag.AlignVCenter | Qt.AlignmentFlag.AlignLeft)
+        hdr.setStyleSheet(
+            f"padding-left: 10px; font-size: {F.SZ_XS}pt; font-weight: 700;"
+            f"letter-spacing: 0.10em; color: {C.TEXT_MUTED};"
+            f"background: {C.BG_LOW}; border-bottom: 1px solid {C.BORDER};"
+        )
+        sb_lay.addWidget(hdr)
 
-        self.overview_table = QTableWidget()
-        self.overview_table.setStyleSheet(self._get_table_style())
-        overview_layout.addWidget(self.overview_table)
+        # Scrollable pin list
+        scroll = QScrollArea()
+        scroll.setWidgetResizable(True)
+        scroll.setFrameShape(QFrame.Shape.NoFrame)
+        scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+        self._pin_list_widget = QWidget()
+        self._pin_list_layout = QVBoxLayout(self._pin_list_widget)
+        self._pin_list_layout.setContentsMargins(0, 0, 0, 0)
+        self._pin_list_layout.setSpacing(0)
+        self._pin_list_layout.addStretch(1)
+        scroll.setWidget(self._pin_list_widget)
+        sb_lay.addWidget(scroll, 1)
 
-        # Section B: Grain Size Parameters
-        grain_group = QGroupBox("🔬 Grain Size Parameters")
-        grain_group.setStyleSheet("""
-            QGroupBox {
-                font-weight: bold;
-                font-size: 11pt;
-                border: 2px solid #8b7355;
-                border-radius: 5px;
-                margin-top: 8px;
-                padding-top: 12px;
-            }
-            QGroupBox::title {
-                subcontrol-origin: margin;
-                subcontrol-position: top left;
-                padding: 2px 8px;
-                color: #5d4e37;
-            }
-        """)
-        grain_layout = QVBoxLayout(grain_group)
+        h.addWidget(sidebar)
+        return page
 
-        self.grain_comparison_table = QTableWidget()
-        self.grain_comparison_table.setStyleSheet(self._get_table_style())
-        grain_layout.addWidget(self.grain_comparison_table)
-
-        # Section C: K-values comparison table
-        k_group = QGroupBox("💧 Hydraulic Conductivity Comparison")
-        k_group.setStyleSheet("""
-            QGroupBox {
-                font-weight: bold;
-                font-size: 11pt;
-                border: 2px solid #8b7355;
-                border-radius: 5px;
-                margin-top: 8px;
-                padding-top: 12px;
-            }
-            QGroupBox::title {
-                subcontrol-origin: margin;
-                subcontrol-position: top left;
-                padding: 2px 8px;
-                color: #5d4e37;
-            }
-        """)
-        k_layout = QVBoxLayout(k_group)
-
-        self.k_comparison_table = QTableWidget()
-        self.k_comparison_table.setStyleSheet(self._get_table_style())
-        k_layout.addWidget(self.k_comparison_table)
-
-        # Section D: Permeability Classification
-        perm_group = QGroupBox("📊 Permeability Classification")
-        perm_group.setStyleSheet("""
-            QGroupBox {
-                font-weight: bold;
-                font-size: 11pt;
-                border: 2px solid #8b7355;
-                border-radius: 5px;
-                margin-top: 8px;
-                padding-top: 12px;
-            }
-            QGroupBox::title {
-                subcontrol-origin: margin;
-                subcontrol-position: top left;
-                padding: 2px 8px;
-                color: #5d4e37;
-            }
-        """)
-        perm_layout = QVBoxLayout(perm_group)
-
-        self.permeability_table = QTableWidget()
-        self.permeability_table.setStyleSheet(self._get_table_style())
-        perm_layout.addWidget(self.permeability_table)
-
-        # Add all sections to 2x2 grid layout
-        layout.addWidget(overview_group, 0, 0)  # Top-left
-        layout.addWidget(grain_group, 0, 1)     # Top-right
-        layout.addWidget(k_group, 1, 0)         # Bottom-left
-        layout.addWidget(perm_group, 1, 1)      # Bottom-right
-
-        return widget
-
-    def _get_table_style(self):
-        """Get consistent table styling"""
-        return """
-            QTableWidget {
-                gridline-color: #d0d0d0;
-                font-size: 10pt;
-                background-color: white;
-                alternate-background-color: #f9f9f9;
-            }
-            QTableWidget::item {
-                padding: 6px;
-            }
-            QHeaderView::section {
-                background-color: #e8e8e8;
-                padding: 6px;
-                border: 1px solid #c0c0c0;
-                font-weight: bold;
-                font-size: 10pt;
-            }
-        """
-
-    def create_statistical_analysis_tab(self):
-        """Create the enhanced visual statistical analysis tab with side-by-side plots"""
-        widget = QWidget()
-        layout = QVBoxLayout(widget)
-        layout.setSpacing(8)
-        layout.setContentsMargins(8, 8, 8, 8)
-
-        # Import matplotlib
-        import matplotlib
-        matplotlib.use('Qt5Agg')
-        from matplotlib.backends.backend_qt5agg import FigureCanvasQTAgg as FigureCanvas
-        from matplotlib.figure import Figure
-
-        # Top section: Side-by-side plots
-        plots_layout = QHBoxLayout()
-        plots_layout.setSpacing(8)
-
-        # Left plot: K-Value Distribution Box Plot
-        k_dist_group = QGroupBox("💧 K-Value Distribution Analysis")
-        k_dist_group.setStyleSheet("""
-            QGroupBox {
-                font-weight: bold;
-                font-size: 11pt;
-                border: 2px solid #8b7355;
-                border-radius: 5px;
-                margin-top: 8px;
-                padding-top: 12px;
-            }
-            QGroupBox::title {
-                subcontrol-origin: margin;
-                subcontrol-position: top left;
-                padding: 2px 8px;
-                color: #5d4e37;
-            }
-        """)
-        k_dist_layout = QVBoxLayout(k_dist_group)
-
-        self.k_boxplot_figure = Figure(figsize=(6, 5))
-        self.k_boxplot_figure.patch.set_facecolor('#fafaf7')
-        self.k_boxplot_canvas = FigureCanvas(self.k_boxplot_figure)
-        k_dist_layout.addWidget(self.k_boxplot_canvas)
-
-        # Right plot: Method Performance Heatmap
-        method_perf_group = QGroupBox("🎯 Method Applicability Matrix")
-        method_perf_group.setStyleSheet("""
-            QGroupBox {
-                font-weight: bold;
-                font-size: 11pt;
-                border: 2px solid #8b7355;
-                border-radius: 5px;
-                margin-top: 8px;
-                padding-top: 12px;
-            }
-            QGroupBox::title {
-                subcontrol-origin: margin;
-                subcontrol-position: top left;
-                padding: 2px 8px;
-                color: #5d4e37;
-            }
-        """)
-        method_perf_layout = QVBoxLayout(method_perf_group)
-
-        self.method_heatmap_figure = Figure(figsize=(6, 5))
-        self.method_heatmap_figure.patch.set_facecolor('#fafaf7')
-        self.method_heatmap_canvas = FigureCanvas(self.method_heatmap_figure)
-        method_perf_layout.addWidget(self.method_heatmap_canvas)
-
-        # Add plots side by side
-        plots_layout.addWidget(k_dist_group)
-        plots_layout.addWidget(method_perf_group)
-
-        layout.addLayout(plots_layout, stretch=1)
-
-        # Bottom section: Statistical Summary Text
-        summary_group = QGroupBox("📊 Statistical Summary")
-        summary_group.setStyleSheet("""
-            QGroupBox {
-                font-weight: bold;
-                font-size: 11pt;
-                border: 2px solid #8b7355;
-                border-radius: 5px;
-                margin-top: 8px;
-                padding-top: 12px;
-            }
-            QGroupBox::title {
-                subcontrol-origin: margin;
-                subcontrol-position: top left;
-                padding: 2px 8px;
-                color: #5d4e37;
-            }
-        """)
-        summary_layout = QVBoxLayout(summary_group)
-
-        self.stats_text = QTextEdit()
-        self.stats_text.setReadOnly(True)
-        self.stats_text.setMinimumHeight(150)
-        self.stats_text.setMaximumHeight(250)
-        self.stats_text.setStyleSheet("""
-            QTextEdit {
-                background-color: #fafafa;
-                border: 1px solid #d0d0d0;
-                padding: 8px;
-                font-family: 'Consolas', 'Courier New', monospace;
-                font-size: 10pt;
-            }
-        """)
-
-        summary_layout.addWidget(self.stats_text)
-        layout.addWidget(summary_group, stretch=0)
-
-        return widget
-
-    def set_dataset_tabs(self, dataset_tabs: List):
-        """Set the available dataset tabs"""
-        self.dataset_tabs = dataset_tabs
-        self.update_dataset_checkboxes()
-
-    def update_dataset_checkboxes(self):
-        """Update the dataset selection UI (checkboxes for ≤5 datasets, dialog for >5)"""
-        # Clear existing UI elements
-        self.clear_selection_container()
-
-        if len(self.dataset_tabs) <= 5:
-            # Use checkboxes for small number of datasets
-            self.use_checkbox_mode()
-        else:
-            # Use dialog button for large number of datasets
-            self.use_dialog_mode()
-
-    def clear_selection_container(self):
-        """Clear all widgets from the selection container"""
-        # Clear checkboxes layout
-        while self.dataset_checks_layout.count():
-            item = self.dataset_checks_layout.takeAt(0)
+    def _refresh_pin_list(self) -> None:
+        """Rebuild the pin-list rows from self.dataset_tabs."""
+        # Remove all except the trailing stretch
+        while self._pin_list_layout.count() > 1:
+            item = self._pin_list_layout.takeAt(0)
             if item.widget():
                 item.widget().deleteLater()
 
-        # Remove all widgets from selection container
-        while self.selection_container.count():
-            item = self.selection_container.takeAt(0)
-            if item.widget():
-                item.widget().setParent(None)
-            elif item.layout():
-                # Remove layout but don't delete it as we might reuse it
-                pass
-
-    def use_checkbox_mode(self):
-        """Set up UI for checkbox mode (≤5 datasets)"""
-        self.selection_container.addLayout(self.dataset_checks_layout)
-
-        # Add checkboxes for each dataset
-        for tab in self.dataset_tabs:
-            checkbox = QCheckBox(tab.get_dataset_name())
-            checkbox.setChecked(True)  # Default to all selected
-            self.dataset_checks_layout.addWidget(checkbox)
-
-    def use_dialog_mode(self):
-        """Set up UI for dialog mode (>5 datasets)"""
-        self.selection_container.addWidget(self.dataset_dialog_btn)
-        self.selection_container.addWidget(self.selection_summary_label)
-
-        # Initialize with all datasets selected
-        self.selected_datasets = self.dataset_tabs.copy()
-        self.update_selection_summary()
-
-    def open_dataset_selection_dialog(self):
-        """Open the dataset selection dialog for large numbers of datasets"""
-        dialog = DatasetSelectionDialog(
-            self.dataset_tabs,
-            getattr(self, 'selected_datasets', []),
-            self
-        )
-
-        if dialog.exec():
-            self.selected_datasets = dialog.get_selected_tabs()
-            self.update_selection_summary()
-
-    def update_selection_summary(self):
-        """Update the selection summary label in dialog mode"""
-        if not hasattr(self, 'selected_datasets'):
-            self.selected_datasets = []
-
-        count = len(self.selected_datasets)
-        if count == 0:
-            self.selection_summary_label.setText("No datasets selected")
-            self.selection_summary_label.setStyleSheet("color: #d32f2f; font-style: italic; margin-left: 8px;")
-        elif count == 1:
-            self.selection_summary_label.setText("1 dataset selected (need ≥2)")
-            self.selection_summary_label.setStyleSheet("color: #ff9800; font-style: italic; margin-left: 8px;")
-        else:
-            self.selection_summary_label.setText(f"{count} datasets selected")
-            self.selection_summary_label.setStyleSheet("color: #4caf50; font-style: italic; margin-left: 8px;")
-
-    def get_selected_datasets(self) -> List:
-        """Get the currently selected datasets"""
-        if len(self.dataset_tabs) <= 5:
-            # Checkbox mode
-            selected = []
-            for i in range(self.dataset_checks_layout.count()):
-                checkbox = self.dataset_checks_layout.itemAt(i).widget()
-                if checkbox and checkbox.isChecked():
-                    # Find corresponding dataset tab
-                    for tab in self.dataset_tabs:
-                        if tab.get_dataset_name() == checkbox.text():
-                            selected.append(tab)
-                            break
-            return selected
-        else:
-            # Dialog mode
-            return getattr(self, 'selected_datasets', [])
-
-    def update_comparison(self):
-        """Update all comparison views"""
-        self.selected_datasets = self.get_selected_datasets()
-
-        if len(self.selected_datasets) < 2:
-            QMessageBox.information(self, "Select Datasets",
-                                  "Please select at least 2 datasets to compare")
-            return
-
-        # Update all views
-        self.update_overlay_plot()
-        self.update_comparison_tables()
-        self.update_statistical_analysis()
-
-        self.comparison_updated.emit()
-
-    def update_overlay_plot(self):
-        """Update the plot widget with selected datasets"""
-        if not self.selected_datasets:
-            # Clear plot if no datasets selected
-            self.comparison_plot_widget.datasets = []
-            self.comparison_plot_widget.show_empty_state("Select datasets and click 'Update Comparison'")
-            return
-
-        # Update the comparison plot widget with selected datasets
-        self.comparison_plot_widget.set_datasets(self.selected_datasets)
-        self.comparison_plot_widget.refresh_plot()
-
-    def update_comparison_tables(self):
-        """Update all comparison tables with color-coding"""
-        if not self.selected_datasets:
-            # Clear all tables if no datasets selected
-            self.overview_table.setRowCount(0)
-            self.overview_table.setColumnCount(0)
-            self.grain_comparison_table.setRowCount(0)
-            self.grain_comparison_table.setColumnCount(0)
-            self.k_comparison_table.setRowCount(0)
-            self.k_comparison_table.setColumnCount(0)
-            self.permeability_table.setRowCount(0)
-            self.permeability_table.setColumnCount(0)
-            return
-
-        # Update all sections
-        self.update_overview_table()
-        self.update_grain_parameters_table()
-        self.update_k_values_table()
-        self.update_permeability_classification_table()
-
-    def update_overview_table(self):
-        """Update the dataset overview table"""
-        overview_params = ["Soil Classification", "Temperature (°C)", "Porosity", "Data Points"]
-
-        self.overview_table.setRowCount(len(overview_params))
-        self.overview_table.setColumnCount(len(self.selected_datasets) + 1)
-        self.overview_table.setAlternatingRowColors(True)
-
-        # Set headers
-        headers = ["Property"] + [tab.get_dataset_name() for tab in self.selected_datasets]
-        self.overview_table.setHorizontalHeaderLabels(headers)
-
-        # Fill data
-        for row, param in enumerate(overview_params):
-            param_item = QTableWidgetItem(param)
-            param_item.setFlags(param_item.flags() & ~Qt.ItemFlag.ItemIsEditable)
-            self.overview_table.setItem(row, 0, param_item)
-
-            for col, tab in enumerate(self.selected_datasets, 1):
-                dataset = tab.get_dataset()
-                value = ""
-
-                if param == "Soil Classification":
-                    value = dataset.classify_soil()
-                elif param == "Temperature (°C)":
-                    value = f"{dataset.temperature:.1f}"
-                elif param == "Porosity":
-                    porosity = getattr(dataset, 'current_porosity', dataset.porosity)
-                    value = f"{porosity:.4f}" if porosity else "N/A"
-                elif param == "Data Points":
-                    value = str(len(dataset.particle_sizes))
-
-                item = QTableWidgetItem(value)
-                item.setFlags(item.flags() & ~Qt.ItemFlag.ItemIsEditable)
-                item.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
-                self.overview_table.setItem(row, col, item)
-
-        self.overview_table.resizeColumnsToContents()
-
-    def update_grain_parameters_table(self):
-        """Update grain size parameters table with color-coding"""
-        params = ["D10 (mm)", "D20 (mm)", "D30 (mm)", "D50 (mm)", "D60 (mm)",
-                 "Uniformity Coefficient (Cu)", "Curvature Coefficient (Cc)", "Gradation"]
-
-        self.grain_comparison_table.setRowCount(len(params))
-        self.grain_comparison_table.setColumnCount(len(self.selected_datasets) + 2)  # +2 for parameter and mean
-        self.grain_comparison_table.setAlternatingRowColors(True)
-
-        # Set headers
-        headers = ["Parameter"] + [tab.get_dataset_name() for tab in self.selected_datasets] + ["Mean/Range"]
-        self.grain_comparison_table.setHorizontalHeaderLabels(headers)
-
-        # Fill data
-        for row, param in enumerate(params):
-            param_item = QTableWidgetItem(param)
-            param_item.setFlags(param_item.flags() & ~Qt.ItemFlag.ItemIsEditable)
-            self.grain_comparison_table.setItem(row, 0, param_item)
-
-            # Collect values for color-coding
-            values_for_row = []
-
-            for col, tab in enumerate(self.selected_datasets, 1):
-                dataset = tab.get_dataset()
-                value = ""
-                numeric_value = None
-
-                if param == "D10 (mm)":
-                    d10 = dataset.get_d10()
-                    value = f"{d10:.3f}" if d10 else "N/A"
-                    numeric_value = d10
-                elif param == "D20 (mm)":
-                    d20 = dataset.get_d20()
-                    value = f"{d20:.3f}" if d20 else "N/A"
-                    numeric_value = d20
-                elif param == "D30 (mm)":
-                    d30 = dataset.get_d30()
-                    value = f"{d30:.3f}" if d30 else "N/A"
-                    numeric_value = d30
-                elif param == "D50 (mm)":
-                    d50 = dataset.get_d50()
-                    value = f"{d50:.3f}" if d50 else "N/A"
-                    numeric_value = d50
-                elif param == "D60 (mm)":
-                    d60 = dataset.get_d60()
-                    value = f"{d60:.3f}" if d60 else "N/A"
-                    numeric_value = d60
-                elif param == "Uniformity Coefficient (Cu)":
-                    d10, d60 = dataset.get_d10(), dataset.get_d60()
-                    if d10 and d60 and d10 > 0:
-                        cu = d60 / d10
-                        value = f"{cu:.2f}"
-                        numeric_value = cu
-                    else:
-                        value = "N/A"
-                elif param == "Curvature Coefficient (Cc)":
-                    d10, d30, d60 = dataset.get_d10(), dataset.get_d30(), dataset.get_d60()
-                    if d10 and d30 and d60 and d10 > 0 and d60 > 0:
-                        cc = (d30*d30)/(d10*d60)
-                        value = f"{cc:.2f}"
-                        numeric_value = cc
-                    else:
-                        value = "N/A"
-                elif param == "Gradation":
-                    d10, d60 = dataset.get_d10(), dataset.get_d60()
-                    if d10 and d60 and d10 > 0:
-                        cu = d60 / d10
-                        if cu < 4:
-                            value = "Uniform"
-                        elif cu < 6:
-                            value = "Moderate"
-                        else:
-                            value = "Well-graded"
-                    else:
-                        value = "N/A"
-
-                item = QTableWidgetItem(value)
-                item.setFlags(item.flags() & ~Qt.ItemFlag.ItemIsEditable)
-                item.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
-
-                # Store numeric value for color-coding
-                if numeric_value is not None:
-                    item.setData(Qt.ItemDataRole.UserRole, numeric_value)
-                    values_for_row.append((col, numeric_value))
-
-                self.grain_comparison_table.setItem(row, col, item)
-
-            # Apply color-coding for numeric params (not Gradation)
-            if param != "Gradation" and len(values_for_row) > 1:
-                numeric_vals = [v[1] for v in values_for_row]
-                min_val = min(numeric_vals)
-                max_val = max(numeric_vals)
-
-                for col, val in values_for_row:
-                    item = self.grain_comparison_table.item(row, col)
-                    normalized = (val - min_val) / (max_val - min_val) if max_val > min_val else 0.5
-
-                    # For Cu, higher is better (well-graded) - reverse colors
-                    if param == "Uniformity Coefficient (Cu)":
-                        color = self._interpolate_color(normalized, reverse=True)
-                    else:
-                        color = self._interpolate_color(normalized)
-
-                    item.setBackground(color)
-
-            # Add statistics column
-            if values_for_row:
-                numeric_vals = [v[1] for v in values_for_row]
-                mean_val = np.mean(numeric_vals)
-                std_val = np.std(numeric_vals)
-                cv = (std_val / mean_val * 100) if mean_val > 0 else 0
-
-                stats_str = f"μ={mean_val:.2f}\nσ={std_val:.2f}\nCV={cv:.1f}%"
-                stats_item = QTableWidgetItem(stats_str)
-                stats_item.setFlags(stats_item.flags() & ~Qt.ItemFlag.ItemIsEditable)
-                stats_item.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
-                stats_item.setBackground(QColor(240, 240, 240))
-                self.grain_comparison_table.setItem(row, len(self.selected_datasets) + 1, stats_item)
-
-        # Resize columns
-        self.grain_comparison_table.resizeColumnsToContents()
-
-        # Update K-values table if calculations exist
-        self.update_k_values_table()
-
-    def update_k_values_table(self):
-        """Update the K-values comparison table"""
-        # Get all unique methods from all datasets
-        all_methods = set()
-        for tab in self.selected_datasets:
-            results = tab.get_results()
-            for result in results:
-                all_methods.add(result.method_name)
-
-        if not all_methods:
-            self.k_comparison_table.setRowCount(1)
-            self.k_comparison_table.setColumnCount(1)
-            self.k_comparison_table.setItem(0, 0,
-                QTableWidgetItem("No K-value calculations available"))
-            return
-
-        methods = sorted(list(all_methods))
-
-        self.k_comparison_table.setRowCount(len(methods) + 2)  # +2 for Mean and Range
-        self.k_comparison_table.setColumnCount(len(self.selected_datasets) + 1)
-
-        # Set headers
-        headers = ["Method"] + [tab.get_dataset_name() for tab in self.selected_datasets]
-        self.k_comparison_table.setHorizontalHeaderLabels(headers)
-
-        # Fill K-values
-        for row, method in enumerate(methods):
-            self.k_comparison_table.setItem(row, 0, QTableWidgetItem(method))
-
-            for col, tab in enumerate(self.selected_datasets, 1):
-                results = tab.get_results()
-                k_value = None
-
-                for result in results:
-                    if result.method_name == method:
-                        k_value = result.k_value
-                        break
-
-                value = f"{k_value:.2e}" if k_value else "N/A"
-                self.k_comparison_table.setItem(row, col, QTableWidgetItem(value))
-
-        # Add mean row
-        mean_row = len(methods)
-        self.k_comparison_table.setItem(mean_row, 0, QTableWidgetItem("Mean K"))
-
-        for col, tab in enumerate(self.selected_datasets, 1):
-            results = tab.get_results()
-            valid_k = [r.k_value for r in results if r.k_value is not None and r.k_value > 0]
-            if valid_k:
-                mean_k = np.mean(valid_k)
-                self.k_comparison_table.setItem(mean_row, col,
-                    QTableWidgetItem(f"{mean_k:.2e}"))
-            else:
-                self.k_comparison_table.setItem(mean_row, col,
-                    QTableWidgetItem("N/A"))
-
-        # Add range row
-        range_row = len(methods) + 1
-        self.k_comparison_table.setItem(range_row, 0, QTableWidgetItem("Range"))
-
-        for col, tab in enumerate(self.selected_datasets, 1):
-            results = tab.get_results()
-            valid_k = [r.k_value for r in results if r.k_value is not None and r.k_value > 0]
-            if valid_k:
-                min_k, max_k = np.min(valid_k), np.max(valid_k)
-                self.k_comparison_table.setItem(range_row, col,
-                    QTableWidgetItem(f"{min_k:.1e} - {max_k:.1e}"))
-            else:
-                self.k_comparison_table.setItem(range_row, col,
-                    QTableWidgetItem("N/A"))
-
-        # Resize columns
-        self.k_comparison_table.resizeColumnsToContents()
-
-    def update_statistical_analysis(self):
-        """Update the visual statistical analysis with plots and text"""
-        if not self.selected_datasets:
-            # Clear plots and show empty message
-            self.k_boxplot_figure.clear()
-            ax1 = self.k_boxplot_figure.add_subplot(1, 1, 1)
-            ax1.text(0.5, 0.5, 'Select datasets and click "Update Comparison"',
-                    transform=ax1.transAxes, ha='center', va='center',
-                    fontsize=12, color='gray')
-            ax1.set_xticks([])
-            ax1.set_yticks([])
-            self.k_boxplot_canvas.draw()
-
-            self.method_heatmap_figure.clear()
-            ax2 = self.method_heatmap_figure.add_subplot(1, 1, 1)
-            ax2.text(0.5, 0.5, 'Select datasets and click "Update Comparison"',
-                    transform=ax2.transAxes, ha='center', va='center',
-                    fontsize=12, color='gray')
-            ax2.set_xticks([])
-            ax2.set_yticks([])
-            self.method_heatmap_canvas.draw()
-
-            self.stats_text.setPlainText("Select datasets and click 'Update Comparison' to view statistical analysis")
-            return
-
-        # Update visual plots
-        self.plot_k_value_boxplots()
-        self.plot_method_applicability_heatmap()
-
-        analysis = "Statistical Comparison Analysis\n"
-        analysis += "=" * 50 + "\n\n"
-
-        # Dataset names
-        analysis += "Datasets Compared:\n"
-        for tab in self.selected_datasets:
-            analysis += f"  • {tab.get_dataset_name()}\n"
-        analysis += "\n"
-
-        # Grain size statistics
-        analysis += "Grain Size Variability:\n"
-        analysis += "-" * 30 + "\n"
-
-        for tab in self.selected_datasets:
-            dataset = tab.get_dataset()
-            d10, d60 = dataset.get_d10(), dataset.get_d60()
-            if d10 and d60:
-                cu = d60 / d10
-                analysis += f"{dataset.sample_name}:\n"
-                analysis += f"  Cu = {cu:.2f} "
-                if cu < 4:
-                    analysis += "(Uniform)\n"
-                elif cu < 6:
-                    analysis += "(Moderately graded)\n"
-                else:
-                    analysis += "(Well-graded)\n"
-
-        analysis += "\n"
-
-        # K-value comparison
-        analysis += "K-Value Comparison:\n"
-        analysis += "-" * 30 + "\n"
-
-        all_k_values = {}
-        for tab in self.selected_datasets:
-            results = tab.get_results()
-            valid_k = [r.k_value for r in results if r.k_value is not None and r.k_value > 0]
-            if valid_k:
-                all_k_values[tab.get_dataset_name()] = valid_k
-
-        if all_k_values:
-            # Find highest and lowest
-            mean_k_values = {name: np.mean(k_list) for name, k_list in all_k_values.items()}
-
-            if mean_k_values:
-                highest = max(mean_k_values.items(), key=lambda x: x[1])
-                lowest = min(mean_k_values.items(), key=lambda x: x[1])
-
-                analysis += f"Highest mean K: {highest[0]} ({highest[1]:.2e} m/s)\n"
-                analysis += f"Lowest mean K: {lowest[0]} ({lowest[1]:.2e} m/s)\n"
-                analysis += f"Variability: {highest[1]/lowest[1]:.1f}x difference\n\n"
-
-        # Soil classification summary
-        analysis += "Soil Classifications:\n"
-        analysis += "-" * 30 + "\n"
-
-        classifications = {}
-        for tab in self.selected_datasets:
-            dataset = tab.get_dataset()
-            soil_type = dataset.classify_soil()
-            classifications[dataset.sample_name] = soil_type
-
-        for name, soil_type in classifications.items():
-            analysis += f"{name}: {soil_type}\n"
-
-        self.stats_text.setPlainText(analysis)
-
-    def export_comparison(self):
-        """Export comparison results"""
-        from PyQt6.QtWidgets import QFileDialog
-
-        file_path, _ = QFileDialog.getSaveFileName(
-            self,
-            "Export Comparison Plot",
-            "comparison_plot.png",
-            "PNG Files (*.png);;SVG Files (*.svg)"
-        )
-
-        if file_path:
+        for i, tab in enumerate(self.dataset_tabs):
+            name = tab.get_dataset_name()
+            color = DATASET_COLORS[i % len(DATASET_COLORS)]
+            pinned = name in self._pinned
+
+            row = QWidget()
+            row.setFixedHeight(34)
+            row.setStyleSheet(
+                f"background: transparent; border-bottom: 1px solid {C.BORDER};"
+            )
+            rl = QHBoxLayout(row)
+            rl.setContentsMargins(8, 0, 6, 0)
+            rl.setSpacing(6)
+
+            dot = QLabel("●")
+            dot.setStyleSheet(
+                f"color: {color}; font-size: 10pt;"
+                f"background: transparent; border: none;"
+            )
+            dot.setFixedWidth(14)
+            rl.addWidget(dot)
+
+            lbl = QLabel(name)
+            lbl.setStyleSheet(
+                f"font-size: {F.SZ_SM}pt; color: {C.TEXT};"
+                f"background: transparent; border: none;"
+            )
+            lbl.setToolTip(name)
+            rl.addWidget(lbl, 1)
+
+            pin_btn = QPushButton()
+            pin_btn.setFixedSize(22, 22)
+            pin_btn.setToolTip("Unpin from view" if pinned else "Pin to view")
+            pin_btn.setStyleSheet(
+                f"QPushButton {{ border: none; border-radius: 3px; padding: 0;"
+                f"  background: {'rgba(107,142,35,0.15)' if pinned else 'transparent'}; }}"
+                f"QPushButton:hover {{ background: rgba(0,0,0,0.07); }}"
+            )
             try:
-                self.comparison_plot_widget.figure.savefig(file_path, dpi=300, bbox_inches='tight')
-                QMessageBox.information(self, "Export Successful",
-                                      f"Plot exported to:\n{file_path}")
-            except Exception as e:
-                QMessageBox.critical(self, "Export Error",
-                                   f"Failed to export plot:\n{str(e)}")
+                pin_btn.setIcon(theme_icon(
+                    "fa6s.thumbtack", color if pinned else C.TEXT_MUTED
+                ))
+                pin_btn.setIconSize(QSize(10, 10))
+            except Exception:
+                pin_btn.setText("📌" if pinned else "○")
+            pin_btn.clicked.connect(lambda _checked, n=name: self._toggle_pin(n))
+            rl.addWidget(pin_btn)
 
-    def update_permeability_classification_table(self):
-        """Update permeability classification table with color-coding"""
-        self.permeability_table.setRowCount(1)
-        self.permeability_table.setColumnCount(len(self.selected_datasets) + 1)
-        self.permeability_table.setAlternatingRowColors(True)
+            # Insert before the stretch (last item)
+            self._pin_list_layout.insertWidget(
+                self._pin_list_layout.count() - 1, row
+            )
 
-        headers = ["Dataset"] + [tab.get_dataset_name() for tab in self.selected_datasets]
-        self.permeability_table.setHorizontalHeaderLabels(headers)
+    def _toggle_pin(self, name: str) -> None:
+        """Toggle pinned state for the named dataset and refresh."""
+        if name in self._pinned:
+            self._pinned.discard(name)
+        else:
+            self._pinned.add(name)
+        self._refresh_pin_list()
 
-        # Row: Permeability classification
-        label_item = QTableWidgetItem("Classification")
-        label_item.setFlags(label_item.flags() & ~Qt.ItemFlag.ItemIsEditable)
-        font = label_item.font()
-        font.setBold(True)
-        label_item.setFont(font)
-        self.permeability_table.setItem(0, 0, label_item)
+    # ── Details tab ───────────────────────────────────────────────────────────
 
-        for col, tab in enumerate(self.selected_datasets, 1):
-            results = tab.get_results()
-            valid_k = [r.k_value for r in results if r.k_value and r.k_value > 0]
+    @staticmethod
+    def _style_details_table(t: QTableWidget) -> None:
+        """Apply clean concept-matching style to a details QTableWidget."""
+        t.setSelectionMode(QTableWidget.SelectionMode.NoSelection)
+        t.verticalHeader().setVisible(False)
+        t.setEditTriggers(QTableWidget.EditTrigger.NoEditTriggers)
+        t.setAlternatingRowColors(False)
+        t.setShowGrid(False)
+        t.setStyleSheet(f"""
+            QTableWidget {{
+                background: {C.BG};
+                border: none;
+            }}
+            QTableWidget::item {{
+                border-bottom: 1px solid rgba(212,196,168,0.45);
+                padding: 0px;
+            }}
+            QTableWidget::item:selected {{
+                background: rgba(107,142,35,0.08);
+            }}
+            QHeaderView::section {{
+                background: {C.BG_RAISED};
+                border: none;
+                border-bottom: 2px solid {C.BORDER_DK};
+                border-right: 1px solid rgba(212,196,168,0.4);
+                padding: 5px 10px;
+                font-family: "{F.UI}";
+                font-size: {F.SZ_SM}pt;
+                font-weight: 600;
+                color: {C.TEXT_MID};
+            }}
+            QHeaderView::section:last {{
+                border-right: none;
+            }}
+            QScrollBar:vertical {{
+                width: 5px; background: transparent;
+            }}
+            QScrollBar::handle:vertical {{
+                background: {C.BORDER}; border-radius: 2px; min-height: 16px;
+            }}
+            QScrollBar::add-line:vertical, QScrollBar::sub-line:vertical {{ height: 0; }}
+        """)
 
-            if valid_k:
-                mean_k = np.mean(valid_k)
+    def _build_details_tab(self) -> QWidget:
+        """Details tab: two clean side-by-side panels with heat-map toggle."""
+        page = QWidget()
+        v = QVBoxLayout(page)
+        v.setContentsMargins(0, 0, 0, 0)
+        v.setSpacing(0)
 
-                # Classify permeability
-                if mean_k > 1e-2:
-                    classification = "Very High\n(Gravel)"
-                    color = QColor(76, 175, 80, 100)  # Green
-                elif mean_k > 1e-4:
-                    classification = "High\n(Clean Sand)"
-                    color = QColor(139, 195, 74, 100)  # Light green
-                elif mean_k > 1e-5:
-                    classification = "Moderate\n(Fine Sand)"
-                    color = QColor(255, 235, 59, 100)  # Yellow
-                elif mean_k > 1e-7:
-                    classification = "Low\n(Silt)"
-                    color = QColor(255, 152, 0, 100)  # Orange
-                else:
-                    classification = "Very Low\n(Clay)"
-                    color = QColor(244, 67, 54, 100)  # Red
+        # ── Toolbar strip with heat-map toggle ────────────────────────────────
+        toolbar = QWidget()
+        toolbar.setFixedHeight(32)
+        toolbar.setAttribute(Qt.WidgetAttribute.WA_StyledBackground)
+        toolbar.setStyleSheet(
+            f"background: {C.BG_RAISED}; border-bottom: 1px solid {C.BORDER};"
+        )
+        tb_row = QHBoxLayout(toolbar)
+        tb_row.setContentsMargins(12, 0, 12, 0)
+        tb_row.setSpacing(8)
+        tb_row.addStretch(1)
 
-                item = QTableWidgetItem(f"{classification}\n{mean_k:.2e} m/s")
-            else:
-                classification = "Not Calculated"
-                item = QTableWidgetItem(classification)
-                color = QColor(200, 200, 200)
+        heat_lbl = QLabel("Heat map")
+        heat_lbl.setStyleSheet(
+            f"font-family: '{F.UI}'; font-size: {F.SZ_SM}pt;"
+            f"color: {C.TEXT_MUTED}; background: transparent; border: none;"
+        )
+        tb_row.addWidget(heat_lbl)
 
-            item.setFlags(item.flags() & ~Qt.ItemFlag.ItemIsEditable)
-            item.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
-            item.setBackground(color)
-            self.permeability_table.setItem(0, col, item)
+        self._heat_btn = QPushButton("On")
+        self._heat_btn.setCheckable(True)
+        self._heat_btn.setChecked(True)
+        self._heat_btn.setFixedSize(46, 22)
+        self._heat_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        self._heat_btn.setStyleSheet(f"""
+            QPushButton {{
+                font-family: '{F.MONO}'; font-size: 8pt; font-weight: 600;
+                border-radius: 11px;
+            }}
+            QPushButton:checked {{
+                background: {C.OLIVE}; color: white;
+                border: 1px solid {C.OLIVE_DK};
+            }}
+            QPushButton:!checked {{
+                background: {C.BG_LOW}; color: {C.TEXT_MUTED};
+                border: 1px solid {C.BORDER};
+            }}
+            QPushButton:checked:hover {{ background: {C.OLIVE_H}; }}
+            QPushButton:!checked:hover {{ background: {C.BG}; color: {C.TEXT_MID}; }}
+        """)
+        self._heat_btn.toggled.connect(self._on_heat_toggle)
+        tb_row.addWidget(self._heat_btn)
 
-        self.permeability_table.resizeColumnsToContents()
-        self.permeability_table.resizeRowsToContents()
+        v.addWidget(toolbar)
 
-    def _interpolate_color(self, normalized_value, reverse=False):
-        """
-        Interpolate color between green and red based on normalized value (0-1)
+        # ── Body: two panels side by side ─────────────────────────────────────
+        body = QWidget()
+        body.setAttribute(Qt.WidgetAttribute.WA_StyledBackground)
+        body.setStyleSheet(f"background: {C.BG};")
+        body_h = QHBoxLayout(body)
+        body_h.setContentsMargins(0, 0, 0, 0)
+        body_h.setSpacing(0)
+
+        # Left: Grain Parameters
+        left = QWidget()
+        left.setAttribute(Qt.WidgetAttribute.WA_StyledBackground)
+        left.setStyleSheet("background: transparent;")
+        ll = QVBoxLayout(left)
+        ll.setContentsMargins(0, 0, 0, 0)
+        ll.setSpacing(0)
+        ll.addWidget(_DetailsPanelHeader("Grain Parameters"))
+        self._grain_table = QTableWidget()
+        self._style_details_table(self._grain_table)
+        ll.addWidget(self._grain_table, 1)
+
+        # Vertical separator
+        sep = QFrame()
+        sep.setFrameShape(QFrame.Shape.VLine)
+        sep.setFixedWidth(1)
+        sep.setStyleSheet(f"background: {C.BORDER_DK}; border: none;")
+
+        # Right: Hydraulic Conductivity
+        right = QWidget()
+        right.setAttribute(Qt.WidgetAttribute.WA_StyledBackground)
+        right.setStyleSheet("background: transparent;")
+        rl = QVBoxLayout(right)
+        rl.setContentsMargins(0, 0, 0, 0)
+        rl.setSpacing(0)
+        rl.addWidget(_DetailsPanelHeader("Hydraulic Conductivity"))
+        self._k_table = QTableWidget()
+        self._style_details_table(self._k_table)
+        rl.addWidget(self._k_table, 1)
+
+        body_h.addWidget(left, 55)
+        body_h.addWidget(sep)
+        body_h.addWidget(right, 45)
+
+        v.addWidget(body, 1)
+        return page
+
+    def _on_heat_toggle(self, checked: bool) -> None:
+        """Toggle heat coloring on/off and refresh both tables."""
+        self._heat_on = checked
+        self._heat_btn.setText("On" if checked else "Off")
+        if self.selected_datasets:
+            self._refresh_grain_table()
+            self._refresh_k_table()
+
+    # ── Statistics tab ────────────────────────────────────────────────────────
+
+    def _build_statistics_tab(self) -> QWidget:
+        """Statistics tab: two matplotlib figures side-by-side."""
+        page = QWidget()
+        h = QHBoxLayout(page)
+        h.setContentsMargins(12, 12, 12, 12)
+        h.setSpacing(12)
+
+        fc = C.BG  # figure facecolor
+
+        # K-value box plot
+        self._box_fig = Figure(facecolor=fc, tight_layout=True)
+        self._box_canvas = FigureCanvas(self._box_fig)
+        self._box_canvas.setSizePolicy(
+            QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding
+        )
+
+        # Method heatmap
+        self._heat_fig = Figure(facecolor=fc, tight_layout=True)
+        self._heat_canvas = FigureCanvas(self._heat_fig)
+        self._heat_canvas.setSizePolicy(
+            QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding
+        )
+
+        h.addWidget(self._box_canvas, 1)
+        h.addWidget(self._heat_canvas, 1)
+        return page
+
+    # ── Data wiring ───────────────────────────────────────────────────────────
+
+    def set_dataset_tabs(self, dataset_tabs) -> None:
+        """Called by main_window whenever the dataset tab list changes.
 
         Args:
-            normalized_value: Value between 0 and 1
-            reverse: If True, green=high, red=low. If False, green=low, red=high
+            dataset_tabs: list of dataset tab objects exposing
+                          get_dataset(), get_dataset_name(), get_results()
         """
-        from PyQt6.QtGui import QColor
+        self.dataset_tabs = dataset_tabs
+        self.selected_datasets = list(dataset_tabs)
+        self._pinned = {t.get_dataset_name() for t in dataset_tabs}
+        self._refresh_pin_list()
+        self._update_header_count()
 
-        if reverse:
-            normalized_value = 1 - normalized_value
+        enabled = len(dataset_tabs) >= 2
+        self._update_btn.setEnabled(enabled)
+        self._export_btn.setEnabled(enabled)
 
-        # Green (low) -> Yellow (mid) -> Red (high)
-        if normalized_value < 0.5:
-            # Green to yellow
-            r = int(255 * (normalized_value * 2))
-            g = 200
-            b = 100
-        else:
-            # Yellow to red
-            r = 255
-            g = int(200 * (1 - (normalized_value - 0.5) * 2))
-            b = 100
+        if enabled:
+            self.update_comparison()
 
-        return QColor(r, g, b, 80)  # 80 = semi-transparent
-
-    def plot_k_value_boxplots(self):
-        """Create box plots showing K-value distribution for each dataset"""
-        self.k_boxplot_figure.clear()
-
-        if not self.selected_datasets:
-            ax = self.k_boxplot_figure.add_subplot(1, 1, 1)
-            ax.text(0.5, 0.5, 'No datasets selected', transform=ax.transAxes,
-                   ha='center', va='center', fontsize=12, color='gray')
-            ax.set_xticks([])
-            ax.set_yticks([])
-            self.k_boxplot_canvas.draw()
+    def update_comparison(self) -> None:
+        """Refresh all views from current dataset_tabs.  Public API."""
+        self.selected_datasets = list(self.dataset_tabs)
+        if len(self.selected_datasets) < 2:
             return
+        self._update_plot()
+        self._refresh_grain_table()
+        self._refresh_k_table()
+        self._refresh_stats()
+        self._update_header_count()
+        self.comparison_updated.emit()
 
-        # Collect K-values for each dataset
-        data_for_boxplot = []
+    # ── Internal update helpers ───────────────────────────────────────────────
+
+    def _update_header_count(self) -> None:
+        n = len(self.dataset_tabs)
+        n_pinned = len(self._pinned)
+        if n == 0:
+            self._count_label.setText("Load datasets to compare")
+        else:
+            self._count_label.setText(
+                f"{n} selected  ·  {n_pinned} pinned in view  ·  pin/unpin in the dataset panel"
+            )
+        self._manage_btn.setEnabled(n >= 1)
+
+    def _on_manage_datasets(self) -> None:
+        """Placeholder — will open a dataset manager dialog."""
+        from PyQt6.QtWidgets import QMessageBox
+        QMessageBox.information(
+            self, "Coming Soon",
+            "Dataset manager — select which loaded datasets to include "
+            "in the comparison.\n\nFor now, use the sidebar toggle (☑) on each "
+            "sample card to control what appears here."
+        )
+
+    def _update_plot(self) -> None:
+        """Push datasets into the comparison plot widget."""
+        if not self.selected_datasets:
+            if hasattr(self._plot_widget, "show_empty_state"):
+                self._plot_widget.show_empty_state("Select datasets and click Update")
+            return
+        self._plot_widget.set_datasets(self.selected_datasets)
+        if hasattr(self._plot_widget, "refresh_plot"):
+            self._plot_widget.refresh_plot()
+
+    # ── Grain parameter table ─────────────────────────────────────────────────
+
+    def _get_grain_value(self, dataset, row_label: str) -> Optional[float]:
+        """Retrieve the numeric value for a given parameter row from a dataset."""
+        label = row_label
+        if label == "D10":
+            return dataset.get_d10()
+        if label == "D16":
+            return dataset._interpolate_grain_size(16.0)
+        if label == "D30":
+            return dataset.get_d30()
+        if label == "D50":
+            return dataset.get_d50()
+        if label == "D60":
+            return dataset.get_d60()
+        if label == "D84":
+            return dataset._interpolate_grain_size(84.0)
+        if label == "D90":
+            return dataset._interpolate_grain_size(90.0)
+        if label == "D95":
+            return dataset._interpolate_grain_size(95.0)
+        if label == "Cu":
+            return dataset.get_uniformity_coefficient()
+        if label == "Cc":
+            return dataset.get_coefficient_of_curvature()
+        if label == "σ":
+            d84 = dataset._interpolate_grain_size(84.0)
+            d16 = dataset._interpolate_grain_size(16.0)
+            if d84 is not None and d16 is not None and d16 > 0:
+                return math.sqrt(d84 / d16)
+            return None
+        if label == "Fines%":
+            return _get_fines_pct(dataset)
+        return None  # Text rows handled separately
+
+    def _gradation_class(self, dataset) -> str:
+        """Classify gradation as Uniform / Moderate / Well-graded from Cu."""
+        cu = dataset.get_uniformity_coefficient()
+        if cu is None:
+            return "—"
+        if cu < 4:
+            return "Uniform"
+        if cu < 6:
+            return "Moderate"
+        return "Well-graded"
+
+    def _make_param_cell(self, label: str, description: str, olive: bool) -> QWidget:
+        """Build a two-line parameter cell widget (name + description)."""
+        w = QWidget()
+        w.setStyleSheet("background: transparent;")
+        lay = QVBoxLayout(w)
+        lay.setContentsMargins(10, 5, 8, 5)
+        lay.setSpacing(1)
+        name_lbl = QLabel(label)
+        name_lbl.setStyleSheet(
+            f"font-family: '{F.UI}'; font-size: {F.SZ_BASE}pt; font-weight: 600;"
+            f"color: {C.OLIVE if olive else C.TEXT_MID}; background: transparent;"
+        )
+        desc_lbl = QLabel(description)
+        desc_lbl.setStyleSheet(
+            f"font-family: '{F.UI}'; font-size: 8pt;"
+            f"color: {C.TEXT_MUTED}; background: transparent;"
+        )
+        lay.addWidget(name_lbl)
+        lay.addWidget(desc_lbl)
+        return w
+
+    def _refresh_grain_table(self) -> None:
+        """Rebuild the grain parameters table."""
+        tabs = self.selected_datasets
+        n_ds = len(tabs)
+        n_rows = len(self._GRAIN_ROWS)
+
+        # Column layout: Parameter | DS0 | DS1 | …
+        self._grain_table.setRowCount(n_rows)
+        self._grain_table.setColumnCount(1 + n_ds)
+
+        # ── Column headers ────────────────────────────────────────────────────
+        self._grain_table.setHorizontalHeaderItem(0, QTableWidgetItem("Parameter"))
+        for col_i, tab in enumerate(tabs):
+            name = tab.get_dataset_name()
+            color = DATASET_COLORS[col_i % len(DATASET_COLORS)]
+            hdr_item = QTableWidgetItem(name)
+            hdr_item.setIcon(_dot_icon(color))
+            hdr_item.setForeground(QBrush(QColor(color)))
+            font = QFont(F.UI, F.SZ_SM)
+            font.setBold(True)
+            hdr_item.setFont(font)
+            self._grain_table.setHorizontalHeaderItem(1 + col_i, hdr_item)
+
+        # First column: stretch; data columns: resize-to-contents
+        self._grain_table.horizontalHeader().setSectionResizeMode(
+            0, QHeaderView.ResizeMode.Stretch
+        )
+        for c in range(1, 1 + n_ds):
+            self._grain_table.horizontalHeader().setSectionResizeMode(
+                c, QHeaderView.ResizeMode.ResizeToContents
+            )
+
+        # ── Collect numeric values per row ────────────────────────────────────
+        TEXT_ROWS = {"USCS", "Class"}
+        row_values: List[List[Optional[float]]] = []
+        for row_def in self._GRAIN_ROWS:
+            label = row_def[0]
+            if label in TEXT_ROWS:
+                row_values.append([])
+                continue
+            vals = [self._get_grain_value(tab.get_dataset(), label) for tab in tabs]
+            row_values.append(vals)
+
+        # ── Populate rows ─────────────────────────────────────────────────────
+        for row_i, (label, tooltip, bold, olive) in enumerate(self._GRAIN_ROWS):
+            is_text = label in TEXT_ROWS
+            vals = row_values[row_i]
+
+            # Column 0: two-line param cell widget
+            self._grain_table.setCellWidget(
+                row_i, 0, self._make_param_cell(label, tooltip, olive)
+            )
+            self._grain_table.setRowHeight(row_i, 42)
+
+            if is_text:
+                if label == "USCS":
+                    for col_i, tab in enumerate(tabs):
+                        val_str = tab.get_dataset().classify_soil() or "—"
+                        color = DATASET_COLORS[col_i % len(DATASET_COLORS)]
+                        item = QTableWidgetItem(val_str)
+                        item.setForeground(QBrush(QColor(color)))
+                        item.setFont(QFont(F.MONO, F.SZ_SM))
+                        item.setTextAlignment(
+                            Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter
+                        )
+                        self._grain_table.setItem(row_i, 1 + col_i, item)
+                elif label == "Class":
+                    for col_i, tab in enumerate(tabs):
+                        val_str = self._gradation_class(tab.get_dataset())
+                        color = DATASET_COLORS[col_i % len(DATASET_COLORS)]
+                        item = QTableWidgetItem(val_str)
+                        item.setForeground(QBrush(QColor(color)))
+                        item.setFont(QFont(F.MONO, F.SZ_SM))
+                        item.setTextAlignment(
+                            Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter
+                        )
+                        self._grain_table.setItem(row_i, 1 + col_i, item)
+                continue
+
+            # Numeric row — heat range
+            valid_vals = [v for v in vals if v is not None]
+            v_min = min(valid_vals) if valid_vals else 0.0
+            v_max = max(valid_vals) if valid_vals else 1.0
+            v_range = v_max - v_min if v_max != v_min else 1.0
+
+            for col_i, val in enumerate(vals):
+                color = DATASET_COLORS[col_i % len(DATASET_COLORS)]
+                if val is None:
+                    item = QTableWidgetItem("—")
+                    item.setForeground(QBrush(QColor(C.TEXT_MUTED)))
+                else:
+                    item = QTableWidgetItem(f"{val:.4g}")
+                    item.setForeground(QBrush(QColor(color)))
+                    if self._heat_on and v_range > 0:
+                        norm = (val - v_min) / v_range
+                        item.setBackground(QBrush(_heat_color(norm)))
+                item.setFont(QFont(F.MONO, F.SZ_SM))
+                item.setTextAlignment(
+                    Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter
+                )
+                self._grain_table.setItem(row_i, 1 + col_i, item)
+
+        self._grain_table.resizeColumnsToContents()
+        self._grain_table.horizontalHeader().setSectionResizeMode(
+            0, QHeaderView.ResizeMode.Stretch
+        )
+
+    # ── Hydraulic conductivity table ──────────────────────────────────────────
+
+    # ── K-value descriptions (method name → short description) ───────────────
+    _K_DESCS: dict = {
+        "Hazen":         "K (m/s)  ·  based on D10",
+        "Kozeny-Carman": "K (m/s)  ·  pore structure",
+        "USBR":          "K (m/s)  ·  Bureau of Reclamation",
+        "Terzaghi":      "K (m/s)  ·  sandy soils",
+        "Slichter":      "K (m/s)  ·  uniform sands",
+        "Beyer":         "K (m/s)  ·  non-uniform sands",
+        "Seelheim":      "K (m/s)  ·  D10 based",
+        "Pavchich":      "K (m/s)  ·  coarse sands",
+    }
+
+    def _refresh_k_table(self) -> None:
+        """Rebuild the hydraulic conductivity comparison table."""
+        tabs = self.selected_datasets
+        n_ds = len(tabs)
+
+        # Collect all results per dataset
+        results_by_tab = [tab.get_results() for tab in tabs]
+
+        # Gather unique method names (sorted alphabetically)
+        method_names: list[str] = sorted(
+            {r.method_name for results in results_by_tab for r in results}
+        )
+
+        # Summary rows appended at the bottom
+        SUMMARY_ROWS = [
+            ("K̄ geometric",  "All methods · m/s"),
+            ("K̄ arithmetic", "All methods · m/s"),
+            ("K median",      "All methods · m/s"),
+            ("K std. dev.",   "Spread across methods"),
+            ("Perm. class",   "Classification"),
+        ]
+
+        n_method = len(method_names)
+        n_rows = n_method + len(SUMMARY_ROWS)
+
+        self._k_table.setRowCount(n_rows)
+        self._k_table.setColumnCount(1 + n_ds)
+
+        # ── Column headers ────────────────────────────────────────────────────
+        self._k_table.setHorizontalHeaderItem(0, QTableWidgetItem("Method"))
+        for col_i, tab in enumerate(tabs):
+            name = tab.get_dataset_name()
+            color = DATASET_COLORS[col_i % len(DATASET_COLORS)]
+            hdr_item = QTableWidgetItem(name)
+            hdr_item.setIcon(_dot_icon(color))
+            hdr_item.setForeground(QBrush(QColor(color)))
+            font = QFont(F.UI, F.SZ_SM)
+            font.setBold(True)
+            hdr_item.setFont(font)
+            self._k_table.setHorizontalHeaderItem(1 + col_i, hdr_item)
+
+        # First column stretch; data columns resize-to-contents
+        self._k_table.horizontalHeader().setSectionResizeMode(
+            0, QHeaderView.ResizeMode.Stretch
+        )
+        for c in range(1, 1 + n_ds):
+            self._k_table.horizontalHeader().setSectionResizeMode(
+                c, QHeaderView.ResizeMode.ResizeToContents
+            )
+
+        # Build k_matrix[method_index][dataset_index] = k_value | None
+        k_matrix: List[List[Optional[float]]] = []
+        for method in method_names:
+            row_vals = []
+            for results in results_by_tab:
+                match = next(
+                    (r.k_value for r in results if r.method_name == method), None
+                )
+                row_vals.append(match)
+            k_matrix.append(row_vals)
+
+        # ── Method rows ───────────────────────────────────────────────────────
+        for row_i, method in enumerate(method_names):
+            vals = k_matrix[row_i]
+            valid_vals = [v for v in vals if v is not None and v > 0]
+
+            # Two-line cell widget for method name
+            desc = self._K_DESCS.get(method, "K (m/s)")
+            self._k_table.setCellWidget(
+                row_i, 0, self._make_param_cell(method, desc, olive=False)
+            )
+            self._k_table.setRowHeight(row_i, 42)
+
+            # Heat range (log scale across row)
+            if valid_vals:
+                log_vals = [math.log10(v) for v in valid_vals]
+                v_min = min(log_vals)
+                v_max = max(log_vals)
+                v_range = v_max - v_min if v_max != v_min else 1.0
+            else:
+                v_min = v_max = v_range = 0.0
+
+            for col_i, val in enumerate(vals):
+                color = DATASET_COLORS[col_i % len(DATASET_COLORS)]
+                if val is None or val <= 0:
+                    item = QTableWidgetItem("—")
+                    item.setForeground(QBrush(QColor(C.TEXT_MUTED)))
+                else:
+                    item = QTableWidgetItem(f"{val:.2e}")
+                    item.setForeground(QBrush(QColor(color)))
+                    if self._heat_on and v_range > 0:
+                        norm = (math.log10(val) - v_min) / v_range
+                        item.setBackground(QBrush(_heat_color(norm)))
+                item.setFont(QFont(F.MONO, F.SZ_SM))
+                item.setTextAlignment(
+                    Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter
+                )
+                self._k_table.setItem(row_i, 1 + col_i, item)
+
+        # ── Build per-dataset valid K lists ───────────────────────────────────
+        valid_k_per_ds: List[List[float]] = []
+        for col_i in range(n_ds):
+            col_vals = [
+                k_matrix[ri][col_i]
+                for ri in range(n_method)
+                if k_matrix[ri][col_i] is not None and k_matrix[ri][col_i] > 0
+            ]
+            valid_k_per_ds.append(col_vals)
+
+        # ── Summary rows ──────────────────────────────────────────────────────
+        summary_bg = QColor(C.BG_LOW)
+        summary_bg.setAlpha(200)
+
+        for si, (s_label, s_desc) in enumerate(SUMMARY_ROWS):
+            row_i = n_method + si
+            self._k_table.setRowHeight(row_i, 42)
+
+            is_geom = s_label == "K̄ geometric"
+            # Two-line summary label, olive-highlighted for K̄ geometric
+            self._k_table.setCellWidget(
+                row_i, 0, self._make_param_cell(s_label, s_desc, olive=is_geom)
+            )
+
+            for col_i, vk in enumerate(valid_k_per_ds):
+                color = DATASET_COLORS[col_i % len(DATASET_COLORS)]
+                if s_label == "K̄ geometric":
+                    txt = f"{float(np.exp(np.mean(np.log(vk)))):.2e}" if vk else "—"
+                elif s_label == "K̄ arithmetic":
+                    txt = f"{float(np.mean(vk)):.2e}" if vk else "—"
+                elif s_label == "K median":
+                    txt = f"{float(np.median(vk)):.2e}" if vk else "—"
+                elif s_label == "K std. dev.":
+                    txt = f"{float(np.std(vk)):.2e}" if vk else "—"
+                elif s_label == "Perm. class":
+                    txt = _perm_class(float(np.exp(np.mean(np.log(vk))))) if vk else "—"
+                else:
+                    txt = "—"
+
+                cell = QTableWidgetItem(txt)
+                cell.setBackground(QBrush(summary_bg))
+                cell.setFont(QFont(F.MONO, F.SZ_SM))
+                cell.setTextAlignment(
+                    Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter
+                )
+                if s_label == "Perm. class" and vk:
+                    cell.setForeground(QBrush(QColor(_perm_color(vk))))
+                elif is_geom and vk:
+                    # Bold colored dataset value for K̄ geometric
+                    cell.setForeground(QBrush(QColor(color)))
+                    bold_f = QFont(F.MONO, F.SZ_SM)
+                    bold_f.setBold(True)
+                    cell.setFont(bold_f)
+                else:
+                    cell.setForeground(QBrush(QColor(C.TEXT_MID)))
+                self._k_table.setItem(row_i, 1 + col_i, cell)
+
+        self._k_table.resizeColumnsToContents()
+        self._k_table.horizontalHeader().setSectionResizeMode(
+            0, QHeaderView.ResizeMode.Stretch
+        )
+
+    # ── Statistics tab figures ────────────────────────────────────────────────
+
+    def _refresh_stats(self) -> None:
+        """Redraw both matplotlib statistics figures."""
+        self._draw_boxplot()
+        self._draw_heatmap()
+
+    def _draw_boxplot(self) -> None:
+        """K-value box plots — one box per dataset, log y-axis."""
+        self._box_fig.clear()
+        ax = self._box_fig.add_subplot(111)
+        ax.set_facecolor("#ffffff")
+
+        tabs = self.selected_datasets
+        data_per_ds = []
         labels = []
         colors = []
 
-        for i, tab in enumerate(self.selected_datasets):
+        for i, tab in enumerate(tabs):
             results = tab.get_results()
-            valid_k = [r.k_value for r in results if r.k_value and r.k_value > 0]
+            vals = [r.k_value for r in results if r.k_value is not None and r.k_value > 0]
+            data_per_ds.append(vals)
+            labels.append(tab.get_dataset_name())
+            colors.append(DATASET_COLORS[i % len(DATASET_COLORS)])
 
-            if valid_k:
-                data_for_boxplot.append(valid_k)
-                labels.append(tab.get_dataset_name())
-                # Use color from dataset colors
-                color_idx = i % len(self.comparison_plot_widget.dataset_colors) if hasattr(self, 'comparison_plot_widget') else i % 10
-                colors.append(['#1f77b4', '#ff7f0e', '#2ca02c', '#d62728', '#9467bd',
-                             '#8c564b', '#e377c2', '#7f7f7f', '#bcbd22', '#17becf'][color_idx])
-
-        if not data_for_boxplot:
-            ax = self.k_boxplot_figure.add_subplot(1, 1, 1)
-            ax.text(0.5, 0.5, 'No K-values calculated', transform=ax.transAxes,
-                   ha='center', va='center', fontsize=12, color='gray')
-            ax.set_xticks([])
-            ax.set_yticks([])
-            self.k_boxplot_canvas.draw()
+        if not any(data_per_ds):
+            ax.text(
+                0.5, 0.5, "No K data available",
+                ha="center", va="center", transform=ax.transAxes,
+                color=C.TEXT_MUTED, fontsize=11,
+            )
+            self._box_canvas.draw()
             return
 
-        ax = self.k_boxplot_figure.add_subplot(1, 1, 1)
-
-        # Create box plots
-        bp = ax.boxplot(data_for_boxplot, labels=labels, patch_artist=True,
-                       showmeans=True, meanline=True,
-                       boxprops=dict(facecolor='lightblue', alpha=0.7),
-                       medianprops=dict(color='red', linewidth=2),
-                       meanprops=dict(color='green', linewidth=2, linestyle='--'),
-                       whiskerprops=dict(linewidth=1.5),
-                       capprops=dict(linewidth=1.5))
-
-        # Color each box
-        for patch, color in zip(bp['boxes'], colors):
-            patch.set_facecolor(color)
-            patch.set_alpha(0.6)
-
-        ax.set_ylabel('Hydraulic Conductivity (m/s)', fontsize=10, fontweight='bold')
-        ax.set_title('K-Value Distribution Comparison', fontsize=12, fontweight='bold')
-        ax.set_yscale('log')
-        ax.grid(True, alpha=0.3, axis='y')
-        ax.tick_params(axis='x', rotation=45, labelsize=9)
-
-        # Add legend
-        from matplotlib.lines import Line2D
-        legend_elements = [
-            Line2D([0], [0], color='red', linewidth=2, label='Median'),
-            Line2D([0], [0], color='green', linewidth=2, linestyle='--', label='Mean')
-        ]
-        ax.legend(handles=legend_elements, loc='upper right', fontsize=8)
-
-        self.k_boxplot_figure.tight_layout()
-        self.k_boxplot_canvas.draw()
-
-    def plot_method_applicability_heatmap(self):
-        """Create heatmap showing which methods are applicable for each dataset"""
-        self.method_heatmap_figure.clear()
-
-        if not self.selected_datasets:
-            ax = self.method_heatmap_figure.add_subplot(1, 1, 1)
-            ax.text(0.5, 0.5, 'No datasets selected', transform=ax.transAxes,
-                   ha='center', va='center', fontsize=12, color='gray')
-            ax.set_xticks([])
-            ax.set_yticks([])
-            self.method_heatmap_canvas.draw()
+        # Filter to datasets that have data
+        plot_data = [(d, l, c) for d, l, c in zip(data_per_ds, labels, colors) if d]
+        if not plot_data:
+            self._box_canvas.draw()
             return
 
-        # Collect all methods and their status for each dataset
-        all_methods = set()
-        for tab in self.selected_datasets:
-            results = tab.get_results()
-            for result in results:
-                all_methods.add(result.method_name)
+        p_data, p_labels, p_colors = zip(*plot_data)
 
-        if not all_methods:
-            ax = self.method_heatmap_figure.add_subplot(1, 1, 1)
-            ax.text(0.5, 0.5, 'No K-values calculated', transform=ax.transAxes,
-                   ha='center', va='center', fontsize=12, color='gray')
-            ax.set_xticks([])
-            ax.set_yticks([])
-            self.method_heatmap_canvas.draw()
+        bp = ax.boxplot(
+            p_data,
+            labels=p_labels,
+            patch_artist=True,
+            medianprops={"color": C.TEXT, "linewidth": 1.5},
+            whiskerprops={"color": C.BORDER_DK, "linewidth": 1.0},
+            capprops={"color": C.BORDER_DK, "linewidth": 1.0},
+            flierprops={"marker": "o", "markersize": 4, "alpha": 0.6},
+        )
+        for patch, color in zip(bp["boxes"], p_colors):
+            qc = QColor(color)
+            patch.set_facecolor(
+                (qc.red() / 255, qc.green() / 255, qc.blue() / 255, 0.30)
+            )
+            patch.set_edgecolor(color)
+
+        ax.set_yscale("log")
+        ax.set_ylabel("K (m/s)", color=C.TEXT_MID, fontsize=10)
+        ax.set_title("K-value Distribution", color=C.TEXT_MID, fontsize=11, fontweight="600")
+        ax.tick_params(axis="x", labelrotation=20, labelsize=8)
+        ax.tick_params(axis="y", labelsize=8)
+        ax.grid(True, which="both", linestyle="--", alpha=0.5, color=C.BORDER)
+        ax.spines["top"].set_visible(False)
+        ax.spines["right"].set_visible(False)
+
+        self._box_canvas.draw()
+
+    def _draw_heatmap(self) -> None:
+        """Method applicability heatmap (methods × datasets)."""
+        self._heat_fig.clear()
+        ax = self._heat_fig.add_subplot(111)
+        ax.set_facecolor("#ffffff")
+
+        tabs = self.selected_datasets
+        results_by_tab = [tab.get_results() for tab in tabs]
+        method_names = sorted(
+            {r.method_name for results in results_by_tab for r in results}
+        )
+        ds_names = [tab.get_dataset_name() for tab in tabs]
+
+        if not method_names or not ds_names:
+            ax.text(
+                0.5, 0.5, "No method data available",
+                ha="center", va="center", transform=ax.transAxes,
+                color=C.TEXT_MUTED,
+            )
+            self._heat_canvas.draw()
             return
 
-        methods = sorted(list(all_methods))
-        dataset_names = [tab.get_dataset_name() for tab in self.selected_datasets]
+        # Build presence matrix
+        matrix = np.zeros((len(method_names), len(ds_names)))
+        for ci, results in enumerate(results_by_tab):
+            available = {r.method_name for r in results if r.k_value is not None}
+            for ri, method in enumerate(method_names):
+                matrix[ri, ci] = 1.0 if method in available else 0.0
 
-        # Create matrix: 0 = N/A, 1 = Error, 2 = Warning, 3 = OK
-        matrix = np.zeros((len(methods), len(dataset_names)))
+        # Build color array: olive for present, light for absent
+        cmap_data = np.zeros((*matrix.shape, 4))
+        olive_qc = QColor(C.OLIVE)
+        present_rgba = (
+            olive_qc.red() / 255, olive_qc.green() / 255,
+            olive_qc.blue() / 255, 0.75,
+        )
+        absent_rgba = (0.9, 0.89, 0.87, 0.5)
+        for ri in range(len(method_names)):
+            for ci in range(len(ds_names)):
+                cmap_data[ri, ci] = present_rgba if matrix[ri, ci] > 0 else absent_rgba
 
-        for j, tab in enumerate(self.selected_datasets):
-            results = tab.get_results()
-            for i, method in enumerate(methods):
-                # Find result for this method
-                for result in results:
-                    if result.method_name == method:
-                        status_str = result.status.value if hasattr(result.status, 'value') else str(result.status)
+        ax.imshow(cmap_data, aspect="auto", interpolation="nearest")
 
-                        if result.k_value is None or result.k_value <= 0:
-                            matrix[i, j] = 0  # N/A / Not calculated
-                        elif 'Error' in status_str:
-                            matrix[i, j] = 1  # Error
-                        elif 'Warning' in status_str:
-                            matrix[i, j] = 2  # Warning
-                        else:
-                            matrix[i, j] = 3  # OK
-                        break
+        ax.set_xticks(range(len(ds_names)))
+        ax.set_xticklabels(ds_names, rotation=25, ha="right", fontsize=8)
+        ax.set_yticks(range(len(method_names)))
+        ax.set_yticklabels(method_names, fontsize=8)
+        ax.set_title(
+            "Method Applicability", color=C.TEXT_MID, fontsize=11, fontweight="600"
+        )
 
-        ax = self.method_heatmap_figure.add_subplot(1, 1, 1)
+        # Overlay ✓ / — markers
+        for ri in range(len(method_names)):
+            for ci in range(len(ds_names)):
+                sym = "✓" if matrix[ri, ci] > 0 else "—"
+                text_color = "white" if matrix[ri, ci] > 0 else C.TEXT_MUTED
+                ax.text(ci, ri, sym, ha="center", va="center",
+                        fontsize=9, color=text_color)
 
-        # Create heatmap with custom colormap
-        from matplotlib.colors import ListedColormap
-        colors_map = ['#cccccc', '#ff6b6b', '#ffd93d', '#6bcf7f']  # Gray, Red, Yellow, Green
-        cmap = ListedColormap(colors_map)
+        # Color x-tick labels per dataset color
+        for ci, tick_lbl in enumerate(ax.get_xticklabels()):
+            tick_lbl.set_color(DATASET_COLORS[ci % len(DATASET_COLORS)])
 
-        im = ax.imshow(matrix, cmap=cmap, aspect='auto', vmin=0, vmax=3)
+        ax.spines[:].set_visible(False)
+        ax.tick_params(length=0)
 
-        # Set ticks
-        ax.set_xticks(np.arange(len(dataset_names)))
-        ax.set_yticks(np.arange(len(methods)))
-        ax.set_xticklabels(dataset_names, rotation=45, ha='right', fontsize=9)
-        ax.set_yticklabels(methods, fontsize=9)
+        self._heat_canvas.draw()
 
-        ax.set_title('Method Applicability Matrix', fontsize=12, fontweight='bold')
-        ax.set_xlabel('Datasets', fontsize=10)
-        ax.set_ylabel('Methods', fontsize=10)
+    # ── Export ────────────────────────────────────────────────────────────────
 
-        # Add colorbar legend
-        cbar = self.method_heatmap_figure.colorbar(im, ax=ax, ticks=[0.375, 1.125, 1.875, 2.625])
-        cbar.ax.set_yticklabels(['N/A', 'Error', 'Warning', 'OK'], fontsize=8)
+    def _export_plot(self) -> None:
+        """Save the comparison plot (Plot tab canvas) as PNG or SVG."""
+        path, _ = QFileDialog.getSaveFileName(
+            self,
+            "Export Comparison Plot",
+            "comparison.png",
+            "PNG Image (*.png);;SVG Vector (*.svg)",
+        )
+        if not path:
+            return
+        try:
+            if hasattr(self._plot_widget, "figure"):
+                self._plot_widget.figure.savefig(path, dpi=150, bbox_inches="tight")
+            elif hasattr(self._plot_widget, "_fig"):
+                self._plot_widget._fig.savefig(path, dpi=150, bbox_inches="tight")
+            elif hasattr(self._plot_widget, "canvas") and hasattr(
+                self._plot_widget.canvas, "figure"
+            ):
+                self._plot_widget.canvas.figure.savefig(
+                    path, dpi=150, bbox_inches="tight"
+                )
+        except Exception as exc:
+            from PyQt6.QtWidgets import QMessageBox
+            QMessageBox.warning(
+                self,
+                "Export Failed",
+                f"Could not save plot:\n{exc}",
+            )
 
-        # Add grid
-        ax.set_xticks(np.arange(len(dataset_names))-0.5, minor=True)
-        ax.set_yticks(np.arange(len(methods))-0.5, minor=True)
-        ax.grid(which='minor', color='white', linestyle='-', linewidth=2)
-
-        self.method_heatmap_figure.tight_layout()
-        self.method_heatmap_canvas.draw()
+    def export_comparison(self) -> None:
+        """Public alias kept for main_window.py compatibility."""
+        self._export_plot()

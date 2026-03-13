@@ -1,700 +1,986 @@
-"""
-Reporting tab for generating professional analysis reports
-"""
+"""Reporting tab — generates and previews professional analysis reports."""
+from __future__ import annotations
 
-from PyQt6.QtWidgets import (
-    QWidget, QVBoxLayout, QHBoxLayout, QComboBox, QPushButton,
-    QLabel, QTextEdit, QGroupBox, QCheckBox, QFileDialog,
-    QMessageBox, QToolBar, QSplitter, QLineEdit, QScrollArea, QFrame
-)
-from PyQt6.QtCore import Qt, pyqtSignal
-from PyQt6.QtGui import QTextDocument, QTextCursor
-from typing import List, Optional
 import os
+from typing import List
 
+from PyQt6.QtCore import Qt, QSettings
+from PyQt6.QtGui import QColor
+from PyQt6.QtWidgets import (
+    QButtonGroup, QCheckBox, QColorDialog, QComboBox, QFileDialog,
+    QFrame, QHBoxLayout, QLabel, QLineEdit, QMessageBox,
+    QPushButton, QScrollArea, QSplitter, QTextEdit,
+    QVBoxLayout, QWidget,
+)
+
+try:
+    from PyQt6.QtWebEngineWidgets import QWebEngineView
+    from PyQt6.QtGui import QPageLayout, QPageSize
+    from PyQt6.QtCore import QMarginsF
+    HAS_WEBENGINE = True
+except ImportError:
+    HAS_WEBENGINE = False
+
+from .theme import C, F
+from .report_brand import ReportBrand
 from report_generator import ReportGenerator
-from data_loader import GrainSizeData
-from k_calculations import KCalculationResult
 
 
-class ReportingTab(QWidget):
-    """
-    Tab for generating and previewing professional reports
-    """
+# ── Small UI helpers ──────────────────────────────────────────────────────────
 
-    # Signals
-    report_generated = pyqtSignal(str)  # Emitted when report is generated
+def _cat_label(text: str) -> QLabel:
+    """All-caps muted category heading."""
+    lbl = QLabel(text.upper())
+    lbl.setStyleSheet(f"""
+        QLabel {{
+            font-family: "{F.UI}";
+            font-size: {F.SZ_SM}pt;
+            font-weight: 700;
+            color: {C.TEXT_MUTED};
+            letter-spacing: 1px;
+            padding: 10px 0 3px 0;
+        }}
+    """)
+    return lbl
+
+
+def _hdivider() -> QFrame:
+    f = QFrame()
+    f.setFrameShape(QFrame.Shape.HLine)
+    f.setStyleSheet(f"color: {C.BORDER};")
+    f.setFixedHeight(1)
+    return f
+
+
+def _field_label(text: str) -> QLabel:
+    lbl = QLabel(text)
+    lbl.setStyleSheet(f"""
+        QLabel {{
+            font-family: "{F.UI}";
+            font-size: {F.SZ_SM}pt;
+            color: {C.TEXT_MID};
+        }}
+    """)
+    return lbl
+
+
+def _line_edit(placeholder: str = "") -> QLineEdit:
+    edit = QLineEdit()
+    if placeholder:
+        edit.setPlaceholderText(placeholder)
+    edit.setStyleSheet(f"""
+        QLineEdit {{
+            font-family: "{F.UI}";
+            font-size: {F.SZ_BASE}pt;
+            color: {C.TEXT};
+            background: white;
+            border: 1px solid {C.BORDER};
+            border-radius: 3px;
+            padding: 3px 6px;
+        }}
+        QLineEdit:focus {{ border-color: {C.OLIVE}; }}
+    """)
+    return edit
+
+
+# ── Report type card button ───────────────────────────────────────────────────
+
+class _TypeCard(QPushButton):
+    """Toggleable card button for report type selection."""
+
+    def __init__(self, icon_ch: str, label: str, parent=None):
+        super().__init__(parent)
+        self.setCheckable(True)
+        self.setText(f"{icon_ch}\n{label}")
+        self.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.setMinimumHeight(54)
+        self.toggled.connect(lambda _: self._refresh())
+        self._refresh()
+
+    def _refresh(self):
+        on = self.isChecked()
+        self.setStyleSheet(f"""
+            QPushButton {{
+                background: {"#6b8e23" if on else C.BG_RAISED};
+                color: {"#ffffff" if on else C.TEXT};
+                border: {"1.5px solid #4f6a1a" if on else f"1px solid {C.BORDER}"};
+                border-radius: 6px;
+                padding: 6px 4px;
+                font-family: "{F.UI}";
+                font-size: {F.SZ_SM}pt;
+                font-weight: {"700" if on else "500"};
+                text-align: center;
+            }}
+            QPushButton:hover:!checked {{
+                border-color: {C.OLIVE};
+                background: {C.BG_LOW};
+            }}
+        """)
+
+
+# ── Individual sub-type chip row ──────────────────────────────────────────────
+
+class _SubtypeChips(QWidget):
+    """Horizontal chip selector for Individual report sub-type."""
+
+    NAMES = ["Grain Size", "K-Values", "Combined"]
 
     def __init__(self, parent=None):
         super().__init__(parent)
+        lay = QHBoxLayout(self)
+        lay.setContentsMargins(0, 2, 0, 2)
+        lay.setSpacing(4)
 
-        self.report_generator = ReportGenerator()
-        self.dataset_tabs = []  # Will be populated by main window
-        self.current_report_html = ""
+        self._group = QButtonGroup(self)
+        self._group.setExclusive(True)
 
-        self.init_ui()
-
-    def init_ui(self):
-        """Initialize the UI"""
-        layout = QVBoxLayout(self)
-        layout.setContentsMargins(5, 5, 5, 5)
-
-        # Create toolbar
-        toolbar = self.create_toolbar()
-        layout.addWidget(toolbar)
-
-        # Create main content area with splitter
-        splitter = QSplitter(Qt.Orientation.Horizontal)
-
-        # Left panel - Report configuration
-        config_panel = self.create_config_panel()
-        config_panel.setMaximumWidth(300)
-
-        # Right panel - Report preview
-        preview_panel = self.create_preview_panel()
-
-        splitter.addWidget(config_panel)
-        splitter.addWidget(preview_panel)
-        splitter.setStretchFactor(0, 0)  # Config panel doesn't stretch
-        splitter.setStretchFactor(1, 1)  # Preview panel stretches
-
-        layout.addWidget(splitter)
-
-    def create_toolbar(self):
-        """Create the toolbar with export options"""
-        toolbar = QToolBar()
-        toolbar.setMovable(False)
-        toolbar.setStyleSheet("""
-            QToolBar {
-                background-color: #f5f5f0;
-                border: 1px solid #d4c4a8;
-                padding: 4px;
-                spacing: 4px;
-            }
-            QPushButton {
-                padding: 6px 12px;
-                font-size: 10px;
-                background-color: #d2b48c;
-                border: 1px solid #8b7355;
+        chip_style = f"""
+            QPushButton {{
+                background: {C.BG};
+                color: {C.TEXT_MID};
+                border: 1px solid {C.BORDER};
                 border-radius: 4px;
-            }
-            QPushButton:hover {
-                background-color: #ddbf94;
-            }
+                padding: 3px 8px;
+                font-family: "{F.UI}";
+                font-size: {F.SZ_SM}pt;
+            }}
+            QPushButton:checked {{
+                background: rgba(107,142,35,0.12);
+                color: {C.OLIVE_DK};
+                border-color: {C.OLIVE};
+                font-weight: 600;
+            }}
+            QPushButton:hover:!checked {{ border-color: {C.OLIVE}; }}
+        """
+        for i, name in enumerate(self.NAMES):
+            btn = QPushButton(name)
+            btn.setCheckable(True)
+            btn.setCursor(Qt.CursorShape.PointingHandCursor)
+            btn.setStyleSheet(chip_style)
+            self._group.addButton(btn, i)
+            lay.addWidget(btn)
+
+        self._group.button(0).setChecked(True)
+
+    def selected(self) -> str:
+        idx = self._group.checkedId()
+        return self.NAMES[idx] if idx >= 0 else "Grain Size"
+
+
+# ── Color swatch ──────────────────────────────────────────────────────────────
+
+class _ColorSwatch(QPushButton):
+    """Small square button showing current hex color."""
+
+    def __init__(self, color: str = "#990000", parent=None):
+        super().__init__(parent)
+        self.setFixedSize(28, 28)
+        self.setToolTip("Click to change brand color")
+        self.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.set_color(color)
+
+    def set_color(self, hex_color: str):
+        self._color = hex_color
+        self.setStyleSheet(f"""
+            QPushButton {{
+                background: {hex_color};
+                border: 2px solid {C.BORDER_DK};
+                border-radius: 4px;
+            }}
+            QPushButton:hover {{ border-color: {C.TEXT_MID}; }}
         """)
 
-        # Export buttons
-        self.export_html_btn = QPushButton("📄 Export HTML")
-        self.export_html_btn.clicked.connect(self.export_html)
-        self.export_html_btn.setEnabled(False)
-        toolbar.addWidget(self.export_html_btn)
+    def color(self) -> str:
+        return self._color
 
-        self.export_pdf_btn = QPushButton("📑 Export PDF")
-        self.export_pdf_btn.clicked.connect(self.export_pdf)
-        self.export_pdf_btn.setEnabled(False)
-        toolbar.addWidget(self.export_pdf_btn)
 
-        self.print_btn = QPushButton("🖨️ Print")
-        self.print_btn.clicked.connect(self.print_report)
-        self.print_btn.setEnabled(False)
-        toolbar.addWidget(self.print_btn)
+# ── Main tab ──────────────────────────────────────────────────────────────────
 
-        # Add stretch
-        spacer = QWidget()
-        spacer.setSizePolicy(spacer.sizePolicy().horizontalPolicy(),
-                           spacer.sizePolicy().verticalPolicy())
-        toolbar.addWidget(spacer)
+class ReportingTab(QWidget):
+    """Tab for generating and previewing professional reports."""
 
-        # Copy button
-        self.copy_btn = QPushButton("📋 Copy to Clipboard")
-        self.copy_btn.clicked.connect(self.copy_to_clipboard)
-        self.copy_btn.setEnabled(False)
-        toolbar.addWidget(self.copy_btn)
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.report_generator = ReportGenerator()
+        self.dataset_tabs: List = []
+        self.current_report_html = ""
+        self.brand = ReportBrand.load()
+        self._init_ui()
 
-        return toolbar
+    def _init_ui(self):
+        root = QHBoxLayout(self)
+        root.setContentsMargins(0, 0, 0, 0)
+        root.setSpacing(0)
 
-    def create_config_panel(self):
-        """Create the configuration panel"""
-        panel = QWidget()
+        splitter = QSplitter(Qt.Orientation.Horizontal)
+        splitter.setChildrenCollapsible(False)
 
-        # Use scroll area for the config panel
+        left = self._build_left_panel()
+        left.setMinimumWidth(260)
+        left.setMaximumWidth(320)
+
+        right = self._build_right_panel()
+
+        splitter.addWidget(left)
+        splitter.addWidget(right)
+        splitter.setStretchFactor(0, 0)
+        splitter.setStretchFactor(1, 1)
+        splitter.setSizes([280, 800])
+
+        root.addWidget(splitter)
+
+    # ── Left panel ────────────────────────────────────────────────────────────
+
+    def _build_left_panel(self) -> QScrollArea:
         scroll = QScrollArea()
         scroll.setWidgetResizable(True)
         scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+        scroll.setStyleSheet(f"""
+            QScrollArea {{ border: none; background: {C.BG}; }}
+            QWidget#left_inner {{ background: {C.BG}; }}
+        """)
 
-        content_widget = QWidget()
-        layout = QVBoxLayout(content_widget)
+        inner = QWidget()
+        inner.setObjectName("left_inner")
+        lay = QVBoxLayout(inner)
+        lay.setContentsMargins(12, 10, 12, 12)
+        lay.setSpacing(2)
 
-        # Project metadata section
-        metadata_group = QGroupBox("Project Information")
-        metadata_layout = QVBoxLayout(metadata_group)
+        # Report type cards
+        lay.addWidget(_cat_label("Report Type"))
+        lay.addWidget(self._build_type_cards())
+        self._subtype_chips = _SubtypeChips()
+        lay.addWidget(self._subtype_chips)
+        lay.addWidget(_hdivider())
 
-        self.project_name_edit = QLineEdit()
-        self.project_name_edit.setPlaceholderText("e.g., Site Investigation 2024")
-        metadata_layout.addWidget(QLabel("Project Name:"))
-        metadata_layout.addWidget(self.project_name_edit)
-
-        self.location_edit = QLineEdit()
-        self.location_edit.setPlaceholderText("e.g., Copenhagen, Denmark")
-        metadata_layout.addWidget(QLabel("Location:"))
-        metadata_layout.addWidget(self.location_edit)
-
-        self.client_edit = QLineEdit()
-        self.client_edit.setPlaceholderText("e.g., ABC Engineering")
-        metadata_layout.addWidget(QLabel("Client/Organization:"))
-        metadata_layout.addWidget(self.client_edit)
-
-        self.analyst_edit = QLineEdit()
-        self.analyst_edit.setPlaceholderText("e.g., John Doe")
-        metadata_layout.addWidget(QLabel("Analyst:"))
-        metadata_layout.addWidget(self.analyst_edit)
-
-        layout.addWidget(metadata_group)
-
-        # Report type selection
-        type_group = QGroupBox("Report Type")
-        type_layout = QVBoxLayout(type_group)
-
-        self.report_type_combo = QComboBox()
-        self.report_type_combo.addItems([
-            "Individual - Grain Size",
-            "Individual - K-Values",
-            "Individual - Combined",
-            "Multi-Sample Comparison",
-            "Full Analysis Report"
-        ])
-        self.report_type_combo.currentTextChanged.connect(self.on_report_type_changed)
-        type_layout.addWidget(self.report_type_combo)
-
-        layout.addWidget(type_group)
-
-        # Report Template/Style selection (NEW)
-        template_group = QGroupBox("Report Template")
-        template_layout = QVBoxLayout(template_group)
-
-        self.template_combo = QComboBox()
-        self.template_combo.addItems([
-            "Standard - Balanced report with all sections",
-            "Executive - Summary focused, minimal details",
-            "Technical - Comprehensive with methodology",
-            "Appendix - Data tables and charts only"
-        ])
-        self.template_combo.setToolTip("Choose the report style that best fits your needs")
-        template_layout.addWidget(self.template_combo)
-
-        # Add template description label
-        self.template_desc_label = QLabel()
-        self.template_desc_label.setWordWrap(True)
-        self.template_desc_label.setStyleSheet("color: #666; font-size: 9px; padding: 5px;")
-        self.update_template_description()
-        self.template_combo.currentTextChanged.connect(self.update_template_description)
-        template_layout.addWidget(self.template_desc_label)
-
-        layout.addWidget(template_group)
+        # Template
+        lay.addWidget(_cat_label("Template"))
+        lay.addWidget(self._build_template_selector())
+        lay.addWidget(_hdivider())
 
         # Sample selection
-        self.sample_group = QGroupBox("Sample Selection")
-        sample_layout = QVBoxLayout(self.sample_group)
+        lay.addWidget(_cat_label("Samples"))
+        lay.addWidget(self._build_sample_section())
+        lay.addWidget(_hdivider())
 
-        self.sample_combo = QComboBox()
-        self.sample_combo.addItem("No samples available")
-        sample_layout.addWidget(self.sample_combo)
+        # Sections
+        lay.addWidget(_cat_label("Sections"))
+        for w in self._build_section_checks():
+            lay.addWidget(w)
+        lay.addWidget(_hdivider())
 
-        # Multi-sample checkboxes will be added dynamically
-        self.sample_checks_widget = QWidget()
-        self.sample_checks_layout = QVBoxLayout(self.sample_checks_widget)
-        self.sample_checks_widget.setVisible(False)
-        sample_layout.addWidget(self.sample_checks_widget)
+        # Branding
+        lay.addWidget(_cat_label("Branding"))
+        for w in self._build_branding_widgets():
+            if isinstance(w, QHBoxLayout):
+                lay.addLayout(w)
+            else:
+                lay.addWidget(w)
+        lay.addWidget(_hdivider())
 
-        layout.addWidget(self.sample_group)
+        # Report info
+        lay.addWidget(_cat_label("Report Info"))
+        for w in self._build_metadata_widgets():
+            lay.addWidget(w)
+        lay.addWidget(_hdivider())
 
-        # Report sections (modular selection)
-        sections_group = QGroupBox("Report Sections")
-        sections_layout = QVBoxLayout(sections_group)
-
-        # Main sections
-        self.include_executive_summary_check = QCheckBox("Executive Summary")
-        self.include_executive_summary_check.setChecked(True)
-        sections_layout.addWidget(self.include_executive_summary_check)
-
-        self.include_methodology_check = QCheckBox("Methodology & Theory")
-        self.include_methodology_check.setChecked(True)
-        sections_layout.addWidget(self.include_methodology_check)
-
-        self.include_results_check = QCheckBox("Results & Analysis")
-        self.include_results_check.setChecked(True)
-        sections_layout.addWidget(self.include_results_check)
-
-        self.include_plots_check = QCheckBox("Visual Charts & Plots")
-        self.include_plots_check.setChecked(True)
-        sections_layout.addWidget(self.include_plots_check)
-
-        self.include_interpretation_check = QCheckBox("Interpretation & Discussion")
-        self.include_interpretation_check.setChecked(True)
-        sections_layout.addWidget(self.include_interpretation_check)
-
-        # Separator
-        separator = QFrame()
-        separator.setFrameShape(QFrame.Shape.HLine)
-        separator.setFrameShadow(QFrame.Shadow.Sunken)
-        sections_layout.addWidget(separator)
-
-        # Detailed data sections
-        detail_label = QLabel("Detailed Statistics:")
-        detail_label.setStyleSheet("font-weight: bold; color: #5d4e37; margin-top: 5px;")
-        sections_layout.addWidget(detail_label)
-
-        self.include_percentiles_check = QCheckBox("  Grain Size Percentiles Table")
-        self.include_percentiles_check.setChecked(True)
-        sections_layout.addWidget(self.include_percentiles_check)
-
-        self.include_gradation_check = QCheckBox("  Gradation Analysis")
-        self.include_gradation_check.setChecked(True)
-        sections_layout.addWidget(self.include_gradation_check)
-
-        self.include_k_statistics_check = QCheckBox("  K-Value Statistics Table")
-        self.include_k_statistics_check.setChecked(True)
-        sections_layout.addWidget(self.include_k_statistics_check)
-
-        self.include_data_quality_check = QCheckBox("  Data Quality Indicators")
-        self.include_data_quality_check.setChecked(False)
-        sections_layout.addWidget(self.include_data_quality_check)
-
-        # Separator
-        separator2 = QFrame()
-        separator2.setFrameShape(QFrame.Shape.HLine)
-        separator2.setFrameShadow(QFrame.Shadow.Sunken)
-        sections_layout.addWidget(separator2)
-
-        # Appendix sections
-        appendix_label = QLabel("Appendix:")
-        appendix_label.setStyleSheet("font-weight: bold; color: #5d4e37; margin-top: 5px;")
-        sections_layout.addWidget(appendix_label)
-
-        self.include_raw_data_check = QCheckBox("  Raw Data Tables")
-        self.include_raw_data_check.setChecked(False)
-        sections_layout.addWidget(self.include_raw_data_check)
-
-        layout.addWidget(sections_group)
-
-        # Custom notes section
-        notes_group = QGroupBox("Custom Notes")
-        notes_layout = QVBoxLayout(notes_group)
-
+        # Notes
+        lay.addWidget(_cat_label("Notes"))
         self.notes_edit = QTextEdit()
-        self.notes_edit.setPlaceholderText("Add any additional notes, observations, or comments to include in the report...")
-        self.notes_edit.setMaximumHeight(100)
-        notes_layout.addWidget(self.notes_edit)
+        self.notes_edit.setPlaceholderText("Additional observations or notes…")
+        self.notes_edit.setMaximumHeight(72)
+        lay.addWidget(self.notes_edit)
 
-        layout.addWidget(notes_group)
+        lay.addSpacing(8)
 
         # Generate button
-        self.generate_btn = QPushButton("🔄 Generate Report")
-        self.generate_btn.clicked.connect(self.generate_report)
-        self.generate_btn.setStyleSheet("""
-            QPushButton {
-                background-color: #6b8e23;
+        self.generate_btn = QPushButton("Generate Report")
+        self.generate_btn.setMinimumHeight(36)
+        self.generate_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.generate_btn.setStyleSheet(f"""
+            QPushButton {{
+                background: {C.OLIVE};
                 color: white;
-                font-weight: bold;
-                padding: 10px;
-                font-size: 11px;
-            }
-            QPushButton:hover {
-                background-color: #7fa02d;
-            }
+                border: none;
+                border-radius: 5px;
+                padding: 8px;
+                font-family: "{F.UI}";
+                font-size: {F.SZ_LG}pt;
+                font-weight: 600;
+            }}
+            QPushButton:hover   {{ background: {C.OLIVE_H}; }}
+            QPushButton:pressed {{ background: {C.OLIVE_DK}; }}
+            QPushButton:disabled {{
+                background: {C.BORDER};
+                color: {C.TEXT_MUTED};
+            }}
         """)
-        layout.addWidget(self.generate_btn)
+        self.generate_btn.clicked.connect(self._on_generate)
+        self.generate_btn.setEnabled(False)
+        lay.addWidget(self.generate_btn)
+        lay.addStretch()
 
-        layout.addStretch()
+        scroll.setWidget(inner)
+        return scroll
 
-        # Set scroll area content and wrap in panel
-        scroll.setWidget(content_widget)
-        panel_layout = QVBoxLayout(panel)
-        panel_layout.setContentsMargins(0, 0, 0, 0)
-        panel_layout.addWidget(scroll)
+    def _build_type_cards(self) -> QWidget:
+        w = QWidget()
+        lay = QHBoxLayout(w)
+        lay.setContentsMargins(0, 0, 0, 0)
+        lay.setSpacing(6)
 
-        return panel
+        self._card_group = QButtonGroup(self)
+        self._card_group.setExclusive(True)
 
-    def create_preview_panel(self):
-        """Create the report preview panel"""
-        panel = QWidget()
-        layout = QVBoxLayout(panel)
+        for i, (icon_ch, label) in enumerate([
+            ("◉", "Individual"),
+            ("◎", "Comparison"),
+            ("⊕", "Full Project"),
+        ]):
+            card = _TypeCard(icon_ch, label)
+            self._card_group.addButton(card, i)
+            lay.addWidget(card)
 
-        # Title
-        title = QLabel("Report Preview")
-        title.setStyleSheet("font-size: 14px; font-weight: bold; padding: 5px;")
-        layout.addWidget(title)
+        self._card_group.button(0).setChecked(True)
+        self._card_group.idToggled.connect(self._on_type_changed)
+        return w
 
-        # Preview area
-        self.preview_edit = QTextEdit()
-        self.preview_edit.setReadOnly(True)
-        self.preview_edit.setStyleSheet("""
-            QTextEdit {
-                background-color: white;
-                border: 1px solid #ddd;
-                font-family: 'Segoe UI', Arial, sans-serif;
-            }
+    def _build_sample_section(self) -> QWidget:
+        w = QWidget()
+        lay = QVBoxLayout(w)
+        lay.setContentsMargins(0, 0, 0, 0)
+        lay.setSpacing(4)
+
+        self.sample_combo = QComboBox()
+        self.sample_combo.addItem("No samples loaded")
+        lay.addWidget(self.sample_combo)
+
+        self.sample_checks_widget = QWidget()
+        self.sample_checks_layout = QVBoxLayout(self.sample_checks_widget)
+        self.sample_checks_layout.setContentsMargins(0, 0, 0, 0)
+        self.sample_checks_layout.setSpacing(2)
+        self.sample_checks_widget.setVisible(False)
+        lay.addWidget(self.sample_checks_widget)
+
+        return w
+
+    def _build_template_selector(self) -> QComboBox:
+        combo = QComboBox()
+        combo.addItems(["Standard", "Executive", "Technical", "Appendix"])
+        combo.setStyleSheet(f"""
+            QComboBox {{
+                font-family: "{F.UI}";
+                font-size: {F.SZ_BASE}pt;
+                color: {C.TEXT};
+                background: white;
+                border: 1px solid {C.BORDER};
+                border-radius: 3px;
+                padding: 3px 6px;
+            }}
+            QComboBox:focus {{ border-color: {C.OLIVE}; }}
+            QComboBox QAbstractItemView {{
+                background: white;
+                border: 1px solid {C.BORDER};
+                selection-background-color: rgba(107,142,35,0.12);
+                selection-color: {C.TEXT};
+            }}
         """)
+        combo.currentTextChanged.connect(self._apply_template)
+        self._template_combo = combo
+        return combo
 
-        # Set initial content
-        self.preview_edit.setHtml("""
-            <div style="text-align: center; padding: 50px; color: #999;">
-                <h2>No Report Generated</h2>
-                <p>Select report type and sample(s), then click "Generate Report"</p>
-            </div>
+    def _apply_template(self, name: str):
+        """Set section checkboxes according to the named template."""
+        if not hasattr(self, "s_cover"):
+            return  # section checkboxes not yet built
+        templates = {
+            "Standard": {
+                "cover": False, "executive": True,  "methodology": True,
+                "results": True, "plots": True,      "interp": True,
+                "percentiles": True, "gradation": True, "k_stats": True,
+                "quality": False, "raw": False,
+            },
+            "Executive": {
+                "cover": True,  "executive": True,  "methodology": False,
+                "results": True, "plots": True,      "interp": True,
+                "percentiles": False, "gradation": True, "k_stats": False,
+                "quality": False, "raw": False,
+            },
+            "Technical": {
+                "cover": False, "executive": False, "methodology": True,
+                "results": True, "plots": True,      "interp": True,
+                "percentiles": True, "gradation": True, "k_stats": True,
+                "quality": True, "raw": True,
+            },
+            "Appendix": {
+                "cover": False, "executive": False, "methodology": False,
+                "results": False, "plots": False,    "interp": False,
+                "percentiles": True, "gradation": True, "k_stats": True,
+                "quality": True, "raw": True,
+            },
+        }
+        cfg = templates.get(name)
+        if cfg is None:
+            return
+        self.s_cover.setChecked(cfg["cover"])
+        self.s_executive.setChecked(cfg["executive"])
+        self.s_methodology.setChecked(cfg["methodology"])
+        self.s_results.setChecked(cfg["results"])
+        self.s_plots.setChecked(cfg["plots"])
+        self.s_interp.setChecked(cfg["interp"])
+        self.s_percentiles.setChecked(cfg["percentiles"])
+        self.s_gradation.setChecked(cfg["gradation"])
+        self.s_k_stats.setChecked(cfg["k_stats"])
+        self.s_quality.setChecked(cfg["quality"])
+        self.s_raw.setChecked(cfg["raw"])
+
+    def _build_section_checks(self) -> list:
+        cb_style = f"""
+            QCheckBox {{
+                font-family: "{F.UI}";
+                font-size: {F.SZ_BASE}pt;
+                color: {C.TEXT};
+                spacing: 6px;
+                padding: 1px 0;
+            }}
+            QCheckBox::indicator {{ width: 13px; height: 13px; }}
+        """
+        sub_style = f"""
+            QLabel {{
+                font-family: "{F.UI}";
+                font-size: {F.SZ_XS}pt;
+                color: {C.TEXT_MUTED};
+                padding: 5px 0 1px 0;
+            }}
+        """
+
+        def cb(label, checked=True):
+            c = QCheckBox(label)
+            c.setChecked(checked)
+            c.setStyleSheet(cb_style)
+            return c
+
+        self.s_cover        = cb("Cover Page", False)
+        self.s_executive    = cb("Executive Summary")
+        self.s_methodology  = cb("Methodology")
+        self.s_results      = cb("Results & Analysis")
+        self.s_plots        = cb("Charts & Plots")
+        self.s_interp       = cb("Interpretation")
+
+        sub_lbl = QLabel("Data details")
+        sub_lbl.setStyleSheet(sub_style)
+
+        self.s_percentiles  = cb("Percentile Table")
+        self.s_gradation    = cb("Gradation Analysis")
+        self.s_k_stats      = cb("K-Value Statistics")
+        self.s_quality      = cb("Data Quality", False)
+        self.s_raw          = cb("Raw Data Tables", False)
+
+        return [
+            self.s_cover,
+            self.s_executive, self.s_methodology, self.s_results,
+            self.s_plots, self.s_interp,
+            sub_lbl,
+            self.s_percentiles, self.s_gradation, self.s_k_stats,
+            self.s_quality, self.s_raw,
+        ]
+
+    def _build_branding_widgets(self) -> list:
+        self.org_name_edit    = _line_edit()
+        self.org_name_edit.setText(self.brand.org_name)
+        self.org_subtitle_edit = _line_edit()
+        self.org_subtitle_edit.setText(self.brand.org_subtitle)
+
+        # Color + logo row
+        row = QHBoxLayout()
+        row.setContentsMargins(0, 2, 0, 0)
+        row.setSpacing(6)
+
+        self._color_swatch = _ColorSwatch(self.brand.primary_color)
+        self._color_swatch.clicked.connect(self._pick_color)
+
+        logo_btn = QPushButton("Choose logo…")
+        logo_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        logo_btn.setStyleSheet(f"""
+            QPushButton {{
+                background: {C.BG_RAISED};
+                border: 1px solid {C.BORDER};
+                border-radius: 3px;
+                padding: 4px 8px;
+                font-family: "{F.UI}";
+                font-size: {F.SZ_SM}pt;
+                color: {C.TEXT_MID};
+            }}
+            QPushButton:hover {{ border-color: {C.OLIVE}; color: {C.TEXT}; }}
         """)
+        logo_btn.clicked.connect(self._pick_logo)
 
-        layout.addWidget(self.preview_edit)
+        clr_lbl = _field_label("Brand color")
+        row.addWidget(clr_lbl)
+        row.addWidget(self._color_swatch)
+        row.addStretch()
+        row.addWidget(logo_btn)
 
-        return panel
+        self._logo_status = QLabel()
+        self._logo_status.setFixedHeight(20)
+        self._refresh_logo_status()
+
+        return [
+            _field_label("Organization"),
+            self.org_name_edit,
+            _field_label("Department / Group"),
+            self.org_subtitle_edit,
+            row,
+            self._logo_status,
+        ]
+
+    def _build_metadata_widgets(self) -> list:
+        fields = [
+            ("project_name_edit", "Project",  "e.g., Site Investigation 2024"),
+            ("location_edit",     "Location", "e.g., Copenhagen, Denmark"),
+            ("client_edit",       "Client",   "e.g., ABC Engineering"),
+            ("analyst_edit",      "Analyst",  "e.g., J. Doe"),
+        ]
+        widgets = []
+        for attr, label, ph in fields:
+            widgets.append(_field_label(label))
+            edit = _line_edit(ph)
+            setattr(self, attr, edit)
+            widgets.append(edit)
+        return widgets
+
+    # ── Right panel ───────────────────────────────────────────────────────────
+
+    def _build_right_panel(self) -> QWidget:
+        w = QWidget()
+        w.setStyleSheet(f"background: {C.BG};")
+        lay = QVBoxLayout(w)
+        lay.setContentsMargins(0, 0, 0, 0)
+        lay.setSpacing(0)
+
+        lay.addWidget(self._build_preview_area(), 1)
+        lay.addWidget(_hdivider())
+        lay.addWidget(self._build_export_bar())
+        return w
+
+    def _build_preview_area(self) -> QWidget:
+        """Gray surround containing the HTML preview."""
+        surround = QWidget()
+        surround.setStyleSheet("background: #d0cbc2;")
+        lay = QVBoxLayout(surround)
+        lay.setContentsMargins(24, 20, 24, 20)
+
+        if HAS_WEBENGINE:
+            self.web_view = QWebEngineView()
+            self.web_view.setStyleSheet("background: white; border: none;")
+            self.web_view.setHtml(self._empty_preview_html())
+            # Connect PDF signal once
+            self.web_view.page().pdfPrintingFinished.connect(self._on_pdf_done)
+            lay.addWidget(self.web_view)
+        else:
+            self.web_view = QTextEdit()
+            self.web_view.setReadOnly(True)
+            self.web_view.setHtml(self._empty_preview_html())
+            lay.addWidget(self.web_view)
+
+            warn = QLabel("PyQt6-WebEngine not installed — PDF export unavailable.")
+            warn.setStyleSheet(
+                f"color: {C.TEXT_MUTED}; font-size: {F.SZ_SM}pt; "
+                f"font-family: '{F.UI}'; padding: 4px; background: transparent;"
+            )
+            warn.setAlignment(Qt.AlignmentFlag.AlignCenter)
+            lay.addWidget(warn)
+
+        return surround
+
+    def _build_export_bar(self) -> QWidget:
+        bar = QWidget()
+        bar.setStyleSheet(f"background: {C.BG_RAISED};")
+        lay = QHBoxLayout(bar)
+        lay.setContentsMargins(12, 8, 12, 8)
+        lay.setSpacing(8)
+
+        btn_style = f"""
+            QPushButton {{
+                background: {C.BG};
+                color: {C.TEXT_MID};
+                border: 1px solid {C.BORDER};
+                border-radius: 4px;
+                padding: 5px 14px;
+                font-family: "{F.UI}";
+                font-size: {F.SZ_BASE}pt;
+            }}
+            QPushButton:hover    {{ border-color: {C.OLIVE}; color: {C.TEXT}; }}
+            QPushButton:disabled {{ color: {C.TEXT_MUTED}; border-color: {C.BORDER}; }}
+        """
+
+        self.btn_html  = QPushButton("Export HTML")
+        self.btn_pdf   = QPushButton("Export PDF")
+        self.btn_md    = QPushButton("Export Markdown")
+        self.btn_docx  = QPushButton("Export Word (.docx)")
+
+        for btn in [self.btn_html, self.btn_pdf, self.btn_md, self.btn_docx]:
+            btn.setStyleSheet(btn_style)
+            btn.setCursor(Qt.CursorShape.PointingHandCursor)
+            btn.setEnabled(False)
+            lay.addWidget(btn)
+
+        lay.addStretch()
+
+        self.btn_html.clicked.connect(self._on_export_html)
+        self.btn_pdf.clicked.connect(self._on_export_pdf)
+        self.btn_md.clicked.connect(self._on_export_md)
+        self.btn_docx.clicked.connect(self._on_export_docx)
+
+        return bar
+
+    # ── Data wiring ───────────────────────────────────────────────────────────
 
     def set_dataset_tabs(self, dataset_tabs: List):
-        """Set the available dataset tabs"""
         self.dataset_tabs = dataset_tabs
-        self.update_sample_selection()
+        self._refresh_sample_list()
 
-    def update_sample_selection(self):
-        """Update the sample selection based on available datasets"""
+    def _refresh_sample_list(self):
         self.sample_combo.clear()
-
-        # Clear multi-sample checkboxes
         while self.sample_checks_layout.count():
             item = self.sample_checks_layout.takeAt(0)
             if item.widget():
                 item.widget().deleteLater()
 
         if not self.dataset_tabs:
-            self.sample_combo.addItem("No samples available")
+            self.sample_combo.addItem("No samples loaded")
             self.generate_btn.setEnabled(False)
             return
 
-        # Add samples to combo box
         for tab in self.dataset_tabs:
             self.sample_combo.addItem(tab.get_dataset_name())
-
-        # Add checkboxes for multi-sample selection
-        for tab in self.dataset_tabs:
-            checkbox = QCheckBox(tab.get_dataset_name())
-            checkbox.setChecked(True)
-            self.sample_checks_layout.addWidget(checkbox)
+            cb = QCheckBox(tab.get_dataset_name())
+            cb.setChecked(True)
+            self.sample_checks_layout.addWidget(cb)
 
         self.generate_btn.setEnabled(True)
 
-    def update_template_description(self):
-        """Update the template description based on selection"""
-        template = self.template_combo.currentText()
-        descriptions = {
-            "Standard": "Includes executive summary, methodology, results with charts, and interpretation. Good for general reporting.",
-            "Executive": "Focused on key findings and visualizations. Perfect for presentations and quick reviews.",
-            "Technical": "Comprehensive report with detailed methodology, all data tables, and quality assessments. Best for technical documentation.",
-            "Appendix": "Minimal narrative, maximum data. Contains only charts, tables, and raw data. Ideal for supplementary materials."
+    # ── Slot handlers ─────────────────────────────────────────────────────────
+
+    def _on_type_changed(self, btn_id: int, checked: bool):
+        if not checked:
+            return
+        is_individual = (btn_id == 0)
+        self._subtype_chips.setVisible(is_individual)
+        self.sample_combo.setVisible(is_individual)
+        self.sample_checks_widget.setVisible(not is_individual)
+
+    def _pick_color(self):
+        dlg = QColorDialog(QColor(self._color_swatch.color()), self)
+        if dlg.exec():
+            self._color_swatch.set_color(dlg.selectedColor().name())
+            self._sync_brand()
+
+    def _pick_logo(self):
+        path, _ = QFileDialog.getOpenFileName(
+            self, "Select Logo Image", "",
+            "Images (*.png *.jpg *.jpeg *.svg)"
+        )
+        if path:
+            self.brand.logo_path = path
+            self._refresh_logo_status()
+            self._sync_brand()
+
+    def _refresh_logo_status(self):
+        if self.brand.logo_path and os.path.exists(self.brand.logo_path):
+            fname = os.path.basename(self.brand.logo_path)
+            self._logo_status.setText(f"✓ {fname}")
+            self._logo_status.setStyleSheet(
+                f"color: {C.OLIVE_DK}; font-size: {F.SZ_SM}pt; "
+                f"font-family: '{F.UI}'; background: transparent;"
+            )
+        else:
+            self._logo_status.setText("Auto-generated placeholder")
+            self._logo_status.setStyleSheet(
+                f"color: {C.TEXT_MUTED}; font-size: {F.SZ_SM}pt; "
+                f"font-style: italic; background: transparent;"
+            )
+
+    def _sync_brand(self):
+        """Push current UI values into brand and persist."""
+        self.brand.org_name      = self.org_name_edit.text()
+        self.brand.org_subtitle  = self.org_subtitle_edit.text()
+        self.brand.primary_color = self._color_swatch.color()
+        self.brand.save()
+
+    # ── Data collection ───────────────────────────────────────────────────────
+
+    def _collect_brand(self) -> ReportBrand:
+        self._sync_brand()
+        return self.brand
+
+    def _collect_metadata(self) -> dict:
+        return {
+            "project_name": self.project_name_edit.text(),
+            "location":     self.location_edit.text(),
+            "client":       self.client_edit.text(),
+            "analyst":      self.analyst_edit.text(),
+            "notes":        self.notes_edit.toPlainText(),
         }
 
-        # Extract template name (before dash)
-        template_name = template.split(" -")[0]
-        desc = descriptions.get(template_name, "")
-        self.template_desc_label.setText(desc)
+    def _collect_sections(self) -> dict:
+        return {
+            "cover_page":        self.s_cover.isChecked(),
+            "executive_summary": self.s_executive.isChecked(),
+            "methodology":       self.s_methodology.isChecked(),
+            "results":           self.s_results.isChecked(),
+            "plots":             self.s_plots.isChecked(),
+            "interpretation":    self.s_interp.isChecked(),
+            "percentiles":       self.s_percentiles.isChecked(),
+            "gradation":         self.s_gradation.isChecked(),
+            "k_statistics":      self.s_k_stats.isChecked(),
+            "data_quality":      self.s_quality.isChecked(),
+            "raw_data":          self.s_raw.isChecked(),
+        }
 
-    def on_report_type_changed(self, text: str):
-        """Handle report type change"""
-        # Show/hide sample selection based on report type
-        is_multi_sample = "Multi-Sample" in text or "Full Analysis" in text
+    # ── Report generation ─────────────────────────────────────────────────────
 
-        self.sample_combo.setVisible(not is_multi_sample)
-        self.sample_checks_widget.setVisible(is_multi_sample)
-
-        # Update sample group title
-        if is_multi_sample:
-            self.sample_group.setTitle("Sample Selection (Select Multiple)")
-        else:
-            self.sample_group.setTitle("Sample Selection")
-
-    def generate_report(self):
-        """Generate the selected report"""
+    def _on_generate(self):
         if not self.dataset_tabs:
-            QMessageBox.warning(self, "No Data", "Please load datasets first")
+            QMessageBox.warning(self, "No Data", "Please load datasets first.")
             return
 
-        report_type = self.report_type_combo.currentText()
+        brand    = self._collect_brand()
+        metadata = self._collect_metadata()
+        sections = self._collect_sections()
 
         try:
-            if "Individual" in report_type:
-                self.generate_individual_report(report_type)
-            elif "Multi-Sample" in report_type:
-                self.generate_comparison_report()
-            elif "Full Analysis" in report_type:
-                self.generate_full_report()
+            type_id = self._card_group.checkedId()
+            if type_id == 0:
+                html = self._gen_individual(brand, metadata, sections)
+            elif type_id == 1:
+                html = self._gen_comparison(brand, metadata, sections)
+            else:
+                html = self._gen_full(brand, metadata, sections)
 
-            # Enable export buttons
-            self.export_html_btn.setEnabled(True)
-            self.export_pdf_btn.setEnabled(True)
-            self.print_btn.setEnabled(True)
-            self.copy_btn.setEnabled(True)
+            self.current_report_html = html
+            self.web_view.setHtml(self._inject_preview_css(html))
 
-            self.report_generated.emit(report_type)
+            self.btn_html.setEnabled(True)
+            if HAS_WEBENGINE:
+                self.btn_pdf.setEnabled(True)
 
-        except Exception as e:
-            QMessageBox.critical(self, "Report Generation Error",
-                               f"Failed to generate report:\n{str(e)}")
+        except Exception as exc:
+            QMessageBox.critical(self, "Report Error",
+                                 f"Failed to generate report:\n{exc}")
 
-    def generate_individual_report(self, report_type: str):
-        """Generate an individual sample report"""
-        # Get selected sample
-        sample_index = self.sample_combo.currentIndex()
-        if sample_index < 0 or sample_index >= len(self.dataset_tabs):
-            return
+    def _gen_individual(self, brand, metadata, sections) -> str:
+        idx = self.sample_combo.currentIndex()
+        if idx < 0 or idx >= len(self.dataset_tabs):
+            raise ValueError("No sample selected.")
+        tab     = self.dataset_tabs[idx]
+        dataset = tab.get_dataset()
+        subtype = self._subtype_chips.selected()
 
-        dataset_tab = self.dataset_tabs[sample_index]
-        dataset = dataset_tab.get_dataset()
-
-        # Get selected template
-        template_text = self.template_combo.currentText()
-        template = template_text.split(" -")[0].lower()  # Extract: "standard", "executive", "technical", "appendix"
-
-        # Collect metadata
-        metadata = {
-            'project_name': self.project_name_edit.text(),
-            'location': self.location_edit.text(),
-            'client': self.client_edit.text(),
-            'analyst': self.analyst_edit.text(),
-            'notes': self.notes_edit.toPlainText()
-        }
-
-        # Collect section options (only if not using template defaults)
-        sections = {
-            'cover_page': template in ['executive', 'technical'],  # Auto cover for exec/tech
-            'executive_summary': self.include_executive_summary_check.isChecked(),
-            'methodology': self.include_methodology_check.isChecked(),
-            'results': self.include_results_check.isChecked(),
-            'plots': self.include_plots_check.isChecked(),
-            'raw_data': self.include_raw_data_check.isChecked(),
-            'interpretation': self.include_interpretation_check.isChecked(),
-            'percentiles': self.include_percentiles_check.isChecked(),
-            'gradation': self.include_gradation_check.isChecked(),
-            'k_statistics': self.include_k_statistics_check.isChecked(),
-            'data_quality': self.include_data_quality_check.isChecked()
-        }
-
-        if "Grain Size" in report_type:
-            html = self.report_generator.generate_grain_size_report(
-                dataset,
-                metadata=metadata,
-                sections=sections,
-                report_template=template
+        if subtype == "K-Values":
+            return self.report_generator.generate_k_value_report(
+                dataset, tab.get_results(), tab.temperature, tab.porosity,
+                metadata=metadata, sections=sections, brand=brand,
             )
-        elif "K-Values" in report_type:
-            k_results = dataset_tab.get_results()
-            html = self.report_generator.generate_k_value_report(
-                dataset,
-                k_results,
-                dataset_tab.temperature,
-                dataset_tab.porosity,
-                metadata=metadata,
-                sections=sections,
-                report_template=template
+        elif subtype == "Combined":
+            return self.report_generator.generate_combined_report(
+                dataset, tab.get_results(), tab.temperature, tab.porosity,
+                metadata=metadata, sections=sections, brand=brand,
             )
-        else:  # Combined
-            k_results = dataset_tab.get_results()
-            html = self.report_generator.generate_combined_report(
-                dataset,
-                k_results,
-                dataset_tab.temperature,
-                dataset_tab.porosity,
-                metadata=metadata,
-                sections=sections
+        else:
+            return self.report_generator.generate_grain_size_report(
+                dataset, metadata=metadata, sections=sections, brand=brand,
             )
 
-        self.current_report_html = html
-        self.preview_edit.setHtml(html)
-
-    def generate_comparison_report(self):
-        """Generate a multi-sample comparison report"""
-        # Get selected samples
-        selected_tabs = []
+    def _gen_comparison(self, brand, metadata, sections) -> str:
+        selected = []
         for i in range(self.sample_checks_layout.count()):
-            checkbox = self.sample_checks_layout.itemAt(i).widget()
-            if checkbox and checkbox.isChecked():
-                # Find corresponding tab
+            cb = self.sample_checks_layout.itemAt(i).widget()
+            if cb and cb.isChecked():
                 for tab in self.dataset_tabs:
-                    if tab.get_dataset_name() == checkbox.text():
-                        selected_tabs.append(tab)
+                    if tab.get_dataset_name() == cb.text():
+                        selected.append(tab)
                         break
 
-        if not selected_tabs:
-            QMessageBox.warning(self, "No Selection",
-                              "Please select at least one sample")
-            return
+        if not selected:
+            raise ValueError("Select at least one sample.")
 
-        # Collect data
-        datasets = [tab.get_dataset() for tab in selected_tabs]
-        k_results_dict = {}
+        datasets = [t.get_dataset() for t in selected]
+        k_dict   = {t.get_dataset_name(): t.get_results()
+                    for t in selected if t.get_results()}
+        temp     = selected[0].temperature if selected else 20.0
+        poro     = selected[0].porosity    if selected else 0.4
 
-        for tab in selected_tabs:
-            k_results = tab.get_results()
-            if k_results:
-                k_results_dict[tab.get_dataset_name()] = k_results
-
-        # Collect metadata
-        metadata = {
-            'project_name': self.project_name_edit.text(),
-            'location': self.location_edit.text(),
-            'client': self.client_edit.text(),
-            'analyst': self.analyst_edit.text(),
-            'notes': self.notes_edit.toPlainText()
-        }
-
-        # Collect section options
-        sections = {
-            'executive_summary': self.include_executive_summary_check.isChecked(),
-            'methodology': self.include_methodology_check.isChecked(),
-            'results': self.include_results_check.isChecked(),
-            'plots': self.include_plots_check.isChecked(),
-            'raw_data': self.include_raw_data_check.isChecked(),
-            'interpretation': self.include_interpretation_check.isChecked(),
-            'percentiles': self.include_percentiles_check.isChecked(),
-            'gradation': self.include_gradation_check.isChecked(),
-            'k_statistics': self.include_k_statistics_check.isChecked(),
-            'data_quality': self.include_data_quality_check.isChecked()
-        }
-
-        # Generate report
-        html = self.report_generator.generate_comparison_report(
-            datasets,
-            k_results_dict,
-            selected_tabs[0].temperature if selected_tabs else 20.0,
-            selected_tabs[0].porosity if selected_tabs else 0.4,
-            metadata=metadata,
-            sections=sections
+        return self.report_generator.generate_comparison_report(
+            datasets, k_dict, temp, poro,
+            metadata=metadata, sections=sections, brand=brand,
         )
 
-        self.current_report_html = html
-        self.preview_edit.setHtml(html)
-
-    def generate_full_report(self):
-        """Generate a full analysis report for all samples"""
-        # Select all samples and generate comparison
+    def _gen_full(self, brand, metadata, sections) -> str:
         for i in range(self.sample_checks_layout.count()):
-            checkbox = self.sample_checks_layout.itemAt(i).widget()
-            if checkbox:
-                checkbox.setChecked(True)
+            cb = self.sample_checks_layout.itemAt(i).widget()
+            if cb:
+                cb.setChecked(True)
+        return self._gen_comparison(brand, metadata, sections)
 
-        self.generate_comparison_report()
+    # ── Export ────────────────────────────────────────────────────────────────
 
-    def export_html(self):
-        """Export report as HTML"""
+    def _on_export_html(self):
         if not self.current_report_html:
             return
+        path, _ = QFileDialog.getSaveFileName(
+            self, "Export HTML", "report.html", "HTML (*.html)"
+        )
+        if path:
+            with open(path, "w", encoding="utf-8") as fh:
+                fh.write(self.current_report_html)
+            QMessageBox.information(self, "Exported", f"Saved to:\n{path}")
 
-        file_path, _ = QFileDialog.getSaveFileName(
-            self,
-            "Export Report as HTML",
-            "report.html",
-            "HTML Files (*.html)"
+    def _on_export_pdf(self):
+        if not self.current_report_html or not HAS_WEBENGINE:
+            return
+
+        default = "report.pdf"
+        proj = self.project_name_edit.text()
+        if proj:
+            safe = "".join(c for c in proj if c.isalnum() or c in " -_").strip()
+            default = f"{safe}_report.pdf"
+
+        path, _ = QFileDialog.getSaveFileName(
+            self, "Export PDF", default, "PDF (*.pdf)"
+        )
+        if path:
+            try:
+                layout = QPageLayout(
+                    QPageSize(QPageSize.PageSizeId.A4),
+                    QPageLayout.Orientation.Portrait,
+                    QMarginsF(15, 15, 15, 15),
+                )
+                self.web_view.page().printToPdf(path, layout)
+            except Exception as exc:
+                QMessageBox.critical(self, "PDF Error",
+                                     f"Failed to export PDF:\n{exc}")
+
+    def _on_pdf_done(self, path: str, success: bool):
+        if success:
+            QMessageBox.information(self, "Exported", f"PDF saved to:\n{path}")
+        else:
+            QMessageBox.critical(self, "Export Error", "PDF export failed.")
+
+    def _on_export_md(self):
+        QMessageBox.information(
+            self, "Coming Soon",
+            "Markdown export will be available in a future update."
         )
 
-        if file_path:
-            try:
-                with open(file_path, 'w', encoding='utf-8') as f:
-                    f.write(self.current_report_html)
-
-                QMessageBox.information(self, "Export Successful",
-                                      f"Report exported to:\n{file_path}")
-            except Exception as e:
-                QMessageBox.critical(self, "Export Error",
-                                   f"Failed to export report:\n{str(e)}")
-
-    def export_pdf(self):
-        """Export report as PDF with improved formatting"""
-        if not self.current_report_html:
-            return
-
-        # Get default filename based on project name and report type
-        default_name = "report.pdf"
-        if self.project_name_edit.text():
-            safe_name = "".join(c for c in self.project_name_edit.text() if c.isalnum() or c in (' ', '-', '_')).strip()
-            default_name = f"{safe_name}_report.pdf"
-
-        file_path, _ = QFileDialog.getSaveFileName(
-            self,
-            "Export Report as PDF",
-            default_name,
-            "PDF Files (*.pdf)"
+    def _on_export_docx(self):
+        QMessageBox.information(
+            self, "Coming Soon",
+            "Word (.docx) export will be available in a future update."
         )
 
-        if file_path:
-            try:
-                from PyQt6.QtPrintSupport import QPrinter
-                from PyQt6.QtGui import QPageLayout, QPageSize
-                from PyQt6.QtCore import QMarginsF
+    # ── Utilities ─────────────────────────────────────────────────────────────
 
-                printer = QPrinter(QPrinter.PrinterMode.HighResolution)
-                printer.setOutputFormat(QPrinter.OutputFormat.PdfFormat)
-                printer.setOutputFileName(file_path)
+    @staticmethod
+    def _inject_preview_css(html: str) -> str:
+        """Inject screen-only CSS + JS that simulates an A4 paper sheet with Word-style
+        page-break gaps in the WebEngine preview. Separators are in the document flow
+        (not positioned overlays) so content is never obscured. Not in PDF export."""
+        screen_block = """<style>
+@media screen {
+    html { background: #c8c4be !important; min-height: 100%; padding: 32px 0 48px 0; }
+    body {
+        box-shadow: 0 4px 28px rgba(0,0,0,0.22), 0 1.5px 6px rgba(0,0,0,0.10) !important;
+        background: white !important;
+        min-height: 297mm;
+        max-width: 210mm;
+        margin: 0 auto !important;
+    }
+    /* Flow-based page separator — bleeds to paper edges via negative margins */
+    .preview-page-sep {
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        height: 40px;
+        /* negative margins = body padding, so separator spans full paper width */
+        margin: 0 -50px;
+        background: #c8c4be;
+        border-top:    1px solid #b0aba5;
+        border-bottom: 1px solid #b0aba5;
+        box-shadow: inset 0 4px 8px rgba(0,0,0,0.07),
+                    inset 0 -4px 8px rgba(0,0,0,0.07);
+        font-family: sans-serif;
+        font-size: 9px;
+        color: #9a9590;
+        letter-spacing: 2px;
+        text-transform: uppercase;
+    }
+}
+</style>
+<script>
+(function () {
+    /*
+     * A4 @ 96 dpi: content height = (297 - 20 - 25) mm * (96/25.4) ≈ 952 px
+     * Strategy: snapshot all direct body-children offsetTops BEFORE any insertion,
+     * then insert flow-block separators in document order so later elements are
+     * physically pushed down — never overlaid.
+     */
+    var PAGE_PX = 252 * 96 / 25.4;
 
-                # Set page size and orientation
-                printer.setPageSize(QPageSize.PageSizeId.A4)
-                printer.setPageOrientation(QPageLayout.Orientation.Portrait)
+    function injectPageBreaks() {
+        if (document.querySelector('.preview-page-sep')) return;
 
-                # Set margins (left, top, right, bottom) in millimeters
-                margins = QMarginsF(20, 20, 20, 20)
-                page_layout = QPageLayout(QPageSize(QPageSize.PageSizeId.A4),
-                                         QPageLayout.Orientation.Portrait,
-                                         margins)
-                printer.setPageLayout(page_layout)
+        var children = Array.from(document.body.children);
+        var origTops = children.map(function (el) { return el.offsetTop; });
+        var bodyH    = document.body.scrollHeight;
+        var page     = 1;
 
-                # Set document properties
-                printer.setDocName(self.project_name_edit.text() or "Analysis Report")
-                printer.setCreator("Grain Size Analysis Tool - Hydraulic Conductivity Calculator")
+        for (var boundary = PAGE_PX; boundary < bodyH; boundary += PAGE_PX) {
+            /* Find the first child whose original top is at or past the boundary */
+            var target = null;
+            for (var i = 0; i < origTops.length; i++) {
+                if (origTops[i] >= boundary) { target = children[i]; break; }
+            }
+            if (!target) continue;
 
-                # Create document from HTML with proper page breaks
-                document = QTextDocument()
-                document.setHtml(self.current_report_html)
+            var sep = document.createElement('div');
+            sep.className = 'preview-page-sep';
+            sep.textContent = 'Page ' + (++page);
+            target.insertAdjacentElement('beforebegin', sep);
+        }
+    }
 
-                # Set default font and page size for the document
-                document.setDefaultFont(self.preview_edit.font())
-                document.setPageSize(printer.pageRect(QPrinter.Unit.Point).size())
+    if (document.readyState === 'complete') { injectPageBreaks(); }
+    else { window.addEventListener('load', injectPageBreaks); }
+})();
+</script>"""
+        if "</head>" in html:
+            return html.replace("</head>", screen_block + "\n</head>", 1)
+        return screen_block + html
 
-                # Print to PDF
-                document.print(printer)
+    @staticmethod
+    def _empty_preview_html() -> str:
+        return """<!DOCTYPE html>
+<html><head><meta charset="UTF-8"><style>
+  body {
+    font-family: 'Calibri', Arial, sans-serif;
+    background: white;
+    margin: 0;
+    padding: 60px 50px;
+    color: #aaa;
+  }
+  .center { text-align: center; padding-top: 80px; }
+  h2 { font-weight: 300; font-size: 22px; margin-bottom: 12px; }
+  p  { font-size: 13px; }
+  strong { color: #6b8e23; }
+</style></head>
+<body>
+  <div class="center">
+    <h2>No Report Generated</h2>
+    <p>
+      Configure options on the left, then click
+      <strong>Generate Report</strong>.
+    </p>
+  </div>
+</body></html>"""
 
-                QMessageBox.information(self, "Export Successful",
-                                      f"Report exported to:\n{file_path}")
-            except Exception as e:
-                QMessageBox.critical(self, "Export Error",
-                                   f"Failed to export PDF:\n{str(e)}")
-
-    def print_report(self):
-        """Print the report"""
-        if not self.current_report_html:
-            return
-
-        try:
-            from PyQt6.QtPrintSupport import QPrinter, QPrintDialog
-
-            printer = QPrinter(QPrinter.PrinterMode.HighResolution)
-            dialog = QPrintDialog(printer, self)
-
-            if dialog.exec() == QPrintDialog.DialogCode.Accepted:
-                document = QTextDocument()
-                document.setHtml(self.current_report_html)
-                document.print(printer)
-        except Exception as e:
-            QMessageBox.critical(self, "Print Error",
-                               f"Failed to print report:\n{str(e)}")
-
-    def copy_to_clipboard(self):
-        """Copy report to clipboard"""
-        if not self.current_report_html:
-            return
-
-        try:
-            from PyQt6.QtWidgets import QApplication
-
-            clipboard = QApplication.clipboard()
-            clipboard.setText(self.preview_edit.toPlainText())
-
-            QMessageBox.information(self, "Copied",
-                                  "Report copied to clipboard")
-        except Exception as e:
-            QMessageBox.critical(self, "Copy Error",
-                               f"Failed to copy report:\n{str(e)}")
