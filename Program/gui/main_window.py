@@ -437,13 +437,21 @@ class MainWindow(FramelessMainWindowMixin, QMainWindow):
         self.welcome_widget = WelcomeWidget(recent_files=recent_files)
         self._connect_welcome_signals()
 
-        self.dataset_tabs_widget.addTab(self.welcome_widget, "Welcome")
-        self.dataset_tabs_widget.tabBar().setTabButton(
-            0, self.dataset_tabs_widget.tabBar().ButtonPosition.RightSide, None
-        )
+        # Inner stack: index 0 = welcome (full-area, no tab chrome),
+        #              index 1 = dataset_tabs_widget
+        self._samples_stack = QStackedWidget()
+        self._samples_stack.addWidget(self.welcome_widget)
+        self._samples_stack.addWidget(self.dataset_tabs_widget)
+
+        settings_tmp = QSettings("GrainSizeAnalysis", "MainWindow")
+        dont_show = settings_tmp.value("welcome_screen/dont_show", False, type=bool)
+        self._samples_stack.setCurrentIndex(0 if not dont_show else 1)
+        # Sidebar is only visible when datasets are shown
+        self.control_panel.setVisible(dont_show)
+
         self.dataset_tabs_widget.currentChanged.connect(self._on_dataset_tab_changed)
         self._refresh_dataset_tab_icons()
-        sc_layout.addWidget(self.dataset_tabs_widget)
+        sc_layout.addWidget(self._samples_stack)
         self.content_stack.addWidget(samples_container)
 
         # Page 1 — Comparison
@@ -673,11 +681,19 @@ class MainWindow(FramelessMainWindowMixin, QMainWindow):
         tab_bar.setElideMode(Qt.TextElideMode.ElideRight)
         tab_bar.setDrawBase(False)
 
+    def _show_welcome(self) -> None:
+        """Show the welcome panel (hide dataset tabs and sidebar)."""
+        self._samples_stack.setCurrentIndex(0)
+        self.control_panel.setVisible(False)
+
+    def _hide_welcome(self) -> None:
+        """Show the dataset tabs (restore sidebar)."""
+        self._samples_stack.setCurrentIndex(1)
+        self.control_panel.setVisible(True)
+
     def _dataset_tab_icon(self, widget: QWidget, active: bool):
         """Return the appropriate qtawesome icon for each dataset sub-tab."""
         color = C.TEXT if active else C.TEXT_MUTED
-        if widget is self.welcome_widget:
-            return icon("fa6s.house", color)
         if isinstance(widget, ErrorTab):
             return icon("fa6s.triangle-exclamation", C.LED_ERR if not active else "#b03a2e")
         return icon("fa6s.vial", color)
@@ -725,6 +741,7 @@ class MainWindow(FramelessMainWindowMixin, QMainWindow):
         if self.content_stack.currentIndex() != 0:
             self.content_stack.setCurrentIndex(0)
             self.app_toolbar.activate_tab(0)
+        self._hide_welcome()
         for i in range(self.dataset_tabs_widget.count()):
             tab = self.dataset_tabs_widget.widget(i)
             if hasattr(tab, 'dataset') and tab.dataset.sample_name == sample_name:
@@ -750,7 +767,7 @@ class MainWindow(FramelessMainWindowMixin, QMainWindow):
                         self.control_panel._file_list.set_active(fp)
                     return
         else:
-            # Welcome tab or non-dataset tab — deselect sidebar
+            # Non-dataset tab — deselect sidebar
             self.control_panel._file_list.set_active(None)
 
     # ──────────────────────────────────────────────────────────────────
@@ -889,15 +906,12 @@ class MainWindow(FramelessMainWindowMixin, QMainWindow):
         self.welcome_widget.update_recent_files(self._load_recent_files())
 
     def _refresh_welcome_widget(self):
-        self.dataset_tabs_widget.removeTab(0)
         recent_files = self._load_recent_files()
+        self._samples_stack.removeWidget(self.welcome_widget)
         self.welcome_widget = WelcomeWidget(recent_files=recent_files)
         self._connect_welcome_signals()
-        self.dataset_tabs_widget.insertTab(0, self.welcome_widget, "Welcome")
-        self.dataset_tabs_widget.tabBar().setTabButton(
-            0, self.dataset_tabs_widget.tabBar().ButtonPosition.RightSide, None
-        )
-        self.dataset_tabs_widget.setCurrentIndex(0)
+        self._samples_stack.insertWidget(0, self.welcome_widget)
+        self._show_welcome()
         self._refresh_dataset_tab_icons()
 
     # ──────────────────────────────────────────────────────────────────
@@ -976,6 +990,7 @@ class MainWindow(FramelessMainWindowMixin, QMainWindow):
 
     def add_dataset_tab(self, dataset: GrainSizeData):
         self.dataset_counter += 1
+        self._hide_welcome()
         dataset_tab = DatasetTab(dataset)
 
         temperature = self.control_panel.temp_spinbox.value()
@@ -1063,13 +1078,13 @@ class MainWindow(FramelessMainWindowMixin, QMainWindow):
                 break
 
     def close_dataset_tab(self, index: int):
-        if index == 0:
-            return  # never close Welcome tab
-        dataset_index = index - 1
+        dataset_index = index
         if 0 <= dataset_index < len(self.dataset_tabs):
             self.dataset_tabs.pop(dataset_index)
         self.dataset_tabs_widget.removeTab(index)
         self._refresh_dataset_tab_icons()
+        if not self.dataset_tabs:
+            self._show_welcome()
         self.comparison_tab.set_dataset_tabs(self._get_selected_dataset_tabs())
         self.reporting_tab.set_dataset_tabs(self.dataset_tabs)
         self._update_export_tab()

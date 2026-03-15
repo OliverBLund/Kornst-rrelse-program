@@ -11,7 +11,7 @@ import sys
 from pathlib import Path
 from typing import List
 
-from PyQt6.QtCore import QSettings, QSize, Qt, pyqtSignal
+from PyQt6.QtCore import QRect, QSettings, QSize, Qt, pyqtSignal
 from PyQt6.QtGui import QColor, QCursor, QLinearGradient, QPainter, QPaintEvent, QPixmap
 from PyQt6.QtWidgets import (
     QCheckBox,
@@ -45,9 +45,21 @@ class WelcomeWidget(QWidget):
     def __init__(self, recent_files: List[str] = None, parent=None):
         super().__init__(parent)
         self.recent_files = recent_files or []
-        # Prevent Qt from filling our background before paintEvent runs
         self.setAutoFillBackground(False)
+        self._bg_pixmap = self._load_bg_pixmap()
         self._setup_ui()
+
+    @staticmethod
+    def _load_bg_pixmap() -> QPixmap:
+        if getattr(sys, "frozen", False):
+            img = Path(sys._MEIPASS) / "Program" / "resources" / "soil_layers.png"  # type: ignore[attr-defined]
+        else:
+            img = Path(__file__).resolve().parent.parent / "resources" / "soil_layers.png"
+        if img.exists():
+            px = QPixmap(str(img))
+            if not px.isNull():
+                return px
+        return QPixmap()
 
     # ── Background painting ──────────────────────────────────────
 
@@ -57,37 +69,21 @@ class WelcomeWidget(QWidget):
 
     def paintEvent(self, event: QPaintEvent):
         painter = QPainter(self)
+        w, h = self.width(), self.height()
 
-        if getattr(sys, "frozen", False):
-            img = Path(sys._MEIPASS) / "Program" / "resources" / "soil_layers.png"  # type: ignore[attr-defined]
+        if not self._bg_pixmap.isNull():
+            # Stretch to fill — slight distortion is invisible under the overlay
+            painter.drawPixmap(self.rect(), self._bg_pixmap)
         else:
-            img = Path(__file__).resolve().parent.parent / "resources" / "soil_layers.png"
-
-        loaded = False
-        if img.exists():
-            px = QPixmap(str(img))
-            if not px.isNull():
-                scaled = px.scaled(
-                    self.size(),
-                    Qt.AspectRatioMode.KeepAspectRatioByExpanding,
-                    Qt.TransformationMode.SmoothTransformation,
-                )
-                x = (self.width()  - scaled.width())  // 2
-                y = (self.height() - scaled.height()) // 2
-                painter.drawPixmap(x, y, scaled)
-                loaded = True
-
-        if not loaded:
-            grad = QLinearGradient(0, 0, 0, self.height())
+            grad = QLinearGradient(0, 0, 0, h)
             grad.setColorAt(0.00, QColor("#b5a080"))
             grad.setColorAt(0.45, QColor("#a0826d"))
             grad.setColorAt(1.00, QColor("#6a94a8"))
             painter.fillRect(self.rect(), grad)
 
-        # rgba(255,255,255,0.38) white overlay  →  alpha = round(0.38 × 255) = 97
+        # rgba(255,255,255,0.38) white overlay
         painter.fillRect(self.rect(), QColor(255, 255, 255, 97))
         painter.end()
-        # Do NOT call super().paintEvent() — it would repaint the solid QSS background on top.
 
     # ── UI Setup ─────────────────────────────────────────────────
 
@@ -99,16 +95,13 @@ class WelcomeWidget(QWidget):
         scroll = QScrollArea()
         scroll.setWidgetResizable(True)
         scroll.setFrameShape(QFrame.Shape.NoFrame)
-        scroll.setStyleSheet("QScrollArea { background: transparent; border: none; }")
-        # Make the viewport transparent so our paintEvent shows through
         scroll.setAutoFillBackground(False)
-        scroll.viewport().setAutoFillBackground(False)
-        scroll.viewport().setStyleSheet("background: transparent;")
+        scroll.setStyleSheet("QScrollArea { background: transparent; border: none; }")
+        # Use custom no-paint widgets for viewport and content so the global
+        # QSS "QWidget { background-color: C.BG }" cannot paint over our soil image.
+        scroll.setViewport(_ClearWidget())
 
-        content = QWidget()
-        content.setAutoFillBackground(False)
-        content.setStyleSheet("background: transparent;")
-
+        content = _ClearWidget()
         lay = QVBoxLayout(content)
         lay.setContentsMargins(20, 22, 20, 14)
         lay.setSpacing(14)
@@ -129,75 +122,124 @@ class WelcomeWidget(QWidget):
         card.setObjectName("wlc-title")
         card.setStyleSheet("""
             QFrame#wlc-title {
-                background: rgba(255,255,255,56);
-                border: 1.5px solid rgba(255,255,255,97);
-                border-radius: 8px;
+                background: rgba(255,255,255,64);
+                border: 1.5px solid rgba(255,255,255,110);
+                border-radius: 12px;
             }
         """)
         card.setMaximumWidth(_CARD_W)
         card.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
 
         lay = QVBoxLayout(card)
-        lay.setContentsMargins(22, 13, 22, 11)
-        lay.setSpacing(3)
+        lay.setContentsMargins(28, 20, 28, 18)
+        lay.setSpacing(0)
         lay.setAlignment(Qt.AlignmentFlag.AlignHCenter)
 
+        # ── Logo mark ──────────────────────────────────────────────
+        mark = QFrame()
+        mark.setObjectName("wlc-mark")
+        mark.setFixedSize(42, 42)
+        mark.setStyleSheet("""
+            QFrame#wlc-mark {
+                background: rgba(107,142,35,180);
+                border: 1.5px solid rgba(107,142,35,220);
+                border-radius: 10px;
+            }
+        """)
+        m_lay = QHBoxLayout(mark)
+        m_lay.setContentsMargins(0, 0, 0, 0)
+        m_ico = QLabel()
+        m_ico.setPixmap(icon("fa6s.layer-group", "#ffffff").pixmap(QSize(18, 18)))
+        m_ico.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        m_ico.setStyleSheet("background: transparent; border: none;")
+        m_lay.addWidget(m_ico, 0, Qt.AlignmentFlag.AlignCenter)
+
+        mark_wrap = QWidget()
+        mark_wrap.setStyleSheet("background: transparent; border: none;")
+        mw_lay = QHBoxLayout(mark_wrap)
+        mw_lay.setContentsMargins(0, 0, 0, 0)
+        mw_lay.addStretch()
+        mw_lay.addWidget(mark)
+        mw_lay.addStretch()
+        lay.addWidget(mark_wrap)
+        lay.addSpacing(12)
+
+        # ── Title ──────────────────────────────────────────────────
         title = QLabel("Grain Size Analysis")
         title.setAlignment(Qt.AlignmentFlag.AlignCenter)
         title.setStyleSheet(
             f'color: {C.TEXT}; font-family: "{F.DISP}"; font-size: {F.SZ_2XL}pt;'
-            ' letter-spacing: 0.02em;'
+            ' font-weight: 700; letter-spacing: 0.02em; background: transparent;'
         )
         lay.addWidget(title)
+        lay.addSpacing(4)
 
         sub = QLabel("Hydraulic Conductivity Calculator")
         sub.setAlignment(Qt.AlignmentFlag.AlignCenter)
         sub.setStyleSheet(
             f"color: {C.TEXT_MID}; font-size: {F.SZ_LG}pt; font-weight: 400;"
+            " background: transparent;"
         )
         lay.addWidget(sub)
+        lay.addSpacing(14)
 
-        # Note badge — rgba(255,255,255,0.28)→71 bg; rgba(120,95,60,0.16)→41 border
-        badge = QWidget()
-        badge.setStyleSheet("""
-            QWidget {
-                background: rgba(255,255,255,71);
-                border: 1px solid rgba(120,95,60,41);
-                border-radius: 99px;
-            }
-        """)
-        b_lay = QHBoxLayout(badge)
-        b_lay.setContentsMargins(10, 4, 10, 4)
-        b_lay.setSpacing(6)
+        # ── Divider ────────────────────────────────────────────────
+        div = QFrame()
+        div.setObjectName("wlc-div")
+        div.setFixedHeight(1)
+        div.setStyleSheet("QFrame#wlc-div { background: rgba(139,115,85,50); border: none; }")
+        lay.addWidget(div)
+        lay.addSpacing(12)
 
-        b_ico = QLabel()
-        b_ico.setPixmap(icon("fa6s.layer-group", C.OLIVE).pixmap(QSize(12, 12)))
-        b_ico.setStyleSheet("background: transparent; border: none;")
+        # ── Feature chips ──────────────────────────────────────────
+        chips_w = QWidget()
+        chips_w.setStyleSheet("background: transparent; border: none;")
+        chips_lay = QHBoxLayout(chips_w)
+        chips_lay.setContentsMargins(0, 0, 0, 0)
+        chips_lay.setSpacing(8)
+        chips_lay.addStretch()
 
-        b_txt = QLabel(
-            "Built for batch loading, rapid sample switching, comparison, and export."
-        )
-        b_txt.setStyleSheet(
-            f"color: {C.TEXT_MID}; font-size: {F.SZ_BASE}pt;"
-            " background: transparent; border: none;"
-        )
-        b_lay.addWidget(b_ico)
-        b_lay.addWidget(b_txt)
+        for chip_ico, chip_txt in [
+            ("fa6s.vial",        "16 K-Methods"),
+            ("fa6s.chart-line",  "D-values & Gradation"),
+            ("fa6s.file-export", "Batch Export"),
+        ]:
+            chip = QWidget()
+            chip.setObjectName("wlc-chip")
+            chip.setStyleSheet("""
+                QWidget#wlc-chip {
+                    background: rgba(107,142,35,30);
+                    border: 1px solid rgba(107,142,35,70);
+                    border-radius: 99px;
+                }
+            """)
+            c_lay = QHBoxLayout(chip)
+            c_lay.setContentsMargins(9, 4, 9, 4)
+            c_lay.setSpacing(5)
 
-        wrap = QWidget()
-        wrap.setStyleSheet("background: transparent; border: none;")
-        w_lay = QHBoxLayout(wrap)
-        w_lay.setContentsMargins(0, 5, 0, 0)
-        w_lay.addStretch()
-        w_lay.addWidget(badge)
-        w_lay.addStretch()
-        lay.addWidget(wrap)
+            c_ico = QLabel()
+            c_ico.setPixmap(icon(chip_ico, C.OLIVE).pixmap(QSize(10, 10)))
+            c_ico.setStyleSheet("background: transparent; border: none;")
 
-        ver = QLabel("Version 0.9.0-beta")
+            c_txt = QLabel(chip_txt)
+            c_txt.setStyleSheet(
+                f"color: {C.OLIVE}; font-size: {F.SZ_XS}pt; font-weight: 600;"
+                " background: transparent; border: none;"
+            )
+            c_lay.addWidget(c_ico)
+            c_lay.addWidget(c_txt)
+            chips_lay.addWidget(chip)
+
+        chips_lay.addStretch()
+        lay.addWidget(chips_w)
+        lay.addSpacing(10)
+
+        # ── Version ────────────────────────────────────────────────
+        ver = QLabel("v0.9.0-beta")
         ver.setAlignment(Qt.AlignmentFlag.AlignCenter)
         ver.setStyleSheet(
-            f"color: {C.TEXT_MUTED}; font-family: '{F.MONO}';"
-            f" font-size: {F.SZ_XS}pt; margin-top: 3px;"
+            f"color: {C.TEXT_MUTED}; font-family: '{F.MONO}'; font-size: {F.SZ_XS}pt;"
+            " background: transparent;"
         )
         lay.addWidget(ver)
         return card
@@ -674,3 +716,16 @@ class WelcomeWidget(QWidget):
     def update_recent_files(self, recent_files: List[str]):
         """Called by main_window; full refresh is handled by _refresh_welcome_widget."""
         self.recent_files = recent_files
+
+
+class _ClearWidget(QWidget):
+    """QWidget that never paints its own background.
+
+    Overriding paintEvent to skip super() prevents the global QSS rule
+    ``QWidget { background-color: C.BG }`` from drawing a solid fill that
+    would cover the parent WelcomeWidget's painted soil-image background.
+    Child widgets (cards) still paint themselves normally on top.
+    """
+
+    def paintEvent(self, event: QPaintEvent):  # noqa: N802
+        pass  # intentionally empty — parent's painted background shows through

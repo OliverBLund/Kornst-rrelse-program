@@ -19,14 +19,100 @@ from PyQt6.QtWidgets import (
     QTextBrowser,
     QSplitter,
     QLineEdit,
+    QScrollArea,
+    QApplication,
 )
-from PyQt6.QtGui import QColor
+from PyQt6.QtGui import QColor, QFont
 from PyQt6.QtCore import Qt, pyqtSignal
 from typing import Optional, List, Dict
 import numpy as np
 
 from data_loader import GrainSizeData
 from k_calculations import KCalculator, KCalculationResult, CalculationStatus
+
+
+_METHOD_META = {
+    "Hazen": {
+        "category": "Empirical · Sand",
+        "applicability": "Valid for uniform fine to medium sands with D₁₀ between 0.1–3.0 mm and Cu ≤ 5. Results may underestimate K for graded sediments.",
+        "reference": "Hazen, A. (1892). Some physical properties of sands and gravels, with special reference to their use in filtration. Annual Report of the State Board of Health of Massachusetts.",
+    },
+    "Hazen_1892": {
+        "category": "Empirical · Sand",
+        "applicability": "Original 1892 mm² formulation with 10 °C reference temperature. D₁₀ in mm. Less commonly used than the simplified variant.",
+        "reference": "Hazen, A. (1892). Some physical properties of sands and gravels, with special reference to their use in filtration. Annual Report of the State Board of Health of Massachusetts.",
+    },
+    "Slichter": {
+        "category": "Empirical · Sand",
+        "applicability": "Applicable to uniform sands. Uses D₁₀. Best suited for laboratory repacked samples.",
+        "reference": "Slichter, C.S. (1898). Theoretical investigation of the motion of ground waters. 19th Annual Report of the U.S. Geological Survey, Part II, 295–384.",
+    },
+    "Terzaghi": {
+        "category": "Empirical · Gravel",
+        "applicability": "Developed for uniform sands and gravels using D₁₀. Based on Darcy flow through granular media.",
+        "reference": "Terzaghi, K. (1925). Erdbaumechanik auf bodenphysikalischer Grundlage. Franz Deuticke, Leipzig.",
+    },
+    "Beyer": {
+        "category": "Empirical · Sand/Gravel",
+        "applicability": "Applicable to sands and gravels with D₁₀ between 0.06–0.6 mm and Cu between 1–20. Widely used in German hydrogeology.",
+        "reference": "Beyer, W. (1964). Zur Bestimmung der Wasserdurchlässigkeit von Kiesen und Sanden aus der Kornverteilungskurve. Wasserwirtschaft–Wassertechnik, 14(6), 165–169.",
+    },
+    "Sauerbrei": {
+        "category": "Empirical · Sand",
+        "applicability": "Best suited for well-graded medium sands. Uses D₁₇ (17th percentile) as the characteristic grain size.",
+        "reference": "Sauerbrei, E. (1932). Cited in: Vukovic, M. & Soro, A. (1992). Determination of Hydraulic Conductivity of Porous Media from Grain-Size Composition. Water Resources Publications, Colorado.",
+    },
+    "Kruger": {
+        "category": "Semi-empirical · Sand/Gravel",
+        "applicability": "Uses effective diameter dₑ derived from the full grain-size distribution. Suitable for non-uniform materials.",
+        "reference": "Kruger, E. (1919). Die Grundwasserbewegung. Internationale Mitteilungen für Bodenkunde, 9, 1–12.",
+    },
+    "Kozeny-Carman": {
+        "category": "Theoretical · All",
+        "applicability": "Theoretically derived from Navier-Stokes equations. Applicable across a wide range of grain sizes when porosity is well constrained.",
+        "reference": "Kozeny, J. (1927). Über kapillare Leitung des Wassers im Boden. Sitzungsberichte der Akademie der Wissenschaften, Wien, 136, 271–306. Carman, P.C. (1937). Fluid flow through granular beds. Trans. Inst. Chem. Eng., 15, 150–166.",
+    },
+    "Zunker": {
+        "category": "Theoretical · Sand/Gravel",
+        "applicability": "Based on specific surface area using an effective diameter from the grain-size distribution. Developed for Central European sediments.",
+        "reference": "Zunker, F. (1930). Das Verhalten des Bodens zum Wasser. Handbuch der Bodenlehre, 6, 66–220.",
+    },
+    "Zamarin": {
+        "category": "Semi-empirical · Sand/Gravel",
+        "applicability": "Uses specific surface area-based effective diameter. Derived from grain-size distribution of granular soils.",
+        "reference": "Zamarin, E.A. (1928). Cited in: Vukovic, M. & Soro, A. (1992). Determination of Hydraulic Conductivity of Porous Media from Grain-Size Composition. Water Resources Publications, Colorado.",
+    },
+    "USBR": {
+        "category": "Empirical · Sand",
+        "applicability": "Applicable to medium sands. Uses D₂₀. Developed by the U.S. Bureau of Reclamation for irrigation canal design.",
+        "reference": "United States Bureau of Reclamation (1977). Design of Small Canal Structures. Denver, CO: USBR Engineering Monograph.",
+    },
+    "Barr": {
+        "category": "Semi-empirical · Sand/Gravel",
+        "applicability": "Uses D₅, D₁₀ and D₆₀. Suitable for poorly-sorted sands and gravels.",
+        "reference": "Barr, D.W. (2001). Coefficient of permeability determined by measurable parameters. Ground Water, 39(3), 356–361.",
+    },
+    "Alyamani-Sen": {
+        "category": "Empirical · Sand",
+        "applicability": "Uses D₁₀, D₅₀ and the slope of the grain-size curve. More accurate for well-graded sands than single-diameter methods.",
+        "reference": "Alyamani, M.S. & Sen, Z. (1993). Determination of hydraulic conductivity from complete grain-size distribution curves. Ground Water, 31(4), 551–555.",
+    },
+    "Chapuis": {
+        "category": "Semi-empirical · Sand/Gravel",
+        "applicability": "Applicable to natural, non-cohesive soils from clean sand to gravel. Requires D₁₀ and Cu. Not suitable for gap-graded materials.",
+        "reference": "Chapuis, R.P. (2004). Predicting the saturated hydraulic conductivity of sand and gravel using effective diameter and void ratio. Canadian Geotechnical Journal, 41(5), 787–795.",
+    },
+    "Shepherd": {
+        "category": "Empirical · Alluvial",
+        "applicability": "Power-law relationship using D₅₀. Derived from fluvial sediment datasets. Best for alluvial aquifer materials.",
+        "reference": "Shepherd, R.G. (1989). Correlations of permeability and grain size. Ground Water, 27(5), 633–638.",
+    },
+    "Krumbein-Monk": {
+        "category": "Empirical · Sand",
+        "applicability": "Uses geometric mean diameter and sorting coefficient from phi-scale statistics. Developed for unconsolidated sands from core samples.",
+        "reference": "Krumbein, W.C. & Monk, G.D. (1943). Permeability as a function of the size parameters of unconsolidated sand. Trans. Am. Inst. Min. Metall. Pet. Eng., 151, 153–163.",
+    },
+}
 
 
 class DatasetTab(QWidget):
@@ -126,169 +212,491 @@ class DatasetTab(QWidget):
         layout.addWidget(self.nested_tabs)
 
     def create_results_tab(self):
-        """Create the results tab with K-value calculations"""
+        """Create the results tab matching the 02_tabs.html concept layout."""
+        from .theme import C, F
         widget = QWidget()
         layout = QVBoxLayout(widget)
+        layout.setContentsMargins(0, 0, 0, 0)
+        layout.setSpacing(0)
 
-        # Results group box
-        results_group = QGroupBox(
-            f"Hydraulic Conductivity Results - {self.dataset.sample_name}"
-        )
-        results_layout = QVBoxLayout(results_group)
-
-        # Summary statistics bar (top)
-        self.summary_frame = QFrame()
-        self.summary_frame.setFrameStyle(QFrame.Shape.StyledPanel | QFrame.Shadow.Plain)
-        self.summary_frame.setFixedHeight(70)
-        self.summary_frame.setStyleSheet("""
-            QFrame {
-                background-color: #f0f0f0;
-                border: 1px solid #c0c0c0;
-                border-radius: 4px;
-                padding: 6px;
-            }
+        # ── Summary / stat bar ──────────────────────────────────────────────────
+        self.res_bar = QFrame()
+        self.res_bar.setObjectName("res-bar")
+        self.res_bar.setFixedHeight(56)
+        self.res_bar.setStyleSheet(f"""
+            QFrame#res-bar {{
+                background: {C.BG_RAISED};
+                border-bottom: 1px solid {C.BORDER};
+            }}
+            QFrame#res-bar QLabel {{ background: transparent; }}
         """)
-        summary_layout = QHBoxLayout(self.summary_frame)
-        summary_layout.setContentsMargins(10, 5, 10, 5)
-        summary_layout.setSpacing(8)
+        bar_layout = QHBoxLayout(self.res_bar)
+        bar_layout.setContentsMargins(0, 0, 0, 0)
+        bar_layout.setSpacing(0)
 
-        # Summary labels
-        self.summary_total_label = QLabel("No calculations yet")
-        self.summary_total_label.setStyleSheet(
-            "font-weight: bold; color: #333; font-size: 10pt;"
-        )
+        self._stat_k_md   = self._make_stat_cell(bar_layout, "—", "K̄ (m/d)",        C.OLIVE, sub="geometric mean")
+        self._stat_k_ms   = self._make_stat_cell(bar_layout, "—", "K̄ (m/s)",        C.K_BLUE)
+        self._stat_valid  = self._make_stat_cell(bar_layout, "—", "Methods valid",   C.TEXT)
+        self._stat_d50    = self._make_stat_cell(bar_layout, "—", "D₅₀",             C.TEXT)
+        self._stat_temp   = self._make_stat_cell(bar_layout, f"{self.temperature:.1f} °C", "Temperature", C.TEXT)
 
-        self.summary_valid_label = QLabel("")
-        self.summary_valid_label.setStyleSheet("color: #006400; font-size: 10pt;")
+        bar_layout.addStretch()
 
-        self.summary_warning_label = QLabel("")
-        self.summary_warning_label.setStyleSheet("color: #8B6914; font-size: 10pt;")
+        # Export / Copy buttons on right side of bar
+        btn_frame = QFrame()
+        btn_frame.setStyleSheet("QFrame { background: transparent; }")
+        btn_fl = QHBoxLayout(btn_frame)
+        btn_fl.setContentsMargins(0, 0, 10, 0)
+        btn_fl.setSpacing(5)
+        self._res_export_btn = QPushButton("Export")
+        self._res_export_btn.setFixedHeight(24)
+        self._res_copy_btn = QPushButton("Copy")
+        self._res_copy_btn.setFixedHeight(24)
+        for btn in (self._res_export_btn, self._res_copy_btn):
+            btn.setStyleSheet(f"""
+                QPushButton {{
+                    background: rgba(255,255,255,0.40);
+                    border: 1px solid {C.BORDER};
+                    border-radius: 4px;
+                    font-family: '{F.UI}';
+                    font-size: {F.SZ_SM}pt;
+                    color: {C.TEXT_MID};
+                    padding: 0 10px;
+                }}
+                QPushButton:hover {{
+                    background: {C.BG_LOW};
+                    border-color: {C.BORDER_DK};
+                    color: {C.TEXT};
+                }}
+            """)
+        self._res_export_btn.clicked.connect(self._on_res_export)
+        self._res_copy_btn.clicked.connect(self._on_res_copy)
+        btn_fl.addWidget(self._res_export_btn)
+        btn_fl.addWidget(self._res_copy_btn)
+        bar_layout.addWidget(btn_frame)
 
-        self.summary_error_label = QLabel("")
-        self.summary_error_label.setStyleSheet("color: #8B0000; font-size: 10pt;")
+        self.res_bar.setVisible(False)
+        layout.addWidget(self.res_bar)
 
-        self.summary_stats_label = QLabel("")
-        self.summary_stats_label.setStyleSheet("color: #333; font-size: 10pt;")
+        # ── Split view: table (left) + detail panel (right) ─────────────────────
+        self._res_splitter = QSplitter(Qt.Orientation.Horizontal)
+        self._res_splitter.setObjectName("res-split")
+        self._res_splitter.setStyleSheet("""
+            QSplitter::handle { width: 1px; background: transparent; }
+        """)
 
-        for label in [
-            self.summary_total_label,
-            self.summary_valid_label,
-            self.summary_warning_label,
-            self.summary_error_label,
-            self.summary_stats_label,
-        ]:
-            label.setWordWrap(False)
-            label.setMaximumHeight(25)
+        # K-values table
+        table_container = QWidget()
+        tc_layout = QVBoxLayout(table_container)
+        tc_layout.setContentsMargins(0, 0, 0, 0)
+        tc_layout.setSpacing(0)
 
-        separator1 = QLabel("|")
-        separator1.setStyleSheet("color: #999; font-size: 10pt;")
-        separator1.setMaximumHeight(25)
-
-        separator2 = QLabel("|")
-        separator2.setStyleSheet("color: #999; font-size: 10pt;")
-        separator2.setMaximumHeight(25)
-
-        summary_layout.addWidget(self.summary_total_label)
-        summary_layout.addWidget(separator1)
-        summary_layout.addWidget(self.summary_valid_label)
-        summary_layout.addWidget(self.summary_warning_label)
-        summary_layout.addWidget(self.summary_error_label)
-        summary_layout.addWidget(separator2)
-        summary_layout.addWidget(self.summary_stats_label)
-        summary_layout.addStretch()
-
-        results_layout.addWidget(self.summary_frame)
-        self.summary_frame.setVisible(False)
-
-        # Middle row: K-values table (left) and Method Details (right)
-        middle_splitter = QSplitter(Qt.Orientation.Horizontal)
-
-        # Left: Results table
-        self.results_table = QTableWidget(0, 5)
+        self.results_table = QTableWidget(0, 6)
         self.results_table.setHorizontalHeaderLabels(
-            ["Method", "K (cm/s)", "K (m/s)", "K (m/d)", "Status"]
+            ["Method", "Category", "K (cm/s)", "K (m/s)", "K (m/d)", "Status"]
         )
         self.results_table.setSortingEnabled(True)
+        self.results_table.setAlternatingRowColors(False)
+        self.results_table.verticalHeader().setVisible(False)
+        self.results_table.setSelectionBehavior(QTableWidget.SelectionBehavior.SelectRows)
+        self.results_table.setSelectionMode(QTableWidget.SelectionMode.SingleSelection)
+        self.results_table.setShowGrid(False)
+        self.results_table.setStyleSheet(f"""
+            QTableWidget {{
+                border: none;
+                border-radius: 0;
+                font-family: '{F.UI}';
+                font-size: {F.SZ_MD}pt;
+                gridline-color: transparent;
+            }}
+            QTableWidget::item {{
+                padding: 5px 10px;
+                border-bottom: 1px solid rgba(212,196,168,0.4);
+            }}
+            QTableWidget::item:selected {{
+                background: rgba(107,142,35,0.07);
+                border-left: 3px solid {C.OLIVE};
+                color: {C.TEXT};
+            }}
+            QTableWidget::item:hover {{
+                background: rgba(212,196,168,0.18);
+            }}
+            QHeaderView::section {{
+                background: {C.BG_RAISED};
+                border: none;
+                border-bottom: 2px solid {C.BORDER_DK};
+                border-right: 1px solid {C.BORDER};
+                padding: 6px 10px;
+                font-family: '{F.UI}';
+                font-size: {F.SZ_SM}pt;
+                font-weight: 600;
+                color: {C.TEXT_MID};
+                text-transform: uppercase;
+                letter-spacing: 0.04em;
+            }}
+        """)
 
         header = self.results_table.horizontalHeader()
         if header:
-            header.setStretchLastSection(True)
+            header.setSectionResizeMode(0, QHeaderView.ResizeMode.Interactive)
+            header.setSectionResizeMode(1, QHeaderView.ResizeMode.Interactive)
+            header.setSectionResizeMode(2, QHeaderView.ResizeMode.ResizeToContents)
+            header.setSectionResizeMode(3, QHeaderView.ResizeMode.ResizeToContents)
+            header.setSectionResizeMode(4, QHeaderView.ResizeMode.ResizeToContents)
+            header.setSectionResizeMode(5, QHeaderView.ResizeMode.ResizeToContents)
+            header.setStretchLastSection(False)
+            self.results_table.setColumnWidth(0, 180)
+            self.results_table.setColumnWidth(1, 160)
 
-        self.results_table.setAlternatingRowColors(True)
-        self.results_table.verticalHeader().setVisible(False)
-        self.results_table.setSelectionBehavior(
-            QTableWidget.SelectionBehavior.SelectRows
-        )
-        self.results_table.setStyleSheet("""
-            QTableWidget {
-                gridline-color: #d0d0d0;
-                font-size: 10pt;
-            }
-            QTableWidget::item {
-                padding: 5px;
-            }
-            QHeaderView::section {
-                background-color: #e8e8e8;
-                padding: 6px;
-                border: 1px solid #c0c0c0;
-                font-weight: bold;
-                font-size: 10pt;
-            }
-        """)
         self.results_table.itemSelectionChanged.connect(self.on_result_row_selected)
+        tc_layout.addWidget(self.results_table)
 
-        # Right: Method details panel
-        self.details_group = QGroupBox("Method Details")
-        self.details_group.setStyleSheet("""
-            QGroupBox {
-                font-weight: bold;
-                border: 2px solid #c0c0c0;
-                border-radius: 5px;
-                margin-top: 8px;
-                padding-top: 10px;
-            }
-            QGroupBox::title {
-                subcontrol-origin: margin;
-                subcontrol-position: top left;
-                padding: 2px 5px;
-                background-color: #e8e8e8;
-            }
-        """)
-        details_layout = QVBoxLayout(self.details_group)
+        # Method detail panel
+        self.detail_panel = self._create_detail_panel()
 
-        self.details_browser = QTextBrowser()
-        self.details_browser.setMinimumHeight(200)
-        self.details_browser.setStyleSheet("""
-            QTextBrowser {
-                background-color: #fafafa;
-                border: 1px solid #d0d0d0;
-                padding: 10px;
-                font-family: 'Consolas', 'Courier New', monospace;
-                font-size: 10pt;
-            }
-        """)
-        self.details_browser.setHtml(
-            "<p style='color: #999; text-align: center;'>Select a row in the table above to view detailed calculation information</p>"
-        )
+        self._res_splitter.addWidget(table_container)
+        self._res_splitter.addWidget(self.detail_panel)
+        self._res_splitter.setStretchFactor(0, 60)
+        self._res_splitter.setStretchFactor(1, 40)
 
-        details_layout.addWidget(self.details_browser)
-
-        middle_splitter.addWidget(self.results_table)
-        middle_splitter.addWidget(self.details_group)
-        middle_splitter.setStretchFactor(0, 50)  # 50% for table
-        middle_splitter.setStretchFactor(1, 50)  # 50% for method details
-
-        results_layout.addWidget(
-            middle_splitter, 1
-        )  # Stretch factor 1 to take available space
-
-        layout.addWidget(results_group)
-
-        # Buttons removed - calculations are automatic, export is done via Export tab
-
+        layout.addWidget(self._res_splitter, 1)
         return widget
 
+    def _make_stat_cell(self, parent_layout, value: str, key: str, value_color: str = None, sub: str = "") -> "QLabel":
+        """Create a stat cell for the results summary bar. Returns the value QLabel."""
+        from .theme import C, F
+        cell = QFrame()
+        cell.setStyleSheet(f"""
+            QFrame {{
+                border-right: 1px solid {C.BORDER};
+                background: transparent;
+            }}
+        """)
+        vbox = QVBoxLayout(cell)
+        vbox.setContentsMargins(16, 6, 16, 6)
+        vbox.setSpacing(1)
+        vbox.setAlignment(Qt.AlignmentFlag.AlignVCenter)
 
+        val_lbl = QLabel(value)
+        color = value_color if value_color else C.TEXT
+        val_lbl.setStyleSheet(
+            f"font-family: '{F.MONO}'; font-size: 13pt; font-weight: 500; color: {color}; border: none;"
+        )
+        vbox.addWidget(val_lbl)
+
+        key_lbl = QLabel(key)
+        key_lbl.setStyleSheet(
+            f"font-family: '{F.UI}'; font-size: {F.SZ_XS}pt; font-weight: 700; "
+            f"color: {C.TEXT_MUTED}; text-transform: uppercase; letter-spacing: 0.06em; border: none;"
+        )
+        vbox.addWidget(key_lbl)
+
+        if sub:
+            sub_lbl = QLabel(sub)
+            sub_lbl.setStyleSheet(
+                f"font-family: '{F.MONO}'; font-size: {F.SZ_XS}pt; color: {C.TEXT_MUTED}; border: none;"
+            )
+            vbox.addWidget(sub_lbl)
+
+        parent_layout.addWidget(cell)
+        return val_lbl
+
+    def _create_detail_panel(self) -> "QFrame":
+        """Create the method detail panel (right side of Results split view)."""
+        from .theme import C, F
+        panel = QFrame()
+        panel.setObjectName("detail-panel")
+        panel.setMinimumWidth(210)
+        panel.setMaximumWidth(320)
+        panel.setStyleSheet(f"""
+            QFrame#detail-panel {{
+                background: {C.BG_RAISED};
+                border-left: 1px solid {C.BORDER};
+            }}
+            QFrame#detail-panel QLabel {{ background: transparent; }}
+        """)
+        panel_layout = QVBoxLayout(panel)
+        panel_layout.setContentsMargins(0, 0, 0, 0)
+        panel_layout.setSpacing(0)
+
+        scroll = QScrollArea()
+        scroll.setWidgetResizable(True)
+        scroll.setFrameShape(QFrame.Shape.NoFrame)
+        scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+        scroll.setStyleSheet("QScrollArea { background: transparent; border: none; }")
+
+        self._detail_content = QWidget()
+        self._detail_content.setStyleSheet(f"background: {C.BG_RAISED};")
+        self._detail_layout = QVBoxLayout(self._detail_content)
+        self._detail_layout.setContentsMargins(0, 0, 0, 0)
+        self._detail_layout.setSpacing(0)
+        self._detail_layout.setAlignment(Qt.AlignmentFlag.AlignTop)
+
+        # Placeholder when nothing selected
+        placeholder = QLabel("Select a row to view\nmethod details")
+        placeholder.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        placeholder.setStyleSheet(
+            f"color: {C.TEXT_MUTED}; font-family: '{F.UI}'; font-size: {F.SZ_MD}pt; padding: 30px;"
+        )
+        self._detail_layout.addWidget(placeholder)
+        self._detail_placeholder = placeholder
+
+        scroll.setWidget(self._detail_content)
+        panel_layout.addWidget(scroll)
+        return panel
+
+    def _update_detail_panel(self, result) -> None:
+        """Rebuild the detail panel content for the given calculation result."""
+        from .theme import C, F
+
+        # Clear existing content
+        while self._detail_layout.count():
+            item = self._detail_layout.takeAt(0)
+            if item.widget():
+                item.widget().deleteLater()
+
+        meta = _METHOD_META.get(result.method_name, {})
+        category = meta.get("category", "—")
+        applicability = meta.get("applicability", "No applicability information available.")
+        reference = meta.get("reference", "No reference available.")
+
+        status = result.status.value if hasattr(result.status, "value") else str(result.status)
+        if "OK" in status:
+            status_color = C.OLIVE_DK
+            status_bg = "rgba(107,142,35,0.08)"
+            status_icon = "✓"
+        elif "Warning" in status:
+            status_color = C.LED_WARN
+            status_bg = "rgba(208,128,32,0.08)"
+            status_icon = "⚠"
+        else:
+            status_color = C.LED_ERR
+            status_bg = "rgba(192,56,40,0.07)"
+            status_icon = "✗"
+
+        # ── Header section ──────────────────────────────────────────────────────
+        header = QFrame()
+        header.setStyleSheet(f"""
+            QFrame {{
+                background: {C.BG_LOW};
+                border-bottom: 1px solid {C.BORDER};
+            }}
+            QFrame QLabel {{ background: transparent; }}
+        """)
+        hdr_layout = QVBoxLayout(header)
+        hdr_layout.setContentsMargins(14, 12, 14, 10)
+        hdr_layout.setSpacing(2)
+
+        name_lbl = QLabel(result.method_name)
+        name_lbl.setStyleSheet(
+            f"font-family: '{F.UI}'; font-size: {F.SZ_LG}pt; font-weight: 600; color: {C.TEXT};"
+        )
+        name_lbl.setWordWrap(True)
+        hdr_layout.addWidget(name_lbl)
+
+        cat_lbl = QLabel(category)
+        cat_lbl.setStyleSheet(
+            f"font-family: '{F.UI}'; font-size: {F.SZ_SM}pt; color: {C.TEXT_MUTED};"
+        )
+        hdr_layout.addWidget(cat_lbl)
+
+        if result.k_value is not None and result.k_value > 0:
+            k_m_s = result.k_value
+            k_m_d = k_m_s * 86400.0
+            k_cm_s = k_m_s * 100.0
+
+            k_big = QLabel(f"{k_m_s:.3e} m/s")
+            k_big.setStyleSheet(
+                f"font-family: '{F.MONO}'; font-size: 15pt; font-weight: 500; color: {C.K_BLUE}; margin-top: 6px;"
+            )
+            hdr_layout.addWidget(k_big)
+
+            k_units = QLabel(f"{k_m_d:.2f} m/d  ·  {k_cm_s:.3e} cm/s")
+            k_units.setStyleSheet(
+                f"font-family: '{F.MONO}'; font-size: {F.SZ_XS}pt; color: {C.TEXT_MUTED};"
+            )
+            hdr_layout.addWidget(k_units)
+        else:
+            no_k = QLabel("No valid K-value")
+            no_k.setStyleSheet(
+                f"font-family: '{F.UI}'; font-size: {F.SZ_MD}pt; color: {C.LED_ERR}; font-weight: 600; margin-top: 6px;"
+            )
+            hdr_layout.addWidget(no_k)
+
+        self._detail_layout.addWidget(header)
+
+        # ── Status alert (if message present) ───────────────────────────────────
+        if result.status_message:
+            alert = QFrame()
+            alert.setStyleSheet(f"""
+                QFrame {{
+                    background: {status_bg};
+                    border-left: 3px solid {status_color};
+                    border-bottom: 1px solid {C.BORDER};
+                }}
+                QFrame QLabel {{ background: transparent; }}
+            """)
+            al = QVBoxLayout(alert)
+            al.setContentsMargins(12, 8, 12, 8)
+            msg = QLabel(f"{status_icon}  {result.status_message}")
+            msg.setStyleSheet(
+                f"font-family: '{F.UI}'; font-size: {F.SZ_SM}pt; color: {status_color}; font-weight: 500;"
+            )
+            msg.setWordWrap(True)
+            al.addWidget(msg)
+            self._detail_layout.addWidget(alert)
+
+        # ── Parameters Used section ──────────────────────────────────────────────
+        params = []
+        d10 = self.dataset.get_d10()
+        d30 = self.dataset.get_d30()
+        d50 = self.dataset.get_d50()
+        d60 = self.dataset.get_d60()
+        if d10: params.append(("D₁₀", f"{d10:.3f} mm"))
+        if d30: params.append(("D₃₀", f"{d30:.3f} mm"))
+        if d50: params.append(("D₅₀", f"{d50:.3f} mm"))
+        if d60: params.append(("D₆₀", f"{d60:.3f} mm"))
+        if d10 and d60:
+            cu = d60 / d10
+            params.append(("Cu", f"{cu:.2f}"))
+            if d30:
+                cc = (d30 * d30) / (d10 * d60)
+                params.append(("Cc", f"{cc:.2f}"))
+        params.append(("Temperature", f"{self.temperature:.1f} °C"))
+        params.append(("Porosity", f"{self.porosity:.4f}"))
+
+        # Merge method-specific values
+        method_vals = self.get_method_specific_values(result.method_name)
+        for k, v in method_vals.items():
+            params.append((k, v))
+
+        self._detail_layout.addWidget(self._make_detail_section("Parameters Used", params))
+
+        # ── Formula section ──────────────────────────────────────────────────────
+        self._detail_layout.addWidget(self._make_detail_section_text("Formula", result.formula_used, monospace=True))
+
+        # ── Applicability section ────────────────────────────────────────────────
+        cond_text = (
+            f"{'✓ Conditions met' if result.conditions_met else '✗ Conditions NOT met'}  —  {applicability}"
+            if hasattr(result, 'conditions_met')
+            else applicability
+        )
+        self._detail_layout.addWidget(self._make_detail_section_text("Applicability", cond_text))
+
+        # ── Reference section ────────────────────────────────────────────────────
+        self._detail_layout.addWidget(self._make_detail_section_text("Reference", reference))
+
+        self._detail_layout.addStretch()
+
+    def _make_detail_section(self, title: str, rows: list) -> "QFrame":
+        """Create a detail panel section with label-value rows."""
+        from .theme import C, F
+        section = QFrame()
+        section.setStyleSheet(f"""
+            QFrame {{
+                border-bottom: 1px solid rgba(212,196,168,0.4);
+                background: transparent;
+            }}
+            QFrame QLabel {{ background: transparent; }}
+        """)
+        layout = QVBoxLayout(section)
+        layout.setContentsMargins(14, 10, 14, 10)
+        layout.setSpacing(4)
+
+        lbl = QLabel(title.upper())
+        lbl.setStyleSheet(
+            f"font-family: '{F.UI}'; font-size: {F.SZ_XS}pt; font-weight: 700; "
+            f"color: {C.TEXT_MUTED}; letter-spacing: 0.07em; margin-bottom: 4px;"
+        )
+        layout.addWidget(lbl)
+
+        for row_label, row_value in rows:
+            row_frame = QFrame()
+            row_frame.setStyleSheet("QFrame { background: transparent; }")
+            row_layout = QHBoxLayout(row_frame)
+            row_layout.setContentsMargins(0, 0, 0, 0)
+            row_layout.setSpacing(4)
+
+            rl = QLabel(row_label)
+            rl.setStyleSheet(
+                f"font-family: '{F.UI}'; font-size: {F.SZ_SM}pt; color: {C.TEXT_MID};"
+            )
+            rv = QLabel(row_value)
+            rv.setStyleSheet(
+                f"font-family: '{F.MONO}'; font-size: {F.SZ_SM}pt; color: {C.TEXT};"
+            )
+            rv.setAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
+
+            row_layout.addWidget(rl)
+            row_layout.addStretch()
+            row_layout.addWidget(rv)
+            layout.addWidget(row_frame)
+
+        return section
+
+    def _make_detail_section_text(self, title: str, text: str, monospace: bool = False) -> "QFrame":
+        """Create a detail panel section with a text block."""
+        from .theme import C, F
+        section = QFrame()
+        section.setStyleSheet(f"""
+            QFrame {{
+                border-bottom: 1px solid rgba(212,196,168,0.4);
+                background: transparent;
+            }}
+            QFrame QLabel {{ background: transparent; }}
+        """)
+        layout = QVBoxLayout(section)
+        layout.setContentsMargins(14, 10, 14, 10)
+        layout.setSpacing(6)
+
+        lbl = QLabel(title.upper())
+        lbl.setStyleSheet(
+            f"font-family: '{F.UI}'; font-size: {F.SZ_XS}pt; font-weight: 700; "
+            f"color: {C.TEXT_MUTED}; letter-spacing: 0.07em;"
+        )
+        layout.addWidget(lbl)
+
+        content_lbl = QLabel(text)
+        content_lbl.setWordWrap(True)
+        if monospace:
+            content_lbl.setStyleSheet(f"""
+                font-family: '{F.MONO}';
+                font-size: {F.SZ_SM}pt;
+                color: {C.TEXT_MID};
+                background: {C.BG_LOW};
+                border: 1px solid {C.BORDER};
+                border-radius: 3px;
+                padding: 6px 8px;
+                line-height: 1.7;
+            """)
+        else:
+            content_lbl.setStyleSheet(
+                f"font-family: '{F.UI}'; font-size: {F.SZ_SM}pt; color: {C.TEXT_MUTED}; line-height: 1.5;"
+            )
+        layout.addWidget(content_lbl)
+        return section
+
+    def _on_res_export(self) -> None:
+        """Export results — delegates to existing export_results()."""
+        self.export_results()
+
+    def _on_res_copy(self) -> None:
+        """Copy results table to clipboard as tab-separated text."""
+        if not self.current_results:
+            return
+        rows = ["Method\tCategory\tK (cm/s)\tK (m/s)\tK (m/d)\tStatus"]
+        for result in self.current_results:
+            meta = _METHOD_META.get(result.method_name, {})
+            cat = meta.get("category", "—")
+            status = result.status.value if hasattr(result.status, "value") else str(result.status)
+            if result.k_value is not None and result.k_value > 0:
+                k_cm_s = f"{result.k_value * 100:.3e}"
+                k_m_s = f"{result.k_value:.2e}"
+                k_m_d = f"{result.k_value * 86400:.1f}"
+            else:
+                k_cm_s = k_m_s = k_m_d = "N/A"
+            rows.append(f"{result.method_name}\t{cat}\t{k_cm_s}\t{k_m_s}\t{k_m_d}\t{status}")
+        QApplication.clipboard().setText("\n".join(rows))
 
     # NOTE: Grain analysis panels (percentiles, gradation, special diameters, environmental params)
     # have been moved to the Statistics Tab for better organization.
@@ -392,206 +800,133 @@ class DatasetTab(QWidget):
         self.calculation_complete.emit(self.dataset.sample_name, self.current_results)
 
     def update_results_table(self):
-        """Update the results table with calculation results"""
-        # Temporarily disable sorting while populating
+        """Populate the 6-column K-values table."""
+        from .theme import C, F
         self.results_table.setSortingEnabled(False)
-
         self.results_table.setRowCount(len(self.current_results))
 
         for row, result in enumerate(self.current_results):
-            # Method name
+            meta = _METHOD_META.get(result.method_name, {})
+            category = meta.get("category", "—")
+
+            # Col 0: Method name
             method_item = QTableWidgetItem(result.method_name)
+            method_item.setForeground(QColor(C.TEXT))
             self.results_table.setItem(row, 0, method_item)
 
-            # K values in different units
+            # Col 1: Category
+            cat_item = QTableWidgetItem(category)
+            cat_item.setForeground(QColor(C.TEXT_MUTED))
+            self.results_table.setItem(row, 1, cat_item)
+
+            # Cols 2-4: K values
             if result.k_value is not None and result.k_value > 0:
                 k_m_s = result.k_value
+                k_cm_s = k_m_s * 100.0
+                k_m_d = k_m_s * 86400.0
 
-                # Convert to different units
-                k_cm_s = k_m_s * 100.0  # m/s to cm/s
-                k_m_d = k_m_s * 86400.0  # m/s to m/d
-
-                # K (cm/s) column - right aligned with numeric sorting
-                cm_s_item = QTableWidgetItem(f"{k_cm_s:.3e}")
-                cm_s_item.setTextAlignment(
-                    Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter
-                )
-                cm_s_item.setData(
-                    Qt.ItemDataRole.UserRole, k_cm_s
-                )  # Store actual number for sorting
-                self.results_table.setItem(row, 1, cm_s_item)
-
-                # K (m/s) column - right aligned with numeric sorting
-                m_s_item = QTableWidgetItem(f"{k_m_s:.2e}")
-                m_s_item.setTextAlignment(
-                    Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter
-                )
-                m_s_item.setData(
-                    Qt.ItemDataRole.UserRole, k_m_s
-                )  # Store actual number for sorting
-                self.results_table.setItem(row, 2, m_s_item)
-
-                # K (m/d) column - right aligned with numeric sorting
-                m_d_item = QTableWidgetItem(f"{k_m_d:.1f}")
-                m_d_item.setTextAlignment(
-                    Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter
-                )
-                m_d_item.setData(
-                    Qt.ItemDataRole.UserRole, k_m_d
-                )  # Store actual number for sorting
-                self.results_table.setItem(row, 3, m_d_item)
+                for col, val, fmt in [(2, k_cm_s, f"{k_cm_s:.3e}"), (3, k_m_s, f"{k_m_s:.2e}"), (4, k_m_d, f"{k_m_d:.1f}")]:
+                    item = QTableWidgetItem(fmt)
+                    item.setTextAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
+                    item.setData(Qt.ItemDataRole.UserRole, val)
+                    item.setForeground(QColor(C.K_BLUE))
+                    self.results_table.setItem(row, col, item)
             else:
-                # N/A for all unit columns
-                for col in [1, 2, 3]:
-                    na_item = QTableWidgetItem("N/A")
-                    na_item.setTextAlignment(
-                        Qt.AlignmentFlag.AlignCenter | Qt.AlignmentFlag.AlignVCenter
-                    )
-                    na_item.setData(
-                        Qt.ItemDataRole.UserRole, -1
-                    )  # Sort N/A values to bottom
-                    self.results_table.setItem(row, col, na_item)
+                for col in [2, 3, 4]:
+                    item = QTableWidgetItem("N/A")
+                    item.setTextAlignment(Qt.AlignmentFlag.AlignCenter | Qt.AlignmentFlag.AlignVCenter)
+                    item.setData(Qt.ItemDataRole.UserRole, -1)
+                    item.setForeground(QColor(C.TEXT_MUTED))
+                    item.setFont(self._italic_font())
+                    self.results_table.setItem(row, col, item)
 
-            # Status with color coding and icons (column 4 - Formula column removed)
-            status = (
-                result.status.value
-                if hasattr(result.status, "value")
-                else str(result.status)
-            )
+            # Col 5: Status badge
+            status = result.status.value if hasattr(result.status, "value") else str(result.status)
+            conditions_met = getattr(result, "conditions_met", True)
 
-            # Add icon based on status
-            if "OK" in status:
-                status_icon = "✓"
-                status_color = QColor(220, 255, 220)  # Light green
-                text_color = QColor(0, 100, 0)  # Dark green
-            elif "Warning" in status:
-                status_icon = "⚠"
-                status_color = QColor(255, 250, 205)  # Light yellow
-                text_color = QColor(150, 100, 0)  # Dark orange
+            if "OK" in status and conditions_met:
+                badge_text = "OK"
+                badge_fg = QColor(79, 106, 26)    # OLIVE_DK
+                badge_bg = QColor(90, 170, 58, 25)
+            elif "Warning" in status or not conditions_met:
+                badge_text = "Warning"
+                badge_fg = QColor(208, 128, 32)   # LED_WARN
+                badge_bg = QColor(208, 128, 32, 22)
             elif "Error" in status:
-                status_icon = "✗"
-                status_color = QColor(255, 220, 220)  # Light red
-                text_color = QColor(150, 0, 0)  # Dark red
+                badge_text = "Error"
+                badge_fg = QColor(192, 56, 40)    # LED_ERR
+                badge_bg = QColor(192, 56, 40, 20)
             else:
-                status_icon = "?"
-                status_color = QColor(240, 240, 240)  # Gray
-                text_color = QColor(100, 100, 100)
+                badge_text = "N/A"
+                badge_fg = QColor(154, 140, 120)  # TEXT_MUTED
+                badge_bg = QColor(154, 140, 120, 20)
 
-            status_text = f"{status_icon} {status}"
-            status_item = QTableWidgetItem(status_text)
-            status_item.setBackground(status_color)
-            status_item.setForeground(text_color)
-            status_item.setTextAlignment(
-                Qt.AlignmentFlag.AlignCenter | Qt.AlignmentFlag.AlignVCenter
-            )
-
+            status_item = QTableWidgetItem(badge_text)
+            status_item.setTextAlignment(Qt.AlignmentFlag.AlignCenter | Qt.AlignmentFlag.AlignVCenter)
+            status_item.setForeground(badge_fg)
+            status_item.setBackground(badge_bg)
             if result.status_message:
                 status_item.setToolTip(result.status_message)
+            self.results_table.setItem(row, 5, status_item)
 
-            self.results_table.setItem(row, 4, status_item)
-
-        # Resize columns and re-enable sorting
-        self.results_table.resizeColumnsToContents()
         self.results_table.setSortingEnabled(True)
-
-        # Update summary statistics bar
         self.update_summary_bar()
 
+    def _italic_font(self):
+        """Return an italic QFont for N/A cells."""
+        f = QFont()
+        f.setItalic(True)
+        return f
+
     def update_summary_bar(self):
-        """Update the summary statistics bar with calculation overview"""
+        """Update the summary stat bar with current calculation results."""
         if not self.current_results:
-            self.summary_frame.setVisible(False)
+            self.res_bar.setVisible(False)
             return
 
-        self.summary_frame.setVisible(True)
+        self.res_bar.setVisible(True)
 
-        # Count results by status
+        valid_results = [r for r in self.current_results if r.k_value is not None and r.k_value > 0]
         total = len(self.current_results)
-        ok_count = sum(
-            1
-            for r in self.current_results
-            if "OK" in (r.status.value if hasattr(r.status, "value") else str(r.status))
-        )
-        warning_count = sum(
-            1
-            for r in self.current_results
-            if "Warning"
-            in (r.status.value if hasattr(r.status, "value") else str(r.status))
-        )
-        error_count = sum(
-            1
-            for r in self.current_results
-            if "Error"
-            in (r.status.value if hasattr(r.status, "value") else str(r.status))
-        )
+        valid_count = len(valid_results)
 
-        # Get valid K values for statistics
-        valid_results = [
-            r for r in self.current_results if r.k_value is not None and r.k_value > 0
-        ]
-
-        # Update labels
-        self.summary_total_label.setText(f"{total} methods calculated")
-
-        if ok_count > 0:
-            self.summary_valid_label.setText(f"✓ {ok_count} valid")
-        else:
-            self.summary_valid_label.setText("")
-
-        if warning_count > 0:
-            self.summary_warning_label.setText(f"⚠ {warning_count} warnings")
-        else:
-            self.summary_warning_label.setText("")
-
-        if error_count > 0:
-            self.summary_error_label.setText(f"✗ {error_count} errors")
-        else:
-            self.summary_error_label.setText("")
-
-        # Calculate and display mean K-value and range
+        # K̄ geometric mean (m/d)
         if valid_results:
-            k_values = [r.k_value for r in valid_results]
-            mean_k = np.mean(k_values)
-            min_k = np.min(k_values)
-            max_k = np.max(k_values)
-
-            self.summary_stats_label.setText(
-                f"Mean: {mean_k:.2e} m/s  |  Range: {min_k:.2e} - {max_k:.2e} m/s"
-            )
+            import math
+            log_k_values = [math.log(r.k_value) for r in valid_results]
+            k_geom_ms = math.exp(sum(log_k_values) / len(log_k_values))
+            k_geom_md = k_geom_ms * 86400.0
+            self._stat_k_md.setText(f"{k_geom_md:.2f}")
+            self._stat_k_ms.setText(f"{k_geom_ms:.2e}")
         else:
-            self.summary_stats_label.setText("No valid K-values calculated")
+            self._stat_k_md.setText("—")
+            self._stat_k_ms.setText("—")
+
+        # Methods valid
+        self._stat_valid.setText(f"{valid_count} / {total}")
+
+        # D50
+        d50 = self.dataset.get_d50()
+        self._stat_d50.setText(f"{d50:.3f} mm" if d50 else "—")
+
+        # Temperature (may have been updated)
+        self._stat_temp.setText(f"{self.temperature:.1f} °C")
 
     def on_result_row_selected(self):
-        """Handle row selection in results table - show method details"""
-        selected_rows = self.results_table.selectedItems()
-        if not selected_rows or not self.current_results:
+        """Handle row selection — update detail panel."""
+        selected = self.results_table.selectedItems()
+        if not selected or not self.current_results:
             return
 
-        # Get the row number (all selected items will have same row)
-        row = selected_rows[0].row()
-
-        # Get the method name from the table (column 0) to handle sorted tables correctly
+        row = selected[0].row()
         method_item = self.results_table.item(row, 0)
         if not method_item:
             return
 
         method_name = method_item.text()
-
-        # Find the matching result by method name
-        result = None
-        for r in self.current_results:
-            if r.method_name == method_name:
-                result = r
-                break
-
-        if not result:
-            return
-
-        # Generate detailed HTML
-        html = self.generate_method_details_html(result)
-
-        # Update details panel
-        self.details_browser.setHtml(html)
+        result = next((r for r in self.current_results if r.method_name == method_name), None)
+        if result:
+            self._update_detail_panel(result)
 
     def get_method_specific_values(self, method_name: str) -> dict:
         """Get method-specific calculated values for display"""
@@ -700,257 +1035,6 @@ class DatasetTab(QWidget):
                 values["D₆₀"] = f"{d60:.4f} mm"
 
         return values
-
-    def generate_method_details_html(self, result) -> str:
-        """Generate detailed HTML for a calculation result with improved formatting"""
-        # Status color
-        status = (
-            result.status.value
-            if hasattr(result.status, "value")
-            else str(result.status)
-        )
-        if "OK" in status:
-            status_color = "#006400"
-            status_bg = "#d4edda"
-            status_icon = "✓"
-        elif "Warning" in status:
-            status_color = "#856404"
-            status_bg = "#fff3cd"
-            status_icon = "⚠"
-        else:
-            status_color = "#721c24"
-            status_bg = "#f8d7da"
-            status_icon = "✗"
-
-        html = f"""
-        <html>
-        <head>
-            <style>
-                body {{
-                    font-family: 'Segoe UI', Arial, sans-serif;
-                    margin: 10px;
-                    font-size: 11pt;
-                    background-color: #ffffff;
-                }}
-                table {{ border-collapse: collapse; width: 100%; }}
-
-                .section-title {{
-                    font-weight: bold;
-                    color: #2c5282;
-                    font-size: 12pt;
-                    background-color: #e8f0f8;
-                    padding: 8px 10px;
-                    margin-top: 8px;
-                    margin-bottom: 6px;
-                    border-left: 4px solid #4a7fb8;
-                }}
-
-                .k-value-large {{
-                    font-size: 18pt;
-                    font-weight: bold;
-                    color: #0066cc;
-                    padding: 12px;
-                    background-color: #f0f8ff;
-                    border-radius: 4px;
-                    margin-bottom: 6px;
-                }}
-
-                .formula-text {{
-                    font-family: 'Courier New', 'Consolas', monospace;
-                    font-size: 15pt;
-                    background-color: #f8f9fa;
-                    padding: 14px 16px;
-                    border-left: 4px solid #0066cc;
-                    border-radius: 4px;
-                    color: #1a1a1a;
-                    line-height: 1.7;
-                    letter-spacing: 0.3px;
-                }}
-
-                .param-table {{
-                    width: 100%;
-                    font-size: 10pt;
-                    margin-top: 6px;
-                    border-spacing: 0;
-                }}
-
-                .param-label {{
-                    font-weight: 600;
-                    color: #495057;
-                    padding: 6px 10px;
-                    width: 25%;
-                    background-color: #f8f9fa;
-                }}
-
-                .param-value {{
-                    font-family: 'Consolas', monospace;
-                    padding: 6px 10px;
-                    background-color: #ffffff;
-                    color: #212529;
-                    border-bottom: 1px solid #e9ecef;
-                }}
-
-                .param-value-warn {{
-                    color: #dc3545;
-                    font-weight: bold;
-                    background-color: #ffe6e6;
-                }}
-
-                .alert-box {{
-                    background-color: {status_bg};
-                    border-left: 4px solid {status_color};
-                    padding: 10px;
-                    margin: 10px 0;
-                    color: {status_color};
-                    font-weight: 500;
-                    border-radius: 4px;
-                    font-size: 10pt;
-                }}
-
-                .check-ok {{
-                    color: #28a745;
-                    font-weight: bold;
-                    font-size: 11pt;
-                }}
-
-                .check-fail {{
-                    color: #dc3545;
-                    font-weight: bold;
-                    font-size: 11pt;
-                }}
-            </style>
-        </head>
-        <body>
-        """
-
-        # Status message alert if present (show at top)
-        if result.status_message:
-            html += f"""
-            <div class="alert-box">
-                <strong>{status_icon} Note:</strong> {result.status_message}
-            </div>
-            """
-
-        # K-Value section (full width)
-        html += '<div class="section-title">Calculated K-Value</div>'
-        if result.k_value is not None and result.k_value > 0:
-            k_cm_s = result.k_value * 100.0
-            k_m_d = result.k_value * 86400.0
-            html += f"""
-            <div class="k-value-large">{result.k_value:.3e} m/s</div>
-            <div style="padding: 8px 12px; font-size: 10pt; color: #555; background-color: #f8f9fa;
-                        border-radius: 4px; margin-bottom: 8px;">
-                <strong>cm/s:</strong> {k_cm_s:.3e} &nbsp;&nbsp;|&nbsp;&nbsp; <strong>m/d:</strong> {k_m_d:.2f}
-            </div>
-            """
-        else:
-            html += '<div style="color: #dc3545; font-weight: bold; padding: 12px; margin-bottom: 8px;">No valid K-value</div>'
-
-        # Formula section (full width, on its own row)
-        html += '<div class="section-title">Formula Used</div>'
-        html += f'<div class="formula-text">{result.formula_used}</div>'
-
-        # Input Parameters section
-        d10 = self.dataset.get_d10()
-        d30 = self.dataset.get_d30()
-        d60 = self.dataset.get_d60()
-        d50 = self.dataset.get_d50()
-
-        html += '<div class="section-title" style="margin-top: 10px;">Input Parameters</div>'
-        html += '<table class="param-table">'
-
-        # Build parameter list
-        params = []
-        if d10:
-            params.append(("D₁₀", f"{d10:.3f} mm", False))
-        if d30:
-            params.append(("D₃₀", f"{d30:.3f} mm", False))
-        if d50:
-            params.append(("D₅₀", f"{d50:.3f} mm", False))
-        if d60:
-            params.append(("D₆₀", f"{d60:.3f} mm", False))
-
-        # Cu and Cc
-        if d10 and d60:
-            cu = d60 / d10
-            params.append(("Cu", f"{cu:.2f}", False))
-            if d30:
-                cc = (d30 * d30) / (d10 * d60)
-                params.append(("Cc", f"{cc:.2f}", False))
-
-        params.append(("Temperature", f"{self.temperature}°C", False))
-        params.append(("Porosity", f"{self.porosity:.4f}", False))
-
-        # Render parameters in 4-column table (2 label-value pairs per row)
-        for i in range(0, len(params), 2):
-            html += "<tr>"
-
-            # First parameter
-            label1, value1, warn1 = params[i]
-            value_class1 = "param-value param-value-warn" if warn1 else "param-value"
-            html += f'<td class="param-label">{label1}:</td>'
-            html += f'<td class="{value_class1}">{value1}</td>'
-
-            # Second parameter (if exists)
-            if i + 1 < len(params):
-                label2, value2, warn2 = params[i + 1]
-                value_class2 = (
-                    "param-value param-value-warn" if warn2 else "param-value"
-                )
-                html += f'<td class="param-label">{label2}:</td>'
-                html += f'<td class="{value_class2}">{value2}</td>'
-            else:
-                html += "<td></td><td></td>"
-
-            html += "</tr>"
-
-        html += "</table>"
-
-        # Method-Specific Values section
-        method_values = self.get_method_specific_values(result.method_name)
-        if method_values:
-            html += '<div class="section-title" style="margin-top: 10px;">Method-Specific Values</div>'
-            html += '<table class="param-table">'
-
-            # Convert dict to list of tuples for 2-column layout
-            values_list = list(method_values.items())
-            for i in range(0, len(values_list), 2):
-                html += "<tr>"
-
-                # First value
-                label1, value1 = values_list[i]
-                html += f'<td class="param-label">{label1}:</td>'
-                html += f'<td class="param-value" style="color: #0066cc; font-weight: 600;">{value1}</td>'
-
-                # Second value (if exists)
-                if i + 1 < len(values_list):
-                    label2, value2 = values_list[i + 1]
-                    html += f'<td class="param-label">{label2}:</td>'
-                    html += f'<td class="param-value" style="color: #0066cc; font-weight: 600;">{value2}</td>'
-                else:
-                    html += "<td></td><td></td>"
-
-                html += "</tr>"
-
-            html += "</table>"
-
-        # Applicability check
-        conditions_met = (
-            result.conditions_met if hasattr(result, "conditions_met") else True
-        )
-        check_symbol = (
-            '<span class="check-ok">✓ Conditions Met</span>'
-            if conditions_met
-            else '<span class="check-fail">✗ Conditions NOT Met</span>'
-        )
-
-        html += f"""
-        <div class="section-title" style="margin-top: 10px;">Applicability</div>
-        <div style="padding: 8px;">{check_symbol}</div>
-        """
-
-        html += "</body></html>"
-        return html
 
     # Note: update_k_statistics() is now handled by StatisticsTab
     # This method is kept for backward compatibility but delegates to the new tab
