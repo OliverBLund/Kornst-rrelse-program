@@ -122,8 +122,8 @@ class WelcomeWidget(QWidget):
         card.setObjectName("wlc-title")
         card.setStyleSheet("""
             QFrame#wlc-title {
-                background: rgba(255,255,255,64);
-                border: 1.5px solid rgba(255,255,255,110);
+                background: rgba(252,248,240,210);
+                border: 1.5px solid rgba(255,255,255,200);
                 border-radius: 12px;
             }
         """)
@@ -177,7 +177,7 @@ class WelcomeWidget(QWidget):
         sub = QLabel("Hydraulic Conductivity Calculator")
         sub.setAlignment(Qt.AlignmentFlag.AlignCenter)
         sub.setStyleSheet(
-            f"color: {C.TEXT_MID}; font-size: {F.SZ_LG}pt; font-weight: 400;"
+            f"color: {C.TEXT_MID}; font-size: {F.SZ_LG}pt; font-weight: 600;"
             " background: transparent;"
         )
         lay.addWidget(sub)
@@ -208,8 +208,8 @@ class WelcomeWidget(QWidget):
             chip.setObjectName("wlc-chip")
             chip.setStyleSheet("""
                 QWidget#wlc-chip {
-                    background: rgba(107,142,35,30);
-                    border: 1px solid rgba(107,142,35,70);
+                    background: rgba(107,142,35,55);
+                    border: 1px solid rgba(107,142,35,130);
                     border-radius: 99px;
                 }
             """)
@@ -223,7 +223,7 @@ class WelcomeWidget(QWidget):
 
             c_txt = QLabel(chip_txt)
             c_txt.setStyleSheet(
-                f"color: {C.OLIVE}; font-size: {F.SZ_XS}pt; font-weight: 600;"
+                f"color: {C.OLIVE_DK}; font-size: {F.SZ_XS}pt; font-weight: 700;"
                 " background: transparent; border: none;"
             )
             c_lay.addWidget(c_ico)
@@ -238,7 +238,7 @@ class WelcomeWidget(QWidget):
         ver = QLabel("v0.9.0-beta")
         ver.setAlignment(Qt.AlignmentFlag.AlignCenter)
         ver.setStyleSheet(
-            f"color: {C.TEXT_MUTED}; font-family: '{F.MONO}'; font-size: {F.SZ_XS}pt;"
+            f"color: {C.TEXT_MID}; font-family: '{F.MONO}'; font-size: {F.SZ_XS}pt;"
             " background: transparent;"
         )
         lay.addWidget(ver)
@@ -251,9 +251,10 @@ class WelcomeWidget(QWidget):
         card.setObjectName("wlc-card")
         card.setStyleSheet("""
             QFrame#wlc-card {
-                background: rgba(255,255,255,247);
-                border: 1.5px solid rgba(180,160,130,64);
-                border-radius: 10px;
+                background: qlineargradient(x1:0,y1:0,x2:0,y2:1,
+                    stop:0 #fdfcf9, stop:0.5 #f8f4ee, stop:1 #f1ece3);
+                border: 1.5px solid rgba(180,160,130,90);
+                border-radius: 12px;
             }
         """)
         card.setMaximumWidth(_CARD_W)
@@ -266,19 +267,23 @@ class WelcomeWidget(QWidget):
 
         grid.addWidget(
             self._build_section("fa6s.folder-open", "Recent Sessions",
-                                self._build_recent(), clear_btn=True), 0, 0
+                                self._build_recent(), clear_btn=True,
+                                accent=C.EARTH), 0, 0
         )
         grid.addWidget(
-            self._build_section("fa6s.file-lines", "What's New",
-                                self._build_whats_new()), 0, 1
+            self._build_section("fa6s.seedling", "What's New",
+                                self._build_whats_new(),
+                                accent=C.OLIVE), 0, 1
         )
         grid.addWidget(
-            self._build_section("fa6s.book", "Quick Help",
-                                self._build_help()), 1, 0
+            self._build_section("fa6s.book-open", "Quick Help",
+                                self._build_help(),
+                                accent=C.AMBER), 1, 0
         )
         grid.addWidget(
-            self._build_section("fa6s.rocket", "Quick Actions",
-                                self._build_actions()), 1, 1
+            self._build_section("fa6s.bolt", "Quick Actions",
+                                self._build_actions(),
+                                accent=C.OLIVE_DK), 1, 1
         )
         grid.setColumnStretch(0, 1)
         grid.setColumnStretch(1, 1)
@@ -290,57 +295,93 @@ class WelcomeWidget(QWidget):
     # ── Section box ──────────────────────────────────────────────
 
     def _build_section(self, icon_name: str, title: str, content: QWidget,
-                       clear_btn: bool = False) -> QFrame:
+                       clear_btn: bool = False, accent: str = None) -> QFrame:
+        _accent = accent or C.BORDER
         sec = QFrame()
         sec.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Preferred)
         sec.setStyleSheet(f"""
             QFrame {{
-                background: #f8f6f2;
+                background: #f9f7f3;
                 border: 1px solid {C.BORDER};
+                border-top: 3px solid {_accent};
                 border-radius: 6px;
             }}
         """)
 
         lay = QVBoxLayout(sec)
-        lay.setContentsMargins(10, 10, 10, 10)
-        lay.setSpacing(7)
+        lay.setContentsMargins(0, 0, 0, 10)
+        lay.setSpacing(8)
 
-        # Header row
-        hdr = QWidget()
-        hdr.setStyleSheet("background: transparent; border: none;")
-        hdr_lay = QHBoxLayout(hdr)
-        hdr_lay.setContentsMargins(0, 0, 0, 0)
-        hdr_lay.setSpacing(6)
+        # ── Header band ────────────────────────────────────────────
+        hdr_band = QWidget()
+        hdr_band.setStyleSheet(
+            f"background: rgba(180,160,130,14); border: none; border-radius: 0px;"
+        )
+        hdr_band_lay = QHBoxLayout(hdr_band)
+        hdr_band_lay.setContentsMargins(10, 8, 10, 8)
+        hdr_band_lay.setSpacing(8)
 
+        # Coloured icon pill
+        ico_pill = QFrame()
+        ico_pill.setFixedSize(22, 22)
+        ico_pill.setStyleSheet(f"""
+            QFrame {{
+                background: {_accent};
+                border-radius: 5px;
+                border: none;
+            }}
+        """)
+        ico_pill_lay = QHBoxLayout(ico_pill)
+        ico_pill_lay.setContentsMargins(0, 0, 0, 0)
         ico_lbl = QLabel()
-        ico_lbl.setPixmap(icon(icon_name, C.EARTH).pixmap(QSize(13, 13)))
+        ico_lbl.setPixmap(icon(icon_name, "#ffffff").pixmap(QSize(11, 11)))
+        ico_lbl.setAlignment(Qt.AlignmentFlag.AlignCenter)
         ico_lbl.setStyleSheet("background: transparent; border: none;")
+        ico_pill_lay.addWidget(ico_lbl, 0, Qt.AlignmentFlag.AlignCenter)
 
         ttl_lbl = QLabel(title)
         ttl_lbl.setStyleSheet(
-            f"color: {C.TEXT}; font-size: {F.SZ_LG}pt; font-weight: 600;"
-            " background: transparent; border: none;"
+            f"color: {C.TEXT}; font-size: {F.SZ_LG}pt; font-weight: 700;"
+            f" letter-spacing: 0.02em; background: transparent; border: none;"
         )
 
-        hdr_lay.addWidget(ico_lbl)
-        hdr_lay.addWidget(ttl_lbl)
-        hdr_lay.addStretch()
+        hdr_band_lay.addWidget(ico_pill)
+        hdr_band_lay.addWidget(ttl_lbl)
+        hdr_band_lay.addStretch()
 
         if clear_btn:
             clr = QPushButton("Clear")
+            clr.setIcon(icon("fa6s.trash-can", C.EARTH))
             clr.setFixedHeight(22)
             clr.setCursor(QCursor(Qt.CursorShape.PointingHandCursor))
-            clr.setStyleSheet("""
-                QPushButton { background: #dc3545; color: white; border: none;
-                              border-radius: 3px; padding: 0 8px; font-size: 9pt; }
-                QPushButton:hover { background: #c82333; }
+            clr.setStyleSheet(f"""
+                QPushButton {{
+                    background: rgba(139,115,85,28);
+                    color: {C.EARTH};
+                    border: 1px solid rgba(139,115,85,90);
+                    border-radius: 3px;
+                    padding: 0 8px;
+                    font-size: 9pt;
+                }}
+                QPushButton:hover {{
+                    background: rgba(139,115,85,55);
+                    color: {C.TEXT_MID};
+                }}
             """)
             clr.clicked.connect(self.clear_sessions_requested.emit)
-            hdr_lay.addWidget(clr)
+            hdr_band_lay.addWidget(clr)
 
-        lay.addWidget(hdr)
-        lay.addWidget(content)
-        lay.addStretch()   # push header+content to top when section is stretched tall
+        lay.addWidget(hdr_band)
+
+        # Content with side padding
+        content_wrap = QWidget()
+        content_wrap.setStyleSheet("background: transparent; border: none;")
+        cw_lay = QVBoxLayout(content_wrap)
+        cw_lay.setContentsMargins(10, 0, 10, 0)
+        cw_lay.setSpacing(0)
+        cw_lay.addWidget(content, 1)
+
+        lay.addWidget(content_wrap, 1)
         return sec
 
     # ── Recent Sessions ──────────────────────────────────────────
@@ -444,6 +485,7 @@ class WelcomeWidget(QWidget):
     def _build_whats_new(self) -> QWidget:
         w = QWidget()
         w.setStyleSheet("background: transparent; border: none;")
+        w.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
         lay = QVBoxLayout(w)
         lay.setContentsMargins(0, 0, 0, 0)
         lay.setSpacing(4)
@@ -499,23 +541,18 @@ class WelcomeWidget(QWidget):
             hr_lay.setContentsMargins(0, 0, 0, 0)
             hr_lay.setSpacing(5)
 
-            d_ico = QLabel()
-            d_ico.setPixmap(icon("fa6s.diamond", C.OLIVE).pixmap(QSize(9, 9)))
-            d_ico.setStyleSheet("background: transparent; border: none;")
-
-            ver_lbl = QLabel(v["version"])
-            ver_lbl.setStyleSheet(
-                f"color: {C.TEXT}; font-size: {F.SZ_BASE}pt; font-weight: 600;"
-                " background: transparent; border: none;"
+            ver_pill = QLabel(v["version"])
+            ver_pill.setStyleSheet(
+                f"color: white; background: {C.OLIVE}; font-size: {F.SZ_XS}pt;"
+                f" font-weight: 700; padding: 1px 7px; border-radius: 3px; border: none;"
             )
-            date_lbl = QLabel(f"({v['date']})")
+            date_lbl = QLabel(v["date"])
             date_lbl.setStyleSheet(
                 f"color: {C.TEXT_MUTED}; font-size: {F.SZ_XS}pt;"
                 " background: transparent; border: none;"
             )
 
-            hr_lay.addWidget(d_ico)
-            hr_lay.addWidget(ver_lbl)
+            hr_lay.addWidget(ver_pill)
             hr_lay.addWidget(date_lbl)
             hr_lay.addStretch()
             blk_lay.addWidget(hdr_row)
@@ -565,29 +602,36 @@ class WelcomeWidget(QWidget):
         grid.setContentsMargins(0, 0, 0, 0)
         grid.setSpacing(5)
 
-        for (name, file), (r, c) in zip(
+        for (name, file, ico_name), (r, c) in zip(
             [
-                ("Getting Started", "getting_started.html"),
-                ("File Formats",    "file_formats.html"),
-                ("Methods",         "methods_overview.html"),
-                ("Troubleshoot",    "troubleshooting.html"),
+                ("Getting Started", "getting_started.html",  "fa6s.circle-play"),
+                ("File Formats",    "file_formats.html",     "fa6s.file-csv"),
+                ("Methods",         "methods_overview.html", "fa6s.flask"),
+                ("Troubleshoot",    "troubleshooting.html",  "fa6s.screwdriver-wrench"),
             ],
             [(0, 0), (0, 1), (1, 0), (1, 1)],
         ):
             btn = QPushButton(name)
+            btn.setIcon(icon(ico_name, C.AMBER))
             btn.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
-            btn.setFixedHeight(28)
+            btn.setFixedHeight(30)
             btn.setCursor(QCursor(Qt.CursorShape.PointingHandCursor))
             btn.setStyleSheet(f"""
                 QPushButton {{
-                    background: transparent;
-                    border: 1px solid rgba(107,142,35,87);
-                    border-radius: 3px;
-                    color: {C.OLIVE};
+                    background: rgba(196,165,116,14);
+                    border: 1px solid rgba(196,165,116,100);
+                    border-radius: 4px;
+                    color: {C.TEXT_MID};
                     font-size: {F.SZ_SM}pt;
+                    font-weight: 500;
                     padding: 5px 6px;
+                    text-align: left;
                 }}
-                QPushButton:hover {{ background: rgba(107,142,35,20); }}
+                QPushButton:hover {{
+                    background: rgba(196,165,116,35);
+                    border-color: rgba(196,165,116,160);
+                    color: {C.TEXT};
+                }}
             """)
             btn.clicked.connect(lambda ch, f=file: self.open_help_topic_requested.emit(f))
             grid.addWidget(btn, r, c)
