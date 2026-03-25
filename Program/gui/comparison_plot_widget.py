@@ -7,13 +7,12 @@ from PyQt6.QtWidgets import (
     QComboBox, QLabel, QCheckBox, QButtonGroup, QRadioButton
 )
 from PyQt6.QtCore import Qt, pyqtSignal
-import matplotlib
-matplotlib.use('Qt5Agg')
-from matplotlib.backends.backend_qt5agg import FigureCanvasQTAgg as FigureCanvas
 from matplotlib.figure import Figure
 import matplotlib.pyplot as plt
 import numpy as np
 from typing import List, Dict, Optional
+from .matplotlib_canvas import FigureCanvas
+from .theme import C, apply_matplotlib_style
 
 
 class ComparisonPlotWidget(QWidget):
@@ -23,6 +22,12 @@ class ComparisonPlotWidget(QWidget):
     
     # Signals
     plot_updated = pyqtSignal()
+    DEFAULT_METHOD_ORDER = [
+        'Hazen', 'Hazen_1892', 'Slichter', 'Terzaghi',
+        'Beyer', 'Sauerbrei', 'Kruger', 'Kozeny-Carman',
+        'Zunker', 'Zamarin', 'USBR', 'Barr',
+        'Alyamani-Sen', 'Chapuis', 'Shepherd', 'Krumbein-Monk',
+    ]
     
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -57,24 +62,30 @@ class ComparisonPlotWidget(QWidget):
             "USBR": "#6d4c41",
             "Sauerbrei": "#546e7a",
             "Hazen_1892": "#d84315",
-            "Kruger": "#4527a0"
+            "Kruger": "#4527a0",
+            "Barr": "#8d6e63",
+            "Alyamani-Sen": "#5d4037",
+            "Chapuis": "#ff5722",
+            "Krumbein-Monk": "#9c27b0",
         }
         
         self.init_ui()
-    
+
     def init_ui(self):
         """Initialize the UI"""
+        apply_matplotlib_style()
+
         layout = QVBoxLayout(self)
         layout.setContentsMargins(2, 2, 2, 2)
         layout.setSpacing(2)
-        
+
         # Create toolbar
         toolbar = self.create_toolbar()
         layout.addWidget(toolbar)
-        
+
         # Create matplotlib figure and canvas
         self.figure = Figure(figsize=(12, 8))
-        self.figure.patch.set_facecolor('#fafaf7')
+        self.figure.patch.set_facecolor(C.BG)
         self.canvas = FigureCanvas(self.figure)
         layout.addWidget(self.canvas)
     
@@ -133,15 +144,15 @@ class ComparisonPlotWidget(QWidget):
         # Radio buttons for display mode
         self.overlay_radio = QRadioButton("Overlay")
         self.overlay_radio.setChecked(True)
-        self.overlay_radio.toggled.connect(lambda: self.set_display_mode("overlay"))
+        self.overlay_radio.toggled.connect(lambda checked: self._on_mode_toggled(checked, "overlay"))
         toolbar.addWidget(self.overlay_radio)
         
         self.grid_radio = QRadioButton("Grid")
-        self.grid_radio.toggled.connect(lambda: self.set_display_mode("grid"))
+        self.grid_radio.toggled.connect(lambda checked: self._on_mode_toggled(checked, "grid"))
         toolbar.addWidget(self.grid_radio)
         
         self.grouped_radio = QRadioButton("Grouped")
-        self.grouped_radio.toggled.connect(lambda: self.set_display_mode("grouped"))
+        self.grouped_radio.toggled.connect(lambda checked: self._on_mode_toggled(checked, "grouped"))
         self.grouped_radio.setVisible(False)  # Only show for bar charts
         toolbar.addWidget(self.grouped_radio)
         
@@ -211,24 +222,69 @@ class ComparisonPlotWidget(QWidget):
         }
         
         self.current_plot_type = plot_map.get(text, "distribution")
-        
-        # Show/hide grouped option based on plot type
-        is_bar_chart = self.current_plot_type in ["k-values", "histogram"]
-        self.grouped_radio.setVisible(is_bar_chart)
-        
-        # Update plot
+        self._normalize_display_mode_for_plot_type()
         self.refresh_plot()
+
+    def _on_mode_toggled(self, checked: bool, mode: str):
+        """Apply mode changes only for the newly checked radio button."""
+        if checked:
+            self.set_display_mode(mode)
     
     def set_display_mode(self, mode: str):
         """Set the display mode"""
         self.display_mode = mode
-        
+        self._normalize_display_mode_for_plot_type()
+
         # Show/hide grid selector
-        show_grid_selector = (mode == "grid")
+        show_grid_selector = (self.display_mode == "grid")
         self.grid_label.setVisible(show_grid_selector)
         self.grid_selector.setVisible(show_grid_selector)
         
         self.refresh_plot()
+
+    def _normalize_display_mode_for_plot_type(self):
+        """Keep the display mode consistent with the selected plot type."""
+        supports_grouped = self.current_plot_type == "k-values"
+        self.grouped_radio.setVisible(supports_grouped)
+
+        if self.display_mode == "grouped" and not supports_grouped:
+            self.display_mode = "grid" if self.current_plot_type in ["combined", "histogram"] else "overlay"
+
+        if self.current_plot_type in ["combined", "histogram"] and self.display_mode == "overlay":
+            self.display_mode = "grid"
+
+        self._sync_mode_radios()
+
+    def _sync_mode_radios(self):
+        """Reflect the active display mode in the radio buttons without re-entering."""
+        buttons = [
+            (self.overlay_radio, "overlay"),
+            (self.grid_radio, "grid"),
+            (self.grouped_radio, "grouped"),
+        ]
+        for button, mode in buttons:
+            button.blockSignals(True)
+            button.setChecked(self.display_mode == mode)
+            button.blockSignals(False)
+
+    def _ordered_methods(self, method_names) -> List[str]:
+        """Return K-methods in a stable, domain-specific order."""
+        seen = set(method_names)
+        ordered = [name for name in self.DEFAULT_METHOD_ORDER if name in seen]
+        extras = sorted(seen.difference(self.DEFAULT_METHOD_ORDER))
+        return ordered + extras
+
+    def _calculate_histogram_frequencies(self, particle_sizes, percent_passing):
+        """Convert cumulative percent passing to retained fractions per size class."""
+        pairs = sorted(zip(particle_sizes, percent_passing), key=lambda pair: pair[0], reverse=True)
+        if not pairs:
+            return np.array([]), np.array([])
+
+        sizes = np.array([size for size, _ in pairs], dtype=float)
+        passing = np.array([passing for _, passing in pairs], dtype=float)
+        next_passing = np.append(passing[1:], 0.0)
+        freq = np.maximum(0.0, passing - next_passing)
+        return sizes, freq
     
     def on_grid_layout_changed(self, text: str):
         """Handle grid layout change"""
@@ -364,7 +420,7 @@ class ComparisonPlotWidget(QWidget):
         all_methods = set()
         for k_dict in self.k_results_dict.values():
             all_methods.update(k_dict.keys())
-        methods = sorted(list(all_methods))
+        methods = self._ordered_methods(all_methods)
         
         # Prepare data
         n_datasets = len(self.k_results_dict)
@@ -410,7 +466,7 @@ class ComparisonPlotWidget(QWidget):
         all_methods = set()
         for k_dict in self.k_results_dict.values():
             all_methods.update(k_dict.keys())
-        methods = sorted(list(all_methods))
+        methods = self._ordered_methods(all_methods)
         
         bar_width = 0.8 / len(methods)
         
@@ -445,8 +501,8 @@ class ComparisonPlotWidget(QWidget):
             
             ax = self.figure.add_subplot(rows, cols, i + 1)
             
-            methods = list(k_dict.keys())
-            values = list(k_dict.values())
+            methods = self._ordered_methods(k_dict.keys())
+            values = [k_dict[m] for m in methods]
             colors = [self.method_colors.get(m, '#888888') for m in methods]
             
             bars = ax.bar(range(len(methods)), values, color=colors, 
@@ -465,11 +521,6 @@ class ComparisonPlotWidget(QWidget):
     
     def plot_combined(self):
         """Plot combined view"""
-        if self.display_mode == "overlay":
-            # Can't really overlay combined views, use grid
-            self.display_mode = "grid"
-            self.grid_radio.setChecked(True)
-        
         rows, cols = self.grid_layout
         
         for i, dataset in enumerate(self.datasets):
@@ -489,12 +540,13 @@ class ComparisonPlotWidget(QWidget):
             ax1.set_xlabel('Size (mm)', fontsize=7)
             ax1.set_ylabel('% Pass', fontsize=7)
             ax1.tick_params(labelsize=6)
-            ax1.grid(True, alpha=0.3)
+            if self.show_grid:
+                ax1.grid(True, alpha=0.3)
             
             # Plot K-values if available
             if dataset.sample_name in self.k_results_dict:
                 k_dict = self.k_results_dict[dataset.sample_name]
-                methods = list(k_dict.keys())[:5]  # Limit to 5 methods for space
+                methods = self._ordered_methods(k_dict.keys())[:5]  # Limit to 5 methods for space
                 values = [k_dict[m] for m in methods]
                 
                 bars = ax2.bar(range(len(methods)), values, alpha=0.8)
@@ -503,7 +555,8 @@ class ComparisonPlotWidget(QWidget):
                 ax2.set_xticklabels([m[:3] for m in methods], rotation=45, fontsize=6)
                 ax2.set_yscale('log')
                 ax2.tick_params(labelsize=6)
-                ax2.grid(True, axis='y', alpha=0.3)
+                if self.show_grid:
+                    ax2.grid(True, axis='y', alpha=0.3)
             else:
                 ax2.text(0.5, 0.5, 'No K-values', transform=ax2.transAxes,
                         ha='center', va='center', fontsize=8)
@@ -516,11 +569,6 @@ class ComparisonPlotWidget(QWidget):
     
     def plot_histogram(self):
         """Plot histogram comparison"""
-        if self.display_mode == "overlay":
-            # Histograms don't overlay well, use grid
-            self.display_mode = "grid"
-            self.grid_radio.setChecked(True)
-        
         rows, cols = self.grid_layout
         
         for i, dataset in enumerate(self.datasets):
@@ -530,10 +578,11 @@ class ComparisonPlotWidget(QWidget):
             ax = self.figure.add_subplot(rows, cols, i + 1)
             color = self.dataset_colors[i % len(self.dataset_colors)]
             
-            # Calculate frequency for each size class
-            sizes = np.array(dataset.particle_sizes)
-            passing = np.array(dataset.percent_passing)
-            freq = np.diff(passing, prepend=0)
+            # Calculate retained frequency for each size class from cumulative passing
+            sizes, freq = self._calculate_histogram_frequencies(
+                dataset.particle_sizes,
+                dataset.percent_passing,
+            )
             
             bars = ax.bar(range(len(sizes)), freq, color=color, alpha=0.8)
             
@@ -614,10 +663,4 @@ class ComparisonPlotWidget(QWidget):
     
     def reset_view(self):
         """Reset view on all axes"""
-        for ax in self.figure.axes:
-            if ax.get_xscale() == 'log':
-                ax.set_xlim(0.001, 100)
-            if 'Percent' in ax.get_ylabel() or '% Pass' in ax.get_ylabel():
-                ax.set_ylim(0, 100)
-        
-        self.canvas.draw()
+        self.refresh_plot()

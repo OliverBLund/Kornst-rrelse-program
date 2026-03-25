@@ -4,16 +4,13 @@ Plot widget with real matplotlib integration for grain size distribution visuali
 
 from PyQt6.QtWidgets import QWidget, QVBoxLayout, QHBoxLayout, QPushButton, QLabel
 from PyQt6.QtCore import Qt
-import matplotlib
-matplotlib.use('QtAgg')
-from matplotlib.backends.backend_qtagg import FigureCanvasQTAgg as FigureCanvas
-from matplotlib.backends.backend_qt5agg import NavigationToolbar2QT as NavigationToolbar
 from matplotlib.figure import Figure
 import matplotlib.pyplot as plt
 import numpy as np
 from typing import Optional, List, Dict
 from unit_conversions import HydraulicConductivityConverter, HydraulicConductivityUnit, get_default_plot_unit
 from .plot_styles import PlotStyle, PROFESSIONAL_STYLE
+from .matplotlib_canvas import FigureCanvas, NavigationToolbar
 from .theme import C, apply_matplotlib_style
 
 
@@ -25,9 +22,11 @@ class PlotWidget(QWidget):
         self.toolbar = None
         self.grain_size_ax = None
         self.k_value_ax = None
+        self.active_axes = []
         
         # Data storage
         self.grain_data = None
+        self.grain_size_data = None
         self.k_results = {}
         self.flagged_methods: set[str] = set()
         self.sample_name = "No data"
@@ -36,7 +35,12 @@ class PlotWidget(QWidget):
         self.display_unit = get_default_plot_unit()  # Default to m/d as specified
 
         # Display options
+        self.show_grid = True
+        self.show_legend = True
         self.show_classification_zones = False
+        self.show_d_lines = False
+        self.show_markers = False
+        self.fill_curve = False
 
         # Style system
         self.current_style = PROFESSIONAL_STYLE
@@ -101,6 +105,7 @@ class PlotWidget(QWidget):
         self.current_ax = ax
         self.grain_size_ax = ax
         self.k_value_ax = None
+        self.active_axes = [ax]
 
         ax.set_xlabel('Grain Diameter (mm)')
         ax.set_ylabel('Cumulative % Passing')
@@ -120,6 +125,60 @@ class PlotWidget(QWidget):
         )
 
         self.canvas.draw()
+
+    def _get_curve_marker(self, style: PlotStyle):
+        """Return the configured curve marker or disable markers entirely."""
+        return style.curve_marker if self.show_markers else None
+
+    def _draw_characteristic_lines(self, ax, diameters, cumulative, grain_size_data, style: PlotStyle):
+        """Draw D10/D30/D60 guide lines when enabled."""
+        if not self.show_d_lines:
+            return
+
+        if grain_size_data is not None:
+            d_values = [
+                grain_size_data.get_d10(),
+                grain_size_data.get_d30(),
+                grain_size_data.get_d60(),
+            ]
+        else:
+            d_values = []
+            if len(diameters) > 0 and len(cumulative) > 0:
+                for percentile in (10, 30, 60):
+                    if min(cumulative) <= percentile <= max(cumulative):
+                        d_values.append(np.interp(percentile, cumulative, diameters))
+                    else:
+                        d_values.append(None)
+
+        characteristic_percentiles = [10, 30, 60]
+        characteristic_colors = [style.d10_color, style.d30_color, style.d60_color]
+        characteristic_linestyles = [style.d10_line_style, style.d30_line_style, style.d60_line_style]
+        characteristic_names = ['D10', 'D30', 'D60']
+
+        for d_value, perc, color, linestyle, name in zip(
+            d_values,
+            characteristic_percentiles,
+            characteristic_colors,
+            characteristic_linestyles,
+            characteristic_names,
+        ):
+            if d_value is None:
+                continue
+
+            ax.axvline(
+                x=d_value,
+                color=color,
+                linestyle=linestyle,
+                linewidth=style.d_line_width,
+                alpha=style.d_line_alpha,
+                label=f'{name} = {d_value:.3f} mm'
+            )
+            ax.axhline(
+                y=perc,
+                color=color,
+                linestyle=':',
+                alpha=style.d_line_alpha * 0.7,
+            )
 
     def draw_classification_zones(self, ax):
         """Draw grain size classification zones as background bands"""
@@ -156,12 +215,15 @@ class PlotWidget(QWidget):
             return
 
         self.grain_data = (diameters, cumulative)
+        self.grain_size_data = grain_size_data
         self.sample_name = sample_name
 
         # Clear figure and create grain size plot
         self.figure.clear()
         self.current_ax = self.figure.add_subplot(1, 1, 1)
         self.grain_size_ax = self.current_ax
+        self.k_value_ax = None
+        self.active_axes = [self.current_ax]
 
         # Draw classification zones if enabled (must be before plotting data)
         if self.show_classification_zones:
@@ -174,69 +236,15 @@ class PlotWidget(QWidget):
             color=style.curve_color,
             linewidth=style.curve_linewidth,
             label=f'{sample_name}',
-            marker=style.curve_marker,
+            marker=self._get_curve_marker(style),
             markersize=style.curve_markersize,
             markeredgecolor=style.curve_markeredgecolor,
             markeredgewidth=style.curve_markeredgewidth
         )
+        if self.fill_curve:
+            self.current_ax.fill_between(diameters, cumulative, 0, color=style.curve_color, alpha=0.12)
 
-        # Add characteristic grain size lines using proper GrainSizeData calculations
-        if grain_size_data is not None:
-            # Use the corrected calculations from GrainSizeData
-            d10 = grain_size_data.get_d10()
-            d30 = grain_size_data.get_d30()
-            d60 = grain_size_data.get_d60()
-
-            d_values = [d10, d30, d60]
-            characteristic_percentiles = [10, 30, 60]
-            characteristic_colors = [style.d10_color, style.d30_color, style.d60_color]
-            characteristic_linestyles = [style.d10_line_style, style.d30_line_style, style.d60_line_style]
-            characteristic_names = ['D10', 'D30', 'D60']
-
-            for d_value, perc, color, linestyle, name in zip(d_values, characteristic_percentiles, characteristic_colors, characteristic_linestyles, characteristic_names):
-                if d_value is not None:
-                    # Draw vertical line at diameter
-                    self.current_ax.axvline(
-                        x=d_value, color=color,
-                        linestyle=linestyle,
-                        linewidth=style.d_line_width,
-                        alpha=style.d_line_alpha,
-                        label=f'{name} = {d_value:.3f} mm'
-                    )
-
-                    # Draw horizontal line at percentile
-                    self.current_ax.axhline(
-                        y=perc, color=color,
-                        linestyle=':',
-                        alpha=style.d_line_alpha * 0.7
-                    )
-        elif len(diameters) > 0 and len(cumulative) > 0:
-            # Fallback to old interpolation method if no GrainSizeData is provided
-            characteristic_percentiles = [10, 30, 60]
-            characteristic_colors = [style.d10_color, style.d30_color, style.d60_color]
-            characteristic_linestyles = [style.d10_line_style, style.d30_line_style, style.d60_line_style]
-            characteristic_names = ['D10', 'D30', 'D60']
-
-            for perc, color, linestyle, name in zip(characteristic_percentiles, characteristic_colors, characteristic_linestyles, characteristic_names):
-                # Interpolate to find diameter at percentile
-                if min(cumulative) <= perc <= max(cumulative):
-                    d_value = np.interp(perc, cumulative, diameters)
-
-                    # Draw vertical line at diameter
-                    self.current_ax.axvline(
-                        x=d_value, color=color,
-                        linestyle=linestyle,
-                        linewidth=style.d_line_width,
-                        alpha=style.d_line_alpha,
-                        label=f'{name} = {d_value:.3f} mm'
-                    )
-
-                    # Draw horizontal line at percentile
-                    self.current_ax.axhline(
-                        y=perc, color=color,
-                        linestyle=':',
-                        alpha=style.d_line_alpha * 0.7
-                    )
+        self._draw_characteristic_lines(self.current_ax, diameters, cumulative, grain_size_data, style)
         
         # Setup plot formatting using current style
         self.current_ax.set_xlabel(
@@ -257,7 +265,7 @@ class PlotWidget(QWidget):
         )
 
         # Apply grid styling
-        if style.grid_show:
+        if self.show_grid and style.grid_show:
             self.current_ax.grid(
                 True,
                 alpha=style.grid_alpha,
@@ -283,12 +291,13 @@ class PlotWidget(QWidget):
         self.current_ax.set_ylim(0, 100)
 
         # Apply legend styling
-        legend = self.current_ax.legend(
-            loc=style.legend_loc,
-            fontsize=style.legend_fontsize,
-            framealpha=style.legend_framealpha,
-            edgecolor=style.legend_edgecolor
-        )
+        if self.show_legend:
+            self.current_ax.legend(
+                loc=style.legend_loc,
+                fontsize=style.legend_fontsize,
+                framealpha=style.legend_framealpha,
+                edgecolor=style.legend_edgecolor
+            )
         
         self.figure.tight_layout()
         self.canvas.draw()
@@ -332,25 +341,29 @@ class PlotWidget(QWidget):
             color=style.curve_color,
             linewidth=style.curve_linewidth,
             label=f'{self.sample_name}',
-            marker=style.curve_marker,
+            marker=self._get_curve_marker(style),
             markersize=style.curve_markersize * 0.8,  # Slightly smaller for combined view
             markeredgecolor=style.curve_markeredgecolor,
             markeredgewidth=style.curve_markeredgewidth
         )
+        if self.fill_curve:
+            ax1.fill_between(diameters, cumulative, 0, color=style.curve_color, alpha=0.12)
+        self._draw_characteristic_lines(ax1, diameters, cumulative, self.grain_size_data, style)
 
         # Apply styling
         ax1.set_xlabel('Grain Diameter (mm)', fontsize=style.label_fontsize - 1, fontfamily=style.font_family)
         ax1.set_ylabel('Cumulative % Passing', fontsize=style.label_fontsize - 1, fontfamily=style.font_family)
         ax1.set_title('Grain Size Distribution', fontsize=style.title_fontsize - 2, fontweight=style.title_fontweight, fontfamily=style.font_family)
 
-        if style.grid_show:
+        if self.show_grid and style.grid_show:
             ax1.grid(True, alpha=style.grid_alpha, which='major', linestyle=style.grid_linestyle, color=style.grid_color, linewidth=style.grid_linewidth)
 
         ax1.set_facecolor(style.axes_facecolor)
         ax1.tick_params(labelsize=style.tick_fontsize - 1)
         ax1.set_xlim(min(diameters)*0.5, max(diameters)*2)
         ax1.set_ylim(0, 100)
-        ax1.legend(loc=style.legend_loc, fontsize=style.legend_fontsize - 1, framealpha=style.legend_framealpha, edgecolor=style.legend_edgecolor)
+        if self.show_legend:
+            ax1.legend(loc=style.legend_loc, fontsize=style.legend_fontsize - 1, framealpha=style.legend_framealpha, edgecolor=style.legend_edgecolor)
         
         # Plot K-values on right if available
         if self.k_results:
@@ -397,7 +410,7 @@ class PlotWidget(QWidget):
             ax2.set_yscale('log')
             ax2.set_facecolor(style.axes_facecolor)
             ax2.tick_params(labelsize=style.tick_fontsize - 1)
-            if style.grid_show:
+            if self.show_grid and style.grid_show:
                 ax2.grid(True, alpha=style.grid_alpha, axis='y', linestyle=style.grid_linestyle, color=style.grid_color, linewidth=style.grid_linewidth)
         else:
             ax2.text(0.5, 0.5, 'Calculate K values\nto view comparison',
@@ -410,6 +423,7 @@ class PlotWidget(QWidget):
         self.current_ax = ax1
         self.grain_size_ax = ax1
         self.k_value_ax = ax2 if self.k_results else None
+        self.active_axes = [ax1, ax2]
         
         self.figure.tight_layout()
         self.canvas.draw()
@@ -424,7 +438,9 @@ class PlotWidget(QWidget):
         # Clear figure and create K-value plot
         self.figure.clear()
         self.current_ax = self.figure.add_subplot(1, 1, 1)
+        self.grain_size_ax = None
         self.k_value_ax = self.current_ax
+        self.active_axes = [self.current_ax]
         
         # Prepare data for bar chart with unit conversion
         methods = list(k_results.keys())
@@ -474,7 +490,7 @@ class PlotWidget(QWidget):
         self.current_ax.set_yscale('log')
         self.current_ax.set_facecolor(style.axes_facecolor)
         self.current_ax.tick_params(labelsize=style.tick_fontsize)
-        if style.grid_show:
+        if self.show_grid and style.grid_show:
             self.current_ax.grid(True, alpha=style.grid_alpha, axis='y', linestyle=style.grid_linestyle,
                                color=style.grid_color, linewidth=style.grid_linewidth)
         
@@ -494,7 +510,8 @@ class PlotWidget(QWidget):
             self.current_ax.axhline(y=max_k, color='green', linestyle=':', alpha=0.5,
                                    label=f'Max: {format_str.format(max_k)} {unit_symbol}')
 
-            self.current_ax.legend(loc='upper right', fontsize=8)
+            if self.show_legend:
+                self.current_ax.legend(loc='upper right', fontsize=8)
         
         # Adjust layout and redraw
         self.figure.tight_layout()

@@ -10,8 +10,16 @@ from pathlib import Path
 import tempfile
 
 from PyQt6.QtWidgets import QApplication
-from PyQt6.QtCore import QTimer, QThread, pyqtSignal
+from PyQt6.QtCore import Qt, QTimer, QThread, pyqtSignal
 from PyQt6.QtGui import QFont
+
+# Must be set before QApplication is created.
+# PassThrough lets Qt (and matplotlib's canvas) use the exact fractional
+# device-pixel ratio (e.g. 1.25 for 125% Windows scaling) so matplotlib
+# renders at full physical resolution instead of being upscaled → no blur.
+QApplication.setHighDpiScaleFactorRoundingPolicy(
+    Qt.HighDpiScaleFactorRoundingPolicy.PassThrough
+)
 
 from Splash.simple_splash import SimpleSplash
 from gui.theme import load_fonts

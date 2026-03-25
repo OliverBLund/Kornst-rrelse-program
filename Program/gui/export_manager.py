@@ -16,8 +16,133 @@ from k_calculations_v2 import KCalculationResult
 class ExportManager:
     """Manages export operations for various file formats"""
 
+    DEFAULT_METHOD_ORDER = [
+        'Hazen', 'Hazen_1892', 'Slichter', 'Terzaghi',
+        'Beyer', 'Sauerbrei', 'Kruger', 'Kozeny-Carman',
+        'Zunker', 'Zamarin', 'USBR', 'Barr',
+        'Alyamani-Sen', 'Chapuis', 'Shepherd', 'Krumbein-Monk',
+    ]
+    METHOD_CATEGORY_MAP = {
+        'hazen_based': {'Hazen', 'Hazen_1892'},
+        'porosity_dependent': {'Slichter', 'Kozeny-Carman', 'Zunker', 'Zamarin', 'Barr'},
+        'uniformity_dependent': {'Beyer'},
+        'empirical': {'USBR', 'Alyamani-Sen', 'Chapuis', 'Shepherd', 'Terzaghi', 'Kruger', 'Krumbein-Monk'},
+        'temperature_corrected': {'Sauerbrei'},
+    }
+    UNIT_SPECS = [
+        ('m_s', 'K (m/s)', 'm/s', 'k_m_s', 1.0, '.3e'),
+        ('cm_s', 'K (cm/s)', 'cm/s', 'k_cm_s', 100.0, '.3e'),
+        ('m_d', 'K (m/d)', 'm/d', 'k_m_d', 86400.0, '.2f'),
+    ]
+    STAT_SPECS = [
+        ('mean', 'Mean', 'K_Mean', 'mean_k'),
+        ('median', 'Median', 'K_Median', 'median_k'),
+        ('std_dev', 'Std Dev', 'K_StdDev', 'stdev_k'),
+        ('min', 'Min', 'K_Min', 'min_k'),
+        ('max', 'Max', 'K_Max', 'max_k'),
+        ('valid_count', 'Valid Count', 'Valid_Methods_Count', 'valid_count'),
+    ]
+
     def __init__(self):
         self.exported_files = []
+
+    def _get_enabled_unit_specs(self, config: Dict) -> List[tuple]:
+        """Return enabled K-value units in a stable display order."""
+        units = config.get('k_units') or {}
+        return [spec for spec in self.UNIT_SPECS if units.get(spec[0], True)]
+
+    def _get_primary_unit_spec(self, config: Dict) -> tuple:
+        """Return the primary unit for compact summary sheets."""
+        enabled = self._get_enabled_unit_specs(config)
+        return enabled[0] if enabled else self.UNIT_SPECS[0]
+
+    def _metadata_enabled(self, config: Dict, key: str) -> bool:
+        """Return whether a metadata item should be exported."""
+        metadata = config.get('include_metadata') or {}
+        return metadata.get(key, True)
+
+    def _get_export_timestamp(self, config: Dict) -> str:
+        """Return the export timestamp shared across this export run."""
+        return config.get('_export_timestamp', datetime.now().isoformat(timespec='seconds'))
+
+    def _format_converted_value(self, k_value: float, unit_spec: tuple) -> str:
+        """Format a conductivity value in the requested unit."""
+        _, _, _, _, multiplier, fmt = unit_spec
+        return format(k_value * multiplier, fmt)
+
+    def _ordered_method_names(self, method_names) -> List[str]:
+        """Return methods in the preferred domain order."""
+        seen = set(method_names)
+        ordered = [name for name in self.DEFAULT_METHOD_ORDER if name in seen]
+        extras = sorted(seen.difference(self.DEFAULT_METHOD_ORDER))
+        return ordered + extras
+
+    def _selected_method_names(self, config: Dict) -> Optional[set[str]]:
+        """Return selected method names or None when no filtering is requested."""
+        filter_mode = config.get('k_filter_mode', 'all')
+
+        if filter_mode == 'individual':
+            return set(config.get('selected_k_methods') or [])
+
+        if filter_mode == 'category':
+            selected = set()
+            for category, enabled in (config.get('selected_k_categories') or {}).items():
+                if enabled:
+                    selected.update(self.METHOD_CATEGORY_MAP.get(category, set()))
+            return selected
+
+        return None
+
+    def _filter_results(self, results: Optional[List[KCalculationResult]], config: Dict) -> List[KCalculationResult]:
+        """Filter K-results to the selected methods while preserving order."""
+        filtered = [result for result in (results or []) if result.k_value is not None]
+        selected = self._selected_method_names(config)
+        if selected is None:
+            return filtered
+        return [result for result in filtered if result.method_name in selected]
+
+    def _collect_method_names(self, datasets: List[tuple], config: Dict) -> List[str]:
+        """Collect method names visible in the current export selection."""
+        method_names = []
+        for _, _, results in datasets:
+            method_names.extend(result.method_name for result in self._filter_results(results, config))
+
+        if method_names:
+            return self._ordered_method_names(method_names)
+
+        selected = self._selected_method_names(config)
+        if selected is not None:
+            return self._ordered_method_names(selected)
+
+        return list(self.DEFAULT_METHOD_ORDER)
+
+    def _get_selected_stat_specs(self, config: Dict) -> List[tuple]:
+        """Return selected statistics in a stable display order."""
+        selected = config.get('selected_statistics')
+        if selected is None:
+            selected_names = {name for name, _, _, _ in self.STAT_SPECS}
+        else:
+            selected_names = set(selected)
+        return [spec for spec in self.STAT_SPECS if spec[0] in selected_names]
+
+    def _calculate_statistics(self, results: Optional[List[KCalculationResult]], config: Dict) -> Dict[str, float]:
+        """Calculate the selected statistics from the filtered K-results."""
+        filtered_results = self._filter_results(results, config)
+        valid_k_values = [result.k_value for result in filtered_results if result.k_value is not None and result.k_value > 0]
+
+        if not valid_k_values:
+            return {}
+
+        import statistics
+
+        return {
+            'mean_k': statistics.mean(valid_k_values),
+            'median_k': statistics.median(valid_k_values),
+            'stdev_k': statistics.stdev(valid_k_values) if len(valid_k_values) > 1 else 0,
+            'min_k': min(valid_k_values),
+            'max_k': max(valid_k_values),
+            'valid_count': len(valid_k_values),
+        }
 
     def export(self, datasets: List[tuple], config: Dict, progress: Optional[QProgressDialog] = None) -> List[str]:
         """
@@ -32,6 +157,9 @@ class ExportManager:
             List of exported file paths
         """
         self.exported_files = []
+        config = dict(config)
+        if self._metadata_enabled(config, 'export_timestamp') and '_export_timestamp' not in config:
+            config['_export_timestamp'] = datetime.now().isoformat(timespec='seconds')
         total_steps = self._calculate_total_steps(datasets, config)
         current_step = 0
 
@@ -41,16 +169,28 @@ class ExportManager:
         # CSV Export
         if config.get('csv', False):
             if config.get('csv_mode') == 'separate':
-                for name, dataset, results in datasets:
-                    self._export_csv_single(name, dataset, results, config)
+                if config.get('csv_long', True):
+                    for name, dataset, results in datasets:
+                        self._export_csv_single(name, dataset, results, config)
+                        current_step += 1
+                        if progress:
+                            progress.setValue(current_step)
+                if config.get('csv_wide', False):
+                    self._export_csv_wide_format_filtered(datasets, config)
                     current_step += 1
                     if progress:
                         progress.setValue(current_step)
             else:
-                self._export_csv_combined(datasets, config)
-                current_step += 1
-                if progress:
-                    progress.setValue(current_step)
+                if config.get('csv_long', True):
+                    self._export_csv_combined_filtered(datasets, config)
+                    current_step += 1
+                    if progress:
+                        progress.setValue(current_step)
+                if config.get('csv_wide', False):
+                    self._export_csv_wide_format_filtered(datasets, config)
+                    current_step += 1
+                    if progress:
+                        progress.setValue(current_step)
 
         # Excel Export
         if config.get('excel', False):
@@ -131,9 +271,15 @@ class ExportManager:
 
         if config.get('csv', False):
             if config.get('csv_mode') == 'separate':
-                steps += len(datasets)
+                if config.get('csv_long', True):
+                    steps += len(datasets)
+                if config.get('csv_wide', False):
+                    steps += 1
             else:
-                steps += 1
+                if config.get('csv_long', True):
+                    steps += 1
+                if config.get('csv_wide', False):
+                    steps += 1
 
         if config.get('excel', False):
             excel_mode = config.get('excel_mode', 'per_dataset')
@@ -144,6 +290,9 @@ class ExportManager:
 
         if config.get('json', False):
             steps += len(datasets)
+
+        if config.get('plots', False) and config.get('plot_figures'):
+            steps += sum(1 for fig in config.get('plot_figures', []) if fig is not None)
 
         return max(steps, 1)
 
@@ -195,14 +344,14 @@ class ExportManager:
         if config.get('k_values', True) and results:
             filename = f"{base_filename}_k_values.csv"
             filepath = os.path.join(output_dir, filename)
-            self._write_k_values_csv(filepath, name, dataset, results, config)
+            self._write_k_values_csv_filtered(filepath, name, dataset, results, config)
             self.exported_files.append(filepath)
 
         # Export statistics if requested
         if config.get('statistics', True):
             filename = f"{base_filename}_statistics.csv"
             filepath = os.path.join(output_dir, filename)
-            self._write_statistics_csv(filepath, dataset, results, config)
+            self._write_statistics_csv_filtered(filepath, dataset, results, config)
             self.exported_files.append(filepath)
 
     def _export_csv_combined(self, datasets: List[tuple], config: Dict):
@@ -250,8 +399,6 @@ class ExportManager:
 
         self.exported_files.append(filepath)
 
-        # Also export wide format
-        self._export_csv_wide_format(datasets, config)
 
     def _export_csv_wide_format(self, datasets: List[tuple], config: Dict):
         """
@@ -579,6 +726,281 @@ class ExportManager:
                     writer.writerow(['Min', f"{min_k:.3e}", f"{min_k*100:.3e}", f"{min_k*86400:.2f}"])
                     writer.writerow(['Max', f"{max_k:.3e}", f"{max_k*100:.3e}", f"{max_k*86400:.2f}"])
 
+    def _export_csv_combined_filtered(self, datasets: List[tuple], config: Dict):
+        """Export a filtered long-format CSV honoring method and unit selections."""
+        output_dir = config['output_dir']
+        template = config['filename_template']
+        unit_specs = self._get_enabled_unit_specs(config)
+        include_environmental = self._metadata_enabled(config, 'environmental')
+        include_timestamp = self._metadata_enabled(config, 'export_timestamp')
+
+        filename = self._format_filename(template, 'combined_all_datasets', '.csv')
+        filepath = os.path.join(output_dir, filename)
+
+        with open(filepath, 'w', newline='', encoding='utf-8') as f:
+            writer = csv.writer(f)
+
+            header = ['Sample Name', 'Method']
+            header.extend(unit_label for _, unit_label, _, _, _, _ in unit_specs)
+            header.append('Status')
+            if config.get('validation', False):
+                header.append('Status Message')
+            if config.get('formulas', False):
+                header.append('Formula')
+            if include_environmental:
+                header.extend(['Temperature (C)', 'Porosity'])
+            header.extend(['D10 (mm)', 'D50 (mm)', 'D60 (mm)', 'Cu', 'Cc'])
+            if include_timestamp:
+                header.append('Export Timestamp')
+            writer.writerow(header)
+
+            for name, dataset, results in datasets:
+                for result in self._filter_results(results, config):
+                    row = [name, result.method_name]
+                    row.extend(self._format_converted_value(result.k_value, unit_spec) for unit_spec in unit_specs)
+                    row.append(result.status.value if hasattr(result.status, 'value') else str(result.status))
+                    if config.get('validation', False):
+                        row.append(result.status_message)
+                    if config.get('formulas', False):
+                        row.append(result.formula_used)
+                    if include_environmental:
+                        row.extend([result.temperature, result.porosity])
+                    row.extend([
+                        dataset.get_d10() if hasattr(dataset, 'get_d10') else '',
+                        dataset.get_d50() if hasattr(dataset, 'get_d50') else '',
+                        dataset.get_d60() if hasattr(dataset, 'get_d60') else '',
+                        dataset.get_uniformity_coefficient() if hasattr(dataset, 'get_uniformity_coefficient') else '',
+                        dataset.get_coefficient_of_curvature() if hasattr(dataset, 'get_coefficient_of_curvature') else '',
+                    ])
+                    if include_timestamp:
+                        row.append(self._get_export_timestamp(config))
+                    writer.writerow(row)
+
+        self.exported_files.append(filepath)
+
+    def _export_csv_wide_format_filtered(self, datasets: List[tuple], config: Dict):
+        """Export a filtered wide-format CSV honoring method and unit selections."""
+        output_dir = config['output_dir']
+        template = config['filename_template']
+        method_names = self._collect_method_names(datasets, config)
+        unit_specs = self._get_enabled_unit_specs(config)
+        include_environmental = self._metadata_enabled(config, 'environmental')
+        include_timestamp = self._metadata_enabled(config, 'export_timestamp')
+        selected_stats = self._get_selected_stat_specs(config)
+
+        filename = self._format_filename(template, 'wide_format_all_datasets', '.csv')
+        filepath = os.path.join(output_dir, filename)
+
+        with open(filepath, 'w', newline='', encoding='utf-8') as f:
+            writer = csv.writer(f)
+
+            selected_percentiles = config.get('selected_percentiles', ['d10', 'd20', 'd30', 'd50', 'd60'])
+            percentile_mapping = {
+                'd5': 5, 'd10': 10, 'd16': 16, 'd17': 17, 'd20': 20,
+                'd30': 30, 'd50': 50, 'd60': 60, 'd84': 84, 'd95': 95
+            }
+
+            header = ['Sample_Name']
+            if include_environmental:
+                header.extend(['Temperature_C', 'Porosity'])
+
+            for p_key in selected_percentiles:
+                p_num = percentile_mapping.get(p_key, 0)
+                if p_num > 0:
+                    header.append(f'D{p_num}_mm')
+
+            if config.get('gradation', True):
+                header.extend(['Cu_Uniformity_Coefficient', 'Cc_Curvature_Coefficient'])
+
+            for method in method_names:
+                safe_name = method.replace('-', '_').replace(' ', '_')
+                for _, _, suffix, _, _, _ in unit_specs:
+                    header.append(f'K_{safe_name}_{suffix}')
+
+            for method in method_names:
+                safe_name = method.replace('-', '_').replace(' ', '_')
+                header.append(f'Status_{safe_name}')
+
+            for _, _, suffix, _, _, _ in unit_specs:
+                for _, _, header_prefix, value_key in selected_stats:
+                    if value_key != 'valid_count':
+                        header.append(f'{header_prefix}_{suffix}')
+
+            if any(value_key == 'valid_count' for _, _, _, value_key in selected_stats):
+                header.append('Valid_Methods_Count')
+
+            if include_timestamp:
+                header.append('Export_Timestamp')
+            writer.writerow(header)
+
+            for name, dataset, results in datasets:
+                row = [name]
+                if include_environmental:
+                    row.extend([dataset.temperature, dataset.current_porosity or dataset.porosity])
+
+                for p_key in selected_percentiles:
+                    p_num = percentile_mapping.get(p_key, 0)
+                    if p_num > 0 and hasattr(dataset, '_interpolate_grain_size'):
+                        value = dataset._interpolate_grain_size(p_num)
+                        row.append(f"{value:.4f}" if value is not None else '')
+                    elif hasattr(dataset, f'get_d{p_num}'):
+                        value = getattr(dataset, f'get_d{p_num}')()
+                        row.append(f"{value:.4f}" if value is not None else '')
+                    else:
+                        row.append('')
+
+                if config.get('gradation', True):
+                    cu = dataset.get_uniformity_coefficient() if hasattr(dataset, 'get_uniformity_coefficient') else None
+                    cc = dataset.get_coefficient_of_curvature() if hasattr(dataset, 'get_coefficient_of_curvature') else None
+                    row.append(f"{cu:.2f}" if cu is not None else '')
+                    row.append(f"{cc:.2f}" if cc is not None else '')
+
+                filtered_results = self._filter_results(results, config)
+                method_results = {result.method_name: result for result in filtered_results}
+
+                for method in method_names:
+                    result = method_results.get(method)
+                    for unit_spec in unit_specs:
+                        row.append(self._format_converted_value(result.k_value, unit_spec) if result else '')
+
+                for method in method_names:
+                    result = method_results.get(method)
+                    if result:
+                        row.append(result.status.value if hasattr(result.status, 'value') else str(result.status))
+                    else:
+                        row.append('')
+
+                stats_values = self._calculate_statistics(results, config)
+                for unit_spec in unit_specs:
+                    for _, _, _, value_key in selected_stats:
+                        if value_key != 'valid_count':
+                            stat_value = stats_values.get(value_key)
+                            row.append(self._format_converted_value(stat_value, unit_spec) if stat_value is not None else '')
+
+                if any(value_key == 'valid_count' for _, _, _, value_key in selected_stats):
+                    count_value = stats_values.get('valid_count')
+                    row.append(str(count_value) if count_value is not None else '')
+
+                if include_timestamp:
+                    row.append(self._get_export_timestamp(config))
+
+                writer.writerow(row)
+
+        self.exported_files.append(filepath)
+
+    def _write_k_values_csv_filtered(self, filepath: str, name: str, dataset: GrainSizeData,
+                                     results: List[KCalculationResult], config: Dict):
+        """Write filtered K-values to CSV honoring method and unit selection."""
+        unit_specs = self._get_enabled_unit_specs(config)
+        filtered_results = self._filter_results(results, config)
+        include_environmental = self._metadata_enabled(config, 'environmental')
+        include_timestamp = self._metadata_enabled(config, 'export_timestamp')
+
+        with open(filepath, 'w', newline='', encoding='utf-8') as f:
+            writer = csv.writer(f)
+
+            header = ['Method']
+            header.extend(unit_label for _, unit_label, _, _, _, _ in unit_specs)
+            header.append('Status')
+            if config.get('validation', False):
+                header.append('Status Message')
+            if config.get('formulas', False):
+                header.append('Formula')
+            if include_environmental:
+                header.extend(['Temperature (C)', 'Porosity'])
+            header.append('Grain Size Used')
+            if include_timestamp:
+                header.append('Export Timestamp')
+            writer.writerow(header)
+
+            for result in filtered_results:
+                row = [result.method_name]
+                row.extend(self._format_converted_value(result.k_value, unit_spec) for unit_spec in unit_specs)
+                row.append(result.status.value if hasattr(result.status, 'value') else str(result.status))
+                if config.get('validation', False):
+                    row.append(result.status_message)
+                if config.get('formulas', False):
+                    row.append(result.formula_used)
+                if include_environmental:
+                    row.extend([result.temperature, result.porosity])
+                row.append(result.grain_size_used)
+                if include_timestamp:
+                    row.append(self._get_export_timestamp(config))
+                writer.writerow(row)
+
+    def _write_statistics_csv_filtered(self, filepath: str, dataset: GrainSizeData,
+                                       results: List[KCalculationResult], config: Dict):
+        """Write statistics CSV using the filtered K-result set."""
+        unit_specs = self._get_enabled_unit_specs(config)
+        filtered_results = self._filter_results(results, config)
+        include_sample_info = self._metadata_enabled(config, 'sample_info')
+        include_environmental = self._metadata_enabled(config, 'environmental')
+        include_timestamp = self._metadata_enabled(config, 'export_timestamp')
+        include_grain_size_stats = config.get('include_grain_size_stats', True)
+        selected_stats = self._get_selected_stat_specs(config)
+        stats_values = self._calculate_statistics(results, config)
+
+        with open(filepath, 'w', newline='', encoding='utf-8') as f:
+            writer = csv.writer(f)
+
+            if include_sample_info or include_environmental or include_timestamp:
+                writer.writerow(['Sample Information'])
+                writer.writerow(['Parameter', 'Value'])
+                if include_sample_info:
+                    writer.writerow(['Sample Name', dataset.sample_name])
+                if include_environmental:
+                    writer.writerow(['Temperature (C)', dataset.temperature])
+                    writer.writerow(['Porosity', dataset.current_porosity or dataset.porosity])
+                if include_timestamp:
+                    writer.writerow(['Export Timestamp', self._get_export_timestamp(config)])
+                writer.writerow([])
+
+            if include_grain_size_stats and config.get('percentiles', True):
+                writer.writerow(['Grain Size Percentiles'])
+                writer.writerow(['Percentile', 'Size (mm)'])
+                percentiles = {
+                    'D10': dataset.get_d10() if hasattr(dataset, 'get_d10') else None,
+                    'D20': dataset.get_d20() if hasattr(dataset, 'get_d20') else None,
+                    'D30': dataset.get_d30() if hasattr(dataset, 'get_d30') else None,
+                    'D50': dataset.get_d50() if hasattr(dataset, 'get_d50') else None,
+                    'D60': dataset.get_d60() if hasattr(dataset, 'get_d60') else None,
+                }
+                for pname, value in percentiles.items():
+                    if value is not None:
+                        writer.writerow([pname, f"{value:.4f}"])
+                writer.writerow([])
+
+            if include_grain_size_stats and config.get('gradation', True):
+                writer.writerow(['Gradation Parameters'])
+                writer.writerow(['Parameter', 'Value'])
+                cu = dataset.get_uniformity_coefficient() if hasattr(dataset, 'get_uniformity_coefficient') else None
+                cc = dataset.get_coefficient_of_curvature() if hasattr(dataset, 'get_coefficient_of_curvature') else None
+                if cu is not None:
+                    writer.writerow(['Uniformity Coefficient (Cu)', f"{cu:.2f}"])
+                if cc is not None:
+                    writer.writerow(['Coefficient of Curvature (Cc)', f"{cc:.2f}"])
+                writer.writerow([])
+
+            if config.get('statistics', True) and filtered_results and stats_values and selected_stats:
+                writer.writerow(['K-Value Statistics'])
+                writer.writerow(['Statistic'] + [unit_label for _, unit_label, _, _, _, _ in unit_specs])
+                for _, label, _, value_key in selected_stats:
+                    if value_key == 'valid_count':
+                        row = [label]
+                        if unit_specs:
+                            row.append(str(stats_values.get('valid_count', '')))
+                            row.extend([''] * (len(unit_specs) - 1))
+                        writer.writerow(row)
+                        continue
+
+                    stat_value = stats_values.get(value_key)
+                    if stat_value is None:
+                        continue
+
+                    row = [label]
+                    row.extend(self._format_converted_value(stat_value, unit_spec) for unit_spec in unit_specs)
+                    writer.writerow(row)
+
     # ==================== EXCEL EXPORT ====================
 
     def _export_excel_single(self, name: str, dataset: GrainSizeData,
@@ -625,7 +1047,7 @@ class ExportManager:
         # Sheet 5: Statistics
         if config.get('statistics', True) and results:
             ws_stats = wb.create_sheet('Statistics')
-            self._write_excel_statistics(ws_stats, results)
+            self._write_excel_statistics(ws_stats, results, config)
 
         wb.save(filepath)
         self.exported_files.append(filepath)
@@ -1141,6 +1563,315 @@ class ExportManager:
                 }
 
         # Write JSON file
+        with open(filepath, 'w', encoding='utf-8') as f:
+            json.dump(data, f, indent=2, default=str)
+
+        self.exported_files.append(filepath)
+
+    def _write_excel_summary(self, ws, name: str, dataset: GrainSizeData,
+                            results: List[KCalculationResult], config: Dict):
+        """Write summary sheet to Excel."""
+        from openpyxl.styles import Font
+
+        ws['A1'] = 'Grain Size Analysis Summary'
+        ws['A1'].font = Font(size=14, bold=True)
+
+        row = 3
+        include_sample_info = self._metadata_enabled(config, 'sample_info')
+        include_environmental = self._metadata_enabled(config, 'environmental')
+        include_timestamp = self._metadata_enabled(config, 'export_timestamp')
+        include_grain_size_stats = config.get('include_grain_size_stats', True)
+        unit_specs = self._get_enabled_unit_specs(config)
+        primary_unit = unit_specs[0] if unit_specs else None
+
+        if include_sample_info:
+            ws[f'A{row}'] = 'Sample Name:'
+            ws[f'B{row}'] = name
+            ws[f'A{row}'].font = Font(bold=True)
+            row += 1
+
+        if include_environmental:
+            ws[f'A{row}'] = 'Temperature:'
+            ws[f'B{row}'] = f"{dataset.temperature} C"
+            ws[f'A{row}'].font = Font(bold=True)
+            row += 1
+
+            ws[f'A{row}'] = 'Porosity:'
+            ws[f'B{row}'] = dataset.current_porosity or dataset.porosity
+            ws[f'A{row}'].font = Font(bold=True)
+            row += 1
+
+        if include_timestamp:
+            ws[f'A{row}'] = 'Exported At:'
+            ws[f'B{row}'] = self._get_export_timestamp(config)
+            ws[f'A{row}'].font = Font(bold=True)
+            row += 1
+
+        if include_sample_info or include_environmental or include_timestamp:
+            row += 1
+
+        if include_grain_size_stats and config.get('percentiles', True):
+            ws[f'A{row}'] = 'Key Grain Sizes'
+            ws[f'A{row}'].font = Font(bold=True, size=12)
+            row += 1
+
+            percentiles = {
+                'D10': dataset.get_d10() if hasattr(dataset, 'get_d10') else None,
+                'D50': dataset.get_d50() if hasattr(dataset, 'get_d50') else None,
+                'D60': dataset.get_d60() if hasattr(dataset, 'get_d60') else None,
+            }
+
+            for percentile_name, value in percentiles.items():
+                if value is not None:
+                    ws[f'A{row}'] = f'{percentile_name}:'
+                    ws[f'B{row}'] = f'{value:.4f} mm'
+                    ws[f'A{row}'].font = Font(bold=True)
+                    row += 1
+
+            row += 1
+
+        if include_grain_size_stats and config.get('gradation', True):
+            cu = dataset.get_uniformity_coefficient() if hasattr(dataset, 'get_uniformity_coefficient') else None
+            cc = dataset.get_coefficient_of_curvature() if hasattr(dataset, 'get_coefficient_of_curvature') else None
+
+            if cu is not None:
+                ws[f'A{row}'] = 'Uniformity Coefficient (Cu):'
+                ws[f'B{row}'] = f'{cu:.2f}'
+                ws[f'A{row}'].font = Font(bold=True)
+                row += 1
+
+            if cc is not None:
+                ws[f'A{row}'] = 'Coefficient of Curvature (Cc):'
+                ws[f'B{row}'] = f'{cc:.2f}'
+                ws[f'A{row}'].font = Font(bold=True)
+                row += 1
+
+        if config.get('classification', True) and hasattr(dataset, 'classify_soil'):
+            row += 1
+            ws[f'A{row}'] = 'Soil Classification:'
+            ws[f'B{row}'] = dataset.classify_soil()
+            ws[f'A{row}'].font = Font(bold=True)
+
+        stats_values = self._calculate_statistics(results, config)
+        selected_stats = self._get_selected_stat_specs(config)
+        if stats_values and selected_stats:
+            row += 2
+            ws[f'A{row}'] = 'K-Value Statistics'
+            ws[f'A{row}'].font = Font(bold=True, size=12)
+            row += 1
+
+            for _, label, _, value_key in selected_stats:
+                if value_key == 'valid_count':
+                    ws[f'A{row}'] = f'{label}:'
+                    ws[f'B{row}'] = stats_values['valid_count']
+                    ws[f'A{row}'].font = Font(bold=True)
+                    row += 1
+                    continue
+
+                if primary_unit is None:
+                    continue
+
+                stat_value = stats_values.get(value_key)
+                if stat_value is None:
+                    continue
+
+                _, _, unit_suffix, _, multiplier, fmt = primary_unit
+                ws[f'A{row}'] = f'{label} ({unit_suffix}):'
+                ws[f'B{row}'] = format(stat_value * multiplier, fmt)
+                ws[f'A{row}'].font = Font(bold=True)
+                row += 1
+
+        ws.column_dimensions['A'].width = 30
+        ws.column_dimensions['B'].width = 20
+
+    def _write_excel_statistics(self, ws, results: List[KCalculationResult], config: Dict):
+        """Write statistics sheet."""
+        from openpyxl.styles import Font
+
+        unit_specs = self._get_enabled_unit_specs(config)
+        stats_values = self._calculate_statistics(results, config)
+        selected_stats = self._get_selected_stat_specs(config)
+
+        if not stats_values or not selected_stats:
+            return
+
+        headers = ['Statistic']
+        if unit_specs:
+            headers.extend(unit_label for _, unit_label, _, _, _, _ in unit_specs)
+        else:
+            headers.append('Value')
+
+        for col, header in enumerate(headers, start=1):
+            ws.cell(row=1, column=col).value = header
+            ws.cell(row=1, column=col).font = Font(bold=True)
+
+        row = 2
+        for _, label, _, value_key in selected_stats:
+            ws.cell(row=row, column=1).value = label
+            ws.cell(row=row, column=1).font = Font(bold=True)
+
+            if value_key == 'valid_count':
+                ws.cell(row=row, column=2).value = stats_values['valid_count']
+                row += 1
+                continue
+
+            stat_value = stats_values.get(value_key)
+            if stat_value is None:
+                row += 1
+                continue
+
+            if unit_specs:
+                for col, unit_spec in enumerate(unit_specs, start=2):
+                    _, _, _, _, multiplier, _ = unit_spec
+                    ws.cell(row=row, column=col).value = stat_value * multiplier
+            else:
+                ws.cell(row=row, column=2).value = stat_value
+
+            row += 1
+
+        for col in range(1, len(headers) + 1):
+            ws.column_dimensions[chr(64 + col)].width = 18
+
+    def _write_excel_combined_summary(self, ws, datasets: List[tuple], config: Dict):
+        """Write combined summary comparing all datasets."""
+        from openpyxl.styles import Font
+
+        ws['A1'] = 'Sample'
+        ws['A1'].font = Font(bold=True)
+        col = 2
+        primary_unit = self._get_primary_unit_spec(config)
+        selected_stats = self._get_selected_stat_specs(config)
+
+        all_methods = set()
+        for _, _, results in datasets:
+            for result in self._filter_results(results, config):
+                if result.k_value is not None:
+                    all_methods.add(result.method_name)
+
+        ordered_methods = self._ordered_method_names(all_methods)
+        for method in ordered_methods:
+            ws.cell(row=1, column=col).value = method
+            ws.cell(row=1, column=col).font = Font(bold=True)
+            col += 1
+
+        for _, label, _, value_key in selected_stats:
+            header = label if value_key == 'valid_count' else f'{label} ({primary_unit[2]})'
+            ws.cell(row=1, column=col).value = header
+            ws.cell(row=1, column=col).font = Font(bold=True)
+            col += 1
+
+        for row, (name, dataset, results) in enumerate(datasets, start=2):
+            ws.cell(row=row, column=1).value = name
+
+            method_values = {}
+            for result in self._filter_results(results, config):
+                if result.k_value is not None:
+                    method_values[result.method_name] = result.k_value
+
+            col = 2
+            for method in ordered_methods:
+                if method in method_values:
+                    ws.cell(row=row, column=col).value = method_values[method]
+                col += 1
+
+            stats_values = self._calculate_statistics(results, config)
+            for _, _, _, value_key in selected_stats:
+                if value_key == 'valid_count':
+                    ws.cell(row=row, column=col).value = stats_values.get('valid_count')
+                else:
+                    stat_value = stats_values.get(value_key)
+                    if stat_value is not None:
+                        ws.cell(row=row, column=col).value = stat_value * primary_unit[4]
+                col += 1
+
+    def _export_json(self, name: str, dataset: GrainSizeData,
+                    results: List[KCalculationResult], config: Dict):
+        """Export dataset to JSON format."""
+        output_dir = config['output_dir']
+        template = config['filename_template']
+        unit_specs = self._get_enabled_unit_specs(config)
+        filtered_results = self._filter_results(results, config)
+        selected_stats = self._get_selected_stat_specs(config)
+        stats_values = self._calculate_statistics(results, config)
+
+        filename = self._format_filename(template, name, '.json')
+        filepath = os.path.join(output_dir, filename)
+
+        data = {}
+        if self._metadata_enabled(config, 'sample_info'):
+            data['sample_name'] = name
+
+        metadata = {}
+        if self._metadata_enabled(config, 'sample_info') and hasattr(dataset, 'file_path') and dataset.file_path:
+            metadata['file_path'] = dataset.file_path
+        if self._metadata_enabled(config, 'environmental'):
+            metadata['temperature'] = dataset.temperature
+            metadata['porosity'] = dataset.current_porosity or dataset.porosity
+        if self._metadata_enabled(config, 'export_timestamp'):
+            metadata['exported_at'] = self._get_export_timestamp(config)
+        if metadata:
+            data['metadata'] = metadata
+
+        if config.get('grain_distribution', True):
+            data['grain_size_distribution'] = {
+                'particle_sizes_mm': dataset.particle_sizes,
+                'percent_passing': dataset.percent_passing,
+            }
+
+        if config.get('percentiles', True):
+            data['percentiles'] = {
+                'D10': dataset.get_d10() if hasattr(dataset, 'get_d10') else None,
+                'D20': dataset.get_d20() if hasattr(dataset, 'get_d20') else None,
+                'D30': dataset.get_d30() if hasattr(dataset, 'get_d30') else None,
+                'D50': dataset.get_d50() if hasattr(dataset, 'get_d50') else None,
+                'D60': dataset.get_d60() if hasattr(dataset, 'get_d60') else None,
+            }
+
+        if config.get('gradation', True):
+            data['gradation'] = {
+                'uniformity_coefficient': dataset.get_uniformity_coefficient() if hasattr(dataset, 'get_uniformity_coefficient') else None,
+                'coefficient_of_curvature': dataset.get_coefficient_of_curvature() if hasattr(dataset, 'get_coefficient_of_curvature') else None,
+            }
+
+        if config.get('classification', True) and hasattr(dataset, 'classify_soil'):
+            data['classification'] = dataset.classify_soil()
+
+        if config.get('k_values', True) and filtered_results:
+            data['k_values'] = []
+            for result in filtered_results:
+                k_data = {
+                    'method': result.method_name,
+                    'status': result.status.value if hasattr(result.status, 'value') else str(result.status),
+                    'grain_size_used': result.grain_size_used,
+                }
+
+                if config.get('validation', False):
+                    k_data['status_message'] = result.status_message
+                if config.get('formulas', False):
+                    k_data['formula'] = result.formula_used
+
+                for unit_key, _, _, json_unit_key, multiplier, _ in unit_specs:
+                    k_data[json_unit_key] = result.k_value * multiplier
+
+                data['k_values'].append(k_data)
+
+        if config.get('statistics', True) and stats_values and selected_stats:
+            statistics_data = {}
+            for _, _, _, value_key in selected_stats:
+                if value_key == 'valid_count':
+                    statistics_data['valid_count'] = stats_values['valid_count']
+                    continue
+
+                stat_value = stats_values.get(value_key)
+                if stat_value is None:
+                    continue
+
+                for unit_key, _, _, _, multiplier, _ in unit_specs:
+                    statistics_data[f'{value_key}_{unit_key}'] = stat_value * multiplier
+
+            if statistics_data:
+                data['statistics'] = statistics_data
+
         with open(filepath, 'w', encoding='utf-8') as f:
             json.dump(data, f, indent=2, default=str)
 

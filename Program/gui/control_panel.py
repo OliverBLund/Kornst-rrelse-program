@@ -60,21 +60,25 @@ class _LogoCard(QWidget):
         icon_inner.addWidget(icon_lbl)
         row.addWidget(icon_box)
 
-        # Title + subtitle
+        # Title + subtitle — vertically centered, tightly packed (gap: 2px)
         text_col = QVBoxLayout()
-        text_col.setSpacing(2)
+        text_col.setContentsMargins(0, 0, 0, 0)
+        text_col.setSpacing(0)
         title = QLabel("GrainSize")
         title.setFont(QFont(F.DISP, F.SZ_2XL, QFont.Weight.Bold))
         title.setStyleSheet(
             f"color: {C.LOGO_TEXT}; background: transparent; "
-            "letter-spacing: 0.01em; line-height: 1.15;")
+            "letter-spacing: 0.01em;")
         subtitle = QLabel("ANALYSIS \u00b7 v0.9-\u03b2")
-        subtitle.setFont(QFont(F.MONO, 7))
+        subtitle.setFont(QFont(F.MONO, F.SZ_XS - 1))
         subtitle.setStyleSheet(
             f"color: {C.LOGO_SUB}; background: transparent; "
             "letter-spacing: 0.06em;")
+        text_col.addStretch(1)
         text_col.addWidget(title)
+        text_col.addSpacing(2)
         text_col.addWidget(subtitle)
+        text_col.addStretch(1)
         row.addLayout(text_col)
         row.addStretch()
 

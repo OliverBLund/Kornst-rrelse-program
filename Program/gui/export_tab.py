@@ -12,7 +12,7 @@ from PyQt6.QtWidgets import (
 )
 from PyQt6.QtCore import Qt, pyqtSignal, QSize
 from PyQt6.QtGui import QFont, QIcon, QColor
-from typing import List, Dict, Optional
+from typing import Any, Dict, List, Optional
 import os
 from datetime import datetime
 
@@ -30,6 +30,7 @@ class ExportTab(QWidget):
     def __init__(self, parent=None):
         super().__init__(parent)
         self.datasets = []  # List of (name, GrainSizeData, List[KCalculationResult])
+        self.plot_figures: List[Any] = []
 
         # Selected formats (for card-based selection)
         self.selected_formats = {
@@ -1724,14 +1725,22 @@ class ExportTab(QWidget):
         preview.setPlainText("\n".join(text))
         self.preview_tabs.addTab(preview, "ℹ️ Help")
 
-    def update_datasets(self, datasets: List[tuple]):
+    def update_datasets(self, datasets: List[tuple], plot_figures: Optional[List[Any]] = None):
         """
         Update the list of available datasets
 
         Args:
             datasets: List of (name, GrainSizeData, List[KCalculationResult]) tuples
+            plot_figures: Optional list of matplotlib Figure objects aligned with datasets
         """
         self.datasets = datasets
+        if plot_figures is None:
+            self.plot_figures = [None] * len(datasets)
+        else:
+            figures = list(plot_figures[:len(datasets)])
+            if len(figures) < len(datasets):
+                figures.extend([None] * (len(datasets) - len(figures)))
+            self.plot_figures = figures
 
         # Update current dataset combo
         self.current_dataset_combo.clear()
@@ -2330,6 +2339,19 @@ class ExportTab(QWidget):
 
         return []
 
+    def _get_plot_figures_to_export(self) -> List[Any]:
+        """Return plot figures aligned to the dataset export selection."""
+        if self.scope_current.isChecked():
+            idx = self.current_dataset_combo.currentIndex()
+            if 0 <= idx < len(self.plot_figures):
+                return [self.plot_figures[idx]]
+            return []
+
+        if self.scope_all.isChecked():
+            return list(self.plot_figures)
+
+        return []
+
     def _build_export_config(self) -> Dict:
         """Build export configuration dictionary"""
         config = {
@@ -2362,6 +2384,8 @@ class ExportTab(QWidget):
             'validation': self.content_selection['k_values']['include_validation'],
 
             # Granular selections (NEW)
+            'k_filter_mode': self.content_selection['k_values']['filter_mode'],
+            'selected_k_categories': dict(self.content_selection['k_values']['categories']),
             'selected_percentiles': [
                 p for p, enabled in self.content_selection['grain_size']['items']['percentiles']['items'].items()
                 if enabled
@@ -2379,6 +2403,7 @@ class ExportTab(QWidget):
                 stat for stat, enabled in self.content_selection['statistics']['items']['k_value_stats']['items'].items()
                 if enabled
             ] if self.content_selection['statistics']['items']['k_value_stats']['enabled'] else [],
+            'include_grain_size_stats': self.content_selection['statistics']['items']['grain_size_stats'],
             'include_metadata': {
                 'sample_info': self.content_selection['metadata']['items']['sample_info'],
                 'environmental': self.content_selection['metadata']['items']['environmental'],
@@ -2389,5 +2414,12 @@ class ExportTab(QWidget):
             'output_dir': self.output_dir.text(),
             'filename_template': '{sample_name}_results_{date}',  # Default template
         }
+
+        if any([
+            self.selected_formats.get('png', False),
+            self.selected_formats.get('svg', False),
+            self.selected_formats.get('pdf', False),
+        ]):
+            config['plot_figures'] = self._get_plot_figures_to_export()
 
         return config

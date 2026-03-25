@@ -1215,9 +1215,16 @@ class MainWindow(FramelessMainWindowMixin, QMainWindow):
 
     def _update_export_tab(self):
         datasets = []
+        plot_figures = []
         for tab in self.dataset_tabs:
             datasets.append((tab.get_dataset_name(), tab.get_dataset(), tab.get_results()))
-        self.export_tab.update_datasets(datasets)
+            figure = None
+            try:
+                figure = tab.plot_workspace.plot_widget.figure
+            except Exception:
+                figure = None
+            plot_figures.append(figure)
+        self.export_tab.update_datasets(datasets, plot_figures=plot_figures)
 
     def closeEvent(self, event):
         if self.dataset_tabs:

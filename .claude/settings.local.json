@@ -18,7 +18,10 @@
       "Bash(python3 << 'EOF'\nimport json, os\n# Check the 176adfb5 session\nproj = 'C:/Users/olive/.claude/projects/C--Users-olive-OneDrive---Danmarks-Tekniske-Universitet-Poul-L-gstrup-Bjergs-filer---Work-Projects-Oliver-Lund-Programmer-Kornst-rrelse---Program'\nfolder = os.path.join\\(proj, '176adfb5-9458-4d57-b0f3-bd3ae0bbd718'\\)\nfiles = os.listdir\\(folder\\)\nprint\\(files[:5]\\)\nEOF)",
       "Bash(pip uninstall:*)",
       "Bash(pip install:*)",
-      "Bash(python -c \"from PyQt6.QtWebEngineWidgets import QWebEngineView; print\\(''WebEngine OK''\\)\")"
+      "Bash(python -c \"from PyQt6.QtWebEngineWidgets import QWebEngineView; print\\(''WebEngine OK''\\)\")",
+      "Bash(grep -r \"PyQt5\\\\|PyQt6\" 'C:\\\\Users\\\\s194420\\\\OneDrive - Danmarks Tekniske Universitet\\\\Poul Løgstrup Bjergs filer - Work_Projects_Oliver Lund\\\\Programmer\\\\Kornstørrelse - Program\\\\Program' --include=*.py -l)",
+      "Bash(grep -roh PyQt[56] 'C:\\\\Users\\\\s194420\\\\OneDrive - Danmarks Tekniske Universitet\\\\Poul Løgstrup Bjergs filer - Work_Projects_Oliver Lund\\\\Programmer\\\\Kornstørrelse - Program\\\\Program' --include=*.py)",
+      "Bash(python -c \"from PyQt6.QtWidgets import QApplication; import sys; app = QApplication\\(sys.argv\\); screen = app.primaryScreen\\(\\); print\\(''devicePixelRatio:'', screen.devicePixelRatio\\(\\)\\); print\\(''logicalDotsPerInch:'', screen.logicalDotsPerInch\\(\\)\\); print\\(''physicalDotsPerInch:'', screen.physicalDotsPerInch\\(\\)\\)\")"
     ],
     "deny": [],
     "ask": []

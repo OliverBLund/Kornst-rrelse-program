@@ -479,8 +479,7 @@ class PlotWorkspace(QWidget):
         self._sw_zones.setChecked(self.show_zones, animate=False)
         self._sw_dlines.setChecked(self.show_dlines, animate=False)
 
-        if self.plot_widget:
-            self.plot_widget.show_classification_zones = self.show_zones
+        self._apply_plot_options()
         self.refresh_plot()
 
     def _on_sidebar_toggle_changed(self, _on: bool):
@@ -513,20 +512,20 @@ class PlotWorkspace(QWidget):
         self._chk_dlines.style().polish(self._chk_dlines)
         self._chk_dlines.blockSignals(False)
 
-        if self.plot_widget:
-            self.plot_widget.show_classification_zones = self.show_zones
+        self._apply_plot_options()
         self.refresh_plot()
 
     def _on_axis_changed(self):
-        if not self.plot_widget or not self.plot_widget.grain_size_ax:
+        target_ax = self.plot_widget.current_ax if self.plot_widget else None
+        if not target_ax:
             return
         try:
             xmin = float(self._in_xmin.text())
             xmax = float(self._in_xmax.text())
             ymin = float(self._in_ymin.text())
             ymax = float(self._in_ymax.text())
-            self.plot_widget.grain_size_ax.set_xlim(xmin, xmax)
-            self.plot_widget.grain_size_ax.set_ylim(ymin, ymax)
+            target_ax.set_xlim(xmin, xmax)
+            target_ax.set_ylim(ymin, ymax)
             self.plot_widget.canvas.draw()
         except ValueError:
             pass
@@ -538,11 +537,24 @@ class PlotWorkspace(QWidget):
         if selected_unit:
             self.plot_widget.set_display_unit(selected_unit)
 
+    def _apply_plot_options(self):
+        """Push workspace toggles into the active plot widget."""
+        if not self.plot_widget:
+            return
+        self.plot_widget.show_grid = self.show_grid
+        self.plot_widget.show_legend = self.show_legend
+        self.plot_widget.show_classification_zones = self.show_zones
+        self.plot_widget.show_d_lines = self.show_dlines
+        self.plot_widget.show_markers = self.show_markers
+        self.plot_widget.fill_curve = self.fill_curve
+
     # ── Plot logic (preserved from original) ───────────────────
 
     def refresh_plot(self):
         if not self.plot_widget:
             return
+
+        self._apply_plot_options()
 
         if self.current_plot_type == "distribution":
             self.plot_widget.update_plot(
@@ -570,6 +582,7 @@ class PlotWorkspace(QWidget):
                 self.dataset.particle_sizes,
                 self.dataset.percent_passing,
                 self.dataset.sample_name,
+                grain_size_data=self.dataset,
             )
             self.plot_widget.flagged_methods = set(self.flagged_methods)
             self.plot_widget.plot_combined_view(self.k_results)
@@ -579,13 +592,12 @@ class PlotWorkspace(QWidget):
             self._plot_histogram()
 
         # Apply display settings
-        if self.plot_widget.grain_size_ax:
-            self.plot_widget.grain_size_ax.grid(
-                self.show_grid, which='both', alpha=0.3)
-            if hasattr(self.plot_widget.grain_size_ax, 'legend_'):
-                legend = self.plot_widget.grain_size_ax.legend_
-                if legend:
-                    legend.set_visible(self.show_legend)
+        for ax in getattr(self.plot_widget, 'active_axes', []) or []:
+            if not self.show_grid:
+                ax.grid(False)
+            legend = ax.get_legend()
+            if legend:
+                legend.set_visible(self.show_legend)
 
         self.plot_widget.canvas.draw()
 
@@ -643,7 +655,10 @@ class PlotWorkspace(QWidget):
             if self.show_legend:
                 ax.legend()
 
+        self.plot_widget.current_ax = ax
         self.plot_widget.grain_size_ax = ax
+        self.plot_widget.k_value_ax = None
+        self.plot_widget.active_axes = [ax]
         self.plot_widget.figure.tight_layout()
         self.plot_widget.canvas.draw()
 
@@ -652,9 +667,15 @@ class PlotWorkspace(QWidget):
             return
         self.plot_widget.figure.clear()
         ax = self.plot_widget.figure.add_subplot(111)
-        sizes = np.array(self.dataset.particle_sizes)
-        passing = np.array(self.dataset.percent_passing)
-        freq = np.diff(passing, prepend=0)
+        pairs = sorted(
+            zip(self.dataset.particle_sizes, self.dataset.percent_passing),
+            key=lambda pair: pair[0],
+            reverse=True,
+        )
+        sizes = np.array([size for size, _ in pairs], dtype=float)
+        passing = np.array([passing for _, passing in pairs], dtype=float)
+        next_passing = np.append(passing[1:], 0.0)
+        freq = np.maximum(0.0, passing - next_passing)
         style = self.plot_widget.current_style if self.plot_widget else None
 
         if style:
@@ -690,38 +711,39 @@ class PlotWorkspace(QWidget):
                                ha='right')
             ax.grid(self.show_grid, alpha=0.3)
 
+        self.plot_widget.current_ax = ax
         self.plot_widget.grain_size_ax = ax
+        self.plot_widget.k_value_ax = None
+        self.plot_widget.active_axes = [ax]
         self.plot_widget.figure.tight_layout()
         self.plot_widget.canvas.draw()
 
     # ── Zoom ───────────────────────────────────────────────────
 
     def zoom_in(self):
-        if self.plot_widget and self.plot_widget.grain_size_ax:
-            xlim = self.plot_widget.grain_size_ax.get_xlim()
-            ylim = self.plot_widget.grain_size_ax.get_ylim()
+        target_ax = self.plot_widget.current_ax if self.plot_widget else None
+        if target_ax:
+            xlim = target_ax.get_xlim()
+            ylim = target_ax.get_ylim()
             x_center = (xlim[0] + xlim[1]) / 2
             y_center = (ylim[0] + ylim[1]) / 2
             x_range = (xlim[1] - xlim[0]) * 0.4
             y_range = (ylim[1] - ylim[0]) * 0.4
-            self.plot_widget.grain_size_ax.set_xlim(
-                x_center - x_range, x_center + x_range)
-            self.plot_widget.grain_size_ax.set_ylim(
-                y_center - y_range, y_center + y_range)
+            target_ax.set_xlim(x_center - x_range, x_center + x_range)
+            target_ax.set_ylim(y_center - y_range, y_center + y_range)
             self.plot_widget.canvas.draw()
 
     def zoom_out(self):
-        if self.plot_widget and self.plot_widget.grain_size_ax:
-            xlim = self.plot_widget.grain_size_ax.get_xlim()
-            ylim = self.plot_widget.grain_size_ax.get_ylim()
+        target_ax = self.plot_widget.current_ax if self.plot_widget else None
+        if target_ax:
+            xlim = target_ax.get_xlim()
+            ylim = target_ax.get_ylim()
             x_center = (xlim[0] + xlim[1]) / 2
             y_center = (ylim[0] + ylim[1]) / 2
             x_range = (xlim[1] - xlim[0]) * 0.6
             y_range = (ylim[1] - ylim[0]) * 0.6
-            self.plot_widget.grain_size_ax.set_xlim(
-                x_center - x_range, x_center + x_range)
-            self.plot_widget.grain_size_ax.set_ylim(
-                y_center - y_range, y_center + y_range)
+            target_ax.set_xlim(x_center - x_range, x_center + x_range)
+            target_ax.set_ylim(y_center - y_range, y_center + y_range)
             self.plot_widget.canvas.draw()
 
     def reset_view(self):
@@ -733,7 +755,7 @@ class PlotWorkspace(QWidget):
     def update_plot(self, particle_sizes, percent_passing, sample_name):
         if self.plot_widget:
             self.plot_widget.update_plot(
-                particle_sizes, percent_passing, sample_name)
+                particle_sizes, percent_passing, sample_name, grain_size_data=self.dataset)
             self.refresh_plot()
 
     def add_k_results(self, k_results: Dict[str, float],

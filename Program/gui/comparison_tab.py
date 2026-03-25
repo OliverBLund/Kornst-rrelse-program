@@ -19,14 +19,6 @@ import math
 import numpy as np
 from typing import Optional, List
 
-# ── matplotlib backend must be set before importing backends ──────────────────
-import matplotlib
-try:
-    matplotlib.use("QtAgg")
-    from matplotlib.backends.backend_qtagg import FigureCanvasQTAgg as FigureCanvas
-except ImportError:
-    matplotlib.use("Qt5Agg")
-    from matplotlib.backends.backend_qt5agg import FigureCanvasQTAgg as FigureCanvas  # type: ignore
 from matplotlib.figure import Figure
 
 # ── PyQt6 ─────────────────────────────────────────────────────────────────────
@@ -39,8 +31,10 @@ from PyQt6.QtCore import Qt, pyqtSignal, QSize
 from PyQt6.QtGui import QColor, QFont, QBrush, QPixmap, QPainter, QIcon
 
 # ── Internal ──────────────────────────────────────────────────────────────────
+from .matplotlib_canvas import FigureCanvas
 from .comparison_plot_widget import ComparisonPlotWidget
 from .theme import C, F, icon as theme_icon
+from k_calculations_v2 import CalculationStatus
 
 
 def _dot_icon(color_hex: str, size: int = 8) -> QIcon:
@@ -638,14 +632,14 @@ class ComparisonTab(QWidget):
         fc = C.BG  # figure facecolor
 
         # K-value box plot
-        self._box_fig = Figure(facecolor=fc, tight_layout=True)
+        self._box_fig = Figure(figsize=(8, 5), facecolor=fc, tight_layout=True)
         self._box_canvas = FigureCanvas(self._box_fig)
         self._box_canvas.setSizePolicy(
             QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding
         )
 
         # Method heatmap
-        self._heat_fig = Figure(facecolor=fc, tight_layout=True)
+        self._heat_fig = Figure(figsize=(8, 5), facecolor=fc, tight_layout=True)
         self._heat_canvas = FigureCanvas(self._heat_fig)
         self._heat_canvas.setSizePolicy(
             QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding
@@ -1141,7 +1135,13 @@ class ComparisonTab(QWidget):
         self._box_canvas.draw()
 
     def _draw_heatmap(self) -> None:
-        """Method applicability heatmap (methods × datasets)."""
+        """Method applicability heatmap (methods × datasets).
+
+        Three cell states driven by CalculationStatus:
+          OK      (2) — olive green  — valid K result
+          WARNING (1) — amber        — K result outside applicability range
+          N/A     (0) — light beige  — method not applicable / failed
+        """
         self._heat_fig.clear()
         ax = self._heat_fig.add_subplot(111)
         ax.set_facecolor("#ffffff")
@@ -1162,24 +1162,39 @@ class ComparisonTab(QWidget):
             self._heat_canvas.draw()
             return
 
-        # Build presence matrix
+        # Build status matrix: 2=OK, 1=WARNING, 0=N/A
         matrix = np.zeros((len(method_names), len(ds_names)))
         for ci, results in enumerate(results_by_tab):
-            available = {r.method_name for r in results if r.k_value is not None}
+            result_map = {r.method_name: r for r in results}
             for ri, method in enumerate(method_names):
-                matrix[ri, ci] = 1.0 if method in available else 0.0
+                if method in result_map:
+                    r = result_map[method]
+                    if r.status == CalculationStatus.OK:
+                        matrix[ri, ci] = 2.0
+                    elif r.status == CalculationStatus.WARNING:
+                        matrix[ri, ci] = 1.0
+                    # ERROR stays 0.0
 
-        # Build color array: olive for present, light for absent
+        # Precompute RGBAs
+        def _hex_to_rgba(hex_color: str, alpha: float) -> tuple:
+            qc = QColor(hex_color)
+            return (qc.red() / 255, qc.green() / 255, qc.blue() / 255, alpha)
+
+        ok_rgba      = _hex_to_rgba(C.OLIVE,    0.85)
+        warn_rgba    = _hex_to_rgba(C.LED_WARN, 0.85)
+        absent_rgba  = (0.90, 0.89, 0.87, 0.45)
+
+        # Build RGBA image
         cmap_data = np.zeros((*matrix.shape, 4))
-        olive_qc = QColor(C.OLIVE)
-        present_rgba = (
-            olive_qc.red() / 255, olive_qc.green() / 255,
-            olive_qc.blue() / 255, 0.75,
-        )
-        absent_rgba = (0.9, 0.89, 0.87, 0.5)
         for ri in range(len(method_names)):
             for ci in range(len(ds_names)):
-                cmap_data[ri, ci] = present_rgba if matrix[ri, ci] > 0 else absent_rgba
+                v = matrix[ri, ci]
+                if v >= 2.0:
+                    cmap_data[ri, ci] = ok_rgba
+                elif v >= 1.0:
+                    cmap_data[ri, ci] = warn_rgba
+                else:
+                    cmap_data[ri, ci] = absent_rgba
 
         ax.imshow(cmap_data, aspect="auto", interpolation="nearest")
 
@@ -1191,13 +1206,15 @@ class ComparisonTab(QWidget):
             "Method Applicability", color=C.TEXT_MID, fontsize=11, fontweight="600"
         )
 
-        # Overlay ✓ / — markers
+        # Overlay status symbols
+        symbols   = {2.0: "✓", 1.0: "⚠", 0.0: "—"}
+        txt_colors = {2.0: "white", 1.0: "white", 0.0: C.TEXT_MUTED}
         for ri in range(len(method_names)):
             for ci in range(len(ds_names)):
-                sym = "✓" if matrix[ri, ci] > 0 else "—"
-                text_color = "white" if matrix[ri, ci] > 0 else C.TEXT_MUTED
-                ax.text(ci, ri, sym, ha="center", va="center",
-                        fontsize=9, color=text_color)
+                v = matrix[ri, ci]
+                key = 2.0 if v >= 2.0 else (1.0 if v >= 1.0 else 0.0)
+                ax.text(ci, ri, symbols[key], ha="center", va="center",
+                        fontsize=9, color=txt_colors[key])
 
         # Color x-tick labels per dataset color
         for ci, tick_lbl in enumerate(ax.get_xticklabels()):
@@ -1205,6 +1222,19 @@ class ComparisonTab(QWidget):
 
         ax.spines[:].set_visible(False)
         ax.tick_params(length=0)
+
+        # Legend
+        import matplotlib.patches as mpatches
+        legend_patches = [
+            mpatches.Patch(color=C.OLIVE,    alpha=0.85, label="OK"),
+            mpatches.Patch(color=C.LED_WARN, alpha=0.85, label="Warning"),
+            mpatches.Patch(color="#e5e1db",  alpha=0.80, label="N/A"),
+        ]
+        ax.legend(
+            handles=legend_patches, loc="upper right",
+            fontsize=7, framealpha=0.9,
+            edgecolor=C.BORDER, facecolor=C.BG_RAISED,
+        )
 
         self._heat_canvas.draw()
 
@@ -1222,14 +1252,14 @@ class ComparisonTab(QWidget):
             return
         try:
             if hasattr(self._plot_widget, "figure"):
-                self._plot_widget.figure.savefig(path, dpi=150, bbox_inches="tight")
+                self._plot_widget.figure.savefig(path, dpi=300, bbox_inches="tight")
             elif hasattr(self._plot_widget, "_fig"):
-                self._plot_widget._fig.savefig(path, dpi=150, bbox_inches="tight")
+                self._plot_widget._fig.savefig(path, dpi=300, bbox_inches="tight")
             elif hasattr(self._plot_widget, "canvas") and hasattr(
                 self._plot_widget.canvas, "figure"
             ):
                 self._plot_widget.canvas.figure.savefig(
-                    path, dpi=150, bbox_inches="tight"
+                    path, dpi=300, bbox_inches="tight"
                 )
         except Exception as exc:
             from PyQt6.QtWidgets import QMessageBox
