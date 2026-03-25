@@ -14,6 +14,12 @@ from matplotlib.figure import Figure
 from matplotlib.colors import ListedColormap
 from data_loader import GrainSizeData
 from k_calculations import KCalculationResult
+from grain_classification import (
+    ISO14688,
+    cu_label as _gc_cu_label,
+    permeability_class as _gc_perm_class,
+    cc_label as _gc_cc_label,
+)
 
 
 class ReportGenerator:
@@ -1680,20 +1686,20 @@ class ReportGenerator:
     def _classify_uniformity(self, cu: Optional[float]) -> str:
         if cu is None:
             return "Cannot calculate"
-        elif cu < 4:
-            return "Uniform (Cu < 4)"
-        elif cu < 6:
-            return "Moderately graded (4 ≤ Cu < 6)"
-        else:
-            return "Well-graded (Cu ≥ 6)"
+        label = _gc_cu_label(cu)
+        if cu < 4:
+            return f"{label} (Cu < 4)"
+        if cu < 6:
+            return f"{label} (4 \u2264 Cu < 6)"
+        return f"{label} (Cu \u2265 6)"
 
     def _classify_curvature(self, cc: Optional[float]) -> str:
         if cc is None:
             return "Cannot calculate"
-        elif 1 <= cc <= 3:
-            return "Well-graded (1 ≤ Cc ≤ 3)"
-        else:
-            return "Gap-graded or Uniform"
+        lbl = _gc_cc_label(cc)
+        if lbl == "Well-graded range":
+            return "Well-graded (1 \u2264 Cc \u2264 3)"
+        return "Gap-graded or Uniform"
 
     def _create_percentiles_table(self, dataset: GrainSizeData) -> str:
         """Generate HTML table with percentiles (D5, D10, D16, D20, D25, D30, D40, D50, D60, D75, D84, D90, D95)"""
@@ -1738,54 +1744,57 @@ class ReportGenerator:
         html += "</tbody></table>"
         return html
 
-    def _create_gradation_table(self, dataset: GrainSizeData) -> str:
-        """Generate HTML table showing gradation breakdown (Gravel %, Sand %, Fines %)"""
-        # Gradation boundaries: Fines (<0.063mm), Sand (0.063-2mm), Gravel (>2mm)
-        gravel_percent = 0
-        sand_percent = 0
-        fines_percent = 0
+    def _create_gradation_table(self, dataset: GrainSizeData, scheme=None) -> str:
+        """Generate HTML table showing gradation breakdown using scheme boundaries."""
+        s = scheme if scheme is not None else ISO14688
+        silt_bnd  = s.silt_max   # upper limit of fines (e.g. 0.063 ISO / 0.075 USCS)
+        sand_bnd  = s.sand_max   # upper limit of sand  (e.g. 2.0   ISO / 4.75  USCS)
+
+        gravel_percent = 0.0
+        sand_percent   = 0.0
+        fines_percent  = 0.0
 
         # Calculate percentages based on percent passing
         for i, size in enumerate(dataset.particle_sizes):
             if i == 0:
                 continue
 
-            prev_size = dataset.particle_sizes[i-1]
+            prev_size    = dataset.particle_sizes[i-1]
             prev_passing = dataset.percent_passing[i-1]
             curr_passing = dataset.percent_passing[i]
 
             # Fraction retained in this interval
             retained = prev_passing - curr_passing
 
-            # Classify based on size
-            if prev_size > 2.0:
+            # Classify based on size using scheme boundaries
+            if prev_size > sand_bnd:
                 gravel_percent += retained
-            elif prev_size > 0.063:
+            elif prev_size > silt_bnd:
                 sand_percent += retained
             else:
                 fines_percent += retained
 
         # Handle edge cases
-        if dataset.particle_sizes[0] > 2.0:
+        if dataset.particle_sizes[0] > sand_bnd:
             gravel_percent += 100 - dataset.percent_passing[0]
-        elif dataset.particle_sizes[0] > 0.063:
+        elif dataset.particle_sizes[0] > silt_bnd:
             sand_percent += 100 - dataset.percent_passing[0]
         else:
             fines_percent += 100 - dataset.percent_passing[0]
 
-        if dataset.particle_sizes[-1] < 0.063:
+        if dataset.particle_sizes[-1] < silt_bnd:
             fines_percent += dataset.percent_passing[-1]
-        elif dataset.particle_sizes[-1] < 2.0:
+        elif dataset.particle_sizes[-1] < sand_bnd:
             sand_percent += dataset.percent_passing[-1]
         else:
             gravel_percent += dataset.percent_passing[-1]
 
-        html = """
+        html = f"""
         <table>
             <thead>
                 <tr>
                     <th>Fraction</th>
-                    <th>Size Range</th>
+                    <th>Size Range ({s.name})</th>
                     <th>Percentage</th>
                 </tr>
             </thead>
@@ -1793,9 +1802,9 @@ class ReportGenerator:
         """
 
         gradations = [
-            ("Gravel", "> 2 mm", gravel_percent),
-            ("Sand", "0.063 - 2 mm", sand_percent),
-            ("Fines", "< 0.063 mm", fines_percent)
+            ("Gravel", f"> {sand_bnd} mm",            gravel_percent),
+            ("Sand",   f"{silt_bnd} \u2013 {sand_bnd} mm", sand_percent),
+            ("Fines",  f"< {silt_bnd} mm",             fines_percent),
         ]
 
         for name, size_range, percent in gradations:
@@ -2049,18 +2058,7 @@ class ReportGenerator:
         return html
 
     def _classify_permeability(self, k: float) -> str:
-        if k > 1e-2:
-            return "Very High Permeability (Clean Gravel)"
-        elif k > 1e-4:
-            return "High Permeability (Clean Sand/Sand-Gravel Mix)"
-        elif k > 1e-5:
-            return "Moderate Permeability (Fine Sand)"
-        elif k > 1e-7:
-            return "Low Permeability (Silt/Silty Sand)"
-        elif k > 1e-9:
-            return "Very Low Permeability (Clay-Silt Mix)"
-        else:
-            return "Practically Impermeable (Clay)"
+        return _gc_perm_class(k)
 
     def _get_permeability_application(self, k: float) -> str:
         if k > 1e-2:

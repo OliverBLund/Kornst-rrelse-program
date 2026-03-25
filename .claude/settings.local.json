@@ -25,7 +25,16 @@
       "Bash(python -c \"import ast, sys; ast.parse\\(open\\(''gui/control_panel.py''\\).read\\(\\)\\); print\\(''OK''\\)\")",
       "Bash(python -c \"import ast; ast.parse\\(open\\(''gui/control_panel.py'', encoding=''utf-8''\\).read\\(\\)\\); print\\(''OK''\\)\")",
       "Bash(python -c \":*)",
-      "Bash(python -u -c \"import ast; tree = ast.parse\\(open\\(''''gui/control_panel.py'''', encoding=''''utf-8''''\\).read\\(\\)\\); names = {n.name for n in ast.walk\\(tree\\) if isinstance\\(n, ast.FunctionDef\\)}; [print\\(m, ''''OK'''' if m in names else ''''MISSING''''\\) for m in [''''show_file_info'''',''''show_file_log'''',''''show_file_props'''',''''_remove_card_by_path'''']]\")"
+      "Bash(python -u -c \"import ast; tree = ast.parse\\(open\\(''''gui/control_panel.py'''', encoding=''''utf-8''''\\).read\\(\\)\\); names = {n.name for n in ast.walk\\(tree\\) if isinstance\\(n, ast.FunctionDef\\)}; [print\\(m, ''''OK'''' if m in names else ''''MISSING''''\\) for m in [''''show_file_info'''',''''show_file_log'''',''''show_file_props'''',''''_remove_card_by_path'''']]\")",
+      "Bash(python -c \"import ast; ast.parse\\(open\\(''gui/control_panel.py'', encoding=''utf-8''\\).read\\(\\)\\); print\\(''control_panel.py OK''\\)\")",
+      "Bash(python -c \"import ast; ast.parse\\(open\\(''gui/main_window.py'', encoding=''utf-8''\\).read\\(\\)\\); print\\(''main_window.py OK''\\)\")",
+      "Bash(python -c \"import ast; ast.parse\\(open\\(''gui/plot_widget.py'', encoding=''utf-8''\\).read\\(\\)\\); print\\(''plot_widget.py OK''\\)\")",
+      "Bash(python -c \"import ast; ast.parse\\(open\\(''gui/statistics_tab.py'', encoding=''utf-8''\\).read\\(\\)\\); print\\(''statistics_tab.py OK''\\)\")",
+      "Bash(python -c \"import ast; ast.parse\\(open\\(''gui/comparison_tab.py'', encoding=''utf-8''\\).read\\(\\)\\); print\\(''comparison_tab.py OK''\\)\")",
+      "Bash(python -c \"import ast; ast.parse\\(open\\(''gui/classification_dialog.py'', encoding=''utf-8''\\).read\\(\\)\\); print\\(''OK''\\)\")",
+      "Bash(python -c \"import sys; sys.path.insert\\(0, ''.''\\); from gui.classification_dialog import ClassificationDialog; print\\(''Import OK''\\)\")",
+      "Bash(python -c \"from gui.classification_dialog import ClassificationDialog; print\\(''Import OK''\\)\")",
+      "Bash(python -c \"from gui.classification_dialog import ClassificationDialog; print\\(''OK''\\)\")"
     ],
     "deny": [],
     "ask": []

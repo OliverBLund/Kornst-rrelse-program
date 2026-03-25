@@ -8,6 +8,10 @@ import os
 from typing import Dict, List, Tuple, Optional, Any
 from dataclasses import dataclass, field
 from enum import Enum
+from grain_classification import (
+    ClassificationResult, GrainClassificationScheme,
+    ISO14688, classify as _gc_classify,
+)
 import logging
 import pandas as pd
 import numpy as np
@@ -348,8 +352,34 @@ class GrainSizeData:
 
         return report
 
+    def classify(
+        self,
+        scheme: Optional[GrainClassificationScheme] = None,
+        k_mean_ms: Optional[float] = None,
+    ) -> ClassificationResult:
+        """Return a structured ClassificationResult for this dataset.
+
+        Parameters
+        ----------
+        scheme     : classification scheme (default: ISO14688)
+        k_mean_ms  : mean hydraulic conductivity in m/s (for permeability class)
+        """
+        return _gc_classify(
+            particle_sizes  = self.particle_sizes,
+            percent_passing = self.percent_passing,
+            cu              = self.get_uniformity_coefficient(),
+            cc              = self.get_coefficient_of_curvature(),
+            scheme          = scheme if scheme is not None else ISO14688,
+            k_mean_ms       = k_mean_ms,
+        )
+
     def classify_soil(self) -> str:
-        """Classify soil based on grain size distribution"""
+        """Classify soil based on grain size distribution.
+
+        .. deprecated::
+            Use classify() which returns a structured ClassificationResult.
+            This wrapper is kept for backward compatibility.
+        """
         d10 = self.get_d10()
         d60 = self.get_d60()
         cu = self.get_uniformity_coefficient()

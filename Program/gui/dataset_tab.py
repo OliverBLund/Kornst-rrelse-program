@@ -731,6 +731,12 @@ class DatasetTab(QWidget):
         if hasattr(self, "statistics_tab"):
             self.statistics_tab.update_display()
 
+    def set_scheme(self, scheme) -> None:
+        """Propagate a new classification scheme to the plot and statistics."""
+        self.plot_workspace.set_scheme(scheme)
+        if hasattr(self, "statistics_tab"):
+            self.statistics_tab.set_scheme(scheme)
+
     def set_parameters(self, temperature: float):
         """Update calculation parameters"""
         self.temperature = temperature

@@ -24,7 +24,7 @@ except Exception:  # pragma: no cover - optional module in some environments
 
 from .mask import apply_frameless_round_mask
 from .mode import resolve_window_chrome_mode
-from .platform import enable_windows_soft_corners
+from .platform import disable_windows_window_transitions, enable_windows_soft_corners
 from .window_helper import FramelessWindowChromeHelper
 
 
@@ -182,6 +182,8 @@ class FramelessDialogMixin:
         self._dialog_chrome_mode = "native"
         self._dialog_window_chrome = None
         self._dialog_drag_filters = []
+        self._dialog_soft_corners_applied = False
+        self._dialog_transitions_disabled = False
         self._dialog_enable_edge_resize = bool(enable_edge_resize)
         self._dialog_resize_margin = int(resize_margin)
         self._dialog_top_resize_margin = int(top_resize_margin)
@@ -293,9 +295,9 @@ class FramelessDialogMixin:
         )
 
     def _init_dialog_chrome(self) -> None:
-        from PyQt6.QtCore import Qt
-
         self._release_dialog_window_chrome()
+        self._dialog_soft_corners_applied = False
+        self._dialog_transitions_disabled = False
         chrome_mode = resolve_window_chrome_mode(
             default_windows=getattr(self, "_dialog_default_windows", "frameless"),
             default_other=getattr(self, "_dialog_default_other", "native"),
@@ -310,7 +312,6 @@ class FramelessDialogMixin:
                 self.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground, False)
                 self.setMouseTracking(bool(getattr(self, "_dialog_enable_edge_resize", False)))
                 self._ensure_dialog_window_chrome()
-                enable_windows_soft_corners(self)
                 return
             except Exception:
                 self._dialog_window_chrome = None
@@ -322,16 +323,39 @@ class FramelessDialogMixin:
         self.setWindowFlags(flags)
         self.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground, False)
         self.setMouseTracking(False)
+
+    def _enable_dialog_windows_soft_corners(self) -> None:
         enable_windows_soft_corners(self)
+
+    def _disable_dialog_windows_transitions(self) -> None:
+        disable_windows_window_transitions(self)
 
     def resizeEvent(self, event):
         super().resizeEvent(event)
         self._apply_frameless_round_mask()
 
+    def event(self, event):
+        result = super().event(event)
+        if event.type() == QEvent.Type.WinIdChange:
+            self._dialog_soft_corners_applied = False
+            self._dialog_transitions_disabled = False
+            if self._is_frameless_mode():
+                self._disable_dialog_windows_transitions()
+                self._dialog_transitions_disabled = True
+                self._enable_dialog_windows_soft_corners()
+                self._dialog_soft_corners_applied = True
+        return result
+
     def showEvent(self, event):
         super().showEvent(event)
         self._ensure_dialog_window_chrome()
         self._apply_frameless_round_mask()
+        if not getattr(self, "_dialog_transitions_disabled", False):
+            self._disable_dialog_windows_transitions()
+            self._dialog_transitions_disabled = True
+        if not getattr(self, "_dialog_soft_corners_applied", False):
+            self._enable_dialog_windows_soft_corners()
+            self._dialog_soft_corners_applied = True
         self._notify_dialog_chrome_state()
 
     def changeEvent(self, event):

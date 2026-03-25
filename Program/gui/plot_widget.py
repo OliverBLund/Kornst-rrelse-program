@@ -13,6 +13,7 @@ from unit_conversions import HydraulicConductivityConverter, HydraulicConductivi
 from .plot_styles import PlotStyle, PROFESSIONAL_STYLE
 from .matplotlib_canvas import FigureCanvas, NavigationToolbar
 from .theme import C, apply_matplotlib_style
+from grain_classification import ISO14688, interpolate_at as _gc_interpolate_at
 
 
 class PlotWidget(QWidget):
@@ -39,6 +40,8 @@ class PlotWidget(QWidget):
         self.show_grid = True
         self.show_legend = True
         self.show_classification_zones = False
+        self.fill_zone_labels = False
+        self._scheme = ISO14688
         self.show_d_lines = False
         self.show_markers = False
         self.fill_curve = False
@@ -242,31 +245,68 @@ class PlotWidget(QWidget):
         if handles:
             ax.legend(handles, labels, loc='upper right', fontsize=8)
 
-    def draw_classification_zones(self, ax):
-        """Draw grain size classification zones as background bands"""
-        # Standard grain size boundaries (USCS/ASTM)
-        # Clay: < 0.002 mm
-        # Silt: 0.002 - 0.075 mm
-        # Sand: 0.075 - 4.75 mm
-        # Gravel: > 4.75 mm
+    def set_scheme(self, scheme):
+        """Set the classification scheme and trigger a redraw if zones are visible."""
+        self._scheme = scheme
+        if self.show_classification_zones and self.grain_data:
+            diameters, cumulative = self.grain_data
+            self.update_plot(diameters, cumulative,
+                             self.sample_name, self.grain_size_data)
 
+    def draw_classification_zones(self, ax):
+        """Draw grain size classification zones as background bands using active scheme."""
+        s = self._scheme
         zones = [
-            {'name': 'Clay', 'min': 0.0001, 'max': 0.002, 'color': '#d4a574', 'alpha': 0.15},
-            {'name': 'Silt', 'min': 0.002, 'max': 0.075, 'color': '#c2b280', 'alpha': 0.15},
-            {'name': 'Sand', 'min': 0.075, 'max': 4.75, 'color': '#f4e4c1', 'alpha': 0.15},
-            {'name': 'Gravel', 'min': 4.75, 'max': 100, 'color': '#9c8a7a', 'alpha': 0.15},
+            {'name': 'Clay',   'min': 0.0001,        'max': s.clay_max,   'color': C.GC_CLAY},
+            {'name': 'Silt',   'min': s.clay_max,    'max': s.silt_max,   'color': C.GC_SILT},
+            {'name': 'Sand',   'min': s.silt_max,    'max': s.sand_max,   'color': C.GC_SAND},
+            {'name': 'Gravel', 'min': s.sand_max,    'max': s.gravel_max, 'color': C.GC_GRAVEL},
+            {'name': 'Cobble', 'min': s.gravel_max,  'max': 300,          'color': C.GC_COBBLE},
         ]
 
         for zone in zones:
             ax.axvspan(zone['min'], zone['max'],
-                      color=zone['color'], alpha=zone['alpha'],
-                      zorder=0)  # Draw behind everything else
+                      color=zone['color'], alpha=0.18,
+                      zorder=0)
 
-            # Add zone label at top of plot
-            mid_point = np.sqrt(zone['min'] * zone['max'])  # Geometric mean for log scale
+            # Label at geometric-mean x position
+            mid_point = np.sqrt(zone['min'] * zone['max'])
             ax.text(mid_point, 95, zone['name'],
                    ha='center', va='top', fontsize=8,
                    color='#5a4a3a', fontweight='bold', alpha=0.6)
+
+    def draw_fill_zone_labels(self, ax, diameters, cumulative):
+        """Draw grain fraction % labels centred inside the filled area for each zone."""
+        import math
+        if not self.grain_size_data:
+            return
+        try:
+            result = self.grain_size_data.classify(scheme=self._scheme)
+            fracs = result.fractions
+        except Exception:
+            return
+
+        s = self._scheme
+        zone_fracs = [
+            ('Clay',   0.0001,       s.clay_max,   fracs.clay_pct),
+            ('Silt',   s.clay_max,   s.silt_max,   fracs.silt_pct),
+            ('Sand',   s.silt_max,   s.sand_max,   fracs.sand_pct),
+            ('Gravel', s.sand_max,   s.gravel_max, fracs.gravel_pct),
+            ('Cobble', s.gravel_max, 200.0,        fracs.cobble_pct),
+        ]
+        for name, lo, hi, frac in zone_fracs:
+            if frac < 2.0:
+                continue
+            x_mid = math.sqrt(lo * hi)
+            y_at_mid = _gc_interpolate_at(list(diameters), list(cumulative), x_mid)
+            if y_at_mid is None or y_at_mid < 6.0:
+                continue
+            ax.text(x_mid, y_at_mid / 2.0,
+                    f"{frac:.0f}%\n{name}",
+                    ha='center', va='center',
+                    fontsize=7.5, fontweight='bold',
+                    color='#3a2e1c', alpha=0.72,
+                    zorder=3)
 
     def update_plot(self, diameters: Optional[List[float]] = None,
                    cumulative: Optional[List[float]] = None,
@@ -305,6 +345,8 @@ class PlotWidget(QWidget):
         )
         if self.fill_curve:
             self.current_ax.fill_between(diameters, cumulative, 0, color=style.curve_color, alpha=0.12)
+            if self.fill_zone_labels:
+                self.draw_fill_zone_labels(self.current_ax, diameters, cumulative)
 
         self._draw_characteristic_lines(self.current_ax, diameters, cumulative, grain_size_data, style)
         
@@ -349,7 +391,17 @@ class PlotWidget(QWidget):
         # Set axis properties
         self.current_ax.set_facecolor(style.axes_facecolor)
         self.current_ax.tick_params(labelsize=style.tick_fontsize)
-        self.current_ax.set_xlim(min(diameters)*0.5, max(diameters)*2)
+        # X-axis right limit: if significant material (>1%) is retained on the
+        # largest measured sieve, extend the axis to expose the coarser zone bands.
+        sorted_pairs = sorted(zip(diameters, cumulative))
+        x_min = sorted_pairs[0][0] * 0.5
+        x_max = sorted_pairs[-1][0] * 2
+        pct_at_largest = sorted_pairs[-1][1]   # % passing at the largest sieve
+        if pct_at_largest > 1.0:
+            # Material exists beyond the data range — extend to show the zone it occupies.
+            # Use scheme gravel_max as the minimum right edge so the cobble band is visible.
+            x_max = max(x_max, self._scheme.gravel_max * 3, 200.0)
+        self.current_ax.set_xlim(x_min, x_max)
         self.current_ax.set_ylim(0, 100)
 
         # Apply legend styling
@@ -590,9 +642,14 @@ class PlotWidget(QWidget):
             
         # Reset based on current plot type
         if self.grain_size_ax == self.current_ax and self.grain_data:
-            # Grain size plot
+            # Grain size plot — same retained-material logic as update_plot
             diameters, cumulative = self.grain_data
-            self.current_ax.set_xlim(min(diameters)*0.5, max(diameters)*2)
+            sorted_pairs = sorted(zip(diameters, cumulative))
+            x_min = sorted_pairs[0][0] * 0.5
+            x_max = sorted_pairs[-1][0] * 2
+            if sorted_pairs[-1][1] > 1.0:
+                x_max = max(x_max, self._scheme.gravel_max * 3, 200.0)
+            self.current_ax.set_xlim(x_min, x_max)
             self.current_ax.set_ylim(0, 100)
         elif self.k_value_ax == self.current_ax and self.k_results:
             # K-value plot - use converted values for proper scaling

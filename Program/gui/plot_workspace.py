@@ -98,6 +98,7 @@ class PlotWorkspace(QWidget):
         self.show_zones = False
         self.show_dlines = False
         self.fill_curve = False
+        self.fill_zone_labels = False
         self.log_x_scale = True
 
         self._init_ui()
@@ -302,12 +303,23 @@ class PlotWorkspace(QWidget):
             ("Show grid lines",      True,  "_sw_grid"),
             ("Show soil zones",      False, "_sw_zones"),
             ("Show D10 / D30 / D60", False, "_sw_dlines"),
-            ("Fill curve area",      False, "_sw_fill"),
-            ("Markers on curve",     False, "_sw_markers"),
         ]:
             row_w, sw = self._toggle_row(label_text, checked)
             setattr(self, attr, sw)
             lay.addWidget(row_w)
+
+        # Fill curve + sub-option (zone labels)
+        row_fill, self._sw_fill = self._toggle_row("Fill curve area", False)
+        lay.addWidget(row_fill)
+
+        row_fill_lbl, self._sw_fill_labels = self._toggle_row("  └ Zone % in fill", False)
+        row_fill_lbl.layout().setContentsMargins(22, 4, 10, 4)
+        row_fill_lbl.setStyleSheet(
+            f"border-bottom: 1px solid rgba(212,196,168,0.4); background: rgba(0,0,0,0.02);")
+        lay.addWidget(row_fill_lbl)
+
+        row_mkr, self._sw_markers = self._toggle_row("Markers on curve", False)
+        lay.addWidget(row_mkr)
 
         # ── Curve Color ──
         lay.addWidget(self._sect_label("Curve Color"))
@@ -488,6 +500,7 @@ class PlotWorkspace(QWidget):
         self.show_zones = self._sw_zones.isChecked()
         self.show_dlines = self._sw_dlines.isChecked()
         self.fill_curve = self._sw_fill.isChecked()
+        self.fill_zone_labels = self._sw_fill_labels.isChecked()
         self.show_markers = self._sw_markers.isChecked()
 
         # Sync toolbar check buttons
@@ -547,6 +560,7 @@ class PlotWorkspace(QWidget):
         self.plot_widget.show_d_lines = self.show_dlines
         self.plot_widget.show_markers = self.show_markers
         self.plot_widget.fill_curve = self.fill_curve
+        self.plot_widget.fill_zone_labels = self.fill_zone_labels
 
     # ── Plot logic (preserved from original) ───────────────────
 
@@ -756,6 +770,13 @@ class PlotWorkspace(QWidget):
         if self.plot_widget:
             self.plot_widget.update_plot(
                 particle_sizes, percent_passing, sample_name, grain_size_data=self.dataset)
+            self.refresh_plot()
+
+    def set_scheme(self, scheme) -> None:
+        """Update classification scheme; redraw via refresh_plot() if zones are visible."""
+        if self.plot_widget:
+            self.plot_widget._scheme = scheme
+        if self.show_zones:
             self.refresh_plot()
 
     def add_k_results(self, k_results: Dict[str, float],

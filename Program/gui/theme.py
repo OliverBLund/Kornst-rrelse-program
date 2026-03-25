@@ -140,6 +140,13 @@ class C:
     K_BLUE      = "#3a7ea0"   # K-value numeric color (tables)
     DTU_RED     = "#C8002A"   # DTU wordmark background
 
+    # ── Grain-zone palette (Stratigraphy widget + plot bands) ──
+    GC_CLAY   = "#7a9bbd"   # Muted blue  — clay
+    GC_SILT   = "#b09870"   # Warm tan    — silt
+    GC_SAND   = "#d4b86a"   # Sandy gold  — sand
+    GC_GRAVEL = "#a09080"   # Grey-brown  — gravel
+    GC_COBBLE = "#807870"   # Dark grey   — cobble
+
     # ── Sample identity palette (Comparison tab) ──
     # Assign in order; cycle if > 8 samples.
     SAMPLE_COLORS = [

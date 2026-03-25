@@ -35,6 +35,12 @@ from .matplotlib_canvas import FigureCanvas
 from .comparison_plot_widget import ComparisonPlotWidget
 from .theme import C, F, icon as theme_icon
 from k_calculations_v2 import CalculationStatus
+from grain_classification import (
+    ISO14688,
+    interpolate_at as _interpolate_at,
+    cu_label as _gc_cu_label,
+    permeability_class as _gc_perm_class,
+)
 
 
 def _dot_icon(color_hex: str, size: int = 8) -> QIcon:
@@ -62,43 +68,16 @@ DATASET_COLORS: List[str] = [
 # Helper functions
 # ─────────────────────────────────────────────────────────────────────────────
 
-def _get_fines_pct(dataset) -> Optional[float]:
-    """Return % passing at 0.063 mm via log-linear interpolation.
+def _get_fines_pct(dataset, scheme=None) -> Optional[float]:
+    """Return % passing at scheme.silt_max (default ISO 0.063 mm) via log-linear interpolation.
 
-    particle_sizes is stored largest→smallest; we sort ascending for interp.
-    Returns None if there are fewer than 2 data points or 0.063 is out of range.
+    Uses grain_classification.interpolate_at for the shared algorithm.
+    Returns None if there are fewer than 2 data points.
     """
     sizes = list(dataset.particle_sizes)
     pcts = list(dataset.percent_passing)
-    if len(sizes) < 2:
-        return None
-
-    # Sort ascending by particle size
-    pairs = sorted(zip(sizes, pcts), key=lambda p: p[0])
-    xs = [p[0] for p in pairs]
-    ys = [p[1] for p in pairs]
-
-    target = 0.063  # mm
-
-    # Clamp check
-    if target <= xs[0]:
-        return ys[0]
-    if target >= xs[-1]:
-        return ys[-1]
-
-    # Find bracketing interval
-    for i in range(len(xs) - 1):
-        x0, x1 = xs[i], xs[i + 1]
-        y0, y1 = ys[i], ys[i + 1]
-        if x0 <= target <= x1:
-            if x0 <= 0 or x1 <= 0:
-                # Fallback to linear if log undefined
-                t = (target - x0) / (x1 - x0) if x1 != x0 else 0.0
-            else:
-                t = (math.log(target) - math.log(x0)) / (math.log(x1) - math.log(x0))
-            return y0 + t * (y1 - y0)
-
-    return None
+    target = scheme.silt_max if scheme is not None else ISO14688.silt_max
+    return _interpolate_at(sizes, pcts, target)
 
 
 def _heat_color(norm: float) -> QColor:
@@ -124,15 +103,7 @@ def _heat_color(norm: float) -> QColor:
 
 def _perm_class(mean_k: float) -> str:
     """Return a human-readable permeability classification for mean_k (m/s)."""
-    if mean_k > 1e-2:
-        return "Very High (Gravel)"
-    if mean_k > 1e-4:
-        return "High (Clean Sand)"
-    if mean_k > 1e-5:
-        return "Moderate (Fine Sand)"
-    if mean_k > 1e-7:
-        return "Low (Silt)"
-    return "Very Low (Clay)"
+    return _gc_perm_class(mean_k)
 
 
 def _perm_color(valid_k_list: list) -> str:
@@ -219,6 +190,7 @@ class ComparisonTab(QWidget):
         self.selected_datasets: list = []
         self._pinned: set[str] = set()
         self._heat_on: bool = True
+        self._active_scheme = ISO14688
 
         self._build_ui()
 
@@ -651,6 +623,12 @@ class ComparisonTab(QWidget):
 
     # ── Data wiring ───────────────────────────────────────────────────────────
 
+    def set_scheme(self, scheme) -> None:
+        """Update active classification scheme and refresh if data present."""
+        self._active_scheme = scheme
+        if len(self.dataset_tabs) >= 2:
+            self.update_comparison()
+
     def set_dataset_tabs(self, dataset_tabs) -> None:
         """Called by main_window whenever the dataset tab list changes.
 
@@ -748,19 +726,13 @@ class ComparisonTab(QWidget):
                 return math.sqrt(d84 / d16)
             return None
         if label == "Fines%":
-            return _get_fines_pct(dataset)
+            return _get_fines_pct(dataset, self._active_scheme)
         return None  # Text rows handled separately
 
     def _gradation_class(self, dataset) -> str:
-        """Classify gradation as Uniform / Moderate / Well-graded from Cu."""
+        """Classify gradation as Uniform / Moderately graded / Well-graded from Cu."""
         cu = dataset.get_uniformity_coefficient()
-        if cu is None:
-            return "—"
-        if cu < 4:
-            return "Uniform"
-        if cu < 6:
-            return "Moderate"
-        return "Well-graded"
+        return _gc_cu_label(cu)
 
     def _make_param_cell(self, label: str, description: str, olive: bool) -> QWidget:
         """Build a two-line parameter cell widget (name + description)."""

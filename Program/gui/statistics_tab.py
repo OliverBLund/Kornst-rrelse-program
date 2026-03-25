@@ -32,6 +32,11 @@ import numpy as np
 from data_loader import GrainSizeData
 from k_calculations import KCalculationResult
 from .theme import C, F
+from grain_classification import (
+    ISO14688,
+    cu_label as _cu_label,
+    permeability_class as _perm_class,
+)
 
 
 class CompactInfoBar(QFrame):
@@ -383,6 +388,7 @@ class StatisticsTab(QWidget):
 
         self.dataset = dataset
         self.k_results: Optional[List[KCalculationResult]] = None
+        self._scheme = ISO14688
 
         # Get temperature and porosity from dataset
         self.temperature = dataset.temperature
@@ -689,8 +695,11 @@ class StatisticsTab(QWidget):
             if valid_k:
                 mean_k = np.mean(valid_k)
 
-        # Soil type
-        soil_type = self.dataset.classify_soil()
+        # Soil type — use structured classify() if available, else fallback
+        try:
+            soil_type = self.dataset.classify(scheme=self._scheme).label
+        except Exception:
+            soil_type = self.dataset.classify_soil()
 
         # Update info bar
         self.info_bar.update_info(
@@ -740,36 +749,43 @@ class StatisticsTab(QWidget):
 
         # Update classification
         mean_k = np.mean(k_values)
-        if mean_k > 1e-2:
-            classification = "Very High Permeability (Gravel)"
-        elif mean_k > 1e-4:
-            classification = "High Permeability (Clean Sand)"
-        elif mean_k > 1e-5:
-            classification = "Moderate Permeability (Fine Sand)"
-        elif mean_k > 1e-7:
-            classification = "Low Permeability (Silt)"
-        else:
-            classification = "Very Low Permeability (Clay)"
-
+        classification = _perm_class(mean_k)
         self.k_stats_widget.classification_label.setText(
             f"Permeability: {classification}"
         )
 
     def update_soil_classification(self):
         """Update soil classification display"""
-        soil_type = self.dataset.classify_soil()
-
-        text = f"""USCS Classification:
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-
-Primary: {soil_type}
-
-Classification based on:
-  • Grain size distribution
-  • Uniformity coefficient
-  • Coefficient of curvature
-"""
+        try:
+            result = self.dataset.classify(scheme=self._scheme)
+            f = result.fractions
+            text = (
+                f"{result.scheme.name} Classification:\n"
+                f"{'─' * 35}\n\n"
+                f"Primary type:  {result.primary_type}\n"
+                f"Gradation:     {result.gradation or '—'}\n"
+            )
+            if result.uscs_symbol:
+                text += f"USCS symbol:   {result.uscs_symbol}\n"
+            text += (
+                f"\nLabel: {result.label}\n\n"
+                f"Grain fractions:\n"
+                f"  Clay:   {f.clay_pct:.1f}%\n"
+                f"  Silt:   {f.silt_pct:.1f}%\n"
+                f"  Sand:   {f.sand_pct:.1f}%\n"
+                f"  Gravel: {f.gravel_pct:.1f}%\n"
+                f"  Cobble: {f.cobble_pct:.1f}%\n\n"
+                f"Cu: {result.cu_label}  |  Cc: {result.cc_label}\n"
+            )
+        except Exception:
+            text = self.dataset.classify_soil()
         self.classification_widget.classification_text.setPlainText(text)
+
+    def set_scheme(self, scheme):
+        """Set the active classification scheme and refresh classification displays."""
+        self._scheme = scheme
+        self.update_soil_classification()
+        self.update_summary_bar()
 
     def set_k_results(self, results: List[KCalculationResult]):
         """Set K-calculation results and update display"""
@@ -876,12 +892,7 @@ Classification based on:
             cu = d60 / d10
             gradation_text += f"<b>Uniformity Coefficient (Cu):</b> {cu:.2f}\n"
             gradation_text += f"  └─ D60/D10 = {d60:.3f}/{d10:.3f}\n"
-            if cu < 4:
-                gradation_text += "  └─ <b>Uniform</b>\n"
-            elif cu < 6:
-                gradation_text += "  └─ <b>Moderately graded</b>\n"
-            else:
-                gradation_text += "  └─ <b>Well-graded</b>\n"
+            gradation_text += f"  └─ <b>{_cu_label(cu)}</b>\n"
 
         # Coefficient of Curvature
         if d10 and d30 and d60:

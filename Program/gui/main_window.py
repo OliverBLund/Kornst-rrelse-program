@@ -26,6 +26,7 @@ from gui.theme import C, F, SZ, build_stylesheet, icon, apply_matplotlib_style
 from qt_chrome import FramelessMainWindowMixin
 from data_loader import DataLoader, GrainSizeData
 from k_calculations import KCalculator
+from grain_classification import ISO14688
 
 
 # ─────────────────────────────────────────────────────────────────────
@@ -366,6 +367,7 @@ class MainWindow(FramelessMainWindowMixin, QMainWindow):
         self.k_calculator = KCalculator()
         self.dataset_tabs: List[DatasetTab] = []
         self.dataset_counter = 0
+        self.active_scheme = ISO14688
 
         # Global stylesheet
         self.setStyleSheet(build_stylesheet())
@@ -399,6 +401,7 @@ class MainWindow(FramelessMainWindowMixin, QMainWindow):
         self.control_panel.update_error_tab_message.connect(self.update_error_tab_message)
         self.control_panel.sample_selected.connect(self._on_sidebar_sample_selected)
         self.control_panel.selection_changed.connect(self._on_sidebar_selection_changed)
+        self.control_panel.scheme_changed.connect(self._on_scheme_changed)
 
         # ── Main area ──────────────────────────────────────────────
         main_widget = QWidget()
@@ -987,6 +990,13 @@ class MainWindow(FramelessMainWindowMixin, QMainWindow):
     def _on_sidebar_selection_changed(self):
         """Push the current selected-tab subset to the comparison tab."""
         self.comparison_tab.set_dataset_tabs(self._get_selected_dataset_tabs())
+
+    def _on_scheme_changed(self, scheme):
+        """Propagate a new classification scheme to all open dataset tabs."""
+        self.active_scheme = scheme
+        for tab in self.dataset_tabs:
+            if hasattr(tab, 'set_scheme'):
+                tab.set_scheme(scheme)
 
     def add_dataset_tab(self, dataset: GrainSizeData):
         self.dataset_counter += 1

@@ -9,15 +9,18 @@ from PyQt6.QtWidgets import (QFrame, QVBoxLayout, QHBoxLayout, QGroupBox,
                             QListWidget, QListWidgetItem, QSplitter, QWidget,
                             QFileDialog, QMessageBox, QHeaderView, QApplication,
                             QMenu, QDialog, QDialogButtonBox, QScrollArea,
-                            QToolButton, QSizePolicy, QTabWidget)
+                            QToolButton, QSizePolicy, QTabWidget, QToolTip)
 from PyQt6.QtCore import QThread, QTimer
 from data_loader import DataLoader
 from gui.column_mapper import ColumnMapperDialog
 import os
-from PyQt6.QtCore import Qt, pyqtSignal, QSize
+from PyQt6.QtCore import Qt, pyqtSignal, QSize, QRectF, QPoint
 from PyQt6.QtGui import (QIcon, QFont, QAction, QPainter, QColor,
-                         QLinearGradient, QBrush, QPixmap)
+                         QLinearGradient, QBrush, QPixmap, QPen, QFontMetrics)
 from gui.theme import C, F, SZ, icon
+from grain_classification import (
+    ISO14688, GrainClassificationScheme, ClassificationResult,
+)
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -536,6 +539,10 @@ class _FileListWidget(QScrollArea):
         if file_path and file_path in self._cards:
             self._cards[file_path].set_active(True)
 
+    def get_active_path(self) -> str | None:
+        """Return the file path of the currently active (clicked) card, or None."""
+        return self._active_path
+
     def get_selected_paths(self) -> list[str]:
         """Return file paths of all selected cards."""
         return [fp for fp, card in self._cards.items() if card.is_selected]
@@ -974,6 +981,359 @@ class PorosityDialog(QDialog):
             self.info_label.setText("ℹ️ No changes detected")
 
 
+class _FractionBar(QWidget):
+    """Stacked horizontal fraction bar drawn with QPainter.
+
+    - 28 px tall, rounded corners, inset highlight at top
+    - Each segment filled with grain-class color; inline text when wide enough
+    - Mouse tracking → per-segment QToolTip on hover
+    - No-data state: dashed border + centred placeholder text
+    """
+
+    _COLORS = [C.GC_CLAY, C.GC_SILT, C.GC_SAND, C.GC_GRAVEL, C.GC_COBBLE]
+    _LABELS = ["Clay",    "Silt",    "Sand",    "Gravel",    "Cobble"]
+    # Text colour per segment (sand is dark-on-light, others white-on-dark)
+    _TEXT_C = ["#ffffff", "#ffffff", "#5a3800", "#ffffff",   "#ffffff"]
+
+    # Minimum pixel widths for showing text in a segment
+    _MIN_W_FULL  = 52   # "Sand · 74%"
+    _MIN_W_SHORT = 26   # "Gvl"
+
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self._fractions: list[float] = []
+        self._seg_rects: list[tuple[int, int, str, str]] = []  # (x, w, name, pct_str)
+        self.setMouseTracking(True)
+
+    def set_fractions(self, result: ClassificationResult | None):
+        if result is None:
+            self._fractions = []
+            self.setToolTip("")
+        else:
+            f = result.fractions
+            self._fractions = [
+                f.clay_pct, f.silt_pct, f.sand_pct, f.gravel_pct, f.cobble_pct,
+            ]
+            parts = []
+            for label, pct in zip(self._LABELS, self._fractions):
+                if pct > 0:
+                    parts.append(f"{label} {pct:.1f}%")
+            self.setToolTip(" · ".join(parts))
+        self.update()
+
+    def _build_seg_rects(self, w: int) -> list:
+        """Return list of (x, seg_w, color, label, pct, text_color) for non-zero segs."""
+        if not self._fractions:
+            return []
+        total = sum(self._fractions)
+        if total == 0:
+            return []
+        segs = []
+        x = 0
+        non_zero = [(i, p) for i, p in enumerate(self._fractions) if p > 0]
+        for idx, (i, pct) in enumerate(non_zero):
+            seg_w = int(round(pct / total * w))
+            if idx == len(non_zero) - 1:
+                seg_w = w - x
+            segs.append((x, seg_w, self._COLORS[i], self._LABELS[i],
+                         pct, self._TEXT_C[i]))
+            x += seg_w
+        return segs
+
+    def mouseMoveEvent(self, event):
+        segs = self._build_seg_rects(self.width())
+        mx = event.position().x()
+        for x, seg_w, _c, label, pct, _tc in segs:
+            if x <= mx < x + seg_w:
+                tip = f"{label}: {pct:.1f}%"
+                QToolTip.showText(event.globalPosition().toPoint(), tip, self)
+                return
+        QToolTip.hideText()
+
+    def paintEvent(self, event):
+        painter = QPainter(self)
+        painter.setRenderHint(QPainter.RenderHint.Antialiasing)
+        w, h = self.width(), self.height()
+        r = 4.0
+
+        segs = self._build_seg_rects(w)
+
+        if not segs:
+            # ── No-data: dashed border + centred text ────────────────────
+            pen = QPen(QColor(C.SB_BDR))
+            pen.setWidth(1)
+            pen.setStyle(Qt.PenStyle.DashLine)
+            painter.setPen(pen)
+            painter.setBrush(Qt.BrushStyle.NoBrush)
+            painter.drawRoundedRect(QRectF(0.5, 0.5, w - 1, h - 1), r, r)
+            painter.setPen(QColor(C.SB_MUTED))
+            font = QFont(F.MONO, 8)
+            painter.setFont(font)
+            painter.drawText(QRectF(0, 0, w, h),
+                             Qt.AlignmentFlag.AlignCenter, "No data loaded")
+            painter.end()
+            return
+
+        # ── Draw filled segments ──────────────────────────────────────────
+        # Clip entire bar to rounded rect so segments inherit the shape
+        from PyQt6.QtGui import QPainterPath
+        clip_path = QPainterPath()
+        clip_path.addRoundedRect(QRectF(0, 0, w, h), r, r)
+        painter.setClipPath(clip_path)
+
+        font = QFont(F.MONO, 8)
+        font.setWeight(QFont.Weight.Medium)
+        painter.setFont(font)
+        fm = QFontMetrics(font)
+
+        for x, seg_w, color_hex, label, pct, text_color in segs:
+            painter.setBrush(QBrush(QColor(color_hex)))
+            painter.setPen(Qt.PenStyle.NoPen)
+            painter.drawRect(QRectF(x, 0, seg_w, h))
+
+            # Inline text if segment is wide enough
+            if seg_w >= self._MIN_W_FULL:
+                text = f"{label} · {pct:.0f}%"
+            elif seg_w >= self._MIN_W_SHORT:
+                text = label[:3]
+            else:
+                text = ""
+
+            if text:
+                painter.setPen(QColor(text_color))
+                painter.drawText(
+                    QRectF(x, 0, seg_w, h),
+                    Qt.AlignmentFlag.AlignCenter,
+                    text,
+                )
+
+        painter.setClipping(False)
+
+        # ── Border overlay ────────────────────────────────────────────────
+        pen = QPen(QColor(C.SB_BDR))
+        pen.setWidth(1)
+        painter.setPen(pen)
+        painter.setBrush(Qt.BrushStyle.NoBrush)
+        painter.drawRoundedRect(QRectF(0.5, 0.5, w - 1, h - 1), r, r)
+
+        # ── Inset highlight: 1px white line at top ────────────────────────
+        painter.setPen(QPen(QColor(255, 255, 255, 90)))
+        painter.drawLine(QRectF(r, 1, w - 2 * r, 0).topLeft().toPoint(),
+                         QRectF(r, 1, w - 2 * r, 0).topRight().toPoint())
+
+        painter.end()
+
+
+class _StratigraphyWidget(QWidget):
+    """Sidebar stratigraphy widget — clean, no nested boxes.
+
+    Layout (top→bottom):
+      • _FractionBar   28 px QPainter bar with per-segment tooltip
+      • Fractions line  compact single row  ● 90% Sand · ● 9% Silt …
+      • Result row      label left  |  scheme pill right  (no box)
+      • Perm line       droplet icon + olive value  (no box)
+    """
+
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self._result: ClassificationResult | None = None
+        self._setup_ui()
+
+    # ── Public API ────────────────────────────────────────────────────────────
+
+    def update_result(self, result: ClassificationResult | None):
+        self._result = result
+        self._refresh()
+
+    # ── Internal ──────────────────────────────────────────────────────────────
+
+    def _setup_ui(self):
+        root = QVBoxLayout(self)
+        root.setContentsMargins(10, 4, 10, 8)
+        root.setSpacing(5)
+        self.setAttribute(Qt.WidgetAttribute.WA_StyledBackground)
+        self.setStyleSheet(f"background: {C.SB};")
+
+        # ── Fraction bar ──────────────────────────────────────────────────
+        self._bar = _FractionBar(self)
+        self._bar.setFixedHeight(28)
+        root.addWidget(self._bar)
+
+        # ── Compact fractions line ────────────────────────────────────────
+        # Custom painter widget: ● 90% Sand · ● 9% Silt  (only significant)
+        self._frac_line = _FractionsLine(self)
+        self._frac_line.setFixedHeight(16)
+        root.addWidget(self._frac_line)
+
+        # ── Result row (no box — just text on sidebar bg) ─────────────────
+        result_row = QWidget()
+        result_row.setStyleSheet("background: transparent;")
+        result_h = QHBoxLayout(result_row)
+        result_h.setContentsMargins(0, 0, 0, 0)
+        result_h.setSpacing(6)
+
+        self._result_lbl = QLabel("No data loaded")
+        self._result_lbl.setFont(QFont(F.UI, F.SZ_SM, QFont.Weight.Medium))
+        self._result_lbl.setStyleSheet(f"color: {C.SB_MUTED}; background: transparent;")
+        result_h.addWidget(self._result_lbl, 1)
+
+        self._scheme_badge = QLabel("")
+        self._scheme_badge.setFont(QFont(F.MONO, 7))
+        self._scheme_badge.setStyleSheet(
+            f"background: {C.SB_UP}; border: 1px solid {C.SB_BDR};"
+            f" border-radius: 99px; padding: 1px 6px; color: {C.SB_MUTED};"
+        )
+        self._scheme_badge.setVisible(False)
+        result_h.addWidget(self._scheme_badge, 0)
+
+        root.addWidget(result_row)
+
+        # ── Permeability line (no box) ────────────────────────────────────
+        perm_row = QWidget()
+        perm_row.setStyleSheet("background: transparent;")
+        perm_h = QHBoxLayout(perm_row)
+        perm_h.setContentsMargins(0, 0, 0, 0)
+        perm_h.setSpacing(5)
+
+        try:
+            _perm_icon = QLabel()
+            _perm_icon.setPixmap(icon("fa6s.droplet", C.SB_MUTED).pixmap(8, 8))
+            _perm_icon.setStyleSheet("background: transparent;")
+            perm_h.addWidget(_perm_icon)
+        except Exception:
+            pass
+
+        self._perm_lbl = QLabel("—")
+        self._perm_lbl.setFont(QFont(F.MONO, 8))
+        self._perm_lbl.setStyleSheet(f"color: {C.SB_MUTED}; background: transparent;")
+        perm_h.addWidget(self._perm_lbl, 1)
+
+        root.addWidget(perm_row)
+
+    def _refresh(self):
+        r = self._result
+        self._bar.set_fractions(r)
+        self._frac_line.set_fractions(r)
+
+        if r is None:
+            self._result_lbl.setText("No data loaded")
+            self._result_lbl.setStyleSheet(f"color: {C.SB_MUTED}; background: transparent;")
+            self._scheme_badge.setVisible(False)
+            self._perm_lbl.setText("—")
+            self._perm_lbl.setStyleSheet(f"color: {C.SB_MUTED}; background: transparent;")
+            self._perm_lbl.setToolTip("")
+            return
+
+        # Classification label
+        self._result_lbl.setText(r.label.title())
+        self._result_lbl.setStyleSheet(f"color: {C.SB_TEXT}; background: transparent;")
+
+        # Scheme pill
+        scheme_short = (r.scheme.key.upper()
+                        .replace("ISO14688", "ISO 14688")
+                        .replace("CUSTOM", "Custom"))
+        self._scheme_badge.setText(scheme_short)
+        self._scheme_badge.setVisible(True)
+
+        # Permeability — olive colour, full text as tooltip
+        perm = r.permeability_class
+        self._perm_lbl.setText(perm)
+        self._perm_lbl.setStyleSheet(f"color: {C.OLIVE}; background: transparent;")
+        self._perm_lbl.setToolTip(perm)
+
+
+class _FractionsLine(QWidget):
+    """Single-line compact fractions summary drawn with QPainter.
+
+    Renders:  ● 90% Sand  ·  ● 9% Silt  ·  ● 1% Gravel
+    Only shows fractions ≥ 0.5%.  Fractions sorted by value descending.
+    """
+
+    _DEFS = [
+        ("Clay",   C.GC_CLAY),
+        ("Silt",   C.GC_SILT),
+        ("Sand",   C.GC_SAND),
+        ("Gravel", C.GC_GRAVEL),
+        ("Cobble", C.GC_COBBLE),
+    ]
+
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self._fractions: list[tuple[str, float, str]] = []  # (name, pct, color)
+
+    def set_fractions(self, result: ClassificationResult | None):
+        if result is None:
+            self._fractions = []
+        else:
+            f = result.fractions
+            raw = [
+                (name, pct, col)
+                for (name, col), pct in zip(
+                    [(d[0], d[1]) for d in self._DEFS],
+                    [f.clay_pct, f.silt_pct, f.sand_pct, f.gravel_pct, f.cobble_pct]
+                )
+                if pct >= 0.5
+            ]
+            # Sort descending so dominant fraction appears first
+            self._fractions = sorted(raw, key=lambda t: t[1], reverse=True)
+        self.update()
+
+    def paintEvent(self, event):
+        if not self._fractions:
+            return
+
+        painter = QPainter(self)
+        painter.setRenderHint(QPainter.RenderHint.Antialiasing)
+        w, h = self.width(), self.height()
+
+        dot_sz   = 6
+        dot_gap  = 4   # gap between dot and text
+        sep_gap  = 8   # gap each side of separator "·"
+        cy       = h // 2
+
+        font_main = QFont(F.MONO, 8)
+        font_sep  = QFont(F.UI, 8)
+        painter.setFont(font_main)
+        fm = QFontMetrics(font_main)
+
+        x = 0
+        for i, (name, pct, color_hex) in enumerate(self._fractions):
+            # Separator
+            if i > 0:
+                painter.setFont(font_sep)
+                sep_w = QFontMetrics(font_sep).horizontalAdvance("·")
+                painter.setPen(QColor(C.SB_MUTED))
+                painter.drawText(
+                    QRectF(x + sep_gap, 0, sep_w, h),
+                    Qt.AlignmentFlag.AlignCenter, "·"
+                )
+                x += sep_w + sep_gap * 2
+                painter.setFont(font_main)
+
+            # Colored dot
+            dot_y = cy - dot_sz // 2
+            painter.setBrush(QBrush(QColor(color_hex)))
+            painter.setPen(Qt.PenStyle.NoPen)
+            painter.drawRoundedRect(QRectF(x, dot_y, dot_sz, dot_sz), 1.5, 1.5)
+            x += dot_sz + dot_gap
+
+            # Text: "90% Sand"
+            text = f"{pct:.0f}% {name}"
+            text_w = fm.horizontalAdvance(text)
+            painter.setPen(QColor(C.SB_MID))
+            painter.drawText(
+                QRectF(x, 0, text_w, h),
+                Qt.AlignmentFlag.AlignVCenter | Qt.AlignmentFlag.AlignLeft,
+                text,
+            )
+            x += text_w
+
+            if x > w:
+                break
+
+        painter.end()
+
+
 class ControlPanel(QFrame):
     # Signals for communication with main window
     files_loaded = pyqtSignal(list)  # Emitted when files are loaded
@@ -984,6 +1344,7 @@ class ControlPanel(QFrame):
     update_error_tab_message = pyqtSignal(str, str)  # Update existing error tab with new message
     dataset_fix_requested = pyqtSignal(str)  # Emitted when user wants to fix/remap a dataset (file_path)
     selection_changed = pyqtSignal()  # Emitted when card selected-toggle state changes
+    scheme_changed = pyqtSignal(object)  # GrainClassificationScheme — emitted when user picks a new scheme
 
     def __init__(self):
         super().__init__()
@@ -991,6 +1352,7 @@ class ControlPanel(QFrame):
         self.validation_errors = []  # Track validation issues
         self.data_loader = DataLoader()  # Data loading engine
         self.file_statuses = {}  # Track file loading status: 'pending', 'auto', 'failed', 'review', 'loaded'
+        self._active_scheme: GrainClassificationScheme = ISO14688
 
         # Temperature change debouncing timer
         self.temp_change_timer = QTimer()
@@ -1370,6 +1732,27 @@ class ControlPanel(QFrame):
         params_v.addWidget(self.porosity_settings_btn)
         body_v.addWidget(params_inner)
 
+        # ── 2e. STRATIGRAPHY section ──────────────────────────────────
+        div2 = QFrame()
+        div2.setFrameShape(QFrame.Shape.HLine)
+        div2.setFixedHeight(1)
+        div2.setStyleSheet(f"background: {C.SB_BDR};")
+        body_v.addWidget(div2)
+
+        strata_header = _SectionHeader("STRATIGRAPHY",
+                                        btn_text="Scheme", btn_icon="fa6s.sliders")
+        strata_header.action_btn.clicked.connect(self._open_classification_dialog)
+        body_v.addWidget(strata_header)
+
+        strata_outer = QWidget()
+        strata_outer.setStyleSheet(f"background: {C.SB};")
+        strata_outer_v = QVBoxLayout(strata_outer)
+        strata_outer_v.setContentsMargins(0, 0, 0, 0)
+        strata_outer_v.setSpacing(0)
+        self._strata_widget = _StratigraphyWidget()
+        strata_outer_v.addWidget(self._strata_widget)
+        body_v.addWidget(strata_outer)
+
         # ── 3. DTU box — matches .dtu-box in CSS ────────────────────────
         dtu_w = QWidget()
         dtu_w.setStyleSheet(
@@ -1496,7 +1879,8 @@ class ControlPanel(QFrame):
             item = self.samples_table.item(row, 0)
             if item and item.data(Qt.ItemDataRole.UserRole) == file_path:
                 self.samples_table.selectRow(row)
-                return
+                break
+        self._refresh_stratigraphy(file_path)
 
     def _on_card_context_menu(self, file_path: str, global_pos):
         """Show context menu triggered from a _SampleCard right-click."""
@@ -1596,6 +1980,72 @@ class ControlPanel(QFrame):
         except Exception:
             pass
         self._file_list.update_card_meta(file_path, d50_str, k_str)
+        # Also refresh the stratigraphy widget for the active card
+        self._refresh_stratigraphy(file_path)
+
+    # ── Classification / Stratigraphy ─────────────────────────────────────────
+
+    def _open_classification_dialog(self):
+        """Open the Classification System dialog and connect its signal."""
+        from gui.classification_dialog import ClassificationDialog
+        dlg = ClassificationDialog(current_scheme=self._active_scheme, parent=self)
+        dlg.scheme_selected.connect(self._on_scheme_changed)
+        dlg.exec()
+
+    def _on_scheme_changed(self, scheme: GrainClassificationScheme):
+        """Store the new active scheme, refresh stratigraphy, emit to main window."""
+        self._active_scheme = scheme
+        self._refresh_stratigraphy()
+        self.scheme_changed.emit(scheme)
+
+    def _refresh_stratigraphy(self, file_path: str | None = None):
+        """Classify the active dataset and update the stratigraphy widget.
+
+        If file_path is None, uses the currently active card path.
+        """
+        # Determine the active file path
+        if file_path is None:
+            # Use the currently selected / active card
+            active = self._file_list.get_active_path()
+            if active is None:
+                self._strata_widget.update_result(None)
+                return
+            file_path = active
+
+        sample_name = self.extract_sample_name(file_path)
+        entry = self.loaded_samples.get(sample_name)
+        if not entry:
+            self._strata_widget.update_result(None)
+            return
+
+        dataset = entry.get('data')
+        if not dataset or not hasattr(dataset, 'classify'):
+            self._strata_widget.update_result(None)
+            return
+
+        # Try to get k_mean for permeability class
+        k_mean_ms = None
+        try:
+            if hasattr(self, 'main_window') and hasattr(self.main_window, 'dataset_tabs_widget'):
+                for i in range(self.main_window.dataset_tabs_widget.count()):
+                    tab = self.main_window.dataset_tabs_widget.widget(i)
+                    if (hasattr(tab, 'dataset') and tab.dataset is dataset
+                            and hasattr(tab, 'current_results') and tab.current_results):
+                        from statistics import geometric_mean
+                        k_vals = [v for v in tab.current_results.values()
+                                  if isinstance(v, (int, float)) and v > 0]
+                        if k_vals:
+                            # Convert from m/day to m/s (÷86400)
+                            k_mean_ms = geometric_mean(k_vals) / 86400.0
+                        break
+        except Exception:
+            pass
+
+        try:
+            result = dataset.classify(scheme=self._active_scheme, k_mean_ms=k_mean_ms)
+            self._strata_widget.update_result(result)
+        except Exception:
+            self._strata_widget.update_result(None)
 
     def add_files(self):
         """Add multiple files for batch processing"""
