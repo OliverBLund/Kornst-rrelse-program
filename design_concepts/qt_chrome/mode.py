@@ -1,4 +1,4 @@
-"""Window chrome mode resolution helpers."""
+"""Chrome mode resolution helpers for main windows and dialogs."""
 
 from __future__ import annotations
 
@@ -20,17 +20,13 @@ def normalize_chrome_mode(raw_mode: str | None) -> Optional[str]:
 
 
 def resolve_window_chrome_mode(
-    default_windows: str = "native",
+    default_windows: str = "frameless",
     default_other: str = "native",
     **_ignored,
 ) -> str:
     """
-    Resolve window chrome mode from fixed defaults.
+    Resolve app window chrome mode from fixed defaults.
     """
-    env_override = normalize_chrome_mode(os.environ.get("GSA_WINDOW_CHROME"))
-    if env_override:
-        return env_override
-
     normalized_windows = normalize_chrome_mode(default_windows) or "frameless"
     normalized_other = normalize_chrome_mode(default_other) or "native"
     return normalized_windows if os.name == "nt" else normalized_other
@@ -43,7 +39,10 @@ def resolve_dialog_chrome_mode(
     default_other: str = "native",
     **_ignored,
 ) -> str:
-    """Resolve dialog chrome mode from parent/default fallback only."""
+    """
+    Resolve dialog chrome mode from parent/default fallback only.
+    """
+
     normalized_parent = normalize_chrome_mode(parent_mode)
     if normalized_parent:
         return normalized_parent

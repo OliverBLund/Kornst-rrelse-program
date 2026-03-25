@@ -1,9 +1,6 @@
-"""Reusable frameless window helpers for PyQt6 apps."""
+"""Reusable frameless window/dialog chrome helpers for PyQt6 projects."""
 
 from .dialog_controller import FramelessDialogChromeController
-from .frameless_dialog_base import FramelessDialogBase
-from .frameless_main_window_mixin import FramelessMainWindowMixin
-from .frameless_dialog_mixin import FramelessDialogMixin
 from .mask import apply_frameless_round_mask
 from .mode import resolve_dialog_chrome_mode, resolve_window_chrome_mode
 from .platform import enable_windows_soft_corners
@@ -11,9 +8,6 @@ from .window_helper import FramelessWindowChromeHelper
 
 __all__ = [
     "FramelessDialogChromeController",
-    "FramelessDialogBase",
-    "FramelessMainWindowMixin",
-    "FramelessDialogMixin",
     "FramelessWindowChromeHelper",
     "apply_frameless_round_mask",
     "enable_windows_soft_corners",

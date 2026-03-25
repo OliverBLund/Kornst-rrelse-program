@@ -24,8 +24,8 @@ except Exception:  # pragma: no cover - optional module in some environments
 
 from .mask import apply_frameless_round_mask
 from .mode import resolve_window_chrome_mode
+from .dialog_controller import FramelessDialogChromeController
 from .platform import disable_windows_window_transitions, enable_windows_soft_corners
-from .window_helper import FramelessWindowChromeHelper
 
 
 class _FramelessDragWidgetFilter(QObject):
@@ -181,9 +181,10 @@ class FramelessDialogMixin:
     ) -> None:
         self._dialog_chrome_mode = "native"
         self._dialog_window_chrome = None
+        self._dialog_drag_widget = None
         self._dialog_drag_filters = []
-        self._dialog_soft_corners_applied = False
-        self._dialog_transitions_disabled = False
+        self._dialog_soft_corners_pending = False
+        self._dialog_native_prewarmed = False
         self._dialog_enable_edge_resize = bool(enable_edge_resize)
         self._dialog_resize_margin = int(resize_margin)
         self._dialog_top_resize_margin = int(top_resize_margin)
@@ -200,48 +201,9 @@ class FramelessDialogMixin:
         allow_double_click_maximize: bool = False,
         include_children: Optional[bool] = None,
     ) -> None:
-        if widget is None:
-            return
-        if include_children is None:
-            # Performance default:
-            # - Binding on the full dialog should not recurse through every child.
-            # - Binding on a dedicated header should recurse for better drag UX.
-            include_children = widget is not self
-
-        interactive_types = (
-            QAbstractButton,
-            QAbstractItemView,
-            QAbstractSlider,
-            QAbstractSpinBox,
-            QComboBox,
-            QLineEdit,
-            QTextEdit,
-            QPlainTextEdit,
-        )
-        if QWebEngineView is not None:
-            interactive_types = interactive_types + (QWebEngineView,)
-
-        def _under_interactive_parent(target: QWidget) -> bool:
-            current = target
-            while current is not None and current is not widget:
-                if isinstance(current, interactive_types):
-                    return True
-                current = current.parentWidget()
-            return isinstance(widget, interactive_types)
-
-        targets = [widget]
-        if include_children:
-            targets.extend(widget.findChildren(QWidget))
-        for target in targets:
-            if _under_interactive_parent(target):
-                continue
-            drag_filter = _FramelessDragWidgetFilter(
-                self,
-                target,
-                allow_double_click_maximize=allow_double_click_maximize,
-            )
-            target.installEventFilter(drag_filter)
-            self._dialog_drag_filters.append(drag_filter)
+        self._dialog_drag_widget = widget
+        self._ensure_dialog_window_chrome()
+        self._prewarm_dialog_native_window()
 
     def _is_frameless_mode(self) -> bool:
         return getattr(self, "_dialog_chrome_mode", "native") == "frameless"
@@ -267,9 +229,9 @@ class FramelessDialogMixin:
         if helper is None:
             return
         try:
-            cleanup = getattr(helper, "_cleanup", None)
+            cleanup = getattr(helper, "cleanup", None)
             if callable(cleanup):
-                cleanup()
+                cleanup(detach_targets=True)
         except Exception:
             pass
         try:
@@ -280,82 +242,85 @@ class FramelessDialogMixin:
 
     def _ensure_dialog_window_chrome(self) -> None:
         if not self._is_frameless_mode():
-            self._release_dialog_window_chrome()
             return
-        if not bool(getattr(self, "_dialog_enable_edge_resize", False)):
-            self._release_dialog_window_chrome()
+        header_widget = getattr(self, "_dialog_drag_widget", None)
+        enable_resize = bool(getattr(self, "_dialog_enable_edge_resize", False))
+        if header_widget is None and not enable_resize:
             return
-        if getattr(self, "_dialog_window_chrome", None) is not None:
-            return
-        self._dialog_window_chrome = FramelessWindowChromeHelper(
-            self,
-            margin=max(2, int(getattr(self, "_dialog_resize_margin", 8))),
-            top_margin=max(2, int(getattr(self, "_dialog_top_resize_margin", 6))),
-            is_effectively_maximized=lambda: bool(self.isMaximized()),
+        helper = getattr(self, "_dialog_window_chrome", None)
+        if helper is None:
+            helper = FramelessDialogChromeController(
+                self,
+                resize_margin=max(2, int(getattr(self, "_dialog_resize_margin", 8))),
+            )
+            self._dialog_window_chrome = helper
+        helper.set_enabled(True)
+        helper.configure(
+            header_widget=header_widget,
+            resize_margin=max(2, int(getattr(self, "_dialog_resize_margin", 8))),
+            enable_resize=enable_resize,
         )
+
+    def _prewarm_dialog_native_window(self) -> None:
+        if self._dialog_native_prewarmed or not self._is_frameless_mode() or self.isVisible():
+            return
+        try:
+            self.setAttribute(Qt.WidgetAttribute.WA_NativeWindow, True)
+            self.winId()
+            self._ensure_dialog_window_chrome()
+            disable_windows_window_transitions(self)
+            enable_windows_soft_corners(self)
+            self._dialog_soft_corners_pending = False
+            self._dialog_native_prewarmed = True
+        except Exception:
+            pass
 
     def _init_dialog_chrome(self) -> None:
         self._release_dialog_window_chrome()
-        self._dialog_soft_corners_applied = False
-        self._dialog_transitions_disabled = False
+        self._dialog_soft_corners_pending = False
+        self._dialog_native_prewarmed = False
         chrome_mode = resolve_window_chrome_mode(
             default_windows=getattr(self, "_dialog_default_windows", "frameless"),
             default_other=getattr(self, "_dialog_default_other", "native"),
         )
         self._dialog_chrome_mode = chrome_mode
 
+        flags = self.windowFlags()
+
         if chrome_mode == "frameless":
             try:
-                flags = self.windowFlags() | Qt.WindowType.FramelessWindowHint
-                flags &= ~Qt.WindowType.WindowTitleHint
-                self.setWindowFlags(flags)
+                self.setWindowFlags(flags | Qt.WindowType.FramelessWindowHint)
                 self.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground, False)
                 self.setMouseTracking(bool(getattr(self, "_dialog_enable_edge_resize", False)))
-                self._ensure_dialog_window_chrome()
+                self._dialog_soft_corners_pending = True
                 return
             except Exception:
                 self._dialog_window_chrome = None
                 self._dialog_chrome_mode = "native"
+                self._dialog_soft_corners_pending = False
 
-        flags = self.windowFlags()
-        flags &= ~Qt.WindowType.FramelessWindowHint
-        flags |= Qt.WindowType.WindowTitleHint
-        self.setWindowFlags(flags)
+        self.setWindowFlags(flags & ~Qt.WindowType.FramelessWindowHint)
         self.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground, False)
         self.setMouseTracking(False)
-
-    def _enable_dialog_windows_soft_corners(self) -> None:
-        enable_windows_soft_corners(self)
-
-    def _disable_dialog_windows_transitions(self) -> None:
-        disable_windows_window_transitions(self)
+        self._dialog_soft_corners_pending = False
 
     def resizeEvent(self, event):
         super().resizeEvent(event)
         self._apply_frameless_round_mask()
 
-    def event(self, event):
-        result = super().event(event)
-        if event.type() == QEvent.Type.WinIdChange:
-            self._dialog_soft_corners_applied = False
-            self._dialog_transitions_disabled = False
-            if self._is_frameless_mode():
-                self._disable_dialog_windows_transitions()
-                self._dialog_transitions_disabled = True
-                self._enable_dialog_windows_soft_corners()
-                self._dialog_soft_corners_applied = True
-        return result
-
     def showEvent(self, event):
-        super().showEvent(event)
         self._ensure_dialog_window_chrome()
+        helper = getattr(self, "_dialog_window_chrome", None)
+        if helper is not None and self._is_frameless_mode():
+            try:
+                helper.on_show()
+            except Exception:
+                pass
+        if self._dialog_soft_corners_pending and self._is_frameless_mode():
+            enable_windows_soft_corners(self)
+            self._dialog_soft_corners_pending = False
+        super().showEvent(event)
         self._apply_frameless_round_mask()
-        if not getattr(self, "_dialog_transitions_disabled", False):
-            self._disable_dialog_windows_transitions()
-            self._dialog_transitions_disabled = True
-        if not getattr(self, "_dialog_soft_corners_applied", False):
-            self._enable_dialog_windows_soft_corners()
-            self._dialog_soft_corners_applied = True
         self._notify_dialog_chrome_state()
 
     def changeEvent(self, event):

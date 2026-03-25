@@ -256,6 +256,7 @@ class PlotWidget(QWidget):
     def draw_classification_zones(self, ax):
         """Draw grain size classification zones as background bands using active scheme."""
         s = self._scheme
+        x_min, x_max = ax.get_xlim()
         zones = [
             {'name': 'Clay',   'min': 0.0001,        'max': s.clay_max,   'color': C.GC_CLAY},
             {'name': 'Silt',   'min': s.clay_max,    'max': s.silt_max,   'color': C.GC_SILT},
@@ -265,12 +266,18 @@ class PlotWidget(QWidget):
         ]
 
         for zone in zones:
+            # Skip zones entirely outside the visible range
+            if zone['max'] <= x_min or zone['min'] >= x_max:
+                continue
+
             ax.axvspan(zone['min'], zone['max'],
                       color=zone['color'], alpha=0.18,
                       zorder=0)
 
-            # Label at geometric-mean x position
-            mid_point = np.sqrt(zone['min'] * zone['max'])
+            # Label at geometric-mean of the VISIBLE portion — clamped to x range
+            lo_vis = max(zone['min'], x_min)
+            hi_vis = min(zone['max'], x_max)
+            mid_point = np.sqrt(lo_vis * hi_vis)
             ax.text(mid_point, 95, zone['name'],
                    ha='center', va='top', fontsize=8,
                    color='#5a4a3a', fontweight='bold', alpha=0.6)
@@ -327,7 +334,28 @@ class PlotWidget(QWidget):
         self.k_value_ax = None
         self.active_axes = [self.current_ax]
 
-        # Draw classification zones if enabled (must be before plotting data)
+        # Compute axis limits up-front so zone drawing can use the correct x range.
+        s = self._scheme
+        sorted_pairs = sorted(zip(diameters, cumulative))
+        x_min = sorted_pairs[0][0] * 0.5
+        last_x = sorted_pairs[-1][0]
+        pct_at_largest = sorted_pairs[-1][1]
+        x_max = last_x * 2
+        if pct_at_largest > 1.0:
+            # Retained material exists above the last sieve.
+            # Extend x_max to the right boundary of the zone containing that sieve,
+            # so the user can see which zone the retained fraction belongs to.
+            if last_x < s.sand_max:
+                x_max = max(x_max, s.sand_max * 2)
+            elif last_x < s.gravel_max:
+                x_max = max(x_max, s.gravel_max * 1.5)
+            else:
+                x_max = max(x_max, last_x * 3)
+        self.current_ax.set_xlim(x_min, x_max)
+        self.current_ax.set_ylim(0, 100)
+
+        # Draw classification zones if enabled (must be after xlim is set so labels
+        # are clamped to the visible range correctly)
         if self.show_classification_zones:
             self.draw_classification_zones(self.current_ax)
 
@@ -391,18 +419,7 @@ class PlotWidget(QWidget):
         # Set axis properties
         self.current_ax.set_facecolor(style.axes_facecolor)
         self.current_ax.tick_params(labelsize=style.tick_fontsize)
-        # X-axis right limit: if significant material (>1%) is retained on the
-        # largest measured sieve, extend the axis to expose the coarser zone bands.
-        sorted_pairs = sorted(zip(diameters, cumulative))
-        x_min = sorted_pairs[0][0] * 0.5
-        x_max = sorted_pairs[-1][0] * 2
-        pct_at_largest = sorted_pairs[-1][1]   # % passing at the largest sieve
-        if pct_at_largest > 1.0:
-            # Material exists beyond the data range — extend to show the zone it occupies.
-            # Use scheme gravel_max as the minimum right edge so the cobble band is visible.
-            x_max = max(x_max, self._scheme.gravel_max * 3, 200.0)
-        self.current_ax.set_xlim(x_min, x_max)
-        self.current_ax.set_ylim(0, 100)
+        # xlim/ylim already set at the top of update_plot before zone drawing
 
         # Apply legend styling
         if self.show_legend:
@@ -644,11 +661,19 @@ class PlotWidget(QWidget):
         if self.grain_size_ax == self.current_ax and self.grain_data:
             # Grain size plot — same retained-material logic as update_plot
             diameters, cumulative = self.grain_data
+            s = self._scheme
             sorted_pairs = sorted(zip(diameters, cumulative))
             x_min = sorted_pairs[0][0] * 0.5
-            x_max = sorted_pairs[-1][0] * 2
-            if sorted_pairs[-1][1] > 1.0:
-                x_max = max(x_max, self._scheme.gravel_max * 3, 200.0)
+            last_x = sorted_pairs[-1][0]
+            pct_at_largest = sorted_pairs[-1][1]
+            x_max = last_x * 2
+            if pct_at_largest > 1.0:
+                if last_x < s.sand_max:
+                    x_max = max(x_max, s.sand_max * 2)
+                elif last_x < s.gravel_max:
+                    x_max = max(x_max, s.gravel_max * 1.5)
+                else:
+                    x_max = max(x_max, last_x * 3)
             self.current_ax.set_xlim(x_min, x_max)
             self.current_ax.set_ylim(0, 100)
         elif self.k_value_ax == self.current_ax and self.k_results:

@@ -18,6 +18,7 @@ from PyQt6.QtCore import Qt, pyqtSignal, QSize, QRectF, QPoint
 from PyQt6.QtGui import (QIcon, QFont, QAction, QPainter, QColor,
                          QLinearGradient, QBrush, QPixmap, QPen, QFontMetrics)
 from gui.theme import C, F, SZ, icon
+from qt_chrome.frameless_dialog_base import FramelessDialogBase
 from grain_classification import (
     ISO14688, GrainClassificationScheme, ClassificationResult,
 )
@@ -578,7 +579,7 @@ class _FileListWidget(QScrollArea):
 # ─────────────────────────────────────────────────────────────────────────────
 
 
-class PorosityDialog(QDialog):
+class PorosityDialog(FramelessDialogBase):
     """
     Dialog for managing porosity settings across all datasets
     Each dataset can have its own porosity value
@@ -587,7 +588,7 @@ class PorosityDialog(QDialog):
     porosity_updated = pyqtSignal(str, float)  # dataset_name, new_porosity
 
     def __init__(self, main_window, parent=None):
-        super().__init__(parent)
+        super().__init__(parent, default_mode="auto")
         self.main_window = main_window
         self.setWindowTitle("Porosity Settings - Per Dataset")
         self.setMinimumWidth(700)
@@ -606,6 +607,7 @@ class PorosityDialog(QDialog):
             "<b>Manage Porosity for Each Dataset</b><br>"
             "Porosity affects K-value calculations. Each dataset can have its own porosity value."
         )
+        self._header_label = header_label
         header_label.setStyleSheet("""
             QLabel {
                 font-size: 11pt;
@@ -708,6 +710,12 @@ class PorosityDialog(QDialog):
         button_box.addButton(close_btn, QDialogButtonBox.ButtonRole.RejectRole)
 
         layout.addWidget(button_box)
+
+        self.install_chrome_behavior(
+            header_widget=self._header_label,
+            corner_radius=8,
+            resize_margin=8,
+        )
 
     def load_dataset_porosity_values(self):
         """Load all datasets and their current porosity values"""
@@ -1988,7 +1996,7 @@ class ControlPanel(QFrame):
     def _open_classification_dialog(self):
         """Open the Classification System dialog and connect its signal."""
         from gui.classification_dialog import ClassificationDialog
-        dlg = ClassificationDialog(current_scheme=self._active_scheme, parent=self)
+        dlg = ClassificationDialog(current_scheme=self._active_scheme, parent=self.window())
         dlg.scheme_selected.connect(self._on_scheme_changed)
         dlg.exec()
 

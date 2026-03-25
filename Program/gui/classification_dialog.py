@@ -24,7 +24,7 @@ from PyQt6.QtGui     import (QColor, QPainter, QBrush, QPen, QFont,
                               QLinearGradient, QDesktopServices)
 from PyQt6.QtCore    import QUrl
 from PyQt6.QtWidgets import (
-    QDialog, QVBoxLayout, QHBoxLayout, QWidget, QLabel, QPushButton,
+    QVBoxLayout, QHBoxLayout, QWidget, QLabel, QPushButton,
     QFrame, QScrollArea, QTabWidget, QTableWidget, QTableWidgetItem,
     QHeaderView, QLineEdit, QDoubleSpinBox, QFileDialog,
     QMessageBox, QSizePolicy,
@@ -35,7 +35,7 @@ from grain_classification import (
     ISO14688, USCS, SCHEMES, make_custom_scheme,
 )
 from gui.theme import C, F, SZ, icon
-from qt_chrome.frameless_dialog_mixin import FramelessDialogMixin
+from qt_chrome.frameless_dialog_base import FramelessDialogBase
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -325,7 +325,7 @@ class _SchemeCard(QFrame):
 # CLASSIFICATION DIALOG
 # ─────────────────────────────────────────────────────────────────────────────
 
-class ClassificationDialog(FramelessDialogMixin, QDialog):
+class ClassificationDialog(FramelessDialogBase):
     """4-tab Classification System dialog."""
 
     scheme_selected = pyqtSignal(object)   # GrainClassificationScheme
@@ -333,7 +333,7 @@ class ClassificationDialog(FramelessDialogMixin, QDialog):
     def __init__(self, current_scheme: GrainClassificationScheme = None,
                  custom_scheme: GrainClassificationScheme = None,
                  parent=None):
-        super().__init__(parent)
+        super().__init__(parent, default_mode="auto")
         self._current  = current_scheme or ISO14688
         self._pending  = self._current       # scheme being previewed before Apply
         self._custom   = custom_scheme or make_custom_scheme(
@@ -343,9 +343,12 @@ class ClassificationDialog(FramelessDialogMixin, QDialog):
         self.setMinimumWidth(700)
         self.setMinimumHeight(560)
         self.resize(720, 580)
-        self.init_frameless_dialog_chrome(corner_radius_px=8)
         self._build()
-        self.bind_frameless_drag_widget(self._header_widget)
+        self.install_chrome_behavior(
+            header_widget=self._header_widget,
+            corner_radius=8,
+            resize_margin=8,
+        )
 
     # ── Build ──────────────────────────────────────────────────────────────
 
