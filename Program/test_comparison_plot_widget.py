@@ -29,15 +29,15 @@ def build_dataset(name: str) -> GrainSizeData:
     )
 
 
-def build_results(scale: float) -> list[KCalculationResult]:
+def build_results(scale: float, flagged_method: str | None = None) -> list[KCalculationResult]:
     return [
         KCalculationResult(
             method_name='Hazen',
             k_value=1.0e-4 * scale,
             formula_used='',
-            status=CalculationStatus.OK,
+            status=CalculationStatus.WARNING if flagged_method == 'Hazen' else CalculationStatus.OK,
             status_message='',
-            conditions_met=True,
+            conditions_met=flagged_method != 'Hazen',
             temperature=20.0,
             porosity=0.35,
             grain_size_used='D10',
@@ -46,9 +46,9 @@ def build_results(scale: float) -> list[KCalculationResult]:
             method_name='Beyer',
             k_value=1.5e-4 * scale,
             formula_used='',
-            status=CalculationStatus.OK,
+            status=CalculationStatus.WARNING if flagged_method == 'Beyer' else CalculationStatus.OK,
             status_message='',
-            conditions_met=True,
+            conditions_met=flagged_method != 'Beyer',
             temperature=20.0,
             porosity=0.35,
             grain_size_used='D10',
@@ -57,9 +57,9 @@ def build_results(scale: float) -> list[KCalculationResult]:
 
 
 class DummyDatasetTab:
-    def __init__(self, name: str, scale: float):
+    def __init__(self, name: str, scale: float, flagged_method: str | None = None):
         self._dataset = build_dataset(name)
-        self._results = build_results(scale)
+        self._results = build_results(scale, flagged_method=flagged_method)
 
     def get_dataset(self):
         return self._dataset
@@ -72,7 +72,7 @@ class TestComparisonPlotWidget(unittest.TestCase):
     def setUp(self):
         self.widget = ComparisonPlotWidget()
         self.widget.set_datasets([
-            DummyDatasetTab('Sample A', 1.0),
+            DummyDatasetTab('Sample A', 1.0, flagged_method='Beyer'),
             DummyDatasetTab('Sample B', 2.0),
         ])
 
@@ -102,6 +102,18 @@ class TestComparisonPlotWidget(unittest.TestCase):
         self.assertAlmostEqual(sum(heights), 100.0, places=6)
         self.assertEqual(self.widget.display_mode, 'grid')
         self.assertTrue(self.widget.grid_radio.isChecked())
+
+    def test_k_value_overlay_hatches_flagged_methods_and_shows_grid(self):
+        self.widget.on_plot_type_changed('K-Values')
+        self.widget.set_display_mode('overlay')
+        self.widget.show_grid = True
+        self.widget.refresh_plot()
+
+        ax = self.widget.figure.axes[0]
+        hatches = [patch.get_hatch() for patch in ax.patches]
+
+        self.assertIn('////', hatches)
+        self.assertTrue(any(line.get_visible() for line in ax.yaxis.get_gridlines()))
 
     def test_reset_view_rebuilds_default_k_value_limits(self):
         self.widget.on_plot_type_changed('K-Values')

@@ -21,7 +21,11 @@
       "Bash(python -c \"from PyQt6.QtWebEngineWidgets import QWebEngineView; print\\(''WebEngine OK''\\)\")",
       "Bash(grep -r \"PyQt5\\\\|PyQt6\" 'C:\\\\Users\\\\s194420\\\\OneDrive - Danmarks Tekniske Universitet\\\\Poul Løgstrup Bjergs filer - Work_Projects_Oliver Lund\\\\Programmer\\\\Kornstørrelse - Program\\\\Program' --include=*.py -l)",
       "Bash(grep -roh PyQt[56] 'C:\\\\Users\\\\s194420\\\\OneDrive - Danmarks Tekniske Universitet\\\\Poul Løgstrup Bjergs filer - Work_Projects_Oliver Lund\\\\Programmer\\\\Kornstørrelse - Program\\\\Program' --include=*.py)",
-      "Bash(python -c \"from PyQt6.QtWidgets import QApplication; import sys; app = QApplication\\(sys.argv\\); screen = app.primaryScreen\\(\\); print\\(''devicePixelRatio:'', screen.devicePixelRatio\\(\\)\\); print\\(''logicalDotsPerInch:'', screen.logicalDotsPerInch\\(\\)\\); print\\(''physicalDotsPerInch:'', screen.physicalDotsPerInch\\(\\)\\)\")"
+      "Bash(python -c \"from PyQt6.QtWidgets import QApplication; import sys; app = QApplication\\(sys.argv\\); screen = app.primaryScreen\\(\\); print\\(''devicePixelRatio:'', screen.devicePixelRatio\\(\\)\\); print\\(''logicalDotsPerInch:'', screen.logicalDotsPerInch\\(\\)\\); print\\(''physicalDotsPerInch:'', screen.physicalDotsPerInch\\(\\)\\)\")",
+      "Bash(python -c \"import ast, sys; ast.parse\\(open\\(''gui/control_panel.py''\\).read\\(\\)\\); print\\(''OK''\\)\")",
+      "Bash(python -c \"import ast; ast.parse\\(open\\(''gui/control_panel.py'', encoding=''utf-8''\\).read\\(\\)\\); print\\(''OK''\\)\")",
+      "Bash(python -c \":*)",
+      "Bash(python -u -c \"import ast; tree = ast.parse\\(open\\(''''gui/control_panel.py'''', encoding=''''utf-8''''\\).read\\(\\)\\); names = {n.name for n in ast.walk\\(tree\\) if isinstance\\(n, ast.FunctionDef\\)}; [print\\(m, ''''OK'''' if m in names else ''''MISSING''''\\) for m in [''''show_file_info'''',''''show_file_log'''',''''show_file_props'''',''''_remove_card_by_path'''']]\")"
     ],
     "deny": [],
     "ask": []

@@ -91,6 +91,30 @@ class TestPlotWorkspaceWiring(unittest.TestCase):
         self.assertTrue(all(height >= 0 for height in heights))
         self.assertAlmostEqual(sum(heights), 100.0, places=6)
 
+    def test_k_value_plot_shows_grid_and_warning_hatch(self):
+        self.workspace.add_k_results(
+            {'Hazen': 1.0e-4, 'Beyer': 1.5e-4},
+            flagged_methods={'Beyer'},
+        )
+        self.workspace.current_plot_type = 'k-values'
+        self.workspace.show_grid = True
+        self.workspace.refresh_plot()
+
+        ax = self.workspace.plot_widget.current_ax
+        hatches = [patch.get_hatch() for patch in ax.patches]
+
+        self.assertTrue(any(line.get_visible() for line in ax.yaxis.get_gridlines()))
+        self.assertIn('////', hatches)
+
+    def test_combined_plot_shows_k_side_legend(self):
+        self.workspace.add_k_results({'Hazen': 1.0e-4, 'Beyer': 1.5e-4})
+        self.workspace.current_plot_type = 'combined'
+        self.workspace.show_legend = True
+        self.workspace.refresh_plot()
+
+        self.assertIsNotNone(self.workspace.plot_widget.k_value_ax)
+        self.assertIsNotNone(self.workspace.plot_widget.k_value_ax.get_legend())
+
 
 if __name__ == '__main__':
     unittest.main(verbosity=2)

@@ -5,6 +5,7 @@ Plot widget with real matplotlib integration for grain size distribution visuali
 from PyQt6.QtWidgets import QWidget, QVBoxLayout, QHBoxLayout, QPushButton, QLabel
 from PyQt6.QtCore import Qt
 from matplotlib.figure import Figure
+from matplotlib.patches import Patch
 import matplotlib.pyplot as plt
 import numpy as np
 from typing import Optional, List, Dict
@@ -179,6 +180,67 @@ class PlotWidget(QWidget):
                 linestyle=':',
                 alpha=style.d_line_alpha * 0.7,
             )
+
+    def _style_k_bar(self, bar, method: str, color: str, flagged: set[str]):
+        """Apply warning styling to flagged K-value bars."""
+        if method in flagged:
+            bar.set_facecolor('none')
+            bar.set_edgecolor(color)
+            bar.set_linewidth(2.0)
+            bar.set_hatch('////')
+            bar.set_alpha(1.0)
+        else:
+            bar.set_edgecolor('black')
+            bar.set_linewidth(1.0)
+
+    def _add_k_reference_lines(self, ax, k_values, style: PlotStyle):
+        """Add mean/min/max reference lines to a K-value axis."""
+        if not k_values:
+            return
+
+        mean_k = np.mean(k_values)
+        min_k = min(k_values)
+        max_k = max(k_values)
+
+        unit_symbol = HydraulicConductivityConverter.UNIT_SYMBOLS[self.display_unit]
+        format_str = HydraulicConductivityConverter.DISPLAY_FORMATS[self.display_unit]
+
+        ax.axhline(
+            y=mean_k,
+            color='red',
+            linestyle='-',
+            alpha=0.5,
+            label=f'Mean: {format_str.format(mean_k)} {unit_symbol}',
+        )
+        ax.axhline(
+            y=min_k,
+            color='blue',
+            linestyle=':',
+            alpha=0.5,
+            label=f'Min: {format_str.format(min_k)} {unit_symbol}',
+        )
+        ax.axhline(
+            y=max_k,
+            color='green',
+            linestyle=':',
+            alpha=0.5,
+            label=f'Max: {format_str.format(max_k)} {unit_symbol}',
+        )
+
+    def _add_k_status_legend(self, ax, flagged: set[str]):
+        handles, labels = ax.get_legend_handles_labels()
+        if flagged:
+            handles = handles + [
+                Patch(
+                    facecolor='none',
+                    edgecolor=self.current_style.k_bar_flagged_color,
+                    hatch='////',
+                    label='Flagged / Warning',
+                )
+            ]
+            labels = labels + ['Flagged / Warning']
+        if handles:
+            ax.legend(handles, labels, loc='upper right', fontsize=8)
 
     def draw_classification_zones(self, ax):
         """Draw grain size classification zones as background bands"""
@@ -383,18 +445,11 @@ class PlotWidget(QWidget):
 
             x_pos = np.arange(len(methods))
             bars = ax2.bar(x_pos, k_values, color=colors, alpha=0.8)
+            ax2.set_axisbelow(True)
 
             # Add value labels on bars with proper formatting
             for bar, method, color in zip(bars, methods, colors):
-                if method in flagged:
-                    bar.set_facecolor('none')
-                    bar.set_edgecolor(color)
-                    bar.set_linewidth(2.0)
-                    bar.set_hatch('////')
-                    bar.set_alpha(1.0)
-                else:
-                    bar.set_edgecolor('black')
-                    bar.set_linewidth(1.0)
+                self._style_k_bar(bar, method, color, flagged)
 
                 height = bar.get_height()
                 formatted_value = self._format_k_value(k_values_display[method])
@@ -412,6 +467,9 @@ class PlotWidget(QWidget):
             ax2.tick_params(labelsize=style.tick_fontsize - 1)
             if self.show_grid and style.grid_show:
                 ax2.grid(True, alpha=style.grid_alpha, axis='y', linestyle=style.grid_linestyle, color=style.grid_color, linewidth=style.grid_linewidth)
+            self._add_k_reference_lines(ax2, k_values, style)
+            if self.show_legend:
+                self._add_k_status_legend(ax2, flagged)
         else:
             ax2.text(0.5, 0.5, 'Calculate K values\nto view comparison',
                     transform=ax2.transAxes, ha='center', va='center', 
@@ -461,18 +519,11 @@ class PlotWidget(QWidget):
         # Create bar chart
         x_pos = np.arange(len(methods))
         bars = self.current_ax.bar(x_pos, k_values, color=colors, alpha=0.8)
+        self.current_ax.set_axisbelow(True)
 
         # Add value labels on bars with proper formatting
         for bar, method, color in zip(bars, methods, colors):
-            if method in flagged:
-                bar.set_facecolor('none')
-                bar.set_edgecolor(color)
-                bar.set_linewidth(2.5)
-                bar.set_hatch('////')
-                bar.set_alpha(1.0)
-            else:
-                bar.set_edgecolor('black')
-                bar.set_linewidth(1.0)
+            self._style_k_bar(bar, method, color, flagged)
 
             height = bar.get_height()
             formatted_value = self._format_k_value(k_values_display[method])
@@ -494,24 +545,9 @@ class PlotWidget(QWidget):
             self.current_ax.grid(True, alpha=style.grid_alpha, axis='y', linestyle=style.grid_linestyle,
                                color=style.grid_color, linewidth=style.grid_linewidth)
         
-        # Add min/max/mean lines with proper unit formatting
-        if k_values:
-            mean_k = np.mean(k_values)
-            min_k = min(k_values)
-            max_k = max(k_values)
-
-            unit_symbol = HydraulicConductivityConverter.UNIT_SYMBOLS[self.display_unit]
-            format_str = HydraulicConductivityConverter.DISPLAY_FORMATS[self.display_unit]
-
-            self.current_ax.axhline(y=mean_k, color='red', linestyle='-', alpha=0.5,
-                                   label=f'Mean: {format_str.format(mean_k)} {unit_symbol}')
-            self.current_ax.axhline(y=min_k, color='blue', linestyle=':', alpha=0.5,
-                                   label=f'Min: {format_str.format(min_k)} {unit_symbol}')
-            self.current_ax.axhline(y=max_k, color='green', linestyle=':', alpha=0.5,
-                                   label=f'Max: {format_str.format(max_k)} {unit_symbol}')
-
-            if self.show_legend:
-                self.current_ax.legend(loc='upper right', fontsize=8)
+        self._add_k_reference_lines(self.current_ax, k_values, style)
+        if self.show_legend:
+            self._add_k_status_legend(self.current_ax, flagged)
         
         # Adjust layout and redraw
         self.figure.tight_layout()

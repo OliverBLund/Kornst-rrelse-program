@@ -8,6 +8,7 @@ from PyQt6.QtWidgets import (
 )
 from PyQt6.QtCore import Qt, pyqtSignal
 from matplotlib.figure import Figure
+from matplotlib.patches import Patch
 import matplotlib.pyplot as plt
 import numpy as np
 from typing import List, Dict, Optional
@@ -42,6 +43,7 @@ class ComparisonPlotWidget(QWidget):
         # Data storage
         self.datasets = []
         self.k_results_dict = {}  # dataset_name -> k_results
+        self.flagged_methods_dict = {}  # dataset_name -> set(method_name)
         
         # Color scheme for consistency
         self.dataset_colors = [
@@ -285,6 +287,32 @@ class ComparisonPlotWidget(QWidget):
         next_passing = np.append(passing[1:], 0.0)
         freq = np.maximum(0.0, passing - next_passing)
         return sizes, freq
+
+    def _style_k_bar(self, bar, color: str, flagged: bool):
+        """Apply warning styling to flagged K-value bars."""
+        if flagged:
+            bar.set_facecolor('none')
+            bar.set_edgecolor(color)
+            bar.set_linewidth(2.0)
+            bar.set_hatch('////')
+            bar.set_alpha(1.0)
+        else:
+            bar.set_edgecolor('black')
+            bar.set_linewidth(0.5)
+
+    def _add_flagged_legend_handle(self, ax):
+        """Append a warning-state legend entry when flagged methods are present."""
+        handles, labels = ax.get_legend_handles_labels()
+        handles = handles + [
+            Patch(
+                facecolor='none',
+                edgecolor=C.TEXT,
+                hatch='////',
+                label='Flagged / Warning',
+            )
+        ]
+        labels = labels + ['Flagged / Warning']
+        ax.legend(handles, labels, loc='best', fontsize=8)
     
     def on_grid_layout_changed(self, text: str):
         """Handle grid layout change"""
@@ -307,6 +335,7 @@ class ComparisonPlotWidget(QWidget):
         """Set the datasets to compare"""
         self.datasets = []
         self.k_results_dict = {}
+        self.flagged_methods_dict = {}
         
         for tab in dataset_tabs:
             dataset = tab.get_dataset()
@@ -316,11 +345,16 @@ class ComparisonPlotWidget(QWidget):
             results = tab.get_results()
             if results:
                 k_dict = {}
+                flagged_methods = set()
                 for r in results:
                     if r.k_value is not None and r.k_value > 0:
                         k_dict[r.method_name] = r.k_value
+                    status_value = getattr(r.status, 'value', str(r.status))
+                    if status_value != 'OK' or not getattr(r, 'conditions_met', True):
+                        flagged_methods.add(r.method_name)
                 if k_dict:
                     self.k_results_dict[dataset.sample_name] = k_dict
+                    self.flagged_methods_dict[dataset.sample_name] = flagged_methods
     
     def refresh_plot(self):
         """Refresh the plot based on current settings"""
@@ -415,6 +449,7 @@ class ComparisonPlotWidget(QWidget):
     def plot_k_values_overlay(self):
         """Plot K-values as grouped bars"""
         ax = self.figure.add_subplot(1, 1, 1)
+        ax.set_axisbelow(True)
         
         # Get all unique methods
         all_methods = set()
@@ -428,16 +463,21 @@ class ComparisonPlotWidget(QWidget):
         bar_width = 0.8 / n_datasets
         
         # Plot bars for each dataset
+        has_flagged = False
         for i, (name, k_dict) in enumerate(self.k_results_dict.items()):
             values = [k_dict.get(method, 0) for method in methods]
             positions = np.arange(n_methods) + i * bar_width
             color = self.dataset_colors[i % len(self.dataset_colors)]
+            flagged_methods = self.flagged_methods_dict.get(name, set())
             
             bars = ax.bar(positions, values, bar_width, label=name,
                           color=color, alpha=0.8, edgecolor='black', linewidth=0.5)
             
             # Add value labels
-            for bar, val in zip(bars, values):
+            for bar, method, val in zip(bars, methods, values):
+                flagged = method in flagged_methods
+                has_flagged = has_flagged or flagged
+                self._style_k_bar(bar, color, flagged)
                 if val > 0:
                     height = bar.get_height()
                     ax.text(bar.get_x() + bar.get_width()/2, height*1.05,
@@ -453,11 +493,15 @@ class ComparisonPlotWidget(QWidget):
         if self.show_grid:
             ax.grid(True, axis='y', alpha=0.3)
         if self.show_legend:
-            ax.legend(loc='best', fontsize=8)
+            if has_flagged:
+                self._add_flagged_legend_handle(ax)
+            else:
+                ax.legend(loc='best', fontsize=8)
     
     def plot_k_values_grouped(self):
         """Plot K-values grouped by dataset"""
         ax = self.figure.add_subplot(1, 1, 1)
+        ax.set_axisbelow(True)
         
         datasets = list(self.k_results_dict.keys())
         n_datasets = len(datasets)
@@ -471,6 +515,7 @@ class ComparisonPlotWidget(QWidget):
         bar_width = 0.8 / len(methods)
         
         # Plot grouped by dataset
+        has_flagged = False
         for i, method in enumerate(methods):
             values = [self.k_results_dict[ds].get(method, 0) for ds in datasets]
             positions = np.arange(n_datasets) + i * bar_width
@@ -478,6 +523,10 @@ class ComparisonPlotWidget(QWidget):
             
             bars = ax.bar(positions, values, bar_width, label=method,
                           color=color, alpha=0.8, edgecolor='black', linewidth=0.5)
+            for bar, dataset_name in zip(bars, datasets):
+                flagged = method in self.flagged_methods_dict.get(dataset_name, set())
+                has_flagged = has_flagged or flagged
+                self._style_k_bar(bar, color, flagged)
         
         ax.set_xlabel('Dataset', fontsize=10)
         ax.set_ylabel('K (m/s)', fontsize=10)
@@ -489,7 +538,10 @@ class ComparisonPlotWidget(QWidget):
         if self.show_grid:
             ax.grid(True, axis='y', alpha=0.3)
         if self.show_legend:
-            ax.legend(loc='best', fontsize=7, ncol=2)
+            if has_flagged:
+                self._add_flagged_legend_handle(ax)
+            else:
+                ax.legend(loc='best', fontsize=7, ncol=2)
     
     def plot_k_values_grid(self):
         """Plot K-values in grid layout"""
@@ -504,9 +556,13 @@ class ComparisonPlotWidget(QWidget):
             methods = self._ordered_methods(k_dict.keys())
             values = [k_dict[m] for m in methods]
             colors = [self.method_colors.get(m, '#888888') for m in methods]
+            flagged_methods = self.flagged_methods_dict.get(name, set())
             
             bars = ax.bar(range(len(methods)), values, color=colors, 
                          alpha=0.8, edgecolor='black', linewidth=0.5)
+            ax.set_axisbelow(True)
+            for bar, method, color in zip(bars, methods, colors):
+                self._style_k_bar(bar, color, method in flagged_methods)
             
             ax.set_title(name, fontsize=9, fontweight='bold')
             ax.set_xlabel('Method', fontsize=8)
@@ -548,8 +604,12 @@ class ComparisonPlotWidget(QWidget):
                 k_dict = self.k_results_dict[dataset.sample_name]
                 methods = self._ordered_methods(k_dict.keys())[:5]  # Limit to 5 methods for space
                 values = [k_dict[m] for m in methods]
+                flagged_methods = self.flagged_methods_dict.get(dataset.sample_name, set())
                 
                 bars = ax2.bar(range(len(methods)), values, alpha=0.8)
+                ax2.set_axisbelow(True)
+                for bar, method in zip(bars, methods):
+                    self._style_k_bar(bar, self.method_colors.get(method, '#888888'), method in flagged_methods)
                 ax2.set_title(f'{dataset.sample_name} - K', fontsize=8)
                 ax2.set_xticks(range(len(methods)))
                 ax2.set_xticklabels([m[:3] for m in methods], rotation=45, fontsize=6)

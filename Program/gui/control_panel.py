@@ -9,7 +9,7 @@ from PyQt6.QtWidgets import (QFrame, QVBoxLayout, QHBoxLayout, QGroupBox,
                             QListWidget, QListWidgetItem, QSplitter, QWidget,
                             QFileDialog, QMessageBox, QHeaderView, QApplication,
                             QMenu, QDialog, QDialogButtonBox, QScrollArea,
-                            QToolButton, QSizePolicy)
+                            QToolButton, QSizePolicy, QTabWidget)
 from PyQt6.QtCore import QThread, QTimer
 from data_loader import DataLoader
 from gui.column_mapper import ColumnMapperDialog
@@ -149,6 +149,10 @@ class _SampleCard(QWidget):
     sig_clicked = pyqtSignal(str)          # file_path
     sig_ctx = pyqtSignal(str, object)      # file_path, QPoint (global)
     sig_selected = pyqtSignal(str, bool)   # file_path, is_selected
+    sig_inspect = pyqtSignal(str)          # file_path
+    sig_log = pyqtSignal(str)              # file_path
+    sig_props = pyqtSignal(str)            # file_path
+    sig_remove = pyqtSignal(str)           # file_path
 
     _STATUS_DOT = {
         'pending': C.SB_MUTED,
@@ -276,11 +280,11 @@ class _SampleCard(QWidget):
         # Action buttons row — .s-act-row in CSS
         act_row = QHBoxLayout()
         act_row.setSpacing(3)
-        for btn_text, btn_icon_name, is_danger in [
-            ("Inspect", "fa6s.magnifying-glass", False),
-            ("Log", "fa6s.clipboard-list", False),
-            ("Props", "fa6s.sliders", False),
-            ("Remove", "fa6s.trash", True),
+        for btn_text, btn_icon_name, is_danger, sig_attr in [
+            ("Inspect", "fa6s.magnifying-glass", False, "sig_inspect"),
+            ("Log",     "fa6s.clipboard-list",   False, "sig_log"),
+            ("Props",   "fa6s.sliders",           False, "sig_props"),
+            ("Remove",  "fa6s.trash",             True,  "sig_remove"),
         ]:
             btn = QPushButton(btn_text)
             btn.setObjectName("card-action")
@@ -300,6 +304,9 @@ class _SampleCard(QWidget):
                 f"QPushButton#card-action:hover {{ background: rgba(255,255,255,0.7); "
                 f"color: {C.SB_TEXT}; }}")
             btn.setCursor(Qt.CursorShape.PointingHandCursor)
+            # Wire to the matching signal — capture sig_attr by value
+            _sig = getattr(self, sig_attr)
+            btn.clicked.connect(lambda _checked, s=_sig: s.emit(self.file_path))
             act_row.addWidget(btn)
         act_row.addStretch()
         detail_v.addLayout(act_row)
@@ -453,6 +460,10 @@ class _FileListWidget(QScrollArea):
     card_clicked = pyqtSignal(str)         # file_path
     card_ctx = pyqtSignal(str, object)     # file_path, QPoint (global)
     selection_changed = pyqtSignal()       # emitted when any card's selected state changes
+    card_inspect = pyqtSignal(str)         # file_path
+    card_log = pyqtSignal(str)             # file_path
+    card_props = pyqtSignal(str)           # file_path
+    card_remove = pyqtSignal(str)          # file_path
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -487,6 +498,10 @@ class _FileListWidget(QScrollArea):
         card.sig_clicked.connect(self._on_card_clicked)
         card.sig_ctx.connect(self.card_ctx)
         card.sig_selected.connect(self._on_card_selected)
+        card.sig_inspect.connect(self.card_inspect)
+        card.sig_log.connect(self.card_log)
+        card.sig_props.connect(self.card_props)
+        card.sig_remove.connect(self.card_remove)
         count = self._layout.count()
         self._layout.insertWidget(count - 1, card)
         self._cards[file_path] = card
@@ -1193,6 +1208,10 @@ class ControlPanel(QFrame):
         self._file_list.card_ctx.connect(self._on_card_context_menu)
         self._file_list.selection_changed.connect(self._update_inventory_bar)
         self._file_list.selection_changed.connect(self.selection_changed)
+        self._file_list.card_inspect.connect(self.show_file_info)
+        self._file_list.card_log.connect(self.show_file_log)
+        self._file_list.card_props.connect(self.show_file_props)
+        self._file_list.card_remove.connect(self._remove_card_by_path)
         body_v.addWidget(self._file_list, 1)
 
         # ── 2c. Batch box — matches .sb-batch in CSS ─────────────────
@@ -1939,53 +1958,220 @@ class ControlPanel(QFrame):
             QMessageBox.warning(self, "Error", f"Failed to edit {os.path.basename(file_path)}:\n{str(e)}")
 
     def show_file_info(self, file_path: str):
-        """Show detailed information about a loaded file"""
+        """Show tabbed inspector: Stats + Raw Data."""
         sample_name = self.extract_sample_name(file_path)
-        if sample_name in self.loaded_samples:
-            dataset = self.loaded_samples[sample_name]['data']
+        if sample_name not in self.loaded_samples:
+            QMessageBox.information(self, "Inspect", "Dataset not yet loaded.")
+            return
 
-            d10 = dataset.get_d10()
-            d30 = dataset.get_d30()
-            d50 = dataset.get_d50()
-            d60 = dataset.get_d60()
-            cu = dataset.get_uniformity_coefficient()
+        dataset = self.loaded_samples[sample_name]['data']
 
-            def fmt(value, fmt_str):
-                return format(value, fmt_str) if value is not None else 'N/A'
+        def fmt(v, f):
+            return format(v, f) if v is not None else 'N/A'
 
-            # Create comprehensive file information
-            info_text = f"""File Analysis Report
-{'='*40}
+        d10 = dataset.get_d10()
+        d30 = dataset.get_d30()
+        d50 = dataset.get_d50()
+        d60 = dataset.get_d60()
+        cu  = dataset.get_uniformity_coefficient()
 
-📄 File: {os.path.basename(file_path)}
-🏷️  Sample: {dataset.sample_name}
-🌡️ Temperature: {dataset.temperature}°C
-🕳️ Porosity: {dataset.porosity}
-📊 Data Points: {len(dataset.particle_sizes)}
+        dlg = QDialog(self)
+        dlg.setWindowTitle(f"Inspect — {dataset.sample_name}")
+        dlg.resize(560, 480)
+        dlg_v = QVBoxLayout(dlg)
+        dlg_v.setContentsMargins(12, 12, 12, 12)
+        dlg_v.setSpacing(10)
 
-Grain Size Range:
-  Largest: {max(dataset.particle_sizes):.3f} mm
-  Smallest: {min(dataset.particle_sizes):.3f} mm
+        tabs = QTabWidget()
+        tabs.setDocumentMode(True)
 
-Characteristic Sizes:
-  D10: {fmt(d10, '.3f')} mm (Used by: Hazen, Terzaghi, Beyer, etc.)
-  D30: {fmt(d30, '.3f')} mm (Used for uniformity calculations)
-  D50: {fmt(d50, '.3f')} mm (Median grain size)
-  D60: {fmt(d60, '.3f')} mm (Used for uniformity coefficient)
+        # ── Tab 1: Stats ──────────────────────────────────────────────
+        stats_text = (
+            f"File:        {os.path.basename(file_path)}\n"
+            f"Sample:      {dataset.sample_name}\n"
+            f"Temperature: {dataset.temperature} °C\n"
+            f"Porosity:    {dataset.porosity}\n"
+            f"Data Points: {len(dataset.particle_sizes)}\n"
+            f"\n"
+            f"Grain Size Range\n"
+            f"  Largest:   {max(dataset.particle_sizes):.4f} mm\n"
+            f"  Smallest:  {min(dataset.particle_sizes):.4f} mm\n"
+            f"\n"
+            f"Characteristic Sizes\n"
+            f"  D10: {fmt(d10, '.4f')} mm\n"
+            f"  D30: {fmt(d30, '.4f')} mm\n"
+            f"  D50: {fmt(d50, '.4f')} mm  (median)\n"
+            f"  D60: {fmt(d60, '.4f')} mm\n"
+            f"\n"
+            f"Soil Classification:        {dataset.classify_soil()}\n"
+            f"Uniformity Coefficient Cu:  {fmt(cu, '.3f')}\n"
+        )
+        stats_edit = QTextEdit()
+        stats_edit.setReadOnly(True)
+        stats_edit.setFont(QFont(F.MONO, F.SZ_SM))
+        stats_edit.setPlainText(stats_text)
+        stats_edit.setFrameShape(QFrame.Shape.NoFrame)
+        tabs.addTab(stats_edit, "Stats")
 
-Soil Classification: {dataset.classify_soil()}
-Uniformity Coefficient (Cu): {fmt(cu, '.2f')}
+        # ── Tab 2: Raw Data ───────────────────────────────────────────
+        raw_tbl = QTableWidget(len(dataset.particle_sizes), 2)
+        raw_tbl.setHorizontalHeaderLabels(["Grain Size (mm)", "% Passing"])
+        raw_tbl.horizontalHeader().setSectionResizeMode(
+            QHeaderView.ResizeMode.Stretch)
+        raw_tbl.verticalHeader().setVisible(False)
+        raw_tbl.setAlternatingRowColors(True)
+        raw_tbl.setEditTriggers(QTableWidget.EditTrigger.NoEditTriggers)
+        raw_tbl.setSelectionBehavior(QTableWidget.SelectionBehavior.SelectRows)
+        raw_tbl.setFont(QFont(F.MONO, F.SZ_SM))
+        for i, (gs, pp) in enumerate(
+                zip(dataset.particle_sizes, dataset.percent_passing)):
+            raw_tbl.setItem(i, 0, QTableWidgetItem(f"{gs:.6g}"))
+            raw_tbl.setItem(i, 1, QTableWidgetItem(f"{pp:.4g}"))
+        tabs.addTab(raw_tbl, f"Raw Data  ({len(dataset.particle_sizes)} pts)")
 
-{'='*40}
-{dataset.get_detailed_validation_report()}"""
+        dlg_v.addWidget(tabs)
 
-            # Show in a dialog
-            msg_box = QMessageBox(self)
-            msg_box.setWindowTitle(f"File Information - {sample_name}")
-            msg_box.setText(info_text)
-            msg_box.setFont(QFont("Courier", 8))  # Monospace font for alignment
-            msg_box.resize(600, 400)  # Make dialog larger
-            msg_box.exec()
+        btn_box = QDialogButtonBox(QDialogButtonBox.StandardButton.Close)
+        btn_box.rejected.connect(dlg.reject)
+        dlg_v.addWidget(btn_box)
+        dlg.exec()
+
+    def show_file_log(self, file_path: str):
+        """Show the load-time validation log for a dataset."""
+        sample_name = self.extract_sample_name(file_path)
+        if sample_name not in self.loaded_samples:
+            QMessageBox.information(self, "Log", "Dataset not yet loaded.")
+            return
+
+        dataset = self.loaded_samples[sample_name]['data']
+        msgs = getattr(dataset, 'validation_messages', [])
+
+        dlg = QDialog(self)
+        dlg.setWindowTitle(f"Load Log — {dataset.sample_name}")
+        dlg.resize(500, 340)
+        dlg_v = QVBoxLayout(dlg)
+        dlg_v.setContentsMargins(12, 12, 12, 12)
+        dlg_v.setSpacing(10)
+
+        log_edit = QTextEdit()
+        log_edit.setReadOnly(True)
+        log_edit.setFont(QFont(F.MONO, F.SZ_SM))
+        log_edit.setFrameShape(QFrame.Shape.NoFrame)
+
+        if not msgs:
+            log_edit.setPlainText("No validation messages — dataset loaded cleanly.")
+        else:
+            lines = []
+            for m in msgs:
+                severity = getattr(m, 'severity', None)
+                sev_str = severity.name if severity is not None else "INFO"
+                title   = getattr(m, 'title', '')
+                message = getattr(m, 'message', '')
+                lines.append(f"[{sev_str}]  {title}")
+                if message:
+                    lines.append(f"        {message}")
+                lines.append("")
+            log_edit.setPlainText("\n".join(lines).strip())
+
+        dlg_v.addWidget(log_edit)
+        btn_box = QDialogButtonBox(QDialogButtonBox.StandardButton.Close)
+        btn_box.rejected.connect(dlg.reject)
+        dlg_v.addWidget(btn_box)
+        dlg.exec()
+
+    def show_file_props(self, file_path: str):
+        """Per-dataset properties editor: temperature + porosity override."""
+        sample_name = self.extract_sample_name(file_path)
+        if sample_name not in self.loaded_samples:
+            QMessageBox.information(self, "Props", "Dataset not yet loaded.")
+            return
+
+        dataset = self.loaded_samples[sample_name]['data']
+
+        # Find the dataset tab so we can push recalculation
+        ds_tab = None
+        if hasattr(self, 'main_window') and hasattr(self.main_window, 'dataset_tabs_widget'):
+            for i in range(self.main_window.dataset_tabs_widget.count()):
+                tab = self.main_window.dataset_tabs_widget.widget(i)
+                if hasattr(tab, 'dataset') and tab.dataset is dataset:
+                    ds_tab = tab
+                    break
+
+        dlg = QDialog(self)
+        dlg.setWindowTitle(f"Properties — {dataset.sample_name}")
+        dlg.setFixedWidth(340)
+        dlg_v = QVBoxLayout(dlg)
+        dlg_v.setContentsMargins(16, 16, 16, 12)
+        dlg_v.setSpacing(12)
+
+        _LBL_SS = f"font-size: {F.SZ_SM}pt; color: {C.TEXT_MID};"
+
+        # Temperature
+        temp_row = QHBoxLayout()
+        temp_lbl = QLabel("Temperature")
+        temp_lbl.setStyleSheet(_LBL_SS)
+        temp_spin = QDoubleSpinBox()
+        temp_spin.setRange(0, 50)
+        temp_spin.setSuffix(" °C")
+        temp_spin.setDecimals(1)
+        temp_spin.setValue(float(getattr(dataset, 'temperature', 20)))
+        temp_spin.setFixedWidth(90)
+        temp_row.addWidget(temp_lbl)
+        temp_row.addStretch()
+        temp_row.addWidget(temp_spin)
+        dlg_v.addLayout(temp_row)
+
+        # Porosity
+        por_row = QHBoxLayout()
+        por_lbl = QLabel("Porosity")
+        por_lbl.setStyleSheet(_LBL_SS)
+        por_spin = QDoubleSpinBox()
+        por_spin.setRange(0.10, 0.80)
+        por_spin.setSingleStep(0.01)
+        por_spin.setDecimals(4)
+        current_por = float(getattr(dataset, 'current_porosity', None)
+                            or getattr(dataset, 'porosity', 0.3))
+        por_spin.setValue(current_por)
+        por_spin.setFixedWidth(90)
+        por_row.addWidget(por_lbl)
+        por_row.addStretch()
+        por_row.addWidget(por_spin)
+        dlg_v.addLayout(por_row)
+
+        # Calculated porosity hint
+        calc_por = getattr(dataset, 'calculated_porosity', None)
+        if calc_por is not None:
+            hint = QLabel(f"Calculated (Urumovic): {calc_por:.4f}")
+            hint.setStyleSheet(f"font-size: {F.SZ_XS}pt; color: {C.SB_MUTED};")
+            dlg_v.addWidget(hint)
+
+        dlg_v.addSpacing(4)
+
+        btn_box = QDialogButtonBox(
+            QDialogButtonBox.StandardButton.Apply |
+            QDialogButtonBox.StandardButton.Close)
+        apply_btn = btn_box.button(QDialogButtonBox.StandardButton.Apply)
+
+        def _apply():
+            dataset.temperature = temp_spin.value()
+            new_por = por_spin.value()
+            dataset.current_porosity = new_por
+            dataset.porosity = new_por
+            if ds_tab is not None:
+                if hasattr(ds_tab, 'porosity'):
+                    ds_tab.porosity = new_por
+                if hasattr(ds_tab, 'statistics_tab'):
+                    ds_tab.statistics_tab.porosity = new_por
+                    ds_tab.statistics_tab.update_display()
+                if hasattr(ds_tab, 'calculate_k_values') and \
+                        hasattr(ds_tab, 'current_results') and ds_tab.current_results:
+                    ds_tab.calculate_k_values()
+            self._push_card_meta(file_path)
+
+        apply_btn.clicked.connect(_apply)
+        btn_box.rejected.connect(dlg.reject)
+        dlg_v.addWidget(btn_box)
+        dlg.exec()
 
     def batch_auto_load(self, file_paths: list):
         """Attempt to auto-load all files in the list"""

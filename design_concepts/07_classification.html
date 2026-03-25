@@ -1,0 +1,1077 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>07 — Classification System · GrainSize Concept</title>
+
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Playfair+Display:wght@600;700&family=Source+Sans+3:wght@300;400;500;600&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/all.min.css">
+
+<style>
+/* ══════════════════════════════════════════════
+   TOKENS  (identical to rest of concept suite)
+══════════════════════════════════════════════ */
+:root {
+  --bg:        #f5f5f0;
+  --bg-raised: #eee8dc;
+  --bg-low:    #e8e0d0;
+  --border:    #d4c4a8;
+  --border-dk: #c0ae90;
+  --text:      #2f2f2f;
+  --text-mid:  #5d4e37;
+  --text-muted:#9a8c78;
+
+  --olive:     #6b8e23;
+  --olive-h:   #7fa02d;
+  --olive-dk:  #4f6a1a;
+  --tan:       #d2b48c;
+  --earth:     #8b7355;
+
+  --sb:        #ddd3be;
+  --sb-up:     #e5dcc8;
+  --sb-dn:     #d0c4ac;
+  --sb-act:    #c8ba9e;
+  --sb-bdr:    #c0ae90;
+  --sb-text:   #3a2e1c;
+  --sb-mid:    #6a5438;
+  --sb-muted:  #9a8468;
+
+  --logo-bg:     #7a5e3e;
+  --logo-bg-top: #8e6e4a;
+  --logo-text:   #f4ece0;
+  --logo-sub:    #c8a87a;
+
+  --st-bg:   #8b7355;
+  --st-text: #f0e8d8;
+  --st-muted:#c4a882;
+
+  --mb-bg:   #ede8de;
+  --mb-bdr:  #cfc0a4;
+  --tb-bg:   #e4d8c0;
+  --tb-bdr:  #ccc0a0;
+
+  /* Grain-class palette */
+  --gc-clay:   #7a9bbd;
+  --gc-silt:   #b09870;
+  --gc-sand:   #d4b86a;
+  --gc-gravel: #a09080;
+  --gc-cobble: #807870;
+
+  --gc-clay-dk:   #4a6a8a;
+  --gc-silt-dk:   #7a6840;
+  --gc-sand-dk:   #a08030;
+  --gc-gravel-dk: #706050;
+
+  --sw:  260px;
+  --mbh: 24px;
+  --tbh: 40px;
+  --sth: 24px;
+
+  --fu: 'Source Sans 3', system-ui, sans-serif;
+  --fd: 'Playfair Display', Georgia, serif;
+  --fm: 'JetBrains Mono', monospace;
+  --r:  4px;
+}
+
+*,*::before,*::after { box-sizing: border-box; margin: 0; padding: 0; }
+html, body { height: 100%; overflow: hidden; }
+body { font-family: var(--fu); font-size: 13px; background: var(--bg); color: var(--text); -webkit-font-smoothing: antialiased; }
+button, select, input { font-family: inherit; cursor: pointer; }
+
+/* Grain texture overlay */
+body::after {
+  content: ''; position: fixed; inset: 0; pointer-events: none; z-index: 9998; opacity: .18;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='260' height='260'%3E%3Cfilter id='g'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.72' numOctaves='4' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='260' height='260' filter='url(%23g)' opacity='.07'/%3E%3C/svg%3E");
+}
+
+/* ══════════════════════════ LAYOUT GRID */
+.app {
+  display: grid; height: 100vh;
+  grid-template-rows: var(--mbh) 1fr var(--sth);
+  grid-template-columns: var(--sw) 1fr;
+  grid-template-areas: "mb mb" "sb main" "st st";
+  overflow: hidden;
+}
+
+/* ══════════════════════════ MENU BAR */
+.mb {
+  grid-area: mb; display: flex; align-items: center;
+  background: var(--mb-bg); border-bottom: 1px solid var(--mb-bdr);
+  padding: 0 6px; user-select: none;
+}
+.mb-title { position: absolute; left: 50%; transform: translateX(-50%); font-size: 11.5px; color: var(--text-muted); pointer-events: none; }
+.mi { display: flex; align-items: center; height: 100%; padding: 0 10px; font-size: 12.5px; color: var(--text-mid); border-radius: 2px; }
+.mb-sp { flex: 1; }
+
+/* ══════════════════════════ STATUS BAR */
+.st { grid-area: st; background: var(--st-bg); border-top: 1px solid rgba(0,0,0,.15); display: flex; align-items: center; padding: 0 12px; gap: 16px; }
+.st-chip { font-family: var(--fm); font-size: 9.5px; color: var(--st-muted); display: flex; align-items: center; gap: 5px; }
+.st-chip i { font-size: 9px; }
+.st-chip.hi { color: var(--st-text); }
+
+/* ══════════════════════════ SIDEBAR */
+.sb {
+  grid-area: sb; display: flex; flex-direction: column; overflow: hidden;
+  background: var(--sb); border-right: 1px solid var(--sb-bdr);
+  box-shadow: inset -4px 0 8px rgba(100,60,20,.05);
+}
+.sb-logo {
+  display: flex; align-items: center; gap: 11px; padding: 11px 14px 10px; flex-shrink: 0;
+  background: linear-gradient(160deg, var(--logo-bg-top) 0%, var(--logo-bg) 100%);
+  border-bottom: 2px solid var(--sb-bdr); box-shadow: 0 2px 6px rgba(0,0,0,.08);
+}
+.logo-mark { width: 32px; height: 32px; flex-shrink: 0; background: rgba(255,255,255,.13); border: 1px solid rgba(255,255,255,.22); border-radius: var(--r); display: flex; align-items: center; justify-content: center; }
+.logo-mark i { color: var(--logo-text); font-size: 14px; opacity: .9; }
+.logo-tx { display: flex; flex-direction: column; gap: 2px; }
+.logo-name { font-family: var(--fd); font-size: 14px; font-weight: 700; color: var(--logo-text); letter-spacing: .01em; }
+.logo-sub { font-family: var(--fm); font-size: 8.5px; color: var(--logo-sub); letter-spacing: .06em; }
+.sb-body { flex: 1; overflow-y: auto; overflow-x: hidden; scrollbar-width: thin; scrollbar-color: var(--sb-bdr) transparent; }
+.sb-sect {
+  padding: 7px 13px 6px; background: var(--sb-up); border-bottom: 1px solid var(--sb-bdr);
+  border-top: 1px solid rgba(255,255,255,.45); display: flex; align-items: center; justify-content: space-between;
+}
+.sb-sect-lbl { font-size: 9.5px; font-weight: 600; color: var(--sb-muted); letter-spacing: .09em; text-transform: uppercase; }
+.sb-sect-btn {
+  display: flex; align-items: center; gap: 3px; padding: 2px 7px;
+  border: 1px solid var(--sb-bdr); background: rgba(255,255,255,.35);
+  border-radius: var(--r); font-size: 10.5px; color: var(--sb-mid); transition: all .12s;
+}
+.sb-sect-btn:hover { background: rgba(255,255,255,.6); border-color: var(--border-dk); color: var(--sb-text); }
+.sb-sect-btn i { font-size: 9px; }
+
+/* ── Sample card (simplified, active state) ── */
+.s-list { display: flex; flex-direction: column; gap: 1px; padding: 4px 6px 2px; }
+.s-item { display: flex; flex-direction: column; border-radius: var(--r); border: 1px solid transparent; position: relative; }
+.s-item.active { background: var(--sb-act); border-color: var(--sb-bdr); }
+.s-item.active::before { content: ''; position: absolute; left: -6px; top: 10px; width: 3px; height: 16px; background: var(--olive); border-radius: 0 3px 3px 0; }
+.s-item-main { display: flex; align-items: center; gap: 8px; padding: 6px 8px; cursor: pointer; }
+.s-ic { width: 26px; height: 26px; border-radius: 3px; flex-shrink: 0; display: flex; align-items: center; justify-content: center; background: rgba(107,142,35,.15); border: 1px solid rgba(107,142,35,.3); }
+.s-ic i { font-size: 11px; color: var(--olive); }
+.s-info { flex: 1; min-width: 0; }
+.s-name { font-size: 12px; font-weight: 500; color: var(--sb-text); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.s-meta { font-family: var(--fm); font-size: 9px; color: var(--sb-muted); margin-top: 1px; }
+.s-led { width: 6px; height: 6px; border-radius: 50%; background: #5aaa3a; box-shadow: 0 0 4px rgba(90,170,58,.4); flex-shrink: 0; }
+
+/* ── Parameters ── */
+.p-rows { display: flex; flex-direction: column; gap: 5px; padding: 6px 10px; }
+.p-row { display: flex; align-items: center; justify-content: space-between; gap: 6px; }
+.p-lbl { font-size: 11.5px; color: var(--sb-mid); display: flex; align-items: center; gap: 4px; }
+.p-lbl i { width: 14px; font-size: 10px; color: var(--sb-muted); }
+.p-field { display: flex; align-items: center; gap: 4px; }
+.p-in { width: 62px; height: 22px; background: rgba(255,255,255,.55); border: 1px solid var(--sb-bdr); border-radius: 3px; color: var(--sb-text); font-family: var(--fm); font-size: 11px; text-align: right; padding: 0 5px; }
+.p-unit { font-family: var(--fm); font-size: 10px; color: var(--sb-muted); min-width: 18px; }
+.p-select { height: 22px; background: rgba(255,255,255,.55); border: 1px solid var(--sb-bdr); border-radius: 3px; color: var(--sb-text); font-size: 11px; padding: 0 4px; }
+
+/* ══════════════════════════
+   STRATIGRAPHY WIDGET
+   The key new sidebar component
+══════════════════════════ */
+.strata-wrap {
+  margin: 6px 10px 4px;
+}
+
+/* ── Header row with title + settings button ── */
+.strata-header {
+  display: flex; align-items: center; justify-content: space-between;
+  margin-bottom: 5px;
+}
+.strata-title {
+  font-size: 10px; font-weight: 600; color: var(--sb-muted);
+  letter-spacing: .07em; text-transform: uppercase;
+  display: flex; align-items: center; gap: 5px;
+}
+.strata-title i { font-size: 9px; }
+.strata-settings-btn {
+  display: flex; align-items: center; gap: 3px; padding: 2px 7px;
+  border: 1px solid var(--sb-bdr); background: rgba(255,255,255,.35);
+  border-radius: var(--r); font-size: 9.5px; color: var(--sb-mid);
+  transition: all .12s;
+}
+.strata-settings-btn:hover { background: rgba(255,255,255,.65); border-color: var(--border-dk); color: var(--sb-text); }
+.strata-settings-btn i { font-size: 8px; }
+
+/* ── The stacked grain bar ── */
+.strata-bar {
+  height: 28px; border-radius: 4px; overflow: hidden;
+  border: 1px solid var(--sb-bdr);
+  display: flex; width: 100%;
+  box-shadow: inset 0 1px 0 rgba(255,255,255,.4), 0 1px 3px rgba(0,0,0,.08);
+}
+.strata-seg {
+  height: 100%; display: flex; align-items: center; justify-content: center;
+  font-family: var(--fm); font-size: 8.5px; font-weight: 500;
+  letter-spacing: .02em; transition: opacity .15s; overflow: hidden;
+  cursor: default; position: relative;
+}
+.strata-seg:hover { opacity: .82; }
+.strata-seg span { white-space: nowrap; }
+.seg-clay   { background: var(--gc-clay);   color: #fff; }
+.seg-silt   { background: var(--gc-silt);   color: #fff; }
+.seg-sand   { background: var(--gc-sand);   color: #5a3800; }
+.seg-gravel { background: var(--gc-gravel); color: #fff; }
+
+/* ── Legend row beneath the bar ── */
+.strata-legend {
+  display: flex; gap: 0; margin-top: 4px;
+  border: 1px solid var(--sb-bdr); border-radius: 3px; overflow: hidden;
+}
+.strata-legend-item {
+  flex: 1; display: flex; flex-direction: column; align-items: center;
+  padding: 3px 2px 4px;
+  border-right: 1px solid var(--sb-bdr);
+  background: rgba(255,255,255,.25);
+}
+.strata-legend-item:last-child { border-right: none; }
+.sl-dot { width: 7px; height: 7px; border-radius: 2px; margin-bottom: 2px; }
+.sl-name { font-size: 8px; color: var(--sb-muted); font-family: var(--fm); letter-spacing: .03em; }
+.sl-pct  { font-size: 9.5px; font-weight: 600; color: var(--sb-text); font-family: var(--fm); line-height: 1.1; }
+
+/* ── Classification label ── */
+.strata-result {
+  margin-top: 5px;
+  display: flex; align-items: center; justify-content: space-between;
+  background: rgba(255,255,255,.35); border: 1px solid var(--sb-bdr);
+  border-radius: 3px; padding: 4px 8px;
+}
+.strata-result-label {
+  font-size: 11px; color: var(--sb-text); font-weight: 500;
+}
+.strata-result-scheme {
+  font-family: var(--fm); font-size: 8.5px; color: var(--sb-muted);
+  background: var(--sb-up); border: 1px solid var(--sb-bdr);
+  padding: 1px 5px; border-radius: 99px;
+}
+
+/* ── No-data state ── */
+.strata-empty {
+  height: 28px; border: 1.5px dashed var(--sb-bdr); border-radius: 4px;
+  display: flex; align-items: center; justify-content: center;
+  font-size: 10px; color: var(--sb-muted);
+}
+
+/* ── Mini permeability class strip ── */
+.perm-strip {
+  margin-top: 4px; padding: 3px 8px;
+  background: rgba(255,255,255,.25); border: 1px solid var(--sb-bdr);
+  border-radius: 3px; display: flex; align-items: center; gap: 6px;
+}
+.perm-strip-icon { font-size: 9px; color: var(--sb-muted); }
+.perm-strip-label { font-size: 10px; color: var(--sb-mid); flex: 1; }
+.perm-strip-value { font-family: var(--fm); font-size: 9px; color: var(--olive); font-weight: 500; }
+
+/* ══════════════════════════ MAIN AREA (blurred bg for dialog demo) */
+.main {
+  grid-area: main; background: var(--bg); overflow: hidden;
+  display: flex; flex-direction: column;
+}
+.tb {
+  height: var(--tbh); flex-shrink: 0; background: var(--tb-bg);
+  border-bottom: 1px solid var(--tb-bdr); display: flex; align-items: stretch;
+}
+.tab { display: flex; align-items: center; gap: 7px; padding: 0 16px; font-size: 12.5px; color: var(--text-muted); border-right: 1px solid var(--tb-bdr); border-bottom: 2px solid transparent; cursor: pointer; }
+.tab.on { background: var(--bg); color: var(--olive); border-bottom-color: var(--olive); font-weight: 600; }
+.tab i { font-size: 11px; }
+.main-body { flex: 1; display: flex; overflow: hidden; }
+
+/* Blurred placeholder content behind the dialog */
+.bg-content {
+  flex: 1; padding: 20px; display: flex; flex-direction: column; gap: 14px;
+  filter: blur(1.5px); opacity: .45; pointer-events: none; user-select: none;
+}
+.bg-card { background: white; border: 1px solid var(--border); border-radius: 6px; height: 120px; }
+.bg-card.tall { height: 240px; }
+.bg-row { display: flex; gap: 14px; }
+.bg-row .bg-card { flex: 1; }
+
+/* ══════════════════════════
+   DIALOG OVERLAY + BASE
+══════════════════════════ */
+.dlg-stage {
+  position: absolute; inset: 0;
+  background: rgba(42,30,15,.5); backdrop-filter: blur(1px);
+  display: flex; align-items: center; justify-content: center;
+  z-index: 100;
+}
+
+.dlg {
+  display: flex; flex-direction: column;
+  background: var(--bg); border: 1px solid var(--border);
+  border-radius: 7px;
+  box-shadow: 0 16px 56px rgba(30,15,5,.30), 0 4px 12px rgba(30,15,5,.12);
+  animation: dlg-in .18s cubic-bezier(.2,.6,.35,1) both;
+  overflow: hidden;
+}
+@keyframes dlg-in { from { opacity:0; transform: scale(.96) translateY(6px); } to { opacity:1; transform: none; } }
+
+.dh {
+  display: flex; align-items: center; gap: 10px; padding: 11px 16px 10px;
+  background: var(--bg-raised); border-bottom: 1px solid var(--border); flex-shrink: 0;
+}
+.dh-icon {
+  width: 30px; height: 30px; border-radius: var(--r); flex-shrink: 0;
+  display: flex; align-items: center; justify-content: center;
+  background: rgba(107,142,35,.12); border: 1px solid rgba(107,142,35,.25);
+}
+.dh-icon i { font-size: 13px; color: var(--olive); }
+.dh-tx { flex: 1; }
+.dh-title { font-family: var(--fd); font-size: 14px; color: var(--text); line-height: 1.2; }
+.dh-sub { font-size: 10.5px; color: var(--text-muted); margin-top: 1px; font-family: var(--fm); }
+.dh-close { width: 26px; height: 26px; border: none; background: transparent; border-radius: 3px; color: var(--text-muted); font-size: 14px; display: flex; align-items: center; justify-content: center; transition: all .1s; }
+.dh-close:hover { background: rgba(180,48,32,.1); color: #a03020; }
+
+.df {
+  display: flex; align-items: center; justify-content: flex-end; gap: 7px;
+  padding: 9px 14px; background: var(--bg-raised); border-top: 1px solid var(--border); flex-shrink: 0;
+}
+.df-l { flex: 1; display: flex; align-items: center; gap: 6px; }
+.df-ref { font-size: 10px; color: var(--text-muted); font-family: var(--fm); display: flex; align-items: center; gap: 4px; }
+.df-ref i { font-size: 9px; }
+.df-ref a { color: var(--olive); text-decoration: none; }
+.df-ref a:hover { text-decoration: underline; }
+
+.d-btn {
+  display: flex; align-items: center; gap: 6px; height: 28px; padding: 0 14px;
+  border: 1px solid var(--border); border-radius: var(--r);
+  font-size: 12px; color: var(--text-mid); background: var(--bg); transition: all .12s;
+}
+.d-btn:hover { background: var(--bg-raised); border-color: var(--border-dk); color: var(--text); }
+.d-btn.prim { background: var(--olive); border-color: var(--olive-dk); color: #fff; font-weight: 500; }
+.d-btn.prim:hover { background: var(--olive-h); }
+.d-btn i { font-size: 10px; }
+
+/* ══════════════════════════
+   CLASSIFICATION DIALOG
+   width 720px, tabs inside
+══════════════════════════ */
+#dlg-classif { width: 720px; max-width: 96vw; }
+
+/* Inner tab bar */
+.ci-tabs {
+  display: flex; border-bottom: 1px solid var(--border);
+  background: var(--bg-low); flex-shrink: 0;
+}
+.ci-tab {
+  display: flex; align-items: center; gap: 6px;
+  padding: 9px 18px 8px; font-size: 12px; color: var(--text-muted);
+  border-bottom: 2px solid transparent; cursor: pointer; transition: all .12s;
+  border-right: 1px solid var(--border);
+}
+.ci-tab:hover { color: var(--text-mid); background: rgba(107,142,35,.04); }
+.ci-tab.on { color: var(--olive); border-bottom-color: var(--olive); background: var(--bg); font-weight: 500; }
+.ci-tab i { font-size: 11px; }
+.ci-tab .badge {
+  font-family: var(--fm); font-size: 8.5px; padding: 1px 5px;
+  border-radius: 99px; background: rgba(107,142,35,.12); color: var(--olive);
+}
+
+.ci-body { flex: 1; overflow-y: auto; scrollbar-width: thin; scrollbar-color: var(--border) transparent; }
+
+/* ── Tab 1: Scheme Selector ── */
+.cs-schemes { display: flex; flex-direction: column; gap: 0; padding: 12px; }
+.cs-scheme-card {
+  display: flex; gap: 14px; padding: 14px;
+  border: 2px solid var(--border); border-radius: 6px;
+  margin-bottom: 8px; cursor: pointer; transition: all .14s; background: white;
+  position: relative;
+}
+.cs-scheme-card:hover { border-color: var(--border-dk); background: var(--bg-raised); }
+.cs-scheme-card.on { border-color: var(--olive); background: rgba(107,142,35,.04); }
+.cs-scheme-card.on::after {
+  content: '\f00c'; font-family: 'Font Awesome 6 Free'; font-weight: 900;
+  position: absolute; top: 10px; right: 12px;
+  font-size: 11px; color: var(--olive);
+}
+.csc-icon {
+  width: 42px; height: 42px; border-radius: 6px; flex-shrink: 0;
+  display: flex; align-items: center; justify-content: center;
+  font-size: 18px; background: var(--bg-low); border: 1px solid var(--border);
+}
+.csc-body { flex: 1; min-width: 0; }
+.csc-name { font-size: 13px; font-weight: 600; color: var(--text); margin-bottom: 2px; }
+.csc-ref { font-family: var(--fm); font-size: 9.5px; color: var(--text-muted); margin-bottom: 5px; display: flex; align-items: center; gap: 4px; }
+.csc-ref a { color: var(--olive); text-decoration: none; }
+.csc-ref a:hover { text-decoration: underline; }
+.csc-desc { font-size: 11.5px; color: var(--text-mid); line-height: 1.5; margin-bottom: 8px; }
+
+/* The zone preview bar inside each scheme card */
+.csc-zones {
+  display: flex; height: 20px; border-radius: 3px; overflow: hidden;
+  border: 1px solid var(--border); width: 100%;
+}
+.csc-zone {
+  display: flex; align-items: center; justify-content: center;
+  font-family: var(--fm); font-size: 8px; font-weight: 500; overflow: hidden;
+}
+.csc-zone span { white-space: nowrap; }
+
+/* ── Tab 2: Boundaries ── */
+.cb-wrap { padding: 14px 16px; display: flex; flex-direction: column; gap: 14px; }
+
+.cb-scheme-note {
+  display: flex; align-items: flex-start; gap: 10px; padding: 10px 12px;
+  background: rgba(107,142,35,.07); border: 1px solid rgba(107,142,35,.22);
+  border-radius: 5px; font-size: 11.5px; color: var(--text-mid); line-height: 1.5;
+}
+.cb-scheme-note i { color: var(--olive); margin-top: 1px; flex-shrink: 0; font-size: 12px; }
+
+/* Live boundary editor */
+.cb-editor { display: flex; flex-direction: column; gap: 0; border: 1px solid var(--border); border-radius: 6px; overflow: hidden; }
+.cb-row {
+  display: flex; align-items: center; padding: 9px 14px;
+  border-bottom: 1px solid var(--border); background: white;
+  gap: 12px;
+}
+.cb-row:last-child { border-bottom: none; }
+.cb-row:nth-child(even) { background: var(--bg-raised); }
+.cb-swatch { width: 14px; height: 14px; border-radius: 3px; flex-shrink: 0; }
+.cb-name { font-size: 12.5px; font-weight: 500; color: var(--text); width: 70px; flex-shrink: 0; }
+.cb-range { flex: 1; font-family: var(--fm); font-size: 11px; color: var(--text-muted); }
+.cb-inputs { display: flex; align-items: center; gap: 6px; }
+.cb-label { font-size: 10.5px; color: var(--text-muted); white-space: nowrap; }
+.cb-input {
+  width: 72px; height: 24px; border: 1px solid var(--border); border-radius: 3px;
+  background: var(--bg); font-family: var(--fm); font-size: 11.5px;
+  color: var(--text); text-align: right; padding: 0 6px;
+  transition: border-color .12s;
+}
+.cb-input:focus { outline: none; border-color: var(--olive); background: white; }
+.cb-input:disabled { background: var(--bg-low); color: var(--text-muted); border-color: var(--border); cursor: default; }
+.cb-unit { font-family: var(--fm); font-size: 10px; color: var(--text-muted); width: 20px; }
+.cb-locked { font-size: 10px; color: var(--text-muted); display: flex; align-items: center; gap: 3px; font-family: var(--fm); }
+.cb-locked i { font-size: 9px; }
+
+/* Live preview bar in boundaries tab */
+.cb-preview-wrap { border: 1px solid var(--border); border-radius: 6px; overflow: hidden; background: white; }
+.cb-preview-hdr { padding: 8px 12px 6px; font-size: 10.5px; font-weight: 600; color: var(--text-muted); letter-spacing: .06em; text-transform: uppercase; border-bottom: 1px solid var(--border); background: var(--bg-raised); display: flex; align-items: center; justify-content: space-between; }
+.cb-preview-hdr span { font-size: 9.5px; font-weight: 400; font-family: var(--fm); color: var(--text-muted); letter-spacing: 0; text-transform: none; }
+.cb-preview-body { padding: 12px; display: flex; flex-direction: column; gap: 8px; }
+.cb-prev-bar { height: 32px; border-radius: 4px; overflow: hidden; border: 1px solid var(--border); display: flex; box-shadow: inset 0 1px 0 rgba(255,255,255,.5); }
+.cb-prev-seg {
+  height: 100%; display: flex; align-items: center; justify-content: center;
+  font-family: var(--fm); font-size: 9px; font-weight: 500; overflow: hidden;
+  position: relative;
+}
+.cb-prev-seg span { white-space: nowrap; }
+.cb-prev-labels { display: flex; justify-content: space-between; font-family: var(--fm); font-size: 9px; color: var(--text-muted); padding: 0 1px; }
+.cb-prev-labels span { display: flex; flex-direction: column; align-items: center; gap: 1px; }
+.cb-prev-labels .tick { width: 1px; height: 5px; background: var(--border-dk); }
+
+/* ── Tab 3: Custom scheme ── */
+.cc-wrap { padding: 14px 16px; }
+
+.cc-name-row { display: flex; align-items: center; gap: 10px; margin-bottom: 14px; }
+.cc-name-lbl { font-size: 12px; color: var(--text-mid); white-space: nowrap; }
+.cc-name-in {
+  flex: 1; height: 28px; border: 1px solid var(--border); border-radius: var(--r);
+  background: white; font-size: 12.5px; color: var(--text); padding: 0 10px;
+}
+.cc-name-in:focus { outline: none; border-color: var(--olive); }
+
+.cc-note {
+  display: flex; gap: 8px; padding: 8px 12px; margin-bottom: 14px;
+  background: rgba(196,160,80,.08); border: 1px solid rgba(196,160,80,.28);
+  border-radius: 5px; font-size: 11.5px; color: var(--text-mid); line-height: 1.5;
+}
+.cc-note i { color: #a07820; margin-top: 1px; font-size: 12px; flex-shrink: 0; }
+
+/* Inherits .cb-editor / .cb-row from boundaries tab */
+
+/* ── Tab 4: About / References ── */
+.cr-wrap { padding: 14px 16px; display: flex; flex-direction: column; gap: 12px; }
+.cr-card {
+  border: 1px solid var(--border); border-radius: 6px; overflow: hidden; background: white;
+}
+.cr-card-hdr {
+  display: flex; align-items: center; gap: 10px; padding: 10px 14px;
+  background: var(--bg-raised); border-bottom: 1px solid var(--border);
+}
+.cr-card-hdr i { font-size: 13px; color: var(--olive); }
+.cr-card-hdr .title { font-size: 13px; font-weight: 600; color: var(--text); }
+.cr-card-hdr .ref { font-family: var(--fm); font-size: 9.5px; color: var(--text-muted); margin-left: auto; }
+.cr-card-hdr a { color: var(--olive); text-decoration: none; }
+.cr-card-hdr a:hover { text-decoration: underline; }
+.cr-card-body { padding: 10px 14px; font-size: 11.5px; color: var(--text-mid); line-height: 1.6; }
+.cr-table { width: 100%; border-collapse: collapse; font-size: 11px; margin-top: 6px; }
+.cr-table th { background: var(--bg-raised); padding: 5px 10px; text-align: left; font-weight: 600; color: var(--text-mid); border-bottom: 1px solid var(--border); font-size: 10.5px; }
+.cr-table td { padding: 5px 10px; border-bottom: 1px solid var(--border); color: var(--text); }
+.cr-table tr:last-child td { border-bottom: none; }
+.cr-table td.swatch-cell { width: 14px; padding-right: 0; }
+.cr-swatch { width: 12px; height: 12px; border-radius: 2px; display: inline-block; }
+.cr-table td.mm { font-family: var(--fm); font-size: 10.5px; color: var(--text-mid); }
+.cr-compare-note { font-size: 11px; color: var(--text-muted); margin-top: 8px; font-style: italic; }
+
+</style>
+</head>
+<body>
+
+<!-- ╔══════════════════════════════════════════════
+     APP SHELL
+══════════════════════════════════════════════╗ -->
+<div class="app">
+
+  <!-- Menu bar -->
+  <nav class="mb">
+    <span class="mi">File</span>
+    <span class="mi">Edit</span>
+    <span class="mi">View</span>
+    <span class="mi">Analysis</span>
+    <span class="mi">Reports</span>
+    <span class="mi">Help</span>
+    <div class="mb-sp"></div>
+    <span class="mb-title">GrainSize Analysis · v0.9-β</span>
+  </nav>
+
+  <!-- Sidebar -->
+  <aside class="sb">
+    <div class="sb-logo">
+      <div class="logo-mark"><i class="fa-solid fa-layer-group"></i></div>
+      <div class="logo-tx">
+        <div class="logo-name">GrainSize</div>
+        <div class="logo-sub">ANALYSIS · v0.9-β</div>
+      </div>
+    </div>
+
+    <div class="sb-body">
+
+      <!-- DROP ZONE -->
+      <div style="padding:8px 10px 4px;">
+        <div style="border:1.5px dashed var(--sb-bdr);border-radius:5px;padding:10px;text-align:center;background:rgba(255,255,255,.25);display:flex;flex-direction:column;align-items:center;gap:3px;">
+          <i class="fa-solid fa-cloud-arrow-up" style="font-size:16px;color:var(--sb-muted);"></i>
+          <div style="font-size:10.5px;color:var(--sb-mid);">Drop files or click to browse</div>
+          <div style="font-size:9px;color:var(--sb-muted);">CSV · XLSX · TXT</div>
+        </div>
+      </div>
+
+      <!-- SAMPLES SECTION -->
+      <div class="sb-sect">
+        <span class="sb-sect-lbl">Samples</span>
+        <button class="sb-sect-btn"><i class="fa-solid fa-plus"></i> Add</button>
+      </div>
+
+      <div class="s-list">
+        <div class="s-item active">
+          <div class="s-item-main">
+            <div class="s-ic"><i class="fa-solid fa-vial"></i></div>
+            <div class="s-info">
+              <div class="s-name">BH-07_Sand-A</div>
+              <div class="s-meta">D50: 0.42 mm · K: 18.3 m/d</div>
+            </div>
+            <div class="s-led"></div>
+          </div>
+        </div>
+        <div class="s-item" style="opacity:.65;">
+          <div class="s-item-main">
+            <div class="s-ic" style="background:rgba(255,255,255,.3);border-color:var(--sb-bdr);"><i class="fa-solid fa-vial" style="color:var(--sb-mid);"></i></div>
+            <div class="s-info">
+              <div class="s-name">BH-12_Gravel-Mix</div>
+              <div class="s-meta">D50: 3.10 mm · K: 142 m/d</div>
+            </div>
+            <div class="s-led" style="background:var(--sb-muted);box-shadow:none;"></div>
+          </div>
+        </div>
+      </div>
+
+      <!-- PARAMETERS SECTION -->
+      <div class="sb-sect" style="margin-top:4px;">
+        <span class="sb-sect-lbl">Parameters</span>
+      </div>
+      <div class="p-rows">
+        <div class="p-row">
+          <span class="p-lbl"><i class="fa-solid fa-temperature-half"></i>Temperature</span>
+          <div class="p-field"><input class="p-in" type="text" value="20.0"><span class="p-unit">°C</span></div>
+        </div>
+        <div class="p-row">
+          <span class="p-lbl"><i class="fa-solid fa-circle-nodes"></i>Porosity</span>
+          <select class="p-select" style="width:130px;font-size:10.5px;">
+            <option>Simple Formula</option>
+            <option>Urumovic Poly.</option>
+          </select>
+        </div>
+      </div>
+
+      <!-- ════════════════════════════════════════
+           STRATIGRAPHY SECTION  ← new component
+      ════════════════════════════════════════ -->
+      <div class="sb-sect" style="margin-top:4px;">
+        <span class="sb-sect-lbl"><i class="fa-solid fa-layer-group" style="margin-right:4px;opacity:.7;"></i>Stratigraphy</span>
+        <button class="sb-sect-btn" onclick="showDialog()"><i class="fa-solid fa-sliders"></i> Scheme</button>
+      </div>
+
+      <div class="strata-wrap">
+
+        <!-- Grain fraction bar -->
+        <div class="strata-bar" title="Clay 2% · Silt 8% · Sand 74% · Gravel 16%">
+          <div class="strata-seg seg-clay"   style="width:2%;"  title="Clay 2%"></div>
+          <div class="strata-seg seg-silt"   style="width:8%;"  title="Silt 8%"><span>Silt</span></div>
+          <div class="strata-seg seg-sand"   style="width:74%;" title="Sand 74%"><span>Sand · 74%</span></div>
+          <div class="strata-seg seg-gravel" style="width:16%;" title="Gravel 16%"><span>Gvl</span></div>
+        </div>
+
+        <!-- Legend -->
+        <div class="strata-legend">
+          <div class="strata-legend-item">
+            <div class="sl-dot" style="background:var(--gc-clay);"></div>
+            <div class="sl-pct">2%</div>
+            <div class="sl-name">Clay</div>
+          </div>
+          <div class="strata-legend-item">
+            <div class="sl-dot" style="background:var(--gc-silt);"></div>
+            <div class="sl-pct">8%</div>
+            <div class="sl-name">Silt</div>
+          </div>
+          <div class="strata-legend-item">
+            <div class="sl-dot" style="background:var(--gc-sand);"></div>
+            <div class="sl-pct">74%</div>
+            <div class="sl-name">Sand</div>
+          </div>
+          <div class="strata-legend-item">
+            <div class="sl-dot" style="background:var(--gc-gravel);"></div>
+            <div class="sl-pct">16%</div>
+            <div class="sl-name">Gravel</div>
+          </div>
+        </div>
+
+        <!-- Classification result label -->
+        <div class="strata-result">
+          <span class="strata-result-label">Well-graded sand (SW)</span>
+          <span class="strata-result-scheme">ISO 14688</span>
+        </div>
+
+        <!-- Permeability class hint -->
+        <div class="perm-strip">
+          <i class="fa-solid fa-droplet perm-strip-icon"></i>
+          <span class="perm-strip-label">Permeability class</span>
+          <span class="perm-strip-value">High</span>
+        </div>
+
+      </div>
+      <!-- end STRATIGRAPHY -->
+
+      <!-- Analyse button -->
+      <div style="padding:4px 10px 8px;">
+        <button class="sb-btn go" style="justify-content:center;">
+          <i class="fa-solid fa-calculator"></i> Calculate K-values
+        </button>
+      </div>
+
+    </div><!-- /sb-body -->
+  </aside><!-- /sidebar -->
+
+  <!-- Main content (blurred) -->
+  <main class="main" style="position:relative;">
+    <div class="tb">
+      <div class="tab on"><i class="fa-solid fa-chart-line"></i> BH-07_Sand-A</div>
+      <div class="tab"><i class="fa-solid fa-chart-line"></i> BH-12_Gravel-Mix</div>
+      <div class="tab"><i class="fa-solid fa-scale-balanced"></i> Comparison</div>
+    </div>
+    <div class="main-body">
+      <div class="bg-content">
+        <div class="bg-row">
+          <div class="bg-card tall"></div>
+          <div class="bg-card tall" style="flex:.5;"></div>
+        </div>
+        <div class="bg-row">
+          <div class="bg-card"></div>
+          <div class="bg-card"></div>
+          <div class="bg-card"></div>
+        </div>
+      </div>
+    </div>
+
+    <!-- ╔══════════════════════════════════════════
+         CLASSIFICATION SYSTEM DIALOG
+    ══════════════════════════════════════════╗ -->
+    <div class="dlg-stage" id="dlg-stage">
+      <div class="dlg" id="dlg-classif">
+
+        <!-- Header -->
+        <div class="dh">
+          <div class="dh-icon"><i class="fa-solid fa-layer-group"></i></div>
+          <div class="dh-tx">
+            <div class="dh-title">Classification System</div>
+            <div class="dh-sub">Grain-size boundaries · Standard scheme · Custom thresholds</div>
+          </div>
+          <button class="dh-close" onclick="hideDialog()"><i class="fa-solid fa-xmark"></i></button>
+        </div>
+
+        <!-- Inner tab bar -->
+        <div class="ci-tabs">
+          <div class="ci-tab on"   onclick="ciTab(0,this)"><i class="fa-solid fa-list-check"></i> Scheme</div>
+          <div class="ci-tab"      onclick="ciTab(1,this)"><i class="fa-solid fa-ruler-horizontal"></i> Boundaries</div>
+          <div class="ci-tab"      onclick="ciTab(2,this)"><i class="fa-solid fa-pen-ruler"></i> Custom <span class="badge">β</span></div>
+          <div class="ci-tab"      onclick="ciTab(3,this)"><i class="fa-solid fa-book-open"></i> References</div>
+        </div>
+
+        <!-- ── TAB 0: Scheme Selector ─────────────────────────── -->
+        <div class="ci-body" id="ci-p0">
+          <div class="cs-schemes">
+
+            <!-- ISO 14688 card (selected) -->
+            <div class="cs-scheme-card on" onclick="selectScheme(this)">
+              <div class="csc-icon">🇪🇺</div>
+              <div class="csc-body">
+                <div class="csc-name">ISO 14688 / DS/EN ISO 14688</div>
+                <div class="csc-ref">
+                  <i class="fa-solid fa-link"></i>
+                  <a href="#" title="ISO 14688-1:2017">ISO 14688-1:2017</a> &nbsp;·&nbsp;
+                  <a href="#" title="ISO 14688-2:2017">ISO 14688-2:2017</a>
+                  &nbsp;·&nbsp; Danish national standard (DS)
+                </div>
+                <div class="csc-desc">
+                  European and Danish standard. Used with Eurocode 7 and Danish geotechnical practice.
+                  Clay &lt; 0.002 mm · Silt 0.002–0.063 mm · Sand 0.063–2.0 mm · Gravel 2.0–63 mm.
+                  <strong>Recommended primary scheme for this tool.</strong>
+                </div>
+                <div class="csc-zones">
+                  <div class="csc-zone" style="width:6%;background:var(--gc-clay);color:#fff;"><span>Clay</span></div>
+                  <div class="csc-zone" style="width:18%;background:var(--gc-silt);color:#fff;"><span>Silt</span></div>
+                  <div class="csc-zone" style="width:46%;background:var(--gc-sand);color:#5a3800;"><span>Sand (0.063–2.0 mm)</span></div>
+                  <div class="csc-zone" style="width:30%;background:var(--gc-gravel);color:#fff;"><span>Gravel (2.0–63 mm)</span></div>
+                </div>
+              </div>
+            </div>
+
+            <!-- USCS card -->
+            <div class="cs-scheme-card" onclick="selectScheme(this)">
+              <div class="csc-icon">🇺🇸</div>
+              <div class="csc-body">
+                <div class="csc-name">USCS / ASTM D2487</div>
+                <div class="csc-ref">
+                  <i class="fa-solid fa-link"></i>
+                  <a href="#" title="ASTM D2487-17">ASTM D2487-17</a>
+                  &nbsp;·&nbsp; Unified Soil Classification System
+                </div>
+                <div class="csc-desc">
+                  US standard, widely used internationally and in the empirical K-formula literature
+                  (Hazen, Beyer, Terzaghi etc.). Clay &lt; 0.002 mm · Silt 0.002–0.075 mm ·
+                  Sand 0.075–4.75 mm · Gravel 4.75–75 mm. Provides USCS symbol codes (GW, SP, etc.).
+                </div>
+                <div class="csc-zones">
+                  <div class="csc-zone" style="width:5%;background:var(--gc-clay);color:#fff;"><span>Clay</span></div>
+                  <div class="csc-zone" style="width:16%;background:var(--gc-silt);color:#fff;"><span>Silt</span></div>
+                  <div class="csc-zone" style="width:52%;background:var(--gc-sand);color:#5a3800;"><span>Sand (0.075–4.75 mm)</span></div>
+                  <div class="csc-zone" style="width:27%;background:var(--gc-gravel);color:#fff;"><span>Gravel (4.75–75 mm)</span></div>
+                </div>
+              </div>
+            </div>
+
+            <!-- Custom card -->
+            <div class="cs-scheme-card" onclick="selectScheme(this)" style="border-style:dashed;">
+              <div class="csc-icon" style="font-size:14px;color:var(--text-muted);">✏️</div>
+              <div class="csc-body">
+                <div class="csc-name" style="color:var(--text-mid);">Custom Scheme</div>
+                <div class="csc-ref"><i class="fa-solid fa-pen-ruler"></i> User-defined thresholds — configure in the Custom tab</div>
+                <div class="csc-desc" style="color:var(--text-muted);">
+                  Define your own grain-size boundaries. Useful for project-specific or
+                  non-standard classification systems. Can be saved and exported with the project.
+                </div>
+                <div class="csc-zones" style="border-style:dashed;opacity:.5;">
+                  <div class="csc-zone" style="width:25%;background:var(--gc-clay);color:#fff;"><span>Custom</span></div>
+                  <div class="csc-zone" style="width:25%;background:var(--gc-silt);color:#fff;"><span>zones</span></div>
+                  <div class="csc-zone" style="width:25%;background:var(--gc-sand);color:#5a3800;"><span>defined</span></div>
+                  <div class="csc-zone" style="width:25%;background:var(--gc-gravel);color:#fff;"><span>by user</span></div>
+                </div>
+              </div>
+            </div>
+
+          </div>
+        </div>
+
+        <!-- ── TAB 1: Boundaries ──────────────────────────────── -->
+        <div class="ci-body" id="ci-p1" style="display:none;">
+          <div class="cb-wrap">
+
+            <div class="cb-scheme-note">
+              <i class="fa-solid fa-circle-info"></i>
+              <span>Currently showing boundaries for <strong>ISO 14688 / DS/EN ISO 14688</strong>.
+              These values are locked for standard schemes. Switch to <em>Custom</em> to define your own.</span>
+            </div>
+
+            <!-- Boundary editor table -->
+            <div class="cb-editor">
+              <div class="cb-row" style="background:var(--bg-raised);border-bottom:1px solid var(--border);">
+                <div style="width:14px;"></div>
+                <div style="width:70px;font-size:10.5px;font-weight:600;color:var(--text-muted);">Class</div>
+                <div style="flex:1;font-size:10.5px;font-weight:600;color:var(--text-muted);">Range</div>
+                <div style="width:200px;font-size:10.5px;font-weight:600;color:var(--text-muted);">Boundary (mm)</div>
+              </div>
+              <div class="cb-row">
+                <div class="cb-swatch" style="background:var(--gc-clay);border-radius:2px;"></div>
+                <div class="cb-name">Clay</div>
+                <div class="cb-range">0 – 0.002 mm</div>
+                <div class="cb-inputs">
+                  <span class="cb-label">max:</span>
+                  <input class="cb-input" value="0.002" disabled>
+                  <span class="cb-unit">mm</span>
+                  <span class="cb-locked"><i class="fa-solid fa-lock"></i> ISO</span>
+                </div>
+              </div>
+              <div class="cb-row">
+                <div class="cb-swatch" style="background:var(--gc-silt);border-radius:2px;"></div>
+                <div class="cb-name">Silt</div>
+                <div class="cb-range">0.002 – 0.063 mm</div>
+                <div class="cb-inputs">
+                  <span class="cb-label">max:</span>
+                  <input class="cb-input" value="0.063" disabled>
+                  <span class="cb-unit">mm</span>
+                  <span class="cb-locked"><i class="fa-solid fa-lock"></i> ISO</span>
+                </div>
+              </div>
+              <div class="cb-row">
+                <div class="cb-swatch" style="background:var(--gc-sand);border-radius:2px;"></div>
+                <div class="cb-name">Sand</div>
+                <div class="cb-range">0.063 – 2.0 mm</div>
+                <div class="cb-inputs">
+                  <span class="cb-label">max:</span>
+                  <input class="cb-input" value="2.0" disabled>
+                  <span class="cb-unit">mm</span>
+                  <span class="cb-locked"><i class="fa-solid fa-lock"></i> ISO</span>
+                </div>
+              </div>
+              <div class="cb-row">
+                <div class="cb-swatch" style="background:var(--gc-gravel);border-radius:2px;"></div>
+                <div class="cb-name">Gravel</div>
+                <div class="cb-range">2.0 – 63.0 mm</div>
+                <div class="cb-inputs">
+                  <span class="cb-label">max:</span>
+                  <input class="cb-input" value="63.0" disabled>
+                  <span class="cb-unit">mm</span>
+                  <span class="cb-locked"><i class="fa-solid fa-lock"></i> ISO</span>
+                </div>
+              </div>
+              <div class="cb-row">
+                <div class="cb-swatch" style="background:var(--gc-cobble);border-radius:2px;"></div>
+                <div class="cb-name">Cobble</div>
+                <div class="cb-range">&gt; 63.0 mm</div>
+                <div class="cb-inputs">
+                  <span class="cb-label">–</span>
+                  <input class="cb-input" value="—" disabled style="width:72px;text-align:center;">
+                  <span class="cb-unit"></span>
+                  <span class="cb-locked"><i class="fa-solid fa-lock"></i> ISO</span>
+                </div>
+              </div>
+            </div>
+
+            <!-- Live zone preview -->
+            <div class="cb-preview-wrap">
+              <div class="cb-preview-hdr">
+                Zone preview
+                <span>log-scale · grain size axis (mm)</span>
+              </div>
+              <div class="cb-preview-body">
+                <div class="cb-prev-bar">
+                  <div class="cb-prev-seg" style="width:6%;background:var(--gc-clay);color:#fff;"><span>Clay</span></div>
+                  <div class="cb-prev-seg" style="width:17%;background:var(--gc-silt);color:#fff;"><span>Silt</span></div>
+                  <div class="cb-prev-seg" style="width:42%;background:var(--gc-sand);color:#5a3800;"><span>Sand</span></div>
+                  <div class="cb-prev-seg" style="width:25%;background:var(--gc-gravel);color:#fff;"><span>Gravel</span></div>
+                  <div class="cb-prev-seg" style="width:10%;background:var(--gc-cobble);color:#fff;"><span>Co.</span></div>
+                </div>
+                <div class="cb-prev-labels">
+                  <span><div class="tick"></div>0.001</span>
+                  <span><div class="tick"></div>0.002</span>
+                  <span><div class="tick"></div>0.010</span>
+                  <span><div class="tick"></div>0.063</span>
+                  <span><div class="tick"></div>0.100</span>
+                  <span><div class="tick"></div>0.500</span>
+                  <span><div class="tick"></div>2.0</span>
+                  <span><div class="tick"></div>10.0</span>
+                  <span><div class="tick"></div>63.0</span>
+                </div>
+              </div>
+            </div>
+
+          </div>
+        </div>
+
+        <!-- ── TAB 2: Custom Scheme ───────────────────────────── -->
+        <div class="ci-body" id="ci-p2" style="display:none;">
+          <div class="cb-wrap cc-wrap">
+
+            <div class="cc-note">
+              <i class="fa-solid fa-triangle-exclamation"></i>
+              <span>Custom schemes are not tied to any published standard. Results will be labelled
+              <em>"Custom"</em> in reports and exports. Classification outside published standards
+              should be used with care in professional deliverables.</span>
+            </div>
+
+            <div class="cc-name-row">
+              <label class="cc-name-lbl">Scheme name:</label>
+              <input class="cc-name-in" type="text" value="My Custom Scheme" placeholder="e.g. Project XY classification">
+            </div>
+
+            <div class="cb-editor">
+              <div class="cb-row" style="background:var(--bg-raised);border-bottom:1px solid var(--border);">
+                <div style="width:14px;"></div>
+                <div style="width:70px;font-size:10.5px;font-weight:600;color:var(--text-muted);">Class</div>
+                <div style="flex:1;font-size:10.5px;font-weight:600;color:var(--text-muted);">Name (editable)</div>
+                <div style="width:200px;font-size:10.5px;font-weight:600;color:var(--text-muted);">Upper boundary (mm)</div>
+              </div>
+              <div class="cb-row">
+                <div class="cb-swatch" style="background:var(--gc-clay);border-radius:2px;"></div>
+                <div class="cb-name"><input style="width:60px;border:1px solid var(--border);border-radius:3px;padding:2px 5px;font-size:11.5px;background:white;" value="Clay"></div>
+                <div class="cb-range" style="font-size:10.5px;color:var(--text-muted);">0 → max below</div>
+                <div class="cb-inputs">
+                  <span class="cb-label">max:</span>
+                  <input class="cb-input" value="0.002">
+                  <span class="cb-unit">mm</span>
+                </div>
+              </div>
+              <div class="cb-row">
+                <div class="cb-swatch" style="background:var(--gc-silt);border-radius:2px;"></div>
+                <div class="cb-name"><input style="width:60px;border:1px solid var(--border);border-radius:3px;padding:2px 5px;font-size:11.5px;background:white;" value="Silt"></div>
+                <div class="cb-range" style="font-size:10.5px;color:var(--text-muted);">Clay max → max below</div>
+                <div class="cb-inputs">
+                  <span class="cb-label">max:</span>
+                  <input class="cb-input" value="0.063">
+                  <span class="cb-unit">mm</span>
+                </div>
+              </div>
+              <div class="cb-row">
+                <div class="cb-swatch" style="background:var(--gc-sand);border-radius:2px;"></div>
+                <div class="cb-name"><input style="width:60px;border:1px solid var(--border);border-radius:3px;padding:2px 5px;font-size:11.5px;background:white;" value="Sand"></div>
+                <div class="cb-range" style="font-size:10.5px;color:var(--text-muted);">Silt max → max below</div>
+                <div class="cb-inputs">
+                  <span class="cb-label">max:</span>
+                  <input class="cb-input" value="2.0">
+                  <span class="cb-unit">mm</span>
+                </div>
+              </div>
+              <div class="cb-row">
+                <div class="cb-swatch" style="background:var(--gc-gravel);border-radius:2px;"></div>
+                <div class="cb-name"><input style="width:60px;border:1px solid var(--border);border-radius:3px;padding:2px 5px;font-size:11.5px;background:white;" value="Gravel"></div>
+                <div class="cb-range" style="font-size:10.5px;color:var(--text-muted);">Sand max → max below</div>
+                <div class="cb-inputs">
+                  <span class="cb-label">max:</span>
+                  <input class="cb-input" value="63.0">
+                  <span class="cb-unit">mm</span>
+                </div>
+              </div>
+            </div>
+
+            <div style="display:flex;gap:8px;margin-top:4px;">
+              <button class="d-btn" style="font-size:11.5px;"><i class="fa-solid fa-download"></i> Import from file</button>
+              <button class="d-btn" style="font-size:11.5px;"><i class="fa-solid fa-upload"></i> Export scheme</button>
+              <div style="flex:1;"></div>
+              <button class="d-btn prim" style="font-size:11.5px;"><i class="fa-solid fa-rotate"></i> Update Preview</button>
+            </div>
+
+          </div>
+        </div>
+
+        <!-- ── TAB 3: References ──────────────────────────────── -->
+        <div class="ci-body" id="ci-p3" style="display:none;">
+          <div class="cr-wrap">
+
+            <!-- ISO 14688 -->
+            <div class="cr-card">
+              <div class="cr-card-hdr">
+                <i class="fa-solid fa-book"></i>
+                <span class="title">ISO 14688 / DS/EN ISO 14688</span>
+                <span class="ref"><a href="#">ISO 14688-1:2017</a> · <a href="#">ISO 14688-2:2017</a></span>
+              </div>
+              <div class="cr-card-body">
+                <p style="margin-bottom:8px;">International standard for geotechnical soil identification and classification. Adopted as the Danish national standard (DS/EN ISO 14688). Recommended for European and Danish projects.</p>
+                <table class="cr-table">
+                  <thead><tr><th></th><th>Class</th><th class="mm">Lower (mm)</th><th class="mm">Upper (mm)</th><th>Note</th></tr></thead>
+                  <tbody>
+                    <tr><td class="swatch-cell"><span class="cr-swatch" style="background:var(--gc-clay);"></span></td><td>Clay (Cl)</td><td class="mm">–</td><td class="mm">0.002</td><td>Fine-grained</td></tr>
+                    <tr><td class="swatch-cell"><span class="cr-swatch" style="background:var(--gc-silt);"></span></td><td>Silt (Si)</td><td class="mm">0.002</td><td class="mm">0.063</td><td>Fine-grained</td></tr>
+                    <tr><td class="swatch-cell"><span class="cr-swatch" style="background:var(--gc-sand);"></span></td><td>Sand (Sa)</td><td class="mm">0.063</td><td class="mm">2.0</td><td>Coarse-grained</td></tr>
+                    <tr><td class="swatch-cell"><span class="cr-swatch" style="background:var(--gc-gravel);"></span></td><td>Gravel (Gr)</td><td class="mm">2.0</td><td class="mm">63.0</td><td>Coarse-grained</td></tr>
+                    <tr><td class="swatch-cell"><span class="cr-swatch" style="background:var(--gc-cobble);"></span></td><td>Cobble (Co)</td><td class="mm">63.0</td><td class="mm">200</td><td></td></tr>
+                  </tbody>
+                </table>
+              </div>
+            </div>
+
+            <!-- USCS -->
+            <div class="cr-card">
+              <div class="cr-card-hdr">
+                <i class="fa-solid fa-book"></i>
+                <span class="title">USCS — ASTM D2487-17</span>
+                <span class="ref"><a href="#">ASTM D2487-17</a></span>
+              </div>
+              <div class="cr-card-body">
+                <p style="margin-bottom:8px;">Unified Soil Classification System. US standard used globally. The empirical hydraulic conductivity formulas in this program (Hazen, Beyer, Terzaghi, Kozeny-Carman etc.) originate in this tradition. Adds gradation symbols GW/GP/GM/GC/SW/SP/SM/SC using Cu and Cc criteria.</p>
+                <table class="cr-table">
+                  <thead><tr><th></th><th>Class</th><th class="mm">Lower (mm)</th><th class="mm">Upper (mm)</th><th>Cu (well-graded)</th></tr></thead>
+                  <tbody>
+                    <tr><td class="swatch-cell"><span class="cr-swatch" style="background:var(--gc-clay);"></span></td><td>Clay</td><td class="mm">–</td><td class="mm">0.002</td><td>–</td></tr>
+                    <tr><td class="swatch-cell"><span class="cr-swatch" style="background:var(--gc-silt);"></span></td><td>Silt (M)</td><td class="mm">0.002</td><td class="mm">0.075</td><td>–</td></tr>
+                    <tr><td class="swatch-cell"><span class="cr-swatch" style="background:var(--gc-sand);"></span></td><td>Sand (S)</td><td class="mm">0.075</td><td class="mm">4.75</td><td>≥ 6</td></tr>
+                    <tr><td class="swatch-cell"><span class="cr-swatch" style="background:var(--gc-gravel);"></span></td><td>Gravel (G)</td><td class="mm">4.75</td><td class="mm">75.0</td><td>≥ 4</td></tr>
+                  </tbody>
+                </table>
+                <p class="cr-compare-note">USCS well-graded criteria also require Cc between 1 and 3. Fine-grained USCS classes (ML, MH, CL, CH) require Atterberg limits — not available from grain size data alone.</p>
+              </div>
+            </div>
+
+            <!-- Note on limitations -->
+            <div style="padding:10px 12px;background:rgba(196,160,80,.08);border:1px solid rgba(196,160,80,.25);border-radius:5px;font-size:11.5px;color:var(--text-mid);line-height:1.6;display:flex;gap:8px;">
+              <i class="fa-solid fa-triangle-exclamation" style="color:#a07820;margin-top:2px;flex-shrink:0;"></i>
+              <span><strong>Limitation:</strong> Classification of fine-grained soils (silt vs clay) from grain size data alone is an approximation. A rigorous USCS classification of fine-grained soils requires Atterberg limit tests (plasticity index, liquid limit). This program cannot determine ML/MH/CL/CH symbols without that data.</span>
+            </div>
+
+          </div>
+        </div>
+
+        <!-- Footer -->
+        <div class="df">
+          <div class="df-l">
+            <span class="df-ref">
+              <i class="fa-solid fa-circle-info"></i>
+              Active: <strong>ISO 14688</strong> &nbsp;·&nbsp;
+              <a href="#">ISO 14688-1:2017</a> &nbsp;·&nbsp; <a href="#">ASTM D2487-17</a>
+            </span>
+          </div>
+          <button class="d-btn" onclick="hideDialog()"><i class="fa-solid fa-xmark"></i> Cancel</button>
+          <button class="d-btn prim" onclick="hideDialog()"><i class="fa-solid fa-check"></i> Apply Scheme</button>
+        </div>
+
+      </div><!-- /dlg-classif -->
+    </div><!-- /dlg-stage -->
+
+  </main>
+
+  <!-- Status bar -->
+  <footer class="st">
+    <span class="st-chip hi"><i class="fa-solid fa-layer-group"></i> ISO 14688</span>
+    <span class="st-chip"><i class="fa-solid fa-vial"></i> 2 datasets</span>
+    <span class="st-chip"><i class="fa-solid fa-chart-line"></i> BH-07_Sand-A · active</span>
+    <span class="st-chip"><i class="fa-solid fa-check-circle" style="color:#5aaa3a;"></i> All loaded</span>
+    <div style="flex:1;"></div>
+    <span class="st-chip">v0.9-β</span>
+  </footer>
+
+</div><!-- /app -->
+
+<script>
+/* Tab switching inside the dialog */
+function ciTab(idx, el) {
+  document.querySelectorAll('.ci-tab').forEach(t => t.classList.remove('on'));
+  el.classList.add('on');
+  for (let i = 0; i < 4; i++) {
+    const p = document.getElementById('ci-p' + i);
+    if (p) p.style.display = i === idx ? '' : 'none';
+  }
+}
+
+/* Scheme card exclusive selection */
+function selectScheme(card) {
+  document.querySelectorAll('.cs-scheme-card').forEach(c => c.classList.remove('on'));
+  card.classList.add('on');
+}
+
+/* Dialog show/hide for the demo */
+function showDialog() {
+  document.getElementById('dlg-stage').style.display = 'flex';
+}
+function hideDialog() {
+  document.getElementById('dlg-stage').style.display = 'none';
+}
+</script>
+</body>
+</html>
