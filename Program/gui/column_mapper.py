@@ -13,12 +13,15 @@ import csv
 from typing import Dict, List, Optional, Tuple
 import os
 from data_loader import GrainSizeData
+from gui.dialog_chrome import make_dialog_header, make_dialog_footer
+from gui.theme import C, F, SZ
+from qt_chrome.frameless_dialog_base import FramelessDialogBase
 
-class ColumnMapperDialog(QDialog):
+class ColumnMapperDialog(FramelessDialogBase):
     """Dialog for mapping CSV columns to grain size data"""
 
     def __init__(self, file_path: str, parent=None, main_window=None, sheet_name: str = None):
-        super().__init__(parent)
+        super().__init__(parent, default_mode="auto")
         self.file_path = file_path
         self.main_window = main_window  # Direct reference to main window
         self.forced_sheet_name = sheet_name  # If provided, only work with this specific sheet
@@ -46,50 +49,20 @@ class ColumnMapperDialog(QDialog):
         self.setModal(True)
         self.resize(800, 600)
 
-        # Apply professional styling
-        self.setStyleSheet("""
-            QDialog {
-                background-color: #f5f5f0;
-            }
-            QGroupBox {
-                font-weight: bold;
-                border: 2px solid #8b7355;
-                border-radius: 5px;
-                margin-top: 10px;
-                padding-top: 10px;
-                background-color: #fafaf7;
-            }
-            QGroupBox::title {
-                subcontrol-origin: margin;
-                left: 10px;
-                padding: 0 5px 0 5px;
-                background-color: #f5f5f0;
-            }
-            QLabel {
-                color: #2f2f2f;
-                font-size: 11px;
-            }
-            QComboBox, QSpinBox, QDoubleSpinBox {
-                padding: 5px;
-                border: 1px solid #8b7355;
-                border-radius: 3px;
-                background-color: white;
-            }
-            QPushButton {
-                background-color: #8b7355;
-                color: white;
-                border: none;
-                padding: 8px 15px;
-                border-radius: 4px;
-                font-weight: bold;
-            }
-            QPushButton:hover {
-                background-color: #6d5a42;
-            }
-            QPushButton:pressed {
-                background-color: #5a4835;
-            }
-        """)
+        # Styling — body inherits global QSS; patch specifics here
+        self.setStyleSheet(
+            f"QGroupBox {{ font-weight: 600; border: 1px solid {C.BORDER}; "
+            f"border-radius: {SZ.BORDER_RADIUS}px; margin-top: 8px; padding-top: 8px; "
+            f"background: {C.BG_RAISED}; font-size: {F.SZ_MD}pt; }}"
+            f"QGroupBox::title {{ subcontrol-origin: margin; left: 8px; "
+            f"padding: 0 4px; color: {C.TEXT_MID}; background: {C.BG_RAISED}; }}"
+            f"QLabel {{ color: {C.TEXT}; font-size: {F.SZ_MD}pt; }}"
+            f"QComboBox, QSpinBox, QDoubleSpinBox {{ padding: 4px 6px; "
+            f"border: 1px solid {C.BORDER}; border-radius: {SZ.BORDER_RADIUS}px; "
+            f"background: white; font-size: {F.SZ_MD}pt; }}"
+            f"QComboBox:focus, QSpinBox:focus, QDoubleSpinBox:focus "
+            f"{{ border-color: {C.OLIVE}; }}"
+        )
 
         try:
             self.load_csv_preview()
@@ -204,7 +177,31 @@ class ColumnMapperDialog(QDialog):
 
     def setup_ui(self):
         """Setup the dialog UI"""
-        layout = QVBoxLayout(self)
+        import os as _os
+        fname = _os.path.basename(self.file_path)
+        sheet_part = f" [{self.current_sheet}]" if self.current_sheet else ""
+        subtitle = f"{fname}{sheet_part} · map columns to grain-size data"
+
+        # Root layout — header / body / footer, no margins
+        root = QVBoxLayout(self)
+        root.setContentsMargins(0, 0, 0, 0)
+        root.setSpacing(0)
+
+        self._header_widget = make_dialog_header(
+            "Column Mapper",
+            subtitle,
+            fa_icon="fa6s.table-columns",
+            close_fn=self.reject,
+        )
+        root.addWidget(self._header_widget)
+
+        # Body wrapper — tabs live here
+        body_wrap = QWidget()
+        body_wrap.setStyleSheet(f"background: {C.BG};")
+        layout = QVBoxLayout(body_wrap)
+        layout.setContentsMargins(10, 8, 10, 8)
+        layout.setSpacing(8)
+        root.addWidget(body_wrap, 1)
 
         # Create tab widget
         tab_widget = QTabWidget()
@@ -478,18 +475,28 @@ class ColumnMapperDialog(QDialog):
 
         layout.addWidget(tab_widget)
 
-        # Buttons
-        button_box = QDialogButtonBox(QDialogButtonBox.StandardButton.Ok |
-                                     QDialogButtonBox.StandardButton.Cancel)
-        button_box.accepted.connect(self.accept)
-        button_box.rejected.connect(self.reject)
+        # Footer (added to root, outside body_wrap so it sticks to bottom)
+        preview_btn_widget = QPushButton("Preview Results")
+        preview_btn_widget.setFixedHeight(28)
+        preview_btn_widget.setStyleSheet(
+            f"QPushButton {{ border: 1px solid {C.BORDER}; "
+            f"border-radius: {SZ.BORDER_RADIUS}px; background: {C.BG}; "
+            f"color: {C.TEXT_MID}; padding: 0 14px; font-size: {F.SZ_LG}pt; }}"
+            f"QPushButton:hover {{ background: {C.BG_RAISED}; border-color: {C.BORDER_DK}; }}"
+        )
+        preview_btn_widget.clicked.connect(self.preview_mapping)
 
-        # Add preview button
-        preview_btn = QPushButton("🔍 Preview Results")
-        preview_btn.clicked.connect(self.preview_mapping)
-        button_box.addButton(preview_btn, QDialogButtonBox.ButtonRole.ActionRole)
+        footer = make_dialog_footer([
+            ("Cancel", self.reject, "secondary"),
+            ("Import", self.accept, "primary"),
+        ], left_widget=preview_btn_widget)
+        root.addWidget(footer)
 
-        layout.addWidget(button_box)
+        self.install_chrome_behavior(
+            header_widget=self._header_widget,
+            corner_radius=8,
+            resize_margin=6,
+        )
 
     def set_sheet_checks(self, state: Qt.CheckState):
         """Check or uncheck all sheet items"""

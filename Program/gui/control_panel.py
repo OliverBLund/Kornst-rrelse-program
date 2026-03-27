@@ -13,6 +13,7 @@ from PyQt6.QtWidgets import (QFrame, QVBoxLayout, QHBoxLayout, QGroupBox,
 from PyQt6.QtCore import QThread, QTimer
 from data_loader import DataLoader
 from gui.column_mapper import ColumnMapperDialog
+from gui.data_inspector_dialog import DataInspectorDialog
 import os
 from PyQt6.QtCore import Qt, pyqtSignal, QSize, QRectF, QPoint
 from PyQt6.QtGui import (QIcon, QFont, QAction, QPainter, QColor,
@@ -599,27 +600,28 @@ class PorosityDialog(FramelessDialogBase):
 
     def init_ui(self):
         """Initialize dialog UI"""
-        layout = QVBoxLayout(self)
-        layout.setSpacing(12)
+        from gui.dialog_chrome import make_dialog_header, make_dialog_footer
+        from gui.theme import C, F, SZ
 
-        # Header with instructions
-        header_label = QLabel(
-            "<b>Manage Porosity for Each Dataset</b><br>"
-            "Porosity affects K-value calculations. Each dataset can have its own porosity value."
+        root = QVBoxLayout(self)
+        root.setContentsMargins(0, 0, 0, 0)
+        root.setSpacing(0)
+
+        # Header
+        self._header_widget = make_dialog_header(
+            "Manage Porosity",
+            "Per-dataset porosity values · affects all K calculations",
+            fa_icon="fa6s.circle-nodes",
+            close_fn=self.accept,
         )
-        self._header_label = header_label
-        header_label.setStyleSheet("""
-            QLabel {
-                font-size: 11pt;
-                color: #2c5530;
-                padding: 10px;
-                background-color: #f5f5f0;
-                border: 1px solid #d4c4a8;
-                border-radius: 4px;
-            }
-        """)
-        header_label.setWordWrap(True)
-        layout.addWidget(header_label)
+        root.addWidget(self._header_widget)
+
+        # Body wrapper
+        body = QWidget()
+        body.setStyleSheet(f"background: {C.BG};")
+        body_lay = QVBoxLayout(body)
+        body_lay.setContentsMargins(0, 0, 0, 0)
+        body_lay.setSpacing(0)
 
         # Table showing all datasets and their porosity values
         self.porosity_table = QTableWidget(0, 5)
@@ -634,87 +636,51 @@ class PorosityDialog(FramelessDialogBase):
 
         # Set column widths
         header = self.porosity_table.horizontalHeader()
-        header.setSectionResizeMode(0, QHeaderView.ResizeMode.Stretch)  # Dataset name
-        header.setSectionResizeMode(1, QHeaderView.ResizeMode.ResizeToContents)  # Calculated
-        header.setSectionResizeMode(2, QHeaderView.ResizeMode.ResizeToContents)  # Current
-        header.setSectionResizeMode(3, QHeaderView.ResizeMode.Fixed)  # Edit field
-        header.setSectionResizeMode(4, QHeaderView.ResizeMode.Fixed)  # Actions
-        self.porosity_table.setColumnWidth(3, 180)  # Increased from 120 for better input widget display
-        self.porosity_table.setColumnWidth(4, 200)  # Increased from 150 for button spacing
+        header.setSectionResizeMode(0, QHeaderView.ResizeMode.Stretch)
+        header.setSectionResizeMode(1, QHeaderView.ResizeMode.ResizeToContents)
+        header.setSectionResizeMode(2, QHeaderView.ResizeMode.ResizeToContents)
+        header.setSectionResizeMode(3, QHeaderView.ResizeMode.Fixed)
+        header.setSectionResizeMode(4, QHeaderView.ResizeMode.Fixed)
+        self.porosity_table.setColumnWidth(3, 180)
+        self.porosity_table.setColumnWidth(4, 200)
 
-        self.porosity_table.setStyleSheet("""
-            QTableWidget {
-                gridline-color: #d0d0d0;
-                font-size: 10pt;
-                background-color: white;
-            }
-            QTableWidget::item {
-                padding: 6px;
-            }
-            QHeaderView::section {
-                background-color: #e8e8e8;
-                padding: 6px;
-                border: 1px solid #c0c0c0;
-                font-weight: bold;
-                font-size: 10pt;
-            }
-        """)
+        self.porosity_table.setStyleSheet(
+            f"QTableWidget {{ gridline-color: {C.BORDER}; font-size: {F.SZ_MD}pt; "
+            f"background-color: white; border: none; }}"
+            f"QTableWidget::item {{ padding: 6px; }}"
+            f"QTableWidget::item:alternate {{ background: {C.BG_LOW}; }}"
+            f"QHeaderView::section {{ background: {C.BG_RAISED}; padding: 5px 12px; "
+            f"border: none; border-bottom: 1px solid {C.BORDER}; "
+            f"font-size: {F.SZ_SM}pt; font-weight: 600; letter-spacing: .06em; "
+            f"text-transform: uppercase; color: {C.TEXT_MUTED}; }}"
+        )
 
-        layout.addWidget(self.porosity_table)
+        body_lay.addWidget(self.porosity_table, 1)
 
         # Info label at bottom
-        self.info_label = QLabel("💡 Tip: Use 'Update' to apply changes to individual datasets, or 'Apply All' to save all changes at once.")
-        self.info_label.setStyleSheet("""
-            QLabel {
-                font-size: 9pt;
-                color: #666;
-                font-style: italic;
-                padding: 6px;
-            }
-        """)
+        self.info_label = QLabel(
+            "Use 'Update' to apply changes to individual datasets, "
+            "or 'Apply All' to save all changes at once."
+        )
+        self.info_label.setStyleSheet(
+            f"color: {C.TEXT_MUTED}; font-size: {F.SZ_SM}pt; "
+            f"padding: 6px 14px; background: transparent;"
+        )
         self.info_label.setWordWrap(True)
-        layout.addWidget(self.info_label)
+        body_lay.addWidget(self.info_label)
 
-        # Dialog buttons
-        button_box = QDialogButtonBox()
+        root.addWidget(body, 1)
 
-        apply_all_btn = QPushButton("Apply All Changes")
-        apply_all_btn.clicked.connect(self.apply_all_changes)
-        apply_all_btn.setStyleSheet("""
-            QPushButton {
-                background-color: #6b8e23;
-                color: white;
-                padding: 8px 16px;
-                font-weight: bold;
-                border-radius: 4px;
-            }
-            QPushButton:hover {
-                background-color: #7fa02d;
-            }
-        """)
-
-        close_btn = QPushButton("Close")
-        close_btn.clicked.connect(self.accept)
-        close_btn.setStyleSheet("""
-            QPushButton {
-                background-color: #d2b48c;
-                padding: 8px 16px;
-                border-radius: 4px;
-            }
-            QPushButton:hover {
-                background-color: #ddbf94;
-            }
-        """)
-
-        button_box.addButton(apply_all_btn, QDialogButtonBox.ButtonRole.AcceptRole)
-        button_box.addButton(close_btn, QDialogButtonBox.ButtonRole.RejectRole)
-
-        layout.addWidget(button_box)
+        # Footer
+        root.addWidget(make_dialog_footer([
+            ("Close",            self.accept,           "secondary"),
+            ("Apply All Changes", self.apply_all_changes, "primary"),
+        ]))
 
         self.install_chrome_behavior(
-            header_widget=self._header_label,
+            header_widget=self._header_widget,
             corner_radius=8,
-            resize_margin=8,
+            resize_margin=6,
         )
 
     def load_dataset_porosity_values(self):
@@ -2492,6 +2458,22 @@ class ControlPanel(QFrame):
         btn_box = QDialogButtonBox(QDialogButtonBox.StandardButton.Close)
         btn_box.rejected.connect(dlg.reject)
         dlg_v.addWidget(btn_box)
+        dlg.exec()
+
+    def show_file_info(self, file_path: str):
+        """Show concept-aligned data inspector for a loaded dataset."""
+        sample_name = self.extract_sample_name(file_path)
+        if sample_name not in self.loaded_samples:
+            QMessageBox.information(self, "Inspect", "Dataset not yet loaded.")
+            return
+
+        dataset = self.loaded_samples[sample_name]['data']
+        dlg = DataInspectorDialog(
+            dataset=dataset,
+            scheme=self._active_scheme,
+            file_path=file_path,
+            parent=self,
+        )
         dlg.exec()
 
     def show_file_log(self, file_path: str):

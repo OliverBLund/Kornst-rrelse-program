@@ -1,258 +1,465 @@
 """
-Dataset selection dialog for comparison tab when many datasets are loaded
+Dataset selection dialog for comparison tab when many datasets are loaded.
 """
 
+from __future__ import annotations
+
+import math
+from typing import List, Optional
+
+from PyQt6.QtCore import Qt, pyqtSignal
+from PyQt6.QtGui import QFont
 from PyQt6.QtWidgets import (
-    QDialog, QVBoxLayout, QHBoxLayout, QLabel, QPushButton,
-    QListWidget, QListWidgetItem, QLineEdit, QCheckBox,
-    QDialogButtonBox, QGroupBox, QMessageBox
+    QFrame,
+    QHBoxLayout,
+    QLabel,
+    QLineEdit,
+    QMessageBox,
+    QPushButton,
+    QScrollArea,
+    QVBoxLayout,
+    QWidget,
 )
-from PyQt6.QtCore import Qt
-from PyQt6.QtGui import QIcon
-from typing import List
+
+from gui.dialog_chrome import make_dialog_footer, make_dialog_header
+from gui.theme import C, F, SZ, icon as _icon
+from qt_chrome.frameless_dialog_base import FramelessDialogBase
 
 
-class DatasetSelectionDialog(QDialog):
-    """Dialog for selecting datasets to compare when many datasets are available"""
+class DatasetSelectionDialog(FramelessDialogBase):
+    """Dialog for selecting datasets to compare when many datasets are available."""
 
-    def __init__(self, dataset_tabs: List, currently_selected: List = None, parent=None):
-        super().__init__(parent)
+    def __init__(
+        self,
+        dataset_tabs: List,
+        currently_selected: Optional[List] = None,
+        parent=None,
+    ):
+        super().__init__(parent, default_mode="auto")
         self.dataset_tabs = dataset_tabs
         self.currently_selected = currently_selected or []
-        self.selected_tabs = []
+        self.selected_tabs: List = []
+        self._rows: list[_DatasetRow] = []
 
-        self.setWindowTitle("Select Datasets to Compare")
+        self.setWindowTitle("Select Datasets for Comparison")
         self.setModal(True)
-        self.resize(500, 400)
+        self.resize(540, 500)
+        self.setMinimumWidth(540)
 
-        # Apply professional styling
-        self.setStyleSheet("""
-            QDialog {
-                background-color: #f5f5f0;
-            }
-            QGroupBox {
-                font-weight: bold;
-                border: 2px solid #8b7355;
-                border-radius: 8px;
-                margin-top: 15px;
-                padding-top: 15px;
-                background-color: #fafaf7;
-                font-size: 12px;
-            }
-            QGroupBox::title {
-                subcontrol-origin: margin;
-                subcontrol-position: top left;
-                left: 18px;
-                top: 4px;
-                padding: 4px 10px 4px 10px;
-                color: #5d4e37;
-                background-color: #fafaf7;
-                border: 1px solid #8b7355;
-                border-radius: 4px;
-                font-weight: bold;
-                font-size: 11px;
-            }
-            QListWidget {
-                background-color: #ffffff;
-                border: 1px solid #8b7355;
-                border-radius: 4px;
-                selection-background-color: #d2b48c;
-            }
-            QListWidget::item {
-                padding: 4px;
-                border-bottom: 1px solid #e0e0e0;
-            }
-            QListWidget::item:selected {
-                background-color: #d2b48c;
-                color: #2f2f2f;
-            }
-            QListWidget::item:hover {
-                background-color: #e6d7c3;
-            }
-            QPushButton {
-                background-color: #d2b48c;
-                border: 1px solid #8b7355;
-                border-radius: 4px;
-                padding: 6px 12px;
-                font-weight: bold;
-                color: #2f2f2f;
-            }
-            QPushButton:hover {
-                background-color: #ddbf94;
-                border-color: #6b5b47;
-            }
-            QPushButton:pressed {
-                background-color: #c4a574;
-            }
-            QLineEdit {
-                background-color: #ffffff;
-                border: 1px solid #8b7355;
-                border-radius: 3px;
-                padding: 4px;
-            }
-            QLineEdit:focus {
-                border-color: #5d4e37;
-                border-width: 2px;
-            }
-        """)
+        self._build_ui()
+        self.install_chrome_behavior(
+            header_widget=self._header_widget,
+            corner_radius=8,
+            resize_margin=6,
+        )
+        self._populate()
 
-        self.setup_ui()
-        self.populate_datasets()
+    # ── UI ─────────────────────────────────────────────────────────────────
 
-    def setup_ui(self):
-        """Setup the dialog UI"""
-        layout = QVBoxLayout(self)
-        layout.setSpacing(12)
-        layout.setContentsMargins(10, 10, 10, 10)
+    def _build_ui(self):
+        root = QVBoxLayout(self)
+        root.setContentsMargins(0, 0, 0, 0)
+        root.setSpacing(0)
 
-        # Header info
-        info_label = QLabel(f"Select datasets to compare from {len(self.dataset_tabs)} loaded datasets:")
-        info_label.setStyleSheet("font-weight: bold; color: #5d4e37; margin-bottom: 6px;")
-        layout.addWidget(info_label)
+        self._header_widget = make_dialog_header(
+            "Select Datasets for Comparison",
+            "Choose which samples to include in the comparison view",
+            fa_icon="fa6s.list-check",
+            close_fn=self.reject,
+        )
+        root.addWidget(self._header_widget)
 
-        # Search and filter section
-        search_group = QGroupBox("🔍 Search & Filter")
-        search_layout = QVBoxLayout(search_group)
-        search_layout.setSpacing(8)
+        # ── Toolbar (search + quick buttons) ──────────────────────────────
+        toolbar = QWidget()
+        toolbar.setStyleSheet(
+            f"background: {C.BG_LOW}; border-bottom: 1px solid {C.BORDER};"
+        )
+        tb_lay = QHBoxLayout(toolbar)
+        tb_lay.setContentsMargins(12, 8, 12, 8)
+        tb_lay.setSpacing(8)
 
-        # Search box
-        search_layout_h = QHBoxLayout()
-        search_layout_h.addWidget(QLabel("Search:"))
-        self.search_box = QLineEdit()
-        self.search_box.setPlaceholderText("Type to filter dataset names...")
-        self.search_box.textChanged.connect(self.filter_datasets)
-        search_layout_h.addWidget(self.search_box)
-        search_layout.addLayout(search_layout_h)
+        # Search field with icon
+        search_wrap = QWidget()
+        search_wrap.setStyleSheet("background: transparent;")
+        sw_lay = QHBoxLayout(search_wrap)
+        sw_lay.setContentsMargins(0, 0, 0, 0)
+        sw_lay.setSpacing(0)
+
+        srch_ic = QLabel()
+        try:
+            srch_ic.setPixmap(_icon("fa6s.magnifying-glass", C.TEXT_MUTED).pixmap(11, 11))
+        except Exception:
+            srch_ic.setText("🔍")
+        srch_ic.setStyleSheet("background: transparent; padding: 0 4px;")
+
+        self._search_box = QLineEdit()
+        self._search_box.setPlaceholderText("Filter by name, D50, K...")
+        self._search_box.setFixedHeight(28)
+        self._search_box.setStyleSheet(
+            f"QLineEdit {{ background: rgba(255,255,255,.7); border: 1px solid {C.BORDER}; "
+            f"border-radius: {SZ.BORDER_RADIUS}px; font-family: '{F.UI}'; "
+            f"font-size: {F.SZ_MD}pt; color: {C.TEXT}; padding: 0 8px; }}"
+            f"QLineEdit:focus {{ border-color: {C.OLIVE}; background: white; }}"
+        )
+        self._search_box.textChanged.connect(self._filter)
+
+        sw_lay.addWidget(srch_ic)
+        sw_lay.addWidget(self._search_box)
+        tb_lay.addWidget(search_wrap, 1)
 
         # Quick selection buttons
-        quick_buttons_layout = QHBoxLayout()
-        self.select_all_btn = QPushButton("Select All")
-        self.select_all_btn.clicked.connect(self.select_all)
-        self.select_none_btn = QPushButton("Select None")
-        self.select_none_btn.clicked.connect(self.select_none)
-        self.invert_btn = QPushButton("Invert Selection")
-        self.invert_btn.clicked.connect(self.invert_selection)
+        for label, fn in [("All", self._select_all), ("None", self._select_none),
+                          ("Invert", self._invert)]:
+            btn = _qs_btn(label, fn)
+            tb_lay.addWidget(btn)
 
-        quick_buttons_layout.addWidget(self.select_all_btn)
-        quick_buttons_layout.addWidget(self.select_none_btn)
-        quick_buttons_layout.addWidget(self.invert_btn)
-        quick_buttons_layout.addStretch()
+        root.addWidget(toolbar)
 
-        search_layout.addLayout(quick_buttons_layout)
-        layout.addWidget(search_group)
-
-        # Dataset list
-        datasets_group = QGroupBox("📊 Available Datasets")
-        datasets_layout = QVBoxLayout(datasets_group)
-
-        self.dataset_list = QListWidget()
-        self.dataset_list.setSelectionMode(QListWidget.SelectionMode.MultiSelection)
-        datasets_layout.addWidget(self.dataset_list)
-
-        # Selection count
-        self.selection_label = QLabel("0 datasets selected")
-        self.selection_label.setStyleSheet("color: #666; font-style: italic; margin-top: 4px;")
-        datasets_layout.addWidget(self.selection_label)
-
-        layout.addWidget(datasets_group)
-
-        # Dialog buttons
-        button_box = QDialogButtonBox(
-            QDialogButtonBox.StandardButton.Ok | QDialogButtonBox.StandardButton.Cancel
+        # ── Dataset list ──────────────────────────────────────────────────
+        self._list_scroll = QScrollArea()
+        self._list_scroll.setWidgetResizable(True)
+        self._list_scroll.setFrameShape(QFrame.Shape.NoFrame)
+        self._list_scroll.setHorizontalScrollBarPolicy(
+            Qt.ScrollBarPolicy.ScrollBarAlwaysOff
         )
-        button_box.accepted.connect(self.accept)
-        button_box.rejected.connect(self.reject)
+        self._list_scroll.setStyleSheet(
+            f"QScrollArea {{ background: {C.BG}; border: none; }}"
+            f"QScrollBar:vertical {{ background: transparent; width: 10px; margin: 6px 2px; }}"
+            f"QScrollBar::handle:vertical {{ background: {C.AMBER}; min-height: 28px; border-radius: 4px; }}"
+            "QScrollBar::add-line:vertical, QScrollBar::sub-line:vertical { height: 0px; }"
+            "QScrollBar::add-page:vertical, QScrollBar::sub-page:vertical { background: transparent; }"
+        )
+        self._list_host = QWidget()
+        self._list_host.setStyleSheet(f"background: {C.BG};")
+        self._rows_layout = QVBoxLayout(self._list_host)
+        self._rows_layout.setContentsMargins(0, 4, 0, 0)
+        self._rows_layout.setSpacing(0)
+        self._rows_layout.addStretch(1)
+        self._list_scroll.setWidget(self._list_host)
+        root.addWidget(self._list_scroll, 1)
 
-        # Add validation to OK button
-        self.ok_button = button_box.button(QDialogButtonBox.StandardButton.Ok)
-        self.ok_button.setEnabled(False)  # Start disabled
+        # ── Selection bar ─────────────────────────────────────────────────
+        sel_bar = QWidget()
+        sel_bar.setStyleSheet(
+            f"background: {C.BG_RAISED}; border-top: 1px solid {C.BORDER};"
+        )
+        sb_lay = QHBoxLayout(sel_bar)
+        sb_lay.setContentsMargins(14, 7, 14, 7)
+        sb_lay.setSpacing(8)
 
-        layout.addWidget(button_box)
+        self._sel_count_badge = QLabel("0 selected")
+        self._sel_count_badge.setStyleSheet(
+            f"background: rgba(107,142,35,.1); color: {C.OLIVE}; "
+            f"border: 1px solid rgba(107,142,35,.25); border-radius: 99px; "
+            f"padding: 2px 8px; font-family: '{F.MONO}'; font-size: {F.SZ_SM}pt; "
+            "font-weight: 500;"
+        )
+        sb_lay.addWidget(self._sel_count_badge)
 
-        # Connect selection change to update validation
-        self.dataset_list.itemSelectionChanged.connect(self.update_selection_info)
+        self._sel_hint = QLabel(f"of {len(self.dataset_tabs)} datasets")
+        self._sel_hint.setStyleSheet(
+            f"color: {C.TEXT_MUTED}; font-size: {F.SZ_SM}pt; background: transparent;"
+        )
+        sb_lay.addWidget(self._sel_hint)
+        sb_lay.addStretch(1)
 
-    def populate_datasets(self):
-        """Populate the dataset list"""
+        root.addWidget(sel_bar)
+
+        # ── Footer ────────────────────────────────────────────────────────
+        self._footer_widget = make_dialog_footer([
+            ("Cancel", self.reject, "secondary"),
+            ("Compare Selected", self.accept, "primary"),
+        ])
+        btns = self._footer_widget.findChildren(QPushButton)
+        self._compare_btn = next(
+            (b for b in btns if b.text() == "Compare Selected"),
+            None,
+        )
+        if self._compare_btn:
+            try:
+                self._compare_btn.setIcon(_icon("fa6s.code-compare", "#ffffff"))
+            except Exception:
+                pass
+            self._compare_btn.setEnabled(False)
+
+        root.addWidget(self._footer_widget)
+
+    # ── Population ──────────────────────────────────────────────────────────
+
+    def _populate(self):
         for tab in self.dataset_tabs:
-            item = QListWidgetItem(tab.get_dataset_name())
-            item.setData(Qt.ItemDataRole.UserRole, tab)  # Store tab reference
-            self.dataset_list.addItem(item)
+            row = _DatasetRow(tab, checked=tab in self.currently_selected)
+            row.toggled.connect(self._on_selection_changed)
+            self._rows.append(row)
+            self._rows_layout.insertWidget(self._rows_layout.count() - 1, row)
+        self._on_selection_changed()
 
-            # Check if this tab was previously selected
-            if tab in self.currently_selected:
-                item.setSelected(True)
+    # ── Filtering ───────────────────────────────────────────────────────────
 
-        self.update_selection_info()
+    def _filter(self, text: str):
+        text = text.lower().strip()
+        for row in self._rows:
+            row.setVisible(row.matches_filter(text))
 
-    def filter_datasets(self, search_text: str):
-        """Filter datasets based on search text"""
-        search_text = search_text.lower()
+    # ── Selection helpers ───────────────────────────────────────────────────
 
-        for i in range(self.dataset_list.count()):
-            item = self.dataset_list.item(i)
-            tab = item.data(Qt.ItemDataRole.UserRole)
-            dataset_name = tab.get_dataset_name().lower()
+    def _select_all(self):
+        for row in self._rows:
+            if row.isVisible():
+                row.set_checked(True, emit_signal=False)
+        self._on_selection_changed()
 
-            # Show/hide based on search match
-            item.setHidden(search_text not in dataset_name)
+    def _select_none(self):
+        for row in self._rows:
+            if row.isVisible():
+                row.set_checked(False, emit_signal=False)
+        self._on_selection_changed()
 
-    def select_all(self):
-        """Select all visible datasets"""
-        for i in range(self.dataset_list.count()):
-            item = self.dataset_list.item(i)
-            if not item.isHidden():
-                item.setSelected(True)
+    def _invert(self):
+        for row in self._rows:
+            if row.isVisible():
+                row.set_checked(not row.is_checked(), emit_signal=False)
+        self._on_selection_changed()
 
-    def select_none(self):
-        """Deselect all datasets"""
-        self.dataset_list.clearSelection()
+    def _on_selection_changed(self):
+        count = len([row for row in self._rows if row.is_checked()])
+        self._sel_count_badge.setText(f"{count} selected")
+        if self._compare_btn:
+            self._compare_btn.setEnabled(count >= 2)
 
-    def invert_selection(self):
-        """Invert the current selection"""
-        for i in range(self.dataset_list.count()):
-            item = self.dataset_list.item(i)
-            if not item.isHidden():
-                item.setSelected(not item.isSelected())
-
-    def update_selection_info(self):
-        """Update selection count and validation"""
-        selected_count = len(self.dataset_list.selectedItems())
-
-        # Update label
-        if selected_count == 0:
-            self.selection_label.setText("No datasets selected")
-            self.selection_label.setStyleSheet("color: #d32f2f; font-style: italic; margin-top: 4px;")
-        elif selected_count == 1:
-            self.selection_label.setText("1 dataset selected (need at least 2 to compare)")
-            self.selection_label.setStyleSheet("color: #ff9800; font-style: italic; margin-top: 4px;")
-        else:
-            self.selection_label.setText(f"{selected_count} datasets selected")
-            self.selection_label.setStyleSheet("color: #4caf50; font-style: italic; margin-top: 4px;")
-
-        # Enable/disable OK button
-        self.ok_button.setEnabled(selected_count >= 2)
+    # ── Accept / reject ─────────────────────────────────────────────────────
 
     def accept(self):
-        """Accept dialog and store selected tabs"""
-        selected_items = self.dataset_list.selectedItems()
-
-        if len(selected_items) < 2:
+        selected_rows = [row for row in self._rows if row.is_checked()]
+        if len(selected_rows) < 2:
             QMessageBox.warning(
-                self,
-                "Invalid Selection",
+                self, "Invalid Selection",
                 "Please select at least 2 datasets to compare."
             )
             return
-
-        # Store selected tabs
-        self.selected_tabs = []
-        for item in selected_items:
-            tab = item.data(Qt.ItemDataRole.UserRole)
-            self.selected_tabs.append(tab)
-
+        self.selected_tabs = [row.tab for row in selected_rows]
         super().accept()
 
     def get_selected_tabs(self) -> List:
-        """Get the selected dataset tabs"""
         return self.selected_tabs
+
+
+class _DatasetRow(QFrame):
+    """Concept-style dataset row used in the comparison selection dialog."""
+
+    toggled = pyqtSignal()
+
+    def __init__(self, tab, checked: bool = False, parent=None):
+        super().__init__(parent)
+        self.tab = tab
+        self._checked = False
+        self._status_color = _dataset_status_color(tab)
+        self._build_ui()
+        self._search_text = (
+            f"{self._label.text()} {self._meta.text()}".strip().lower()
+        )
+        self._sync_styles()
+        if checked:
+            self.set_checked(True, emit_signal=False)
+
+    def _build_ui(self):
+        self.setObjectName("datasetSelectionRow")
+        self.setCursor(Qt.CursorShape.PointingHandCursor)
+
+        lay = QHBoxLayout(self)
+        lay.setContentsMargins(14, 7, 14, 7)
+        lay.setSpacing(10)
+
+        self._checkbox = QFrame()
+        self._checkbox.setFixedSize(15, 15)
+        cb_lay = QHBoxLayout(self._checkbox)
+        cb_lay.setContentsMargins(0, 0, 0, 0)
+        self._checkmark = QLabel("✓")
+        self._checkmark.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self._checkmark.setFont(QFont(F.UI, F.SZ_XS))
+        cb_lay.addWidget(self._checkmark)
+        lay.addWidget(self._checkbox, 0, Qt.AlignmentFlag.AlignVCenter)
+
+        self._icon_box = QFrame()
+        self._icon_box.setFixedSize(26, 26)
+        icon_lay = QHBoxLayout(self._icon_box)
+        icon_lay.setContentsMargins(0, 0, 0, 0)
+        self._icon_label = QLabel()
+        self._icon_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        icon_lay.addWidget(self._icon_label)
+        lay.addWidget(self._icon_box, 0, Qt.AlignmentFlag.AlignVCenter)
+
+        name_col = QVBoxLayout()
+        name_col.setContentsMargins(0, 0, 0, 0)
+        name_col.setSpacing(1)
+
+        self._label = QLabel(self.tab.get_dataset_name())
+        self._label.setFont(QFont(F.UI, F.SZ_MD))
+        self._label.setStyleSheet("background: transparent; font-weight: 500;")
+        self._label.setTextInteractionFlags(Qt.TextInteractionFlag.NoTextInteraction)
+        name_col.addWidget(self._label)
+
+        self._meta = QLabel(_dataset_meta_text(self.tab))
+        self._meta.setFont(QFont(F.MONO, F.SZ_XS))
+        self._meta.setStyleSheet(
+            f"color: {C.TEXT_MUTED}; background: transparent;"
+        )
+        self._meta.setTextInteractionFlags(Qt.TextInteractionFlag.NoTextInteraction)
+        name_col.addWidget(self._meta)
+        lay.addLayout(name_col, 1)
+
+        self._status_dot = QLabel()
+        self._status_dot.setFixedSize(7, 7)
+        self._status_dot.setStyleSheet(
+            f"background: {self._status_color}; border-radius: 3px;"
+        )
+        lay.addWidget(self._status_dot, 0, Qt.AlignmentFlag.AlignVCenter)
+
+        for widget in (
+            self._checkbox,
+            self._checkmark,
+            self._icon_box,
+            self._icon_label,
+            self._label,
+            self._meta,
+            self._status_dot,
+        ):
+            widget.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents, True)
+
+    def matches_filter(self, text: str) -> bool:
+        return not text or text in self._search_text
+
+    def is_checked(self) -> bool:
+        return self._checked
+
+    def set_checked(self, checked: bool, *, emit_signal: bool = True):
+        checked = bool(checked)
+        if self._checked == checked:
+            return
+        self._checked = checked
+        self._sync_styles()
+        if emit_signal:
+            self.toggled.emit()
+
+    def mousePressEvent(self, event):
+        if event.button() == Qt.MouseButton.LeftButton:
+            self.set_checked(not self._checked)
+            event.accept()
+            return
+        super().mousePressEvent(event)
+
+    def _sync_styles(self):
+        row_bg = "rgba(107,142,35,.05)" if self._checked else "transparent"
+        row_hover = "rgba(107,142,35,.07)" if self._checked else "rgba(107,142,35,.04)"
+        self.setStyleSheet(
+            f"QFrame#datasetSelectionRow {{"
+            f"background: {row_bg};"
+            "border: none;"
+            "border-bottom: 1px solid rgba(212,196,168,.35);"
+            "}"
+            f"QFrame#datasetSelectionRow:hover {{ background: {row_hover}; }}"
+        )
+
+        check_bg = C.OLIVE if self._checked else "rgba(255,255,255,.5)"
+        check_border = C.OLIVE_DK if self._checked else C.BORDER
+        self._checkbox.setStyleSheet(
+            f"background: {check_bg}; border: 1.5px solid {check_border}; border-radius: 3px;"
+        )
+        self._checkmark.setVisible(self._checked)
+        self._checkmark.setStyleSheet(
+            "background: transparent; color: white; font-weight: 700;"
+        )
+
+        icon_bg = "rgba(107,142,35,.12)" if self._checked else "rgba(255,255,255,.4)"
+        icon_border = "rgba(107,142,35,.3)" if self._checked else C.BORDER
+        icon_color = C.OLIVE if self._checked else C.TEXT_MUTED
+        self._icon_box.setStyleSheet(
+            f"background: {icon_bg}; border: 1px solid {icon_border}; border-radius: 3px;"
+        )
+        try:
+            self._icon_label.setPixmap(_icon("fa6s.vial", icon_color).pixmap(10, 10))
+            self._icon_label.setText("")
+        except Exception:
+            self._icon_label.setPixmap(None)
+            self._icon_label.setText("•")
+            self._icon_label.setStyleSheet(
+                f"background: transparent; color: {icon_color};"
+            )
+
+
+def _dataset_meta_text(tab) -> str:
+    dataset = tab.get_dataset() if hasattr(tab, "get_dataset") else getattr(tab, "dataset", None)
+    parts: list[str] = []
+
+    if dataset is not None and hasattr(dataset, "get_d50"):
+        d50 = dataset.get_d50()
+        if d50 is not None:
+            parts.append(f"D50 {d50:.3f} mm")
+
+    k_md = _dataset_k_mean_md(tab)
+    if k_md is not None:
+        parts.append(f"K̄ {_format_md_value(k_md)} m/d")
+
+    fractions = len(getattr(dataset, "particle_sizes", []) or [])
+    if fractions:
+        parts.append(f"{fractions} fractions")
+
+    return " · ".join(parts) if parts else "Loaded dataset"
+
+
+def _dataset_status_color(tab) -> str:
+    results = tab.get_results() if hasattr(tab, "get_results") else getattr(tab, "current_results", None)
+    if isinstance(results, dict):
+        results = list(results.values())
+    if not results:
+        return C.LED_OK
+
+    for result in results:
+        status = getattr(getattr(result, "status", None), "value", getattr(result, "status", ""))
+        if "OK" not in str(status) or not getattr(result, "conditions_met", True):
+            return C.LED_WARN
+    return C.LED_OK
+
+
+def _dataset_k_mean_md(tab) -> float | None:
+    results = tab.get_results() if hasattr(tab, "get_results") else getattr(tab, "current_results", None)
+    if isinstance(results, dict):
+        results = list(results.values())
+    if not results:
+        return None
+
+    values: list[float] = []
+    for result in results:
+        k_value = getattr(result, "k_value", None)
+        if k_value is not None and k_value > 0:
+            values.append(k_value * 86400.0)
+
+    if not values:
+        return None
+    return math.exp(sum(math.log(v) for v in values) / len(values))
+
+
+def _format_md_value(value: float) -> str:
+    if value >= 100:
+        return f"{value:.0f}"
+    if value >= 1:
+        return f"{value:.1f}"
+    return f"{value:.2f}"
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Internal helper
+# ─────────────────────────────────────────────────────────────────────────────
+
+def _qs_btn(label: str, fn) -> QPushButton:
+    btn = QPushButton(label)
+    btn.setFixedHeight(24)
+    btn.setStyleSheet(
+        f"QPushButton {{ border: 1px solid {C.BORDER}; "
+        f"border-radius: {SZ.BORDER_RADIUS}px; background: transparent; "
+        f"color: {C.TEXT_MUTED}; padding: 3px 8px; font-size: {F.SZ_SM}pt; }}"
+        f"QPushButton:hover {{ background: {C.BG_RAISED}; border-color: {C.BORDER_DK}; "
+        f"color: {C.TEXT}; }}"
+    )
+    btn.clicked.connect(fn)
+    return btn

@@ -33,7 +33,7 @@ except Exception:  # pragma: no cover - optional module in some environments
 
 from .mask import apply_frameless_round_mask
 from .mode import resolve_window_chrome_mode
-from .platform import enable_windows_soft_corners
+from .platform import enable_windows_frameless_snap_styles, enable_windows_soft_corners
 from .window_helper import FramelessWindowChromeHelper
 
 
@@ -199,6 +199,7 @@ class FramelessMainWindowMixin:
         self._chrome_resize_margin = int(resize_margin)
         self._chrome_top_resize_margin = int(top_resize_margin)
         self._chrome_enable_edge_resize = bool(enable_edge_resize)
+        self._chrome_enable_windows_snap_styles = True
         self._frameless_drag_filters = []
 
         self.window_chrome = None
@@ -492,6 +493,9 @@ class FramelessMainWindowMixin:
     def _enable_windows_soft_corners(self) -> None:
         enable_windows_soft_corners(self)
 
+    def _enable_windows_snap_styles(self) -> None:
+        enable_windows_frameless_snap_styles(self)
+
     def resizeEvent(self, event):
         super().resizeEvent(event)
         self._apply_frameless_round_mask()
@@ -510,6 +514,13 @@ class FramelessMainWindowMixin:
     def _post_first_show(self) -> None:
         """Deferred setup called once after the native window is fully ready."""
         self._apply_frameless_round_mask()
+        if (
+            self._is_frameless_mode()
+            and getattr(self, "_chrome_enable_windows_snap_styles", True)
+            and not getattr(self, "_windows_snap_styles_applied", False)
+        ):
+            self._enable_windows_snap_styles()
+            self._windows_snap_styles_applied = True
         if not getattr(self, "_soft_corners_applied", False):
             self._enable_windows_soft_corners()
             self._soft_corners_applied = True

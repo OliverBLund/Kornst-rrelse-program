@@ -33,6 +33,7 @@ from PyQt6.QtGui import QColor, QFont, QBrush, QPixmap, QPainter, QIcon
 # ── Internal ──────────────────────────────────────────────────────────────────
 from .matplotlib_canvas import FigureCanvas
 from .comparison_plot_widget import ComparisonPlotWidget
+from .dataset_selection_dialog import DatasetSelectionDialog
 from .theme import C, F, icon as theme_icon
 from k_calculations_v2 import CalculationStatus
 from grain_classification import (
@@ -291,7 +292,7 @@ class ComparisonTab(QWidget):
         lay.addWidget(title_block)
         lay.addStretch(1)
 
-        # Manage Datasets button (placeholder)
+        # Manage Datasets button
         self._manage_btn = QPushButton("Manage Datasets")
         self._manage_btn.setFixedHeight(28)
         try:
@@ -300,7 +301,7 @@ class ComparisonTab(QWidget):
         except Exception:
             pass
         self._manage_btn.setEnabled(False)
-        self._manage_btn.setToolTip("Coming soon — manage which datasets appear in comparison")
+        self._manage_btn.setToolTip("Choose which loaded datasets appear in comparison")
         self._manage_btn.clicked.connect(self._on_manage_datasets)
 
         self._update_btn = QPushButton("Update")
@@ -376,14 +377,14 @@ class ComparisonTab(QWidget):
         return page
 
     def _refresh_pin_list(self) -> None:
-        """Rebuild the pin-list rows from self.dataset_tabs."""
+        """Rebuild the pin-list rows from the currently selected datasets."""
         # Remove all except the trailing stretch
         while self._pin_list_layout.count() > 1:
             item = self._pin_list_layout.takeAt(0)
             if item.widget():
                 item.widget().deleteLater()
 
-        for i, tab in enumerate(self.dataset_tabs):
+        for i, tab in enumerate(self.selected_datasets):
             name = tab.get_dataset_name()
             color = DATASET_COLORS[i % len(DATASET_COLORS)]
             pinned = name in self._pinned
@@ -628,8 +629,29 @@ class ComparisonTab(QWidget):
     def set_scheme(self, scheme) -> None:
         """Update active classification scheme and refresh if data present."""
         self._active_scheme = scheme
-        if len(self.dataset_tabs) >= 2:
+        if len(self.selected_datasets) >= 2:
             self.update_comparison()
+
+    def _set_selected_datasets(self, selected_tabs) -> None:
+        """Apply a selected subset while preserving dataset order and valid pins."""
+        selected_names = {tab.get_dataset_name() for tab in selected_tabs}
+        self.selected_datasets = [
+            tab for tab in self.dataset_tabs
+            if tab.get_dataset_name() in selected_names
+        ]
+        if not self.selected_datasets and self.dataset_tabs:
+            self.selected_datasets = list(self.dataset_tabs)
+
+        active_names = {tab.get_dataset_name() for tab in self.selected_datasets}
+        self._pinned = {name for name in self._pinned if name in active_names}
+        if not self._pinned and active_names:
+            self._pinned = set(active_names)
+
+        enabled = len(self.selected_datasets) >= 2
+        self._update_btn.setEnabled(enabled)
+        self._export_btn.setEnabled(enabled)
+        self._refresh_pin_list()
+        self._update_header_count()
 
     def set_dataset_tabs(self, dataset_tabs) -> None:
         """Called by main_window whenever the dataset tab list changes.
@@ -638,22 +660,24 @@ class ComparisonTab(QWidget):
             dataset_tabs: list of dataset tab objects exposing
                           get_dataset(), get_dataset_name(), get_results()
         """
-        self.dataset_tabs = dataset_tabs
-        self.selected_datasets = list(dataset_tabs)
-        self._pinned = {t.get_dataset_name() for t in dataset_tabs}
-        self._refresh_pin_list()
-        self._update_header_count()
+        prev_selected = {tab.get_dataset_name() for tab in self.selected_datasets}
+        self.dataset_tabs = list(dataset_tabs)
 
-        enabled = len(dataset_tabs) >= 2
-        self._update_btn.setEnabled(enabled)
-        self._export_btn.setEnabled(enabled)
+        if prev_selected:
+            selected_tabs = [
+                tab for tab in self.dataset_tabs
+                if tab.get_dataset_name() in prev_selected
+            ]
+        else:
+            selected_tabs = list(self.dataset_tabs)
 
-        if enabled:
+        self._set_selected_datasets(selected_tabs)
+
+        if len(self.selected_datasets) >= 2:
             self.update_comparison()
 
     def update_comparison(self) -> None:
         """Refresh all views from current dataset_tabs.  Public API."""
-        self.selected_datasets = list(self.dataset_tabs)
         if len(self.selected_datasets) < 2:
             return
         self._update_plot()
@@ -666,25 +690,28 @@ class ComparisonTab(QWidget):
     # ── Internal update helpers ───────────────────────────────────────────────
 
     def _update_header_count(self) -> None:
-        n = len(self.dataset_tabs)
+        n_loaded = len(self.dataset_tabs)
+        n_selected = len(self.selected_datasets)
         n_pinned = len(self._pinned)
-        if n == 0:
-            self._count_label.setText("Load datasets to compare")
-        else:
-            self._count_label.setText(
-                f"{n} selected  ·  {n_pinned} pinned in view  ·  pin/unpin in the dataset panel"
-            )
-        self._manage_btn.setEnabled(n >= 1)
+        self._count_label.setText(
+            "Load datasets to compare" if n_loaded == 0
+            else f"{n_selected} selected  ·  {n_loaded} loaded  ·  {n_pinned} pinned in view"
+        )
+        self._manage_btn.setEnabled(n_loaded >= 1)
 
     def _on_manage_datasets(self) -> None:
-        """Placeholder — will open a dataset manager dialog."""
-        from PyQt6.QtWidgets import QMessageBox
-        QMessageBox.information(
-            self, "Coming Soon",
-            "Dataset manager — select which loaded datasets to include "
-            "in the comparison.\n\nFor now, use the sidebar toggle (☑) on each "
-            "sample card to control what appears here."
+        """Open dataset-selection dialog for the comparison subset."""
+        if not self.dataset_tabs:
+            return
+
+        dialog = DatasetSelectionDialog(
+            self.dataset_tabs,
+            currently_selected=self.selected_datasets,
+            parent=self,
         )
+        if dialog.exec():
+            self._set_selected_datasets(dialog.get_selected_tabs())
+            self.update_comparison()
 
     def _update_plot(self) -> None:
         """Push datasets into the comparison plot widget."""

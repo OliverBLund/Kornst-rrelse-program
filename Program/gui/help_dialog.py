@@ -3,20 +3,23 @@ Help dialog with navigation and HTML content browser
 """
 
 from PyQt6.QtWidgets import (
-    QDialog, QVBoxLayout, QHBoxLayout, QSplitter,
+    QVBoxLayout, QHBoxLayout, QSplitter,
     QTreeWidget, QTreeWidgetItem, QTextBrowser,
     QPushButton, QLineEdit, QWidget, QLabel
 )
 from PyQt6.QtCore import Qt, QUrl
 from PyQt6.QtGui import QFont, QDesktopServices
 import os
+from gui.dialog_chrome import make_dialog_header, make_dialog_footer
+from gui.theme import C, F, SZ, icon as _icon
+from qt_chrome.frameless_dialog_base import FramelessDialogBase
 
 
-class HelpDialog(QDialog):
+class HelpDialog(FramelessDialogBase):
     """Professional help dialog with navigation and rich HTML content"""
 
     def __init__(self, parent=None):
-        super().__init__(parent)
+        super().__init__(parent, default_mode="auto")
         self.setWindowTitle("Grain Size Analysis - Help & Documentation")
         self.resize(1000, 700)
 
@@ -38,6 +41,11 @@ class HelpDialog(QDialog):
             self.help_dir = os.path.join(os.path.dirname(os.path.dirname(__file__)), "help_content")
 
         self.setup_ui()
+        self.install_chrome_behavior(
+            header_widget=self._header_widget,
+            corner_radius=8,
+            resize_margin=8,
+        )
         self.load_help_topics()
 
         # Show getting started by default
@@ -49,136 +57,107 @@ class HelpDialog(QDialog):
         layout.setSpacing(0)
         layout.setContentsMargins(0, 0, 0, 0)
 
-        # Apply styling
-        self.setStyleSheet("""
-            QDialog {
-                background-color: #f5f5f0;
-            }
-            QTreeWidget {
-                background-color: #fafaf7;
-                border: 1px solid #d4c4a8;
-                font-size: 11px;
-                padding: 4px;
-            }
-            QTreeWidget::item {
-                padding: 6px;
-                border-radius: 3px;
-            }
-            QTreeWidget::item:selected {
-                background-color: #6b8e23;
-                color: white;
-            }
-            QTreeWidget::item:hover {
-                background-color: #ddbf94;
-            }
-            QTextBrowser {
-                background-color: white;
-                border: 1px solid #d4c4a8;
-                padding: 20px;
-                font-size: 11px;
-            }
-            QPushButton {
-                background-color: #d2b48c;
-                border: 1px solid #8b7355;
-                border-radius: 4px;
-                padding: 8px 16px;
-                font-weight: bold;
-                font-size: 11px;
-            }
-            QPushButton:hover {
-                background-color: #ddbf94;
-            }
-            QPushButton:pressed {
-                background-color: #c4a574;
-            }
-        """)
+        # Tree + browser inherit global stylesheet; only patch specifics
+        self.setStyleSheet(
+            f"QTreeWidget {{ background: {C.BG_RAISED}; border: 1px solid {C.BORDER}; "
+            f"font-size: {F.SZ_MD}pt; padding: 4px; }}"
+            f"QTreeWidget::item {{ padding: 5px; border-radius: {SZ.BORDER_RADIUS}px; }}"
+            f"QTreeWidget::item:selected {{ background: {C.OLIVE}; color: white; }}"
+            f"QTreeWidget::item:hover {{ background: {C.BG_LOW}; }}"
+            f"QTextBrowser {{ background: white; border: 1px solid {C.BORDER}; "
+            f"padding: 20px; font-size: {F.SZ_MD}pt; }}"
+        )
 
-        # Top bar with title and search
-        top_bar = QWidget()
-        top_bar.setStyleSheet("background-color: #6b8e23; padding: 12px;")
-        top_layout = QHBoxLayout(top_bar)
+        # ── Header ────────────────────────────────────────────────────────
+        # The header also hosts the search box in an extra row below
+        header_outer = QWidget()
+        header_outer.setObjectName("helpHeaderOuter")
+        header_outer.setStyleSheet(
+            f"QWidget#helpHeaderOuter {{ background: {C.BG_RAISED}; "
+            f"border-bottom: 1px solid {C.BORDER}; }}"
+        )
+        ho_lay = QVBoxLayout(header_outer)
+        ho_lay.setContentsMargins(0, 0, 0, 0)
+        ho_lay.setSpacing(0)
 
-        title_label = QLabel("Help & Documentation")
-        title_label.setStyleSheet("color: white; font-size: 16px; font-weight: bold;")
-        top_layout.addWidget(title_label)
+        _inner_header = make_dialog_header(
+            "Help & Documentation",
+            "Grain-size analysis · K-calculation methods · reference guide",
+            fa_icon="fa6s.circle-question",
+            close_fn=self.accept,
+        )
+        _inner_header.setStyleSheet("")   # let outer widget supply bg
+        ho_lay.addWidget(_inner_header)
+        # Expose outer container as header for drag purposes
+        self._header_widget = header_outer
 
-        # Search box
-        search_label = QLabel("Search:")
-        search_label.setStyleSheet("color: white; margin-left: 20px;")
-        top_layout.addWidget(search_label)
+        # Search strip below title row
+        search_strip = QWidget()
+        search_strip.setStyleSheet(
+            f"background: {C.BG_LOW}; border-top: 1px solid {C.BORDER};"
+        )
+        ss_lay = QHBoxLayout(search_strip)
+        ss_lay.setContentsMargins(14, 6, 14, 6)
+        ss_lay.setSpacing(6)
+
+        srch_ic = QLabel()
+        try:
+            srch_ic.setPixmap(_icon("fa6s.magnifying-glass", C.TEXT_MUTED).pixmap(11, 11))
+        except Exception:
+            srch_ic.setText("🔍")
+        srch_ic.setStyleSheet("background: transparent;")
+        ss_lay.addWidget(srch_ic)
 
         self.search_box = QLineEdit()
-        self.search_box.setPlaceholderText("Type to search help topics...")
-        self.search_box.setMaximumWidth(300)
-        self.search_box.setStyleSheet("""
-            QLineEdit {
-                background-color: white;
-                border: 1px solid #8b7355;
-                border-radius: 3px;
-                padding: 6px;
-                font-size: 11px;
-            }
-        """)
+        self.search_box.setPlaceholderText("Search help topics…")
+        self.search_box.setFixedHeight(26)
+        self.search_box.setStyleSheet(
+            f"QLineEdit {{ background: rgba(255,255,255,.7); border: 1px solid {C.BORDER}; "
+            f"border-radius: {SZ.BORDER_RADIUS}px; font-size: {F.SZ_MD}pt; "
+            f"color: {C.TEXT}; padding: 0 8px; }}"
+            f"QLineEdit:focus {{ border-color: {C.OLIVE}; background: white; }}"
+        )
         self.search_box.textChanged.connect(self.on_search_text_changed)
-        top_layout.addWidget(self.search_box)
+        ss_lay.addWidget(self.search_box, 1)
 
-        # Clear search button
         self.clear_search_btn = QPushButton("Clear")
-        self.clear_search_btn.setMaximumWidth(60)
-        self.clear_search_btn.setStyleSheet("""
-            QPushButton {
-                background-color: #8b7355;
-                color: white;
-                border: none;
-                padding: 6px;
-            }
-            QPushButton:hover {
-                background-color: #6b5b47;
-            }
-        """)
+        self.clear_search_btn.setFixedHeight(26)
+        self.clear_search_btn.setStyleSheet(
+            f"QPushButton {{ border: 1px solid {C.BORDER}; border-radius: {SZ.BORDER_RADIUS}px; "
+            f"background: {C.BG}; color: {C.TEXT_MID}; padding: 0 10px; "
+            f"font-size: {F.SZ_SM}pt; }}"
+            f"QPushButton:hover {{ background: {C.BG_RAISED}; border-color: {C.BORDER_DK}; }}"
+        )
         self.clear_search_btn.clicked.connect(self.clear_search)
-        top_layout.addWidget(self.clear_search_btn)
+        ss_lay.addWidget(self.clear_search_btn)
 
-        top_layout.addStretch()
+        ho_lay.addWidget(search_strip)
+        layout.addWidget(header_outer)
 
-        layout.addWidget(top_bar)
-
-        # Main content area
+        # ── Main content area ─────────────────────────────────────────────
         splitter = QSplitter(Qt.Orientation.Horizontal)
 
-        # Left: Navigation tree
         self.nav_tree = QTreeWidget()
         self.nav_tree.setHeaderHidden(True)
         self.nav_tree.setMaximumWidth(300)
         self.nav_tree.setMinimumWidth(250)
         self.nav_tree.itemClicked.connect(self.on_topic_clicked)
 
-        # Right: Content browser
         self.content_browser = QTextBrowser()
         self.content_browser.setOpenExternalLinks(False)
         self.content_browser.anchorClicked.connect(self.on_link_clicked)
-
-        # Set search paths for images
         self.content_browser.setSearchPaths([self.help_dir, os.path.join(self.help_dir, "images")])
 
         splitter.addWidget(self.nav_tree)
         splitter.addWidget(self.content_browser)
-        splitter.setStretchFactor(1, 1)  # Give more space to content
+        splitter.setStretchFactor(1, 1)
 
         layout.addWidget(splitter, 1)
 
-        # Bottom bar with close button
-        bottom_bar = QWidget()
-        bottom_bar.setStyleSheet("background-color: #f0ebe5; padding: 8px; border-top: 1px solid #d4c4a8;")
-        bottom_layout = QHBoxLayout(bottom_bar)
-        bottom_layout.addStretch()
-
-        close_btn = QPushButton("Close")
-        close_btn.clicked.connect(self.accept)
-        close_btn.setMinimumWidth(100)
-        bottom_layout.addWidget(close_btn)
-
-        layout.addWidget(bottom_bar)
+        # ── Footer ────────────────────────────────────────────────────────
+        layout.addWidget(make_dialog_footer([
+            ("Close", self.accept, "secondary"),
+        ]))
 
     def load_help_topics(self):
         """Populate the navigation tree with help topics"""
