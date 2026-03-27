@@ -18,6 +18,7 @@ from datetime import datetime
 
 from data_loader import GrainSizeData
 from k_calculations_v2 import KCalculationResult
+from grain_classification import ISO14688
 
 
 class ExportTab(QWidget):
@@ -29,6 +30,7 @@ class ExportTab(QWidget):
 
     def __init__(self, parent=None):
         super().__init__(parent)
+        self._scheme = ISO14688
         self.datasets = []  # List of (name, GrainSizeData, List[KCalculationResult])
         self.plot_figures: List[Any] = []
 
@@ -1725,6 +1727,10 @@ class ExportTab(QWidget):
         preview.setPlainText("\n".join(text))
         self.preview_tabs.addTab(preview, "ℹ️ Help")
 
+    def set_scheme(self, scheme) -> None:
+        """Set the active classification scheme used for all exports."""
+        self._scheme = scheme
+
     def update_datasets(self, datasets: List[tuple], plot_figures: Optional[List[Any]] = None):
         """
         Update the list of available datasets
@@ -2274,6 +2280,7 @@ class ExportTab(QWidget):
 
         # Create export manager
         manager = ExportManager()
+        manager.set_scheme(self._scheme)
 
         # Show progress dialog
         progress = QProgressDialog(

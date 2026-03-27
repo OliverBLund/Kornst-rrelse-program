@@ -2461,7 +2461,7 @@ class ControlPanel(QFrame):
             f"  D50: {fmt(d50, '.4f')} mm  (median)\n"
             f"  D60: {fmt(d60, '.4f')} mm\n"
             f"\n"
-            f"Soil Classification:        {dataset.classify_soil()}\n"
+            f"Soil Classification:        {dataset.classify(scheme=self._active_scheme).label}\n"
             f"Uniformity Coefficient Cu:  {fmt(cu, '.3f')}\n"
         )
         stats_edit = QTextEdit()

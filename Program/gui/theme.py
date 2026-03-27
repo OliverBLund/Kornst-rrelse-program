@@ -21,7 +21,8 @@ from __future__ import annotations
 import sys
 from pathlib import Path
 import qtawesome as qta
-from PyQt6.QtGui import QColor, QIcon, QFontDatabase
+from PyQt6.QtCore import Qt, QRectF
+from PyQt6.QtGui import QColor, QFont, QFontDatabase, QIcon, QPainter, QPen, QPixmap
 
 
 _MATPLOTLIB_FONTS_REGISTERED = False
@@ -303,6 +304,55 @@ def icon_colored(fa_name: str, color: str, active_color: str | None = None) -> Q
             color_active=active_color,
         )
     return _safe_qta_icon(fa_name, color=color)
+
+
+def app_icon() -> QIcon:
+    """Return a multi-size application icon for window/taskbar usage."""
+    ico = QIcon()
+    glyph_icon = _safe_qta_icon("fa6s.layer-group", color=C.LOGO_TEXT)
+
+    for size in (16, 20, 24, 32, 40, 48, 64, 128, 256):
+        pix = QPixmap(size, size)
+        pix.fill(Qt.GlobalColor.transparent)
+
+        painter = QPainter(pix)
+        painter.setRenderHint(QPainter.RenderHint.Antialiasing)
+
+        inset = max(1, size // 16)
+        border_w = max(1, size // 32)
+        radius = max(4.0, size * 0.22)
+        rect = QRectF(inset, inset, size - inset * 2, size - inset * 2)
+
+        painter.setPen(QPen(QColor(C.LOGO_BG_TOP), border_w))
+        painter.setBrush(QColor(C.LOGO_BG))
+        painter.drawRoundedRect(rect, radius, radius)
+
+        accent_h = max(2.0, size * 0.14)
+        painter.setPen(Qt.PenStyle.NoPen)
+        painter.setBrush(QColor(C.OLIVE))
+        painter.drawRoundedRect(
+            QRectF(rect.left(), rect.bottom() - accent_h, rect.width(), accent_h),
+            radius * 0.55,
+            radius * 0.55,
+        )
+
+        if not glyph_icon.isNull():
+            glyph_size = max(10, int(size * 0.56))
+            glyph = glyph_icon.pixmap(glyph_size, glyph_size)
+            gx = int((size - glyph.width()) / 2)
+            gy = int((size - glyph.height()) / 2 - size * 0.04)
+            painter.drawPixmap(gx, gy, glyph)
+        else:
+            font = QFont(F.UI, max(7, int(size * 0.22)), QFont.Weight.Bold)
+            font.setPixelSize(max(7, int(size * 0.30)))
+            painter.setFont(font)
+            painter.setPen(QColor(C.LOGO_TEXT))
+            painter.drawText(rect, Qt.AlignmentFlag.AlignCenter, "GS")
+
+        painter.end()
+        ico.addPixmap(pix)
+
+    return ico
 
 
 # ─────────────────────────────────────────────────────────────

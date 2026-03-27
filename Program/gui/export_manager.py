@@ -46,6 +46,11 @@ class ExportManager:
 
     def __init__(self):
         self.exported_files = []
+        self._scheme = ISO14688  # Active classification scheme; set via set_scheme()
+
+    def set_scheme(self, scheme) -> None:
+        """Set the active classification scheme used in all exports."""
+        self._scheme = scheme
 
     def _get_enabled_unit_specs(self, config: Dict) -> List[tuple]:
         """Return enabled K-value units in a stable display order."""
@@ -1191,32 +1196,27 @@ class ExportManager:
             row += 1
 
         # Classification
-        if config.get('classification', True) and hasattr(dataset, 'classify'):
+        if config.get('classification', True):
             row += 1
-            try:
-                _cls = dataset.classify(scheme=ISO14688)
-                ws[f'A{row}'] = 'Soil Classification:'
-                ws[f'B{row}'] = _cls.label
-                ws[f'A{row}'].font = Font(bold=True)
-                row += 1
-                ws[f'A{row}'] = 'Standard:'
-                ws[f'B{row}'] = _cls.scheme.name
-                row += 1
-                ws[f'A{row}'] = 'Clay %:'
-                ws[f'B{row}'] = _cls.fractions.clay_pct
-                row += 1
-                ws[f'A{row}'] = 'Silt %:'
-                ws[f'B{row}'] = _cls.fractions.silt_pct
-                row += 1
-                ws[f'A{row}'] = 'Sand %:'
-                ws[f'B{row}'] = _cls.fractions.sand_pct
-                row += 1
-                ws[f'A{row}'] = 'Gravel %:'
-                ws[f'B{row}'] = _cls.fractions.gravel_pct
-            except Exception:
-                ws[f'A{row}'] = 'Soil Classification:'
-                ws[f'B{row}'] = dataset.classify_soil() if hasattr(dataset, 'classify_soil') else '—'
-                ws[f'A{row}'].font = Font(bold=True)
+            _cls = dataset.classify(scheme=self._scheme)
+            ws[f'A{row}'] = 'Soil Classification:'
+            ws[f'B{row}'] = _cls.label
+            ws[f'A{row}'].font = Font(bold=True)
+            row += 1
+            ws[f'A{row}'] = 'Standard:'
+            ws[f'B{row}'] = _cls.scheme.name
+            row += 1
+            ws[f'A{row}'] = 'Clay %:'
+            ws[f'B{row}'] = _cls.fractions.clay_pct
+            row += 1
+            ws[f'A{row}'] = 'Silt %:'
+            ws[f'B{row}'] = _cls.fractions.silt_pct
+            row += 1
+            ws[f'A{row}'] = 'Sand %:'
+            ws[f'B{row}'] = _cls.fractions.sand_pct
+            row += 1
+            ws[f'A{row}'] = 'Gravel %:'
+            ws[f'B{row}'] = _cls.fractions.gravel_pct
 
         # K-value statistics
         if results:
@@ -1545,20 +1545,17 @@ class ExportManager:
             }
 
         # Classification
-        if config.get('classification', True) and hasattr(dataset, 'classify'):
-            try:
-                _cls = dataset.classify(scheme=ISO14688)
-                data['classification'] = {
-                    'label':       _cls.label,
-                    'scheme_name': _cls.scheme.name,
-                    'clay_pct':    _cls.fractions.clay_pct,
-                    'silt_pct':    _cls.fractions.silt_pct,
-                    'sand_pct':    _cls.fractions.sand_pct,
-                    'gravel_pct':  _cls.fractions.gravel_pct,
-                    'cobble_pct':  _cls.fractions.cobble_pct,
-                }
-            except Exception:
-                data['classification'] = dataset.classify_soil() if hasattr(dataset, 'classify_soil') else '—'
+        if config.get('classification', True):
+            _cls = dataset.classify(scheme=self._scheme)
+            data['classification'] = {
+                'label':       _cls.label,
+                'scheme_name': _cls.scheme.name,
+                'clay_pct':    _cls.fractions.clay_pct,
+                'silt_pct':    _cls.fractions.silt_pct,
+                'sand_pct':    _cls.fractions.sand_pct,
+                'gravel_pct':  _cls.fractions.gravel_pct,
+                'cobble_pct':  _cls.fractions.cobble_pct,
+            }
 
         # K-values
         if config.get('k_values', True) and results:
@@ -1680,32 +1677,27 @@ class ExportManager:
                 ws[f'A{row}'].font = Font(bold=True)
                 row += 1
 
-        if config.get('classification', True) and hasattr(dataset, 'classify'):
+        if config.get('classification', True):
             row += 1
-            try:
-                _cls = dataset.classify(scheme=ISO14688)
-                ws[f'A{row}'] = 'Soil Classification:'
-                ws[f'B{row}'] = _cls.label
-                ws[f'A{row}'].font = Font(bold=True)
-                row += 1
-                ws[f'A{row}'] = 'Standard:'
-                ws[f'B{row}'] = _cls.scheme.name
-                row += 1
-                ws[f'A{row}'] = 'Clay %:'
-                ws[f'B{row}'] = _cls.fractions.clay_pct
-                row += 1
-                ws[f'A{row}'] = 'Silt %:'
-                ws[f'B{row}'] = _cls.fractions.silt_pct
-                row += 1
-                ws[f'A{row}'] = 'Sand %:'
-                ws[f'B{row}'] = _cls.fractions.sand_pct
-                row += 1
-                ws[f'A{row}'] = 'Gravel %:'
-                ws[f'B{row}'] = _cls.fractions.gravel_pct
-            except Exception:
-                ws[f'A{row}'] = 'Soil Classification:'
-                ws[f'B{row}'] = dataset.classify_soil() if hasattr(dataset, 'classify_soil') else '—'
-                ws[f'A{row}'].font = Font(bold=True)
+            _cls = dataset.classify(scheme=self._scheme)
+            ws[f'A{row}'] = 'Soil Classification:'
+            ws[f'B{row}'] = _cls.label
+            ws[f'A{row}'].font = Font(bold=True)
+            row += 1
+            ws[f'A{row}'] = 'Standard:'
+            ws[f'B{row}'] = _cls.scheme.name
+            row += 1
+            ws[f'A{row}'] = 'Clay %:'
+            ws[f'B{row}'] = _cls.fractions.clay_pct
+            row += 1
+            ws[f'A{row}'] = 'Silt %:'
+            ws[f'B{row}'] = _cls.fractions.silt_pct
+            row += 1
+            ws[f'A{row}'] = 'Sand %:'
+            ws[f'B{row}'] = _cls.fractions.sand_pct
+            row += 1
+            ws[f'A{row}'] = 'Gravel %:'
+            ws[f'B{row}'] = _cls.fractions.gravel_pct
 
         stats_values = self._calculate_statistics(results, config)
         selected_stats = self._get_selected_stat_specs(config)
@@ -1888,8 +1880,17 @@ class ExportManager:
                 'coefficient_of_curvature': dataset.get_coefficient_of_curvature() if hasattr(dataset, 'get_coefficient_of_curvature') else None,
             }
 
-        if config.get('classification', True) and hasattr(dataset, 'classify_soil'):
-            data['classification'] = dataset.classify_soil()
+        if config.get('classification', True):
+            _cls = dataset.classify(scheme=self._scheme)
+            data['classification'] = {
+                'label':       _cls.label,
+                'scheme_name': _cls.scheme.name,
+                'clay_pct':    _cls.fractions.clay_pct,
+                'silt_pct':    _cls.fractions.silt_pct,
+                'sand_pct':    _cls.fractions.sand_pct,
+                'gravel_pct':  _cls.fractions.gravel_pct,
+                'cobble_pct':  _cls.fractions.cobble_pct,
+            }
 
         if config.get('k_values', True) and filtered_results:
             data['k_values'] = []

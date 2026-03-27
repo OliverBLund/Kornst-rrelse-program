@@ -343,6 +343,8 @@ class ClassificationDialog(FramelessDialogBase):
         self.setMinimumWidth(700)
         self.setMinimumHeight(560)
         self.resize(720, 580)
+        self._tab_pages: dict[int, QWidget] = {}
+        self._built_tabs: set[int] = set()
         self._build()
         self.install_chrome_behavior(
             header_widget=self._header_widget,
@@ -375,20 +377,53 @@ class ClassificationDialog(FramelessDialogBase):
         )
 
         try:
-            self._tabs.addTab(self._make_scheme_tab(),     icon('fa6s.list-check', C.TEXT_MUTED),     "  Scheme  ")
-            self._tabs.addTab(self._make_boundaries_tab(), icon('fa6s.ruler-horizontal', C.TEXT_MUTED), "  Boundaries  ")
-            self._tabs.addTab(self._make_custom_tab(),     icon('fa6s.pen-ruler', C.TEXT_MUTED),      "  Custom β  ")
-            self._tabs.addTab(self._make_references_tab(), icon('fa6s.book-open', C.TEXT_MUTED),      "  References  ")
+            self._tabs.addTab(self._make_scheme_tab(),         icon('fa6s.list-check', C.TEXT_MUTED),      "  Scheme  ")
+            self._tabs.addTab(self._make_tab_placeholder(1),   icon('fa6s.ruler-horizontal', C.TEXT_MUTED), "  Boundaries  ")
+            self._tabs.addTab(self._make_tab_placeholder(2),   icon('fa6s.pen-ruler', C.TEXT_MUTED),       "  Custom β  ")
+            self._tabs.addTab(self._make_tab_placeholder(3),   icon('fa6s.book-open', C.TEXT_MUTED),       "  References  ")
         except Exception:
-            self._tabs.addTab(self._make_scheme_tab(),     "  Scheme  ")
-            self._tabs.addTab(self._make_boundaries_tab(), "  Boundaries  ")
-            self._tabs.addTab(self._make_custom_tab(),     "  Custom β  ")
-            self._tabs.addTab(self._make_references_tab(), "  References  ")
+            self._tabs.addTab(self._make_scheme_tab(),       "  Scheme  ")
+            self._tabs.addTab(self._make_tab_placeholder(1), "  Boundaries  ")
+            self._tabs.addTab(self._make_tab_placeholder(2), "  Custom β  ")
+            self._tabs.addTab(self._make_tab_placeholder(3), "  References  ")
+        self._built_tabs.add(0)
         self._tabs.currentChanged.connect(self._on_tab_changed)
         root.addWidget(self._tabs, 1)
 
         # Footer
         root.addWidget(self._make_footer())
+
+    def _make_tab_placeholder(self, index: int) -> QWidget:
+        page = QWidget()
+        page.setObjectName(f"classificationTabPlaceholder{index}")
+        page.setStyleSheet(f"background: {C.BG};")
+        lay = QVBoxLayout(page)
+        lay.setContentsMargins(0, 0, 0, 0)
+        lay.setSpacing(0)
+        self._tab_pages[index] = page
+        return page
+
+    def _ensure_tab_built(self, index: int):
+        if index in self._built_tabs:
+            return
+
+        builder = {
+            1: self._make_boundaries_tab,
+            2: self._make_custom_tab,
+            3: self._make_references_tab,
+        }.get(index)
+        page = self._tab_pages.get(index)
+        if builder is None or page is None:
+            return
+
+        content = builder()
+        layout = page.layout()
+        if layout is None:
+            layout = QVBoxLayout(page)
+            layout.setContentsMargins(0, 0, 0, 0)
+            layout.setSpacing(0)
+        layout.addWidget(content)
+        self._built_tabs.add(index)
 
     def _make_header(self) -> QWidget:
         w = QWidget()
@@ -601,6 +636,9 @@ class ClassificationDialog(FramelessDialogBase):
         return w
 
     def _refresh_boundaries_tab(self):
+        if not hasattr(self, "_bnd_note") or not hasattr(self, "_bnd_table"):
+            return
+
         s = self._pending
         is_custom = s.key == "custom"
         locked_txt = "Custom" if is_custom else s.name.split("/")[0].strip()
@@ -799,6 +837,8 @@ class ClassificationDialog(FramelessDialogBase):
         return scroll
 
     def _build_custom_scheme(self) -> GrainClassificationScheme:
+        if not hasattr(self, "_custom_name") or not hasattr(self, "_custom_spins"):
+            return self._custom
         return make_custom_scheme(
             name       = self._custom_name.text() or "Custom",
             clay_max   = self._custom_spins["Clay"].value(),
@@ -1045,6 +1085,7 @@ class ClassificationDialog(FramelessDialogBase):
     # ── Tab change ─────────────────────────────────────────────────────────
 
     def _on_tab_changed(self, idx: int):
+        self._ensure_tab_built(idx)
         if idx == 1:
             self._refresh_boundaries_tab()
 

@@ -8,8 +8,6 @@ from typing import Optional
 
 _NATIVE_VALUES = {"native", "system", "default"}
 _FRAMELESS_VALUES = {"frameless", "custom", "none"}
-
-
 def normalize_chrome_mode(raw_mode: str | None) -> Optional[str]:
     mode = str(raw_mode or "").strip().lower()
     if mode in _NATIVE_VALUES:

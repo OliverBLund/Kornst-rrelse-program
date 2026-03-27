@@ -374,44 +374,14 @@ class GrainSizeData:
         )
 
     def classify_soil(self) -> str:
-        """Classify soil based on grain size distribution.
+        """Return the classification label using the default (ISO 14688) scheme.
 
         .. deprecated::
-            Use classify() which returns a structured ClassificationResult.
-            This wrapper is kept for backward compatibility.
+            Use classify() which returns a structured ClassificationResult and
+            supports scheme selection.  This wrapper is kept for call sites that
+            only need a plain string and have no scheme context.
         """
-        d10 = self.get_d10()
-        d60 = self.get_d60()
-        cu = self.get_uniformity_coefficient()
-        cc = self.get_coefficient_of_curvature()
-
-        # Basic size classification
-        if d10 and d60:
-            if d60 > 4.75:  # Larger than No. 4 sieve
-                base_type = "Gravel"
-            elif d60 > 0.075:  # Between No. 4 and No. 200 sieve
-                base_type = "Sand"
-            else:
-                base_type = "Fine-grained"
-        else:
-            return "Insufficient data for classification"
-
-        # Gradation classification
-        if cu and cc and base_type in ["Sand", "Gravel"]:
-            if base_type == "Sand":
-                if cu >= 6 and 1 <= cc <= 3:
-                    gradation = "Well-graded"
-                else:
-                    gradation = "Poorly-graded"
-            else:  # Gravel
-                if cu >= 4 and 1 <= cc <= 3:
-                    gradation = "Well-graded"
-                else:
-                    gradation = "Poorly-graded"
-
-            return f"{gradation} {base_type.lower()}"
-
-        return base_type
+        return self.classify().label
 
     def _calculate_simple_porosity(self) -> Optional[float]:
         """

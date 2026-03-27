@@ -22,8 +22,23 @@ QApplication.setHighDpiScaleFactorRoundingPolicy(
 )
 
 from Splash.simple_splash import SimpleSplash
-from gui.theme import load_fonts
+from gui.theme import app_icon, load_fonts
 # MainWindow imported later to speed up splash appearance
+
+
+APP_USER_MODEL_ID = "DTU.GrainSizeAnalysis.Desktop"
+
+
+def _set_windows_app_user_model_id(app_id: str) -> None:
+    """Best-effort AppUserModelID for Windows taskbar grouping/icon identity."""
+    if sys.platform != "win32":
+        return
+    try:
+        import ctypes
+
+        ctypes.windll.shell32.SetCurrentProcessExplicitAppUserModelID(str(app_id))
+    except Exception:
+        pass
 
 
 def _log_startup_error(source: str, exc: Exception) -> None:
@@ -67,11 +82,16 @@ class LoaderThread(QThread):
 
 
 def main() -> None:
+    _set_windows_app_user_model_id(APP_USER_MODEL_ID)
     app = QApplication(sys.argv)
     app.setApplicationName("Grain Size Analysis")
     app.setApplicationVersion("1.0.0")
     app.setOrganizationName("Geotechnical Engineering")
     app.setOrganizationDomain("grainsize.app")
+
+    window_icon = app_icon()
+    if not window_icon.isNull():
+        app.setWindowIcon(window_icon)
 
     # Load bundled fonts (Source Sans 3, JetBrains Mono, Playfair Display)
     load_fonts()
@@ -79,6 +99,8 @@ def main() -> None:
 
     # Create and show splash screen IMMEDIATELY (before heavy imports)
     splash = SimpleSplash()
+    if not app.windowIcon().isNull():
+        splash.setWindowIcon(app.windowIcon())
     splash.set_message("Initializing Grain Size Analysis...")
     splash.show()
     app.processEvents()
@@ -105,6 +127,8 @@ def main() -> None:
         # Create and show main window
         try:
             window = MainWindow()
+            if not app.windowIcon().isNull():
+                window.setWindowIcon(app.windowIcon())
             # Show window first, then maximize after native HWND is ready
             window.show()
             QTimer.singleShot(50, window.showMaximized)

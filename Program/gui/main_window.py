@@ -992,11 +992,14 @@ class MainWindow(FramelessMainWindowMixin, QMainWindow):
         self.comparison_tab.set_dataset_tabs(self._get_selected_dataset_tabs())
 
     def _on_scheme_changed(self, scheme):
-        """Propagate a new classification scheme to all open dataset tabs."""
+        """Propagate a new classification scheme to all open dataset tabs and output tabs."""
         self.active_scheme = scheme
         for tab in self.dataset_tabs:
             if hasattr(tab, 'set_scheme'):
                 tab.set_scheme(scheme)
+        self.export_tab.set_scheme(scheme)
+        if hasattr(self, 'reporting_tab'):
+            self.reporting_tab.set_scheme(scheme)
 
     def add_dataset_tab(self, dataset: GrainSizeData):
         self.dataset_counter += 1

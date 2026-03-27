@@ -106,20 +106,22 @@ def _perm_class(mean_k: float) -> str:
     return _gc_perm_class(mean_k)
 
 
+_PERM_CLASS_COLOR = {
+    "Very High (Gravel)":           "#2e7d32",  # dark green
+    "High (Clean Sand)":            "#558b2f",  # olive green
+    "Moderate (Fine Sand)":         "#f57f17",  # amber
+    "Low (Silt)":                   "#e65100",  # deep orange
+    "Very Low (Clay-Silt)":         "#b71c1c",  # dark red
+    "Practically Impermeable (Clay)":"#7b1fa2", # deep purple
+}
+
 def _perm_color(valid_k_list: list) -> str:
     """Return hex color for the permeability class based on geometric mean."""
     if not valid_k_list:
         return C.TEXT_MUTED
     mean_k = float(np.exp(np.mean(np.log(valid_k_list))))
-    if mean_k > 1e-2:
-        return "#2e7d32"   # dark green
-    if mean_k > 1e-4:
-        return "#558b2f"   # olive green
-    if mean_k > 1e-5:
-        return "#f57f17"   # amber
-    if mean_k > 1e-7:
-        return "#e65100"   # deep orange
-    return "#b71c1c"       # dark red
+    cls = _gc_perm_class(mean_k)
+    return _PERM_CLASS_COLOR.get(cls, C.TEXT_MUTED)
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -179,7 +181,7 @@ class ComparisonTab(QWidget):
         ("Cc",     "Curvature coeff.",               True,  True),
         ("σ",      "Sorting coeff. √(D84/D16)",      False, False),
         ("Fines%", "% passing 0.063 mm",             False, False),
-        ("USCS",   "Soil classification",            False, False),
+        ("Classif.","Soil classification (active scheme)", False, False),
         ("Class",  "Gradation class",                False, False),
     ]
 
@@ -788,7 +790,7 @@ class ComparisonTab(QWidget):
             )
 
         # ── Collect numeric values per row ────────────────────────────────────
-        TEXT_ROWS = {"USCS", "Class"}
+        TEXT_ROWS = {"Classif.", "Class"}
         row_values: List[List[Optional[float]]] = []
         for row_def in self._GRAIN_ROWS:
             label = row_def[0]
@@ -810,9 +812,9 @@ class ComparisonTab(QWidget):
             self._grain_table.setRowHeight(row_i, 42)
 
             if is_text:
-                if label == "USCS":
+                if label == "Classif.":
                     for col_i, tab in enumerate(tabs):
-                        val_str = tab.get_dataset().classify_soil() or "—"
+                        val_str = tab.get_dataset().classify(scheme=self._active_scheme).label or "—"
                         color = DATASET_COLORS[col_i % len(DATASET_COLORS)]
                         item = QTableWidgetItem(val_str)
                         item.setForeground(QBrush(QColor(color)))

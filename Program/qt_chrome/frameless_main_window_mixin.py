@@ -194,7 +194,6 @@ class FramelessMainWindowMixin:
         self._frameless_taskbar_gap_px = int(taskbar_gap_px)
         self._frameless_maximize_inset_px = int(maximize_inset_px)
         self._frameless_corner_radius_px = int(corner_radius_px)
-
         self._chrome_default_windows = default_windows
         self._chrome_default_other = default_other
         self._chrome_resize_margin = int(resize_margin)

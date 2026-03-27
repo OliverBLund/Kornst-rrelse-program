@@ -28,6 +28,8 @@ class ReportGenerator:
     """
 
     def __init__(self):
+        self._scheme = ISO14688  # Active classification scheme; set via set_scheme()
+
         # Brand-aware professional report stylesheet.
         # --brand is the single color token; _get_branded_style() overrides it.
         self.report_style = """
@@ -403,6 +405,10 @@ class ReportGenerator:
             }
         </style>
         """
+
+    def set_scheme(self, scheme) -> None:
+        """Set the active classification scheme used for all generated reports."""
+        self._scheme = scheme
 
     def _get_branded_style(self, brand=None) -> str:
         """Return report CSS with --brand CSS variable set to the brand color."""
@@ -862,7 +868,7 @@ class ReportGenerator:
         <div class="metadata-label">Sample Name:</div>
         <div class="metadata-value">{dataset.sample_name}</div>
         <div class="metadata-label">Soil Classification:</div>
-        <div class="metadata-value"><strong>{dataset.classify_soil()}</strong></div>
+        <div class="metadata-value"><strong>{dataset.classify(scheme=self._scheme).label}</strong></div>
         <div class="metadata-label">Temperature:</div>
         <div class="metadata-value">{dataset.temperature}°C</div>
         <div class="metadata-label">Porosity:</div>
@@ -879,7 +885,7 @@ class ReportGenerator:
 <div class="no-break">
 <h2>Executive Summary</h2>
 <div class="success-box">
-    <p>Sample <strong>{dataset.sample_name}</strong> has been analyzed and classified as <strong>{dataset.classify_soil()}</strong>.</p>
+    <p>Sample <strong>{dataset.sample_name}</strong> has been analyzed and classified as <strong>{dataset.classify(scheme=self._scheme).label}</strong>.</p>
 </div>
 <div class="summary-stats">
     <div class="stat-card">
@@ -988,7 +994,7 @@ class ReportGenerator:
         </tr>
         <tr>
             <td><strong>Soil Classification</strong></td>
-            <td colspan="2"><span class="badge badge-success">{dataset.classify_soil()}</span></td>
+            <td colspan="2"><span class="badge badge-success">{dataset.classify(scheme=self._scheme).label}</span></td>
         </tr>
     </tbody>
 </table>
@@ -1564,7 +1570,7 @@ class ReportGenerator:
                     <td>{f'{d50:.3f}' if d50 else 'N/A'}</td>
                     <td>{f'{d60:.3f}' if d60 else 'N/A'}</td>
                     <td>{f'{cu:.2f}' if cu else 'N/A'}</td>
-                    <td>{dataset.classify_soil()}</td>
+                    <td>{dataset.classify(scheme=self._scheme).label}</td>
                     <td>{mean_k}</td>
                 </tr>
                 """
@@ -1686,12 +1692,7 @@ class ReportGenerator:
     def _classify_uniformity(self, cu: Optional[float]) -> str:
         if cu is None:
             return "Cannot calculate"
-        label = _gc_cu_label(cu)
-        if cu < 4:
-            return f"{label} (Cu < 4)"
-        if cu < 6:
-            return f"{label} (4 \u2264 Cu < 6)"
-        return f"{label} (Cu \u2265 6)"
+        return _gc_cu_label(cu)
 
     def _classify_curvature(self, cc: Optional[float]) -> str:
         if cc is None:
@@ -2026,17 +2027,7 @@ class ReportGenerator:
             if valid_k:
                 mean_k = np.mean(valid_k)
 
-                # Classify without color-coding
-                if mean_k > 1e-2:
-                    classification = "Very High (Gravel)"
-                elif mean_k > 1e-4:
-                    classification = "High (Clean Sand)"
-                elif mean_k > 1e-5:
-                    classification = "Moderate (Fine Sand)"
-                elif mean_k > 1e-7:
-                    classification = "Low (Silt)"
-                else:
-                    classification = "Very Low (Clay)"
+                classification = _gc_perm_class(mean_k)
 
                 html += f"""
                 <tr>
@@ -2075,13 +2066,14 @@ class ReportGenerator:
             return "Excellent barrier material, natural aquitard"
 
     def _interpret_grain_distribution(self, dataset: GrainSizeData, cu: Optional[float], cc: Optional[float]) -> str:
-        interpretation = f"The sample '{dataset.sample_name}' has been classified as {dataset.classify_soil()}. "
+        interpretation = f"The sample '{dataset.sample_name}' has been classified as {dataset.classify(scheme=self._scheme).label}. "
 
         if cu:
-            if cu < 4:
+            cu_class = _gc_cu_label(cu)
+            if cu_class == "Uniform":
                 interpretation += "The uniform gradation (Cu < 4) indicates particles of similar size, "
                 interpretation += "which typically results in higher void ratios and permeability. "
-            elif cu < 6:
+            elif cu_class == "Moderately graded":
                 interpretation += "The moderate gradation (4 ≤ Cu < 6) suggests a reasonable distribution of particle sizes. "
             else:
                 interpretation += "The well-graded nature (Cu ≥ 6) indicates a wide range of particle sizes, "

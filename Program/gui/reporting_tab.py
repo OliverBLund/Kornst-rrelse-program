@@ -24,6 +24,7 @@ except ImportError:
 from .theme import C, F
 from .report_brand import ReportBrand
 from report_generator import ReportGenerator
+from grain_classification import ISO14688
 
 
 # ── Small UI helpers ──────────────────────────────────────────────────────────
@@ -202,6 +203,7 @@ class ReportingTab(QWidget):
     def __init__(self, parent=None):
         super().__init__(parent)
         self.report_generator = ReportGenerator()
+        self._scheme = ISO14688
         self.dataset_tabs: List = []
         self.current_report_html = ""
         self.brand = ReportBrand.load()
@@ -635,6 +637,11 @@ class ReportingTab(QWidget):
         return bar
 
     # ── Data wiring ───────────────────────────────────────────────────────────
+
+    def set_scheme(self, scheme) -> None:
+        """Set the active classification scheme used for all generated reports."""
+        self._scheme = scheme
+        self.report_generator.set_scheme(scheme)
 
     def set_dataset_tabs(self, dataset_tabs: List):
         self.dataset_tabs = dataset_tabs

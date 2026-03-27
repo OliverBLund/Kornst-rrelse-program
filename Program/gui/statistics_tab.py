@@ -695,11 +695,7 @@ class StatisticsTab(QWidget):
             if valid_k:
                 mean_k = np.mean(valid_k)
 
-        # Soil type — use structured classify() if available, else fallback
-        try:
-            soil_type = self.dataset.classify(scheme=self._scheme).label
-        except Exception:
-            soil_type = self.dataset.classify_soil()
+        soil_type = self.dataset.classify(scheme=self._scheme).label
 
         # Update info bar
         self.info_bar.update_info(
@@ -756,29 +752,26 @@ class StatisticsTab(QWidget):
 
     def update_soil_classification(self):
         """Update soil classification display"""
-        try:
-            result = self.dataset.classify(scheme=self._scheme)
-            f = result.fractions
-            text = (
-                f"{result.scheme.name} Classification:\n"
-                f"{'─' * 35}\n\n"
-                f"Primary type:  {result.primary_type}\n"
-                f"Gradation:     {result.gradation or '—'}\n"
-            )
-            if result.uscs_symbol:
-                text += f"USCS symbol:   {result.uscs_symbol}\n"
-            text += (
-                f"\nLabel: {result.label}\n\n"
-                f"Grain fractions:\n"
-                f"  Clay:   {f.clay_pct:.1f}%\n"
-                f"  Silt:   {f.silt_pct:.1f}%\n"
-                f"  Sand:   {f.sand_pct:.1f}%\n"
-                f"  Gravel: {f.gravel_pct:.1f}%\n"
-                f"  Cobble: {f.cobble_pct:.1f}%\n\n"
-                f"Cu: {result.cu_label}  |  Cc: {result.cc_label}\n"
-            )
-        except Exception:
-            text = self.dataset.classify_soil()
+        result = self.dataset.classify(scheme=self._scheme)
+        f = result.fractions
+        text = (
+            f"{result.scheme.name} Classification:\n"
+            f"{'─' * 35}\n\n"
+            f"Primary type:  {result.primary_type}\n"
+            f"Gradation:     {result.gradation or '—'}\n"
+        )
+        if result.uscs_symbol:
+            text += f"USCS symbol:   {result.uscs_symbol}\n"
+        text += (
+            f"\nLabel: {result.label}\n\n"
+            f"Grain fractions:\n"
+            f"  Clay:   {f.clay_pct:.1f}%\n"
+            f"  Silt:   {f.silt_pct:.1f}%\n"
+            f"  Sand:   {f.sand_pct:.1f}%\n"
+            f"  Gravel: {f.gravel_pct:.1f}%\n"
+            f"  Cobble: {f.cobble_pct:.1f}%\n\n"
+            f"Cu: {result.cu_label}  |  Cc: {result.cc_label}\n"
+        )
         self.classification_widget.classification_text.setPlainText(text)
 
     def set_scheme(self, scheme):
