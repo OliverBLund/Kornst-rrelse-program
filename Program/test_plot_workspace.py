@@ -81,6 +81,30 @@ class TestPlotWorkspaceWiring(unittest.TestCase):
         self.assertNotEqual(before_xlim, after_xlim)
         self.assertNotEqual(before_ylim, after_ylim)
 
+    def test_distribution_reset_view_adds_curve_headroom(self):
+        self.workspace.current_plot_type = 'distribution'
+        self.workspace.refresh_plot()
+
+        ax = self.workspace.plot_widget.current_ax
+        xlim = ax.get_xlim()
+        ylim = ax.get_ylim()
+
+        self.assertLess(xlim[0], min(self.workspace.dataset.particle_sizes) * 0.5)
+        self.assertGreater(xlim[1], max(self.workspace.dataset.particle_sizes) * 2)
+        self.assertGreater(ylim[1], 100.0)
+
+    def test_distribution_zoom_preserves_positive_log_limits(self):
+        self.workspace.current_plot_type = 'distribution'
+        self.workspace.refresh_plot()
+
+        before_xlim = self.workspace.plot_widget.current_ax.get_xlim()
+        self.workspace.zoom_in()
+        after_xlim = self.workspace.plot_widget.current_ax.get_xlim()
+
+        self.assertNotEqual(before_xlim, after_xlim)
+        self.assertGreater(after_xlim[0], 0.0)
+        self.assertGreater(after_xlim[1], after_xlim[0])
+
     def test_histogram_uses_retained_percentages(self):
         self.workspace.current_plot_type = 'histogram'
         self.workspace.refresh_plot()
@@ -114,6 +138,22 @@ class TestPlotWorkspaceWiring(unittest.TestCase):
 
         self.assertIsNotNone(self.workspace.plot_widget.k_value_ax)
         self.assertIsNotNone(self.workspace.plot_widget.k_value_ax.get_legend())
+
+    def test_distribution_refresh_only_requests_one_canvas_draw(self):
+        draw_calls = 0
+        original_draw = self.workspace.plot_widget.canvas.draw
+
+        def counted_draw(*args, **kwargs):
+            nonlocal draw_calls
+            draw_calls += 1
+            return original_draw(*args, **kwargs)
+
+        self.workspace.plot_widget.canvas.draw = counted_draw
+        self.workspace.current_plot_type = 'distribution'
+
+        self.workspace.refresh_plot()
+
+        self.assertEqual(draw_calls, 1)
 
 
 if __name__ == '__main__':

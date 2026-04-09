@@ -713,12 +713,7 @@ class DatasetTab(QWidget):
 
     def load_dataset_data(self):
         """Load and display the dataset data"""
-        # Update plot
-        self.plot_workspace.update_plot(
-            self.dataset.particle_sizes,
-            self.dataset.percent_passing,
-            self.dataset.sample_name,
-        )
+        self.plot_workspace.refresh_plot()
 
         # Update statistics tab with data
         if hasattr(self, "statistics_tab"):
@@ -783,6 +778,15 @@ class DatasetTab(QWidget):
             porosity=self.porosity,
             selected_methods=selected_methods,
         )
+
+        self._apply_calculation_results(self.current_results)
+
+    def apply_precomputed_results(self, results: List[KCalculationResult]):
+        """Bind worker-computed K results without recalculating on the UI thread."""
+        self._apply_calculation_results(list(results))
+
+    def _apply_calculation_results(self, results: List[KCalculationResult]):
+        self.current_results = list(results)
 
         # Update results table
         self.update_results_table()

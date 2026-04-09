@@ -2,6 +2,7 @@
 Control panel widget for data import and analysis controls
 """
 
+from collections import deque
 from PyQt6.QtWidgets import (QFrame, QVBoxLayout, QHBoxLayout, QGroupBox,
                             QPushButton, QLabel, QLineEdit, QComboBox,
                             QTableWidget, QTableWidgetItem, QTextEdit,
@@ -10,7 +11,9 @@ from PyQt6.QtWidgets import (QFrame, QVBoxLayout, QHBoxLayout, QGroupBox,
                             QFileDialog, QMessageBox, QHeaderView, QApplication,
                             QMenu, QDialog, QDialogButtonBox, QScrollArea,
                             QToolButton, QSizePolicy, QTabWidget, QToolTip)
-from PyQt6.QtCore import QThread, QTimer
+import multiprocessing as mp
+import queue
+from PyQt6.QtCore import QTimer
 from data_loader import DataLoader
 from gui.column_mapper import ColumnMapperDialog
 from gui.data_inspector_dialog import DataInspectorDialog
@@ -18,9 +21,10 @@ import os
 from PyQt6.QtCore import Qt, pyqtSignal, QSize, QRectF, QPoint
 from PyQt6.QtGui import (QIcon, QFont, QAction, QPainter, QColor,
                          QLinearGradient, QBrush, QPixmap, QPen, QFontMetrics)
-from gui.loading_dialog import BatchImportWorker, LoadingDialog
+from gui.loading_dialog import LoadingDialog
 from gui.theme import C, F, SZ, icon
 from qt_chrome.frameless_dialog_base import FramelessDialogBase
+from load_process_worker import run_batch_import
 from grain_classification import (
     ISO14688, GrainClassificationScheme, ClassificationResult,
 )
@@ -546,6 +550,18 @@ class _FileListWidget(QScrollArea):
     def get_selected_paths(self) -> list[str]:
         """Return file paths of all selected cards."""
         return [fp for fp, card in self._cards.items() if card.is_selected]
+
+    def set_selected_paths(self, file_paths: list[str], *, emit_signal: bool = True):
+        """Apply a sidebar selection state programmatically."""
+        path_set = set(file_paths)
+        changed = False
+        for file_path, card in self._cards.items():
+            should_select = file_path in path_set
+            if card.is_selected != should_select:
+                card.set_selected(should_select)
+                changed = True
+        if changed and emit_signal:
+            self.selection_changed.emit()
 
     def get_loaded_count(self) -> int:
         return len(self._cards)
@@ -1314,6 +1330,8 @@ class ControlPanel(QFrame):
     dataset_loaded_successfully = pyqtSignal(object, str)  # Emitted when dataset loads successfully (dataset, file_path)
     update_error_tab_message = pyqtSignal(str, str)  # Update existing error tab with new message
     dataset_fix_requested = pyqtSignal(str)  # Emitted when user wants to fix/remap a dataset (file_path)
+    dataset_integration_started = pyqtSignal()  # Batched dataset UI integration starts
+    dataset_integration_finished = pyqtSignal()  # Batched dataset UI integration finished
     selection_changed = pyqtSignal()  # Emitted when card selected-toggle state changes
     scheme_changed = pyqtSignal(object)  # GrainClassificationScheme — emitted when user picks a new scheme
 
@@ -1324,9 +1342,20 @@ class ControlPanel(QFrame):
         self.data_loader = DataLoader()  # Data loading engine
         self.file_statuses = {}  # Track file loading status: 'pending', 'failed', 'review', 'loaded'
         self._active_scheme: GrainClassificationScheme = ISO14688
-        self._import_thread = None
-        self._import_worker = None
+        self._import_process = None
+        self._import_queue = None
+        self._import_finished_received = False
+        self._import_finalize_summary = None
+        self._pending_import_ui_events = deque()
+        self._import_ui_total = 0
+        self._import_ui_processed = 0
         self._import_dialog = None
+        self._import_poll_timer = QTimer(self)
+        self._import_poll_timer.setInterval(25)
+        self._import_poll_timer.timeout.connect(self._poll_import_process)
+        self._import_ui_timer = QTimer(self)
+        self._import_ui_timer.setInterval(0)
+        self._import_ui_timer.timeout.connect(self._process_import_ui_slice)
 
         # Temperature change debouncing timer
         self.temp_change_timer = QTimer()
@@ -1341,6 +1370,10 @@ class ControlPanel(QFrame):
     def get_selected_paths(self) -> list[str]:
         """Return file paths of all sidebar-selected sample cards."""
         return self._file_list.get_selected_paths()
+
+    def set_selected_paths(self, file_paths: list[str], *, emit_signal: bool = True):
+        """Set sidebar-selected sample cards from an external controller."""
+        self._file_list.set_selected_paths(file_paths, emit_signal=emit_signal)
 
     def dragEnterEvent(self, event):
         if event.mimeData().hasUrls():
@@ -3045,11 +3078,13 @@ class ControlPanel(QFrame):
     def _process_files_with_loading_dialog(self, file_entries: list):
         if not file_entries:
             return
-        if self._import_thread is not None:
+        if self._import_process is not None:
             if self._import_dialog is not None:
                 self._import_dialog.raise_()
                 self._import_dialog.activateWindow()
             return
+
+        self.dataset_integration_started.emit()
 
         for file_entry in file_entries:
             if isinstance(file_entry, tuple):
@@ -3060,33 +3095,152 @@ class ControlPanel(QFrame):
             self.error_dataset.emit(file_key, "Loading...")
 
         self._import_dialog = LoadingDialog(
-            "Loading Files",
-            "Parsing selected grain-size datasets",
+            "Importing Datasets",
+            "Reading selected files and building sample tabs",
             parent=self.window(),
             cancellable=False,
         )
-        self._import_dialog.update_progress(0, len(file_entries), "Preparing load...", "Creating placeholder tabs")
-        self._import_dialog.set_activity("The import now runs on a worker thread.")
+        progress_total = max(1, len(file_entries) * 2)
+        self._import_dialog.update_progress(
+            0,
+            progress_total,
+            "Preparing import",
+            "Creating placeholder tabs and starting the background loader.",
+            count_label=f"0 of {len(file_entries)} files",
+            activity_label="Starting the background loader.",
+        )
+        self._import_dialog.set_activity(
+            "Large files can take a moment. This window will close automatically when the import is complete."
+        )
         self._import_dialog.open()
 
-        self._import_worker = BatchImportWorker(file_entries)
-        self._import_thread = QThread(self)
-        self._import_worker.moveToThread(self._import_thread)
-        self._import_thread.started.connect(self._import_worker.run)
-        self._import_worker.progress.connect(self._on_import_worker_progress)
-        self._import_worker.item_loaded.connect(self._on_import_worker_loaded)
-        self._import_worker.item_validation_failed.connect(self._on_import_worker_validation_failed)
-        self._import_worker.item_failed.connect(self._on_import_worker_failed)
-        self._import_worker.finished.connect(self._on_import_worker_finished)
-        self._import_worker.finished.connect(self._import_thread.quit)
-        self._import_thread.finished.connect(self._cleanup_import_worker)
-        self._import_thread.finished.connect(self._import_thread.deleteLater)
-        self._import_thread.finished.connect(self._import_worker.deleteLater)
-        self._import_thread.start()
+        ctx = mp.get_context("spawn")
+        self._import_finished_received = False
+        self._import_finalize_summary = None
+        self._pending_import_ui_events.clear()
+        self._import_ui_total = 0
+        self._import_ui_processed = 0
+        self._import_queue = ctx.Queue()
+        self._import_process = ctx.Process(
+            target=run_batch_import,
+            args=(file_entries, self._import_queue),
+            kwargs={"temperature": self.temp_spinbox.value()},
+            daemon=True,
+        )
+        self._import_process.start()
+        self._import_poll_timer.start()
+
+    def _poll_import_process(self):
+        if self._import_queue is None:
+            return
+
+        for _ in range(32):
+            try:
+                event = self._import_queue.get_nowait()
+            except queue.Empty:
+                break
+
+            kind = event[0]
+            payload = event[1:]
+
+            if kind == 'progress':
+                self._on_import_worker_progress(*payload)
+            elif kind == 'item_loaded':
+                self._import_ui_total += 1
+                self._pending_import_ui_events.append((self._on_import_worker_loaded, payload))
+            elif kind == 'item_validation_failed':
+                self._import_ui_total += 1
+                self._pending_import_ui_events.append((self._on_import_worker_validation_failed, payload))
+            elif kind == 'item_failed':
+                self._import_ui_total += 1
+                self._pending_import_ui_events.append((self._on_import_worker_failed, payload))
+            elif kind == 'finished':
+                self._import_finished_received = True
+                self._import_finalize_summary = payload[0]
+                if self._import_dialog is not None and self._pending_import_ui_events:
+                    self._import_dialog.set_activity(
+                        "Integrating loaded datasets into the workspace."
+                    )
+                    self._update_import_integration_progress()
+            elif kind == 'process_error':
+                self._import_finished_received = True
+                self._import_finalize_summary = (
+                    {
+                        'total': 0,
+                        'loaded': 0,
+                        'review': 1,
+                        'failed': 0,
+                        'canceled': False,
+                    }
+                )
+                if self._import_dialog is not None:
+                    self._import_dialog.set_activity(payload[0])
+
+        if self._pending_import_ui_events and not self._import_ui_timer.isActive():
+            self._import_ui_timer.start()
+
+        self._finalize_import_if_ready()
+
+    def _process_import_ui_slice(self):
+        if not self._pending_import_ui_events:
+            self._import_ui_timer.stop()
+            self._finalize_import_if_ready()
+            return
+
+        handler, payload = self._pending_import_ui_events.popleft()
+        handler(*payload)
+        self._import_ui_processed += 1
+        if self._import_finished_received:
+            self._update_import_integration_progress()
+
+        if not self._pending_import_ui_events:
+            self._import_ui_timer.stop()
+            self._finalize_import_if_ready()
+
+    def _finalize_import_if_ready(self):
+        if self._pending_import_ui_events:
+            return
+
+        if self._import_finalize_summary is not None:
+            summary = self._import_finalize_summary
+            self._import_finalize_summary = None
+            self._on_import_worker_finished(summary)
+
+        if self._import_finished_received and self._import_process is not None and not self._import_process.is_alive():
+            self._cleanup_import_process()
 
     def _on_import_worker_progress(self, current: int, total: int, stage: str, detail: str):
         if self._import_dialog is not None:
-            self._import_dialog.update_progress(current, total, stage, detail)
+            overall_total = max(1, total * 2)
+            self._import_dialog.update_progress(
+                current,
+                overall_total,
+                stage,
+                detail,
+                count_label=f"{current} of {total} files",
+                activity_label=f"Processing file {current} of {total}.",
+            )
+
+    def _update_import_integration_progress(self):
+        if self._import_dialog is None or self._import_ui_total <= 0:
+            return
+
+        current = max(0, min(self._import_ui_processed, self._import_ui_total))
+        noun = "dataset" if self._import_ui_total == 1 else "datasets"
+        overall_total = max(1, self._import_ui_total * 2)
+        activity = (
+            "Preparing workspace integration."
+            if current <= 0
+            else f"Integrating dataset {current} of {self._import_ui_total}."
+        )
+        self._import_dialog.update_progress(
+            self._import_ui_total + current,
+            overall_total,
+            "Integrating datasets",
+            "Adding loaded datasets to the workspace.",
+            count_label=f"{current} of {self._import_ui_total} {noun}",
+            activity_label=activity,
+        )
 
     def _on_import_worker_loaded(self, file_key: str, dataset, status: str, sample_name: str):
         self.file_statuses[file_key] = status
@@ -3150,9 +3304,12 @@ class ControlPanel(QFrame):
             summary_text = detail
 
         if self._import_dialog is not None:
+            self.dataset_integration_finished.emit()
             dialog = self._import_dialog
             dialog.mark_finished(headline, detail, ok=ok)
             QTimer.singleShot(420, lambda d=dialog: self._dismiss_import_dialog(d))
+        else:
+            self.dataset_integration_finished.emit()
 
         self.sample_info_label.setText(summary_text)
         self.update_ui_state()
@@ -3164,9 +3321,26 @@ class ControlPanel(QFrame):
         if self._import_dialog is dialog:
             self._import_dialog = None
 
-    def _cleanup_import_worker(self):
-        self._import_thread = None
-        self._import_worker = None
+    def _cleanup_import_process(self):
+        self._import_poll_timer.stop()
+        self._import_ui_timer.stop()
+
+        if self._import_process is not None:
+            self._import_process.join(timeout=0.1)
+            if self._import_process.is_alive():
+                self._import_process.terminate()
+                self._import_process.join(timeout=0.1)
+
+        if self._import_queue is not None:
+            self._import_queue.close()
+            self._import_queue = None
+
+        self._import_process = None
+        self._import_finished_received = False
+        self._import_finalize_summary = None
+        self._pending_import_ui_events.clear()
+        self._import_ui_total = 0
+        self._import_ui_processed = 0
 
     # ================================
     # SENSITIVITY ANALYSIS

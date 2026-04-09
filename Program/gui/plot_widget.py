@@ -17,6 +17,9 @@ from grain_classification import ISO14688, interpolate_at as _gc_interpolate_at
 
 
 class PlotWidget(QWidget):
+    _DIST_X_PADDING_FACTOR = 2.5
+    _DIST_Y_MAX = 102.0
+
     def __init__(self):
         super().__init__()
         self.figure = None
@@ -116,7 +119,7 @@ class PlotWidget(QWidget):
         ax.set_title('Grain Size Distribution Curve')
         ax.set_xscale('log')
         ax.set_xlim(0.001, 100)
-        ax.set_ylim(0, 100)
+        ax.set_ylim(0, self._DIST_Y_MAX)
         ax.set_facecolor('#ffffff')
         ax.grid(True, which='major', linestyle='-',
                 color='#d4c4a8', linewidth=0.5, alpha=0.6)
@@ -133,6 +136,25 @@ class PlotWidget(QWidget):
     def _get_curve_marker(self, style: PlotStyle):
         """Return the configured curve marker or disable markers entirely."""
         return style.curve_marker if self.show_markers else None
+
+    def _distribution_limits(self, diameters, cumulative) -> tuple[float, float, float, float]:
+        """Compute padded distribution-plot limits with slight headroom."""
+        s = self._scheme
+        sorted_pairs = sorted(zip(diameters, cumulative))
+        x_min = sorted_pairs[0][0] / self._DIST_X_PADDING_FACTOR
+        last_x = sorted_pairs[-1][0]
+        pct_at_largest = sorted_pairs[-1][1]
+        x_max = last_x * self._DIST_X_PADDING_FACTOR
+        if pct_at_largest > 1.0:
+            # Keep a little space to the right when retained material exists above
+            # the largest measured sieve, so the curve does not terminate on the edge.
+            if last_x < s.sand_max:
+                x_max = max(x_max, s.sand_max * 1.35)
+            elif last_x < s.gravel_max:
+                x_max = max(x_max, s.gravel_max * 1.35)
+            else:
+                x_max = max(x_max, last_x * 3.5)
+        return x_min, x_max, 0.0, self._DIST_Y_MAX
 
     def _draw_characteristic_lines(self, ax, diameters, cumulative, grain_size_data, style: PlotStyle):
         """Draw D10/D30/D60 guide lines when enabled."""
@@ -335,24 +357,9 @@ class PlotWidget(QWidget):
         self.active_axes = [self.current_ax]
 
         # Compute axis limits up-front so zone drawing can use the correct x range.
-        s = self._scheme
-        sorted_pairs = sorted(zip(diameters, cumulative))
-        x_min = sorted_pairs[0][0] * 0.5
-        last_x = sorted_pairs[-1][0]
-        pct_at_largest = sorted_pairs[-1][1]
-        x_max = last_x * 2
-        if pct_at_largest > 1.0:
-            # Retained material exists above the last sieve.
-            # Extend x_max to the right boundary of the zone containing that sieve,
-            # so the user can see which zone the retained fraction belongs to.
-            if last_x < s.sand_max:
-                x_max = max(x_max, s.sand_max * 2)
-            elif last_x < s.gravel_max:
-                x_max = max(x_max, s.gravel_max * 1.5)
-            else:
-                x_max = max(x_max, last_x * 3)
+        x_min, x_max, y_min, y_max = self._distribution_limits(diameters, cumulative)
         self.current_ax.set_xlim(x_min, x_max)
-        self.current_ax.set_ylim(0, 100)
+        self.current_ax.set_ylim(y_min, y_max)
 
         # Draw classification zones if enabled (must be after xlim is set so labels
         # are clamped to the visible range correctly)
@@ -491,8 +498,9 @@ class PlotWidget(QWidget):
 
         ax1.set_facecolor(style.axes_facecolor)
         ax1.tick_params(labelsize=style.tick_fontsize - 1)
-        ax1.set_xlim(min(diameters)*0.5, max(diameters)*2)
-        ax1.set_ylim(0, 100)
+        x_min, x_max, y_min, y_max = self._distribution_limits(diameters, cumulative)
+        ax1.set_xlim(x_min, x_max)
+        ax1.set_ylim(y_min, y_max)
         if self.show_legend:
             ax1.legend(loc=style.legend_loc, fontsize=style.legend_fontsize - 1, framealpha=style.legend_framealpha, edgecolor=style.legend_edgecolor)
         
@@ -659,23 +667,11 @@ class PlotWidget(QWidget):
             
         # Reset based on current plot type
         if self.grain_size_ax == self.current_ax and self.grain_data:
-            # Grain size plot — same retained-material logic as update_plot
+            # Grain size plot — same padded limits as update_plot
             diameters, cumulative = self.grain_data
-            s = self._scheme
-            sorted_pairs = sorted(zip(diameters, cumulative))
-            x_min = sorted_pairs[0][0] * 0.5
-            last_x = sorted_pairs[-1][0]
-            pct_at_largest = sorted_pairs[-1][1]
-            x_max = last_x * 2
-            if pct_at_largest > 1.0:
-                if last_x < s.sand_max:
-                    x_max = max(x_max, s.sand_max * 2)
-                elif last_x < s.gravel_max:
-                    x_max = max(x_max, s.gravel_max * 1.5)
-                else:
-                    x_max = max(x_max, last_x * 3)
+            x_min, x_max, y_min, y_max = self._distribution_limits(diameters, cumulative)
             self.current_ax.set_xlim(x_min, x_max)
-            self.current_ax.set_ylim(0, 100)
+            self.current_ax.set_ylim(y_min, y_max)
         elif self.k_value_ax == self.current_ax and self.k_results:
             # K-value plot - use converted values for proper scaling
             k_values_display = self._convert_k_values_for_display(self.k_results)
@@ -685,7 +681,7 @@ class PlotWidget(QWidget):
             # Default grain size limits
             if hasattr(self.current_ax, 'get_xscale') and self.current_ax.get_xscale() == 'log':
                 self.current_ax.set_xlim(0.001, 100)
-            self.current_ax.set_ylim(0, 100)
+            self.current_ax.set_ylim(0, self._DIST_Y_MAX)
         
         self.canvas.draw()
         

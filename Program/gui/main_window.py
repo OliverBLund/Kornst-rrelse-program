@@ -4,16 +4,20 @@ Main window for the Grain Size Analysis application.
 
 from __future__ import annotations
 
+from collections import deque
+import multiprocessing as mp
+import os
+import queue
+
 from PyQt6.QtWidgets import (
     QMainWindow, QWidget, QHBoxLayout, QVBoxLayout,
     QStatusBar, QStackedWidget, QTabWidget, QMessageBox,
     QProgressBar, QLabel, QFrame, QFileDialog,
     QPushButton, QSizePolicy, QToolButton, QMenu, QSplitter,
 )
-from PyQt6.QtCore import Qt, pyqtSignal, QSettings, QSize, QTimer, QThread
+from PyQt6.QtCore import Qt, pyqtSignal, QSettings, QSize, QTimer
 from PyQt6.QtGui import QAction, QColor, QFont
 from typing import List, Optional
-import os
 
 from gui.control_panel import ControlPanel
 from gui.dataset_tab import DatasetTab
@@ -21,13 +25,14 @@ from gui.comparison_tab import ComparisonTab
 from gui.reporting_tab import ReportingTab
 from gui.export_tab import ExportTab
 from gui.error_tab import ErrorTab
-from gui.loading_dialog import ExternalLoadWorker, LoadingDialog
+from gui.loading_dialog import LoadingDialog
 from gui.welcome_widget import WelcomeWidget
 from gui.theme import C, F, SZ, build_stylesheet, icon, apply_matplotlib_style
 from qt_chrome import FramelessMainWindowMixin
 from data_loader import DataLoader, GrainSizeData
 from k_calculations import KCalculator
 from grain_classification import ISO14688
+from load_process_worker import run_external_load
 
 
 # ─────────────────────────────────────────────────────────────────────
@@ -75,6 +80,7 @@ class _AppToolbar(QWidget):
             btn.setObjectName(f"navtab-{i}")
             btn.setProperty("navtab", True)
             btn.setFixedHeight(SZ.TOOLBAR_H)
+            btn.setSizePolicy(QSizePolicy.Policy.Minimum, QSizePolicy.Policy.Fixed)
             btn.setCursor(Qt.CursorShape.PointingHandCursor)
             btn.setText(f"  {label}")
             btn.clicked.connect(lambda checked, idx=i: self._activate(idx))
@@ -164,11 +170,23 @@ class _AppToolbar(QWidget):
         """Compute the pill width explicitly so QSS padding quirks do not flatten the badge."""
         return max(16, badge.fontMetrics().horizontalAdvance(badge.text()) + 10)
 
+    def _nav_button_min_width(self, btn: QPushButton, badge: QLabel) -> int:
+        """Keep badge pills inside the owning tab button instead of spilling into the next tab."""
+        text_w = btn.fontMetrics().horizontalAdvance(btn.text())
+        icon_w = btn.iconSize().width() + 8 if not btn.icon().isNull() else 0
+        side_padding = 34
+        badge_w = self._badge_width(badge) + 14 if badge.isVisible() else 0
+        return text_w + icon_w + side_padding + badge_w
+
+    def _update_nav_button_width(self, index: int) -> None:
+        btn = self._nav_btns[index]
+        badge = self._badge_lbls[index]
+        btn.setMinimumWidth(self._nav_button_min_width(btn, badge))
+        btn.updateGeometry()
+
     def _position_badge(self, btn: QPushButton, badge: QLabel) -> None:
         badge.setFixedWidth(self._badge_width(badge))
-        fm = btn.fontMetrics()
-        text_w = fm.horizontalAdvance(btn.text()) + 26  # icon + padding
-        bx = text_w + 4
+        bx = max(8, btn.width() - badge.width() - 10)
         by = (btn.height() - badge.height()) // 2
         badge.move(bx, by)
 
@@ -205,6 +223,7 @@ class _AppToolbar(QWidget):
             else:
                 badge.setText("")
                 badge.hide()
+            self._update_nav_button_width(tab_index)
             self._refresh_nav_styles()
 
     def _refresh_nav_styles(self) -> None:
@@ -228,6 +247,7 @@ class _AppToolbar(QWidget):
 
             # Badge pill styling — olive-tinted when active, neutral otherwise
             badge = self._badge_lbls[i]
+            self._update_nav_button_width(i)
             if badge.isVisible():
                 badge.setStyleSheet(self._badge_stylesheet(active))
                 self._position_badge(btn, badge)
@@ -369,10 +389,25 @@ class MainWindow(FramelessMainWindowMixin, QMainWindow):
         self.dataset_tabs: List[DatasetTab] = []
         self.dataset_counter = 0
         self.active_scheme = ISO14688
-        self._external_load_thread = None
-        self._external_load_worker = None
+        self._bulk_dataset_add_depth = 0
+        self._bulk_dataset_add_dirty = False
+        self._bulk_dataset_add_last_index = None
+        self._bulk_dataset_add_last_label = ""
+        self._external_load_process = None
+        self._external_load_queue = None
+        self._external_load_finished_received = False
+        self._external_load_finalize_summary = None
+        self._pending_external_ui_events = deque()
+        self._external_ui_total = 0
+        self._external_ui_processed = 0
         self._external_load_dialog = None
         self._external_load_context = None
+        self._external_load_poll_timer = QTimer(self)
+        self._external_load_poll_timer.setInterval(25)
+        self._external_load_poll_timer.timeout.connect(self._poll_external_load_process)
+        self._external_load_ui_timer = QTimer(self)
+        self._external_load_ui_timer.setInterval(0)
+        self._external_load_ui_timer.timeout.connect(self._process_external_load_ui_slice)
 
         # Global stylesheet
         self.setStyleSheet(build_stylesheet())
@@ -403,6 +438,8 @@ class MainWindow(FramelessMainWindowMixin, QMainWindow):
         self.control_panel.error_dataset.connect(self.add_error_tab)
         self.control_panel.dataset_loaded_successfully.connect(self.replace_error_tab_with_dataset)
         self.control_panel.update_error_tab_message.connect(self.update_error_tab_message)
+        self.control_panel.dataset_integration_started.connect(self._begin_bulk_dataset_add)
+        self.control_panel.dataset_integration_finished.connect(self._end_bulk_dataset_add)
         self.control_panel.sample_selected.connect(self._on_sidebar_sample_selected)
         self.control_panel.selection_changed.connect(self._on_sidebar_selection_changed)
         self.control_panel.scheme_changed.connect(self._on_scheme_changed)
@@ -467,6 +504,9 @@ class MainWindow(FramelessMainWindowMixin, QMainWindow):
 
         # Page 1 — Comparison
         self.comparison_tab = ComparisonTab()
+        self.comparison_tab.dataset_selection_requested.connect(
+            self._on_comparison_selection_requested
+        )
         self.content_stack.addWidget(self.comparison_tab)
 
         # Page 2 — Reports
@@ -1186,7 +1226,7 @@ class MainWindow(FramelessMainWindowMixin, QMainWindow):
     ):
         if not file_paths:
             return
-        if self._external_load_thread is not None:
+        if self._external_load_process is not None:
             if self._external_load_dialog is not None:
                 self._external_load_dialog.raise_()
                 self._external_load_dialog.activateWindow()
@@ -1199,27 +1239,152 @@ class MainWindow(FramelessMainWindowMixin, QMainWindow):
             parent=self,
             cancellable=False,
         )
-        self._external_load_dialog.update_progress(0, len(file_paths), "Preparing load...", "Initializing worker thread")
-        self._external_load_dialog.set_activity("The workspace remains responsive while files are being read.")
+        progress_total = max(1, len(file_paths) * 2)
+        self._external_load_dialog.update_progress(
+            0,
+            progress_total,
+            "Preparing files",
+            "Starting the background loader and checking the selected paths.",
+            count_label=f"0 of {len(file_paths)} files",
+            activity_label="Starting the background loader.",
+        )
+        self._external_load_dialog.set_activity(
+            "Recent files are being reopened in the background. This window will close automatically when loading is complete."
+        )
         self._external_load_dialog.open()
+        self._begin_bulk_dataset_add()
 
-        self._external_load_worker = ExternalLoadWorker(file_paths, stage_title=stage_title)
-        self._external_load_thread = QThread(self)
-        self._external_load_worker.moveToThread(self._external_load_thread)
-        self._external_load_thread.started.connect(self._external_load_worker.run)
-        self._external_load_worker.progress.connect(self._on_external_load_progress)
-        self._external_load_worker.file_loaded.connect(self._on_external_load_file_loaded)
-        self._external_load_worker.file_failed.connect(self._on_external_load_file_failed)
-        self._external_load_worker.finished.connect(self._on_external_load_finished)
-        self._external_load_worker.finished.connect(self._external_load_thread.quit)
-        self._external_load_thread.finished.connect(self._cleanup_external_load_worker)
-        self._external_load_thread.finished.connect(self._external_load_thread.deleteLater)
-        self._external_load_thread.finished.connect(self._external_load_worker.deleteLater)
-        self._external_load_thread.start()
+        ctx = mp.get_context("spawn")
+        self._external_load_finished_received = False
+        self._external_load_finalize_summary = None
+        self._pending_external_ui_events.clear()
+        self._external_ui_total = 0
+        self._external_ui_processed = 0
+        self._external_load_queue = ctx.Queue()
+        self._external_load_process = ctx.Process(
+            target=run_external_load,
+            kwargs={
+                "file_paths": file_paths,
+                "stage_title": stage_title,
+                "result_queue": self._external_load_queue,
+                "temperature": self.control_panel.temp_spinbox.value(),
+            },
+            daemon=True,
+        )
+        self._external_load_process.start()
+        self._external_load_poll_timer.start()
+
+    def _poll_external_load_process(self):
+        if self._external_load_queue is None:
+            return
+
+        for _ in range(32):
+            try:
+                event = self._external_load_queue.get_nowait()
+            except queue.Empty:
+                break
+
+            kind = event[0]
+            payload = event[1:]
+
+            if kind == "progress":
+                self._on_external_load_progress(*payload)
+            elif kind == "file_loaded":
+                self._external_ui_total += 1
+                self._pending_external_ui_events.append((self._on_external_load_file_loaded, payload))
+            elif kind == "file_failed":
+                self._external_ui_total += 1
+                self._pending_external_ui_events.append((self._on_external_load_file_failed, payload))
+            elif kind == "finished":
+                self._external_load_finished_received = True
+                self._external_load_finalize_summary = payload[0]
+                if self._external_load_dialog is not None and self._pending_external_ui_events:
+                    self._external_load_dialog.set_activity(
+                        "Integrating loaded datasets into the workspace."
+                    )
+                    self._update_external_integration_progress()
+            elif kind == "process_error":
+                self._external_load_finished_received = True
+                self._external_load_finalize_summary = (
+                    {
+                        "total": 0,
+                        "loaded": 0,
+                        "failed": 1,
+                        "canceled": False,
+                    }
+                )
+                if self._external_load_dialog is not None:
+                    self._external_load_dialog.set_activity(payload[0])
+
+        if self._pending_external_ui_events and not self._external_load_ui_timer.isActive():
+            self._external_load_ui_timer.start()
+
+        self._finalize_external_load_if_ready()
+
+    def _process_external_load_ui_slice(self):
+        if not self._pending_external_ui_events:
+            self._external_load_ui_timer.stop()
+            self._finalize_external_load_if_ready()
+            return
+
+        handler, payload = self._pending_external_ui_events.popleft()
+        handler(*payload)
+        self._external_ui_processed += 1
+        if self._external_load_finished_received:
+            self._update_external_integration_progress()
+
+        if not self._pending_external_ui_events:
+            self._external_load_ui_timer.stop()
+            self._finalize_external_load_if_ready()
+
+    def _finalize_external_load_if_ready(self):
+        if self._pending_external_ui_events:
+            return
+
+        if self._external_load_finalize_summary is not None:
+            summary = self._external_load_finalize_summary
+            self._external_load_finalize_summary = None
+            self._on_external_load_finished(summary)
+
+        if (
+            self._external_load_finished_received
+            and self._external_load_process is not None
+            and not self._external_load_process.is_alive()
+        ):
+            self._cleanup_external_load_process()
 
     def _on_external_load_progress(self, current: int, total: int, stage: str, detail: str):
         if self._external_load_dialog is not None:
-            self._external_load_dialog.update_progress(current, total, stage, detail)
+            overall_total = max(1, total * 2)
+            self._external_load_dialog.update_progress(
+                current,
+                overall_total,
+                stage,
+                detail,
+                count_label=f"{current} of {total} files",
+                activity_label=f"Processing file {current} of {total}.",
+            )
+
+    def _update_external_integration_progress(self) -> None:
+        if self._external_load_dialog is None or self._external_ui_total <= 0:
+            return
+
+        current = max(0, min(self._external_ui_processed, self._external_ui_total))
+        noun = "dataset" if self._external_ui_total == 1 else "datasets"
+        overall_total = max(1, self._external_ui_total * 2)
+        activity = (
+            "Preparing workspace integration."
+            if current <= 0
+            else f"Integrating dataset {current} of {self._external_ui_total}."
+        )
+        self._external_load_dialog.update_progress(
+            self._external_ui_total + current,
+            overall_total,
+            "Integrating datasets",
+            "Adding loaded datasets to the workspace.",
+            count_label=f"{current} of {self._external_ui_total} {noun}",
+            activity_label=activity,
+        )
 
     def _on_external_load_file_loaded(self, file_path: str, dataset):
         dataset.file_path = file_path
@@ -1235,6 +1400,7 @@ class MainWindow(FramelessMainWindowMixin, QMainWindow):
         )
 
     def _on_external_load_finished(self, summary: dict):
+        self._end_bulk_dataset_add()
         context = self._external_load_context or {}
         mode = context.get("mode", "recent")
         loaded = summary.get("loaded", 0)
@@ -1292,9 +1458,26 @@ class MainWindow(FramelessMainWindowMixin, QMainWindow):
                 parts.append("Failed to load:\n" + failed_lines)
             QMessageBox.warning(self, "Load Completed With Issues", "\n\n".join(parts))
 
-    def _cleanup_external_load_worker(self):
-        self._external_load_thread = None
-        self._external_load_worker = None
+    def _cleanup_external_load_process(self):
+        self._external_load_poll_timer.stop()
+        self._external_load_ui_timer.stop()
+
+        if self._external_load_process is not None:
+            self._external_load_process.join(timeout=0.1)
+            if self._external_load_process.is_alive():
+                self._external_load_process.terminate()
+                self._external_load_process.join(timeout=0.1)
+
+        if self._external_load_queue is not None:
+            self._external_load_queue.close()
+            self._external_load_queue = None
+
+        self._external_load_process = None
+        self._external_load_finished_received = False
+        self._external_load_finalize_summary = None
+        self._pending_external_ui_events.clear()
+        self._external_ui_total = 0
+        self._external_ui_processed = 0
         self._external_load_context = None
 
     def _dismiss_external_load_dialog(self, dialog):
@@ -1343,9 +1526,20 @@ class MainWindow(FramelessMainWindowMixin, QMainWindow):
                     and t.dataset.file_path in path_set]
         return filtered if filtered else self.dataset_tabs
 
+    def _sync_comparison_dataset_state(self) -> None:
+        """Keep comparison loaded/selected dataset state aligned with the sidebar."""
+        self.comparison_tab.set_dataset_state(
+            self.dataset_tabs,
+            selected_tabs=self._get_selected_dataset_tabs(),
+        )
+
     def _on_sidebar_selection_changed(self):
         """Push the current selected-tab subset to the comparison tab."""
-        self.comparison_tab.set_dataset_tabs(self._get_selected_dataset_tabs())
+        self._sync_comparison_dataset_state()
+
+    def _on_comparison_selection_requested(self, file_paths: list[str]) -> None:
+        """Apply comparison-dialog selections back onto the sidebar cards."""
+        self.control_panel.set_selected_paths(file_paths)
 
     def _on_scheme_changed(self, scheme):
         """Propagate a new classification scheme to all open dataset tabs and output tabs."""
@@ -1357,7 +1551,58 @@ class MainWindow(FramelessMainWindowMixin, QMainWindow):
         if hasattr(self, 'reporting_tab'):
             self.reporting_tab.set_scheme(scheme)
 
+    def _begin_bulk_dataset_add(self) -> None:
+        self._bulk_dataset_add_depth += 1
+        if self._bulk_dataset_add_depth != 1:
+            return
+        self._bulk_dataset_add_dirty = False
+        self._bulk_dataset_add_last_index = None
+        self._bulk_dataset_add_last_label = ""
+        if hasattr(self, "dataset_tabs_widget"):
+            self.dataset_tabs_widget.setUpdatesEnabled(False)
+
+    def _end_bulk_dataset_add(self) -> None:
+        if self._bulk_dataset_add_depth == 0:
+            return
+        self._bulk_dataset_add_depth -= 1
+        if self._bulk_dataset_add_depth != 0:
+            return
+
+        if hasattr(self, "dataset_tabs_widget"):
+            self.dataset_tabs_widget.setUpdatesEnabled(True)
+
+        if not self._bulk_dataset_add_dirty:
+            return
+
+        if (
+            self._bulk_dataset_add_last_index is not None
+            and 0 <= self._bulk_dataset_add_last_index < self.dataset_tabs_widget.count()
+        ):
+            self.dataset_tabs_widget.setCurrentIndex(self._bulk_dataset_add_last_index)
+
+        self._refresh_dataset_tab_icons()
+        self._sync_comparison_dataset_state()
+        self.reporting_tab.set_dataset_tabs(self.dataset_tabs)
+        self._update_export_tab()
+        self._refresh_dataset_status_segments(self._bulk_dataset_add_last_label)
+        self.dataset_tabs_widget.update()
+        self._bulk_dataset_add_dirty = False
+        self._bulk_dataset_add_last_index = None
+        self._bulk_dataset_add_last_label = ""
+
+    def _refresh_dataset_status_segments(self, sample_name: str | None = None) -> None:
+        n = len(self.dataset_tabs)
+        temp = self.control_panel.temp_spinbox.value()
+        sample_label = sample_name or (self.dataset_tabs[-1].get_dataset_name() if self.dataset_tabs else "—")
+
+        self.rich_status_bar.set_segment("DATASETS", str(n) if n else "—")
+        self.rich_status_bar.set_segment("SAMPLE", sample_label[:24] if sample_label else "—")
+        self.rich_status_bar.set_segment("TEMP", f"{temp}°C")
+        self.rich_status_bar.set_segment("METHODS", str(len(self.k_calculator.get_all_method_names())))
+        self.app_toolbar.set_badge(0, n)
+
     def add_dataset_tab(self, dataset: GrainSizeData):
+        bulk_mode = self._bulk_dataset_add_depth > 0
         self.dataset_counter += 1
         self._hide_welcome()
         dataset_tab = DatasetTab(dataset)
@@ -1370,32 +1615,39 @@ class MainWindow(FramelessMainWindowMixin, QMainWindow):
         tab_index = self.dataset_tabs_widget.addTab(dataset_tab, tab_label)
         self.dataset_tabs_widget.setTabToolTip(tab_index, dataset.sample_name)
         self.dataset_tabs.append(dataset_tab)
-        self.dataset_tabs_widget.setCurrentIndex(self.dataset_tabs_widget.count() - 1)
-        self._refresh_dataset_tab_icons()
-
-        self.comparison_tab.set_dataset_tabs(self._get_selected_dataset_tabs())
-        self.reporting_tab.set_dataset_tabs(self.dataset_tabs)
-        self._update_export_tab()
+        if bulk_mode:
+            self._bulk_dataset_add_dirty = True
+            self._bulk_dataset_add_last_index = tab_index
+            self._bulk_dataset_add_last_label = dataset.sample_name
+        else:
+            self.dataset_tabs_widget.setCurrentIndex(self.dataset_tabs_widget.count() - 1)
+            self._refresh_dataset_tab_icons()
+            self._sync_comparison_dataset_state()
+            self.reporting_tab.set_dataset_tabs(self.dataset_tabs)
+            self._update_export_tab()
 
         if hasattr(dataset, 'file_path') and dataset.file_path:
             self._save_recent_file(dataset.file_path)
 
-        # Auto-calculate K values
-        selected_methods = self.k_calculator.get_all_method_names()
-        dataset_tab.calculate_k_values(selected_methods)
+        precomputed_results = getattr(dataset, "_precomputed_k_results", None)
+        precomputed_temperature = getattr(dataset, "_precomputed_k_temperature", None)
+        precomputed_porosity = getattr(dataset, "_precomputed_k_porosity", None)
+        if (
+            precomputed_results is not None
+            and precomputed_temperature == dataset_tab.temperature
+            and precomputed_porosity == dataset_tab.porosity
+        ):
+            dataset_tab.apply_precomputed_results(precomputed_results)
+        else:
+            selected_methods = self.k_calculator.get_all_method_names()
+            dataset_tab.calculate_k_values(selected_methods)
 
-        # Update status bar segments
-        n = len(self.dataset_tabs)
-        self.rich_status_bar.set_segment("DATASETS", str(n))
-        self.rich_status_bar.set_segment("SAMPLE", dataset.sample_name[:24])
-        temp = self.control_panel.temp_spinbox.value()
-        self.rich_status_bar.set_segment("TEMP", f"{temp}\u00b0C")
-        self.rich_status_bar.set_segment("METHODS", str(len(self.k_calculator.get_all_method_names())))
-        # Update Individual Samples badge with dataset count
-        self.app_toolbar.set_badge(0, n)
-        self._show_status_message(f"Loaded: {dataset.sample_name}")
+        if not bulk_mode:
+            self._refresh_dataset_status_segments(dataset.sample_name)
+            self._show_status_message(f"Loaded: {dataset.sample_name}")
 
     def add_error_tab(self, file_path: str, error_message: str):
+        bulk_mode = self._bulk_dataset_add_depth > 0
         self._hide_welcome()
         error_tab = ErrorTab(file_path, error_message, self)
         error_tab.dataset_fixed.connect(self.on_dataset_fixed)
@@ -1403,9 +1655,14 @@ class MainWindow(FramelessMainWindowMixin, QMainWindow):
         index = self.dataset_tabs_widget.addTab(error_tab, file_name)
         self.dataset_tabs_widget.setTabToolTip(index, file_name)
         self.dataset_tabs_widget.tabBar().setTabTextColor(index, QColor(211, 47, 47))
-        self.dataset_tabs_widget.setCurrentIndex(index)
-        self._refresh_dataset_tab_icons()
-        self._show_status_message(f"Error loading: {file_name} \u2014 click tab to fix", ok=False)
+        if bulk_mode:
+            self._bulk_dataset_add_dirty = True
+            self._bulk_dataset_add_last_index = index
+            self._bulk_dataset_add_last_label = file_name
+        else:
+            self.dataset_tabs_widget.setCurrentIndex(index)
+            self._refresh_dataset_tab_icons()
+            self._show_status_message(f"Error loading: {file_name} \u2014 click tab to fix", ok=False)
 
     def _remove_error_tab(self, file_path: str) -> bool:
         for i in range(self.dataset_tabs_widget.count()):
@@ -1455,11 +1712,10 @@ class MainWindow(FramelessMainWindowMixin, QMainWindow):
         self._refresh_dataset_tab_icons()
         if not self.dataset_tabs:
             self._show_welcome()
-        self.comparison_tab.set_dataset_tabs(self._get_selected_dataset_tabs())
+        self._sync_comparison_dataset_state()
         self.reporting_tab.set_dataset_tabs(self.dataset_tabs)
         self._update_export_tab()
-        n = len(self.dataset_tabs)
-        self.rich_status_bar.set_segment("DATASETS", str(n) if n else "\u2014")
+        self._refresh_dataset_status_segments()
         self._show_status_message("Dataset closed")
 
     # ──────────────────────────────────────────────────────────────────
@@ -1571,11 +1827,21 @@ class MainWindow(FramelessMainWindowMixin, QMainWindow):
     # ──────────────────────────────────────────────────────────────────
 
     def _on_calculation_complete(self, sample_name: str, results):
+        if self._bulk_dataset_add_depth > 0:
+            self._bulk_dataset_add_dirty = True
+            if sample_name:
+                self._bulk_dataset_add_last_label = sample_name
+            return
+
         self._update_export_tab()
         # Update K̄ segment with current tab's result
         if results:
             try:
-                vals = [v for v in results.values() if v and v > 0]
+                vals = [
+                    result.k_value
+                    for result in results
+                    if getattr(result, "k_value", None) is not None and result.k_value > 0
+                ]
                 if vals:
                     import math
                     gmean = math.exp(sum(math.log(v) for v in vals) / len(vals))

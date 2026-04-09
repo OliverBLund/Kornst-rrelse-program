@@ -13,6 +13,7 @@ from PyQt6.QtCore import (
     Qt, pyqtSignal, QPropertyAnimation, QEasingCurve, QSize,
 )
 from typing import Optional, Dict, Set
+import math
 import numpy as np
 
 from data_loader import GrainSizeData
@@ -43,6 +44,7 @@ def _pw_btn(text: str = "", tooltip: str = "", icon_name: str = "") -> QPushButt
     btn.setCursor(Qt.CursorShape.PointingHandCursor)
     if icon_name:
         btn.setIcon(icon(icon_name, C.TEXT_MID))
+        btn.setIconSize(QSize(12, 12))
     return btn
 
 
@@ -59,6 +61,7 @@ def _pw_chk(text: str, tooltip: str = "", checked: bool = False,
     if icon_name:
         btn._pw_icon_name = icon_name
         btn.setIcon(icon(icon_name, C.OLIVE if checked else C.TEXT_MID))
+        btn.setIconSize(QSize(12, 12))
     # Keep the active property in sync with checked state
     btn.toggled.connect(lambda on, b=btn: _sync_chk(b, on))
     return btn
@@ -139,6 +142,7 @@ class PlotWorkspace(QWidget):
         self._seg_dist.setCheckable(True)
         self._seg_dist.setChecked(True)
         self._seg_dist.setCursor(Qt.CursorShape.PointingHandCursor)
+        self._seg_dist.setIconSize(QSize(12, 12))
 
         self._seg_kval = QPushButton("  K-Values")
         self._seg_kval.setIcon(icon("fa6s.chart-bar", C.TEXT_MID))
@@ -146,6 +150,7 @@ class PlotWorkspace(QWidget):
         self._seg_kval.setProperty("active", False)
         self._seg_kval.setCheckable(True)
         self._seg_kval.setCursor(Qt.CursorShape.PointingHandCursor)
+        self._seg_kval.setIconSize(QSize(12, 12))
 
         self._seg_group.addButton(self._seg_dist, 0)
         self._seg_group.addButton(self._seg_kval, 1)
@@ -243,6 +248,7 @@ class PlotWorkspace(QWidget):
         self._toggle_handle = QPushButton(self._chart_area)
         self._toggle_handle.setObjectName("pw-toggle-handle")
         self._toggle_handle.setIcon(icon("fa6s.chevron-right", C.TEXT_MID, 8))
+        self._toggle_handle.setIconSize(QSize(8, 8))
         self._toggle_handle.setToolTip("Toggle sidebar")
         self._toggle_handle.setCursor(Qt.CursorShape.PointingHandCursor)
         self._toggle_handle.clicked.connect(self._toggle_sidebar)
@@ -290,7 +296,7 @@ class PlotWorkspace(QWidget):
             ("X min (mm)", "0.001", "_in_xmin"),
             ("X max (mm)", "100",   "_in_xmax"),
             ("Y min (%)",  "0",     "_in_ymin"),
-            ("Y max (%)",  "100",   "_in_ymax"),
+            ("Y max (%)",  "102",   "_in_ymax"),
         ]:
             row, inp = self._axis_row(label_text, default)
             setattr(self, attr, inp)
@@ -540,6 +546,7 @@ class PlotWorkspace(QWidget):
             target_ax.set_xlim(xmin, xmax)
             target_ax.set_ylim(ymin, ymax)
             self.plot_widget.canvas.draw()
+            self._sync_axis_inputs_from_ax(target_ax)
         except ValueError:
             pass
 
@@ -604,16 +611,7 @@ class PlotWorkspace(QWidget):
             self._plot_cumulative_distribution()
         elif self.current_plot_type == "histogram":
             self._plot_histogram()
-
-        # Apply display settings
-        for ax in getattr(self.plot_widget, 'active_axes', []) or []:
-            if not self.show_grid:
-                ax.grid(False)
-            legend = ax.get_legend()
-            if legend:
-                legend.set_visible(self.show_legend)
-
-        self.plot_widget.canvas.draw()
+        self._sync_axis_inputs_from_ax(getattr(self.plot_widget, 'current_ax', None))
 
     def _plot_cumulative_distribution(self):
         if not self.plot_widget:
@@ -675,6 +673,7 @@ class PlotWorkspace(QWidget):
         self.plot_widget.active_axes = [ax]
         self.plot_widget.figure.tight_layout()
         self.plot_widget.canvas.draw()
+        self._sync_axis_inputs_from_ax(ax)
 
     def _plot_histogram(self):
         if not self.plot_widget:
@@ -731,38 +730,68 @@ class PlotWorkspace(QWidget):
         self.plot_widget.active_axes = [ax]
         self.plot_widget.figure.tight_layout()
         self.plot_widget.canvas.draw()
+        self._sync_axis_inputs_from_ax(ax)
 
     # ── Zoom ───────────────────────────────────────────────────
+
+    def _sync_axis_inputs_from_ax(self, target_ax) -> None:
+        """Reflect the active axes limits in the sidebar controls."""
+        if not target_ax:
+            return
+        xlim = target_ax.get_xlim()
+        ylim = target_ax.get_ylim()
+        self._in_xmin.setText(f"{xlim[0]:.6g}")
+        self._in_xmax.setText(f"{xlim[1]:.6g}")
+        self._in_ymin.setText(f"{ylim[0]:.6g}")
+        self._in_ymax.setText(f"{ylim[1]:.6g}")
+
+    @staticmethod
+    def _zoom_axis_limits(limits, scale: str, factor: float) -> tuple[float, float]:
+        """Zoom a linear or log axis around its center by the given factor."""
+        lo, hi = limits
+        if scale == 'log' and lo > 0 and hi > 0:
+            lo_log = math.log10(lo)
+            hi_log = math.log10(hi)
+            center_log = (lo_log + hi_log) / 2
+            half_span = (hi_log - lo_log) * factor / 2
+            return 10 ** (center_log - half_span), 10 ** (center_log + half_span)
+
+        center = (lo + hi) / 2
+        half_range = (hi - lo) * factor / 2
+        new_lo = center - half_range
+        new_hi = center + half_range
+        if lo >= 0 and new_lo < 0:
+            new_lo = 0
+        return new_lo, new_hi
 
     def zoom_in(self):
         target_ax = self.plot_widget.current_ax if self.plot_widget else None
         if target_ax:
-            xlim = target_ax.get_xlim()
-            ylim = target_ax.get_ylim()
-            x_center = (xlim[0] + xlim[1]) / 2
-            y_center = (ylim[0] + ylim[1]) / 2
-            x_range = (xlim[1] - xlim[0]) * 0.4
-            y_range = (ylim[1] - ylim[0]) * 0.4
-            target_ax.set_xlim(x_center - x_range, x_center + x_range)
-            target_ax.set_ylim(y_center - y_range, y_center + y_range)
+            target_ax.set_xlim(
+                *self._zoom_axis_limits(target_ax.get_xlim(), target_ax.get_xscale(), 0.8)
+            )
+            target_ax.set_ylim(
+                *self._zoom_axis_limits(target_ax.get_ylim(), target_ax.get_yscale(), 0.8)
+            )
             self.plot_widget.canvas.draw()
+            self._sync_axis_inputs_from_ax(target_ax)
 
     def zoom_out(self):
         target_ax = self.plot_widget.current_ax if self.plot_widget else None
         if target_ax:
-            xlim = target_ax.get_xlim()
-            ylim = target_ax.get_ylim()
-            x_center = (xlim[0] + xlim[1]) / 2
-            y_center = (ylim[0] + ylim[1]) / 2
-            x_range = (xlim[1] - xlim[0]) * 0.6
-            y_range = (ylim[1] - ylim[0]) * 0.6
-            target_ax.set_xlim(x_center - x_range, x_center + x_range)
-            target_ax.set_ylim(y_center - y_range, y_center + y_range)
+            target_ax.set_xlim(
+                *self._zoom_axis_limits(target_ax.get_xlim(), target_ax.get_xscale(), 1.2)
+            )
+            target_ax.set_ylim(
+                *self._zoom_axis_limits(target_ax.get_ylim(), target_ax.get_yscale(), 1.2)
+            )
             self.plot_widget.canvas.draw()
+            self._sync_axis_inputs_from_ax(target_ax)
 
     def reset_view(self):
         if self.plot_widget:
             self.plot_widget.reset_view()
+            self._sync_axis_inputs_from_ax(self.plot_widget.current_ax)
 
     # ── Public API (unchanged interface) ───────────────────────
 
@@ -770,7 +799,7 @@ class PlotWorkspace(QWidget):
         if self.plot_widget:
             self.plot_widget.update_plot(
                 particle_sizes, percent_passing, sample_name, grain_size_data=self.dataset)
-            self.refresh_plot()
+            self._sync_axis_inputs_from_ax(getattr(self.plot_widget, 'current_ax', None))
 
     def set_scheme(self, scheme) -> None:
         """Update classification scheme; redraw via refresh_plot() if zones are visible."""

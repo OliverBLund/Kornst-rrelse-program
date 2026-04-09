@@ -31,6 +31,22 @@ if _dpr_change_event is not None:
 class FigureCanvas(_FigureCanvas):
     """Qt canvas that eagerly syncs matplotlib to the active screen DPR."""
 
+    def __init__(self, *args, **kwargs) -> None:
+        super().__init__(*args, **kwargs)
+        self._deferred_draw_pending = False
+
+    def draw(self, *args, **kwargs) -> None:  # type: ignore[override]
+        if not self.isVisible():
+            self._deferred_draw_pending = True
+            return
+        self._deferred_draw_pending = False
+        super().draw(*args, **kwargs)
+
+    def _flush_deferred_draw(self) -> None:
+        if self._deferred_draw_pending and self.isVisible():
+            self._deferred_draw_pending = False
+            super().draw()
+
     def _sync_device_pixel_ratio(self) -> None:
         update_pixel_ratio = getattr(self, "_update_pixel_ratio", None)
         if callable(update_pixel_ratio):
@@ -40,6 +56,7 @@ class FigureCanvas(_FigureCanvas):
     def showEvent(self, event) -> None:  # type: ignore[override]
         super().showEvent(event)
         QTimer.singleShot(0, self._sync_device_pixel_ratio)
+        QTimer.singleShot(0, self._flush_deferred_draw)
 
     def event(self, event):  # type: ignore[override]
         result = super().event(event)

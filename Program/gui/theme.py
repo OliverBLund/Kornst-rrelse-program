@@ -20,18 +20,27 @@ Usage:
 from __future__ import annotations
 import sys
 from pathlib import Path
-import qtawesome as qta
 from PyQt6.QtCore import Qt, QRectF
 from PyQt6.QtGui import QColor, QFont, QFontDatabase, QIcon, QPainter, QPen, QPixmap
 
 
 _MATPLOTLIB_FONTS_REGISTERED = False
+_QTA_MODULE = None
+_ICON_BASE_SIZE_PX = 14.0
 
 
 def _font_base_dir() -> Path:
     """Return the bundled font directory for dev and frozen builds."""
     if getattr(sys, "frozen", False):
-        return Path(sys._MEIPASS) / "resources" / "fonts"  # type: ignore[attr-defined]
+        base = Path(sys._MEIPASS)  # type: ignore[attr-defined]
+        candidates = [
+            base / "Program" / "resources" / "fonts",
+            base / "resources" / "fonts",
+        ]
+        for candidate in candidates:
+            if candidate.is_dir():
+                return candidate
+        return candidates[0]
     return Path(__file__).resolve().parent.parent / "resources" / "fonts"
 
 
@@ -56,6 +65,18 @@ def _register_matplotlib_fonts(base: Path) -> None:
     _MATPLOTLIB_FONTS_REGISTERED = True
 
 
+def _qtawesome():
+    """Import qtawesome on first use to keep cold startup light."""
+    global _QTA_MODULE
+
+    if _QTA_MODULE is None:
+        import qtawesome as qta
+
+        _QTA_MODULE = qta
+
+    return _QTA_MODULE
+
+
 def load_fonts() -> None:
     """Load bundled font files from resources/fonts/ via QFontDatabase.
 
@@ -67,15 +88,32 @@ def load_fonts() -> None:
     if not base.is_dir():
         return
 
-    _register_matplotlib_fonts(base)
-
-    for font_file in base.glob("*.ttf"):
+    for font_file in sorted(base.glob("*.ttf")):
         font_id = QFontDatabase.addApplicationFont(str(font_file))
         if font_id < 0:
             print(f"[theme] WARNING: Failed to load font: {font_file.name}")
         else:
             families = QFontDatabase.applicationFontFamilies(font_id)
-            print(f"[theme] Loaded font: {font_file.name} → {families}")
+            print(f"[theme] Loaded font: {font_file.name} -> {families}")
+
+
+def default_ui_font_family(platform_name: str | None = None) -> str:
+    """Return the primary UI font family for the current platform."""
+    platform_name = sys.platform if platform_name is None else platform_name
+    if platform_name == "win32":
+        # Native Windows UI text is consistently crisper than bundled variable fonts.
+        return "Segoe UI"
+    return "Source Sans 3"
+
+
+def default_ui_font_families(platform_name: str | None = None) -> list[str]:
+    """Return ordered fallbacks for plot text and other font consumers."""
+    primary = default_ui_font_family(platform_name)
+    families = [primary]
+    if primary != "Source Sans 3":
+        families.append("Source Sans 3")
+    families.append("DejaVu Sans")
+    return families
 
 
 # ─────────────────────────────────────────────────────────────
@@ -173,7 +211,7 @@ class C:
 
 class F:
     """Font family names. Must match names registered via QFontDatabase."""
-    UI    = "Source Sans 3"
+    UI    = default_ui_font_family()
     MONO  = "JetBrains Mono"
     DISP  = "Playfair Display"
 
@@ -224,7 +262,7 @@ MATPLOTLIB_RCPARAMS: dict = {
     "grid.color":           C.BORDER,
     "grid.linewidth":       0.5,
     "grid.alpha":           0.7,
-    "font.family":          [F.UI, "DejaVu Sans"],
+    "font.family":          default_ui_font_families(),
     "font.size":            11,
     "axes.titlesize":       12,
     "axes.titlecolor":      C.TEXT_MID,
@@ -265,6 +303,7 @@ def _warn_icon_once(message: str) -> None:
 
 def _safe_qta_icon(fa_name: str, **kwargs) -> QIcon:
     """Return a qtawesome icon with safe fallbacks for unsupported prefixes."""
+    qta = _qtawesome()
     try:
         return qta.icon(fa_name, **kwargs)
     except Exception as exc:
@@ -292,7 +331,13 @@ def icon(fa_name: str, color: str = C.TEXT_MID, size: int = 14) -> QIcon:
     Example:
         btn.setIcon(icon('fa6s.bolt', C.OLIVE))
     """
-    return _safe_qta_icon(fa_name, color=color, scale_factor=1.0)
+    scale_factor = float(size) / _ICON_BASE_SIZE_PX if size > 0 else 1.0
+    return _safe_qta_icon(
+        fa_name,
+        color=color,
+        draw="path",
+        scale_factor=scale_factor,
+    )
 
 
 def icon_colored(fa_name: str, color: str, active_color: str | None = None) -> QIcon:
@@ -302,14 +347,15 @@ def icon_colored(fa_name: str, color: str, active_color: str | None = None) -> Q
             fa_name,
             color=color,
             color_active=active_color,
+            draw="path",
         )
-    return _safe_qta_icon(fa_name, color=color)
+    return _safe_qta_icon(fa_name, color=color, draw="path")
 
 
 def app_icon() -> QIcon:
     """Return a multi-size application icon for window/taskbar usage."""
     ico = QIcon()
-    glyph_icon = _safe_qta_icon("fa6s.layer-group", color=C.LOGO_TEXT)
+    glyph_icon = _safe_qta_icon("fa6s.layer-group", color=C.LOGO_TEXT, draw="path")
 
     for size in (16, 20, 24, 32, 40, 48, 64, 128, 256):
         pix = QPixmap(size, size)

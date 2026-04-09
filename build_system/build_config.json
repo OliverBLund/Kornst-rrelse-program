@@ -14,6 +14,10 @@
       "target": "Program/help_content"
     },
     {
+      "source": "../Program/resources",
+      "target": "Program/resources"
+    },
+    {
       "source": "../docs",
       "target": "docs"
     },

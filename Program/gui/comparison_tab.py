@@ -166,6 +166,8 @@ class ComparisonTab(QWidget):
 
     # Emitted whenever update_comparison() completes successfully
     comparison_updated = pyqtSignal()
+    # Emitted when the manage-datasets dialog requests a new comparison subset.
+    dataset_selection_requested = pyqtSignal(list)
 
     # ── Grain parameter definitions ──────────────────────────────────────────
     # (label, tooltip, bold, olive-highlight)
@@ -301,7 +303,7 @@ class ComparisonTab(QWidget):
         except Exception:
             pass
         self._manage_btn.setEnabled(False)
-        self._manage_btn.setToolTip("Choose which loaded datasets appear in comparison")
+        self._manage_btn.setToolTip("Choose which loaded datasets appear in comparison and sync them with SAMPLES")
         self._manage_btn.clicked.connect(self._on_manage_datasets)
 
         self._update_btn = QPushButton("Update")
@@ -650,23 +652,27 @@ class ComparisonTab(QWidget):
         enabled = len(self.selected_datasets) >= 2
         self._update_btn.setEnabled(enabled)
         self._export_btn.setEnabled(enabled)
+        if not enabled:
+            self._clear_views()
         self._refresh_pin_list()
         self._update_header_count()
 
-    def set_dataset_tabs(self, dataset_tabs) -> None:
-        """Called by main_window whenever the dataset tab list changes.
+    def set_dataset_state(self, dataset_tabs, selected_tabs=None) -> None:
+        """Update loaded datasets and the active comparison subset.
 
         Args:
             dataset_tabs: list of dataset tab objects exposing
                           get_dataset(), get_dataset_name(), get_results()
+            selected_tabs: subset sourced from the sidebar selection. If omitted
+                           or empty, all loaded datasets are compared.
         """
-        prev_selected = {tab.get_dataset_name() for tab in self.selected_datasets}
         self.dataset_tabs = list(dataset_tabs)
 
-        if prev_selected:
+        if selected_tabs:
+            selected_names = {tab.get_dataset_name() for tab in selected_tabs}
             selected_tabs = [
                 tab for tab in self.dataset_tabs
-                if tab.get_dataset_name() in prev_selected
+                if tab.get_dataset_name() in selected_names
             ]
         else:
             selected_tabs = list(self.dataset_tabs)
@@ -675,6 +681,10 @@ class ComparisonTab(QWidget):
 
         if len(self.selected_datasets) >= 2:
             self.update_comparison()
+
+    def set_dataset_tabs(self, dataset_tabs) -> None:
+        """Backward-compatible wrapper: compare the provided tabs directly."""
+        self.set_dataset_state(dataset_tabs, selected_tabs=dataset_tabs)
 
     def update_comparison(self) -> None:
         """Refresh all views from current dataset_tabs.  Public API."""
@@ -700,7 +710,7 @@ class ComparisonTab(QWidget):
         self._manage_btn.setEnabled(n_loaded >= 1)
 
     def _on_manage_datasets(self) -> None:
-        """Open dataset-selection dialog for the comparison subset."""
+        """Open dataset-selection dialog and sync the result back to the sidebar."""
         if not self.dataset_tabs:
             return
 
@@ -710,8 +720,21 @@ class ComparisonTab(QWidget):
             parent=self,
         )
         if dialog.exec():
-            self._set_selected_datasets(dialog.get_selected_tabs())
+            selected_tabs = dialog.get_selected_tabs()
+            self._set_selected_datasets(selected_tabs)
+            self.dataset_selection_requested.emit(self._dataset_paths(selected_tabs))
             self.update_comparison()
+
+    @staticmethod
+    def _dataset_paths(dataset_tabs) -> list[str]:
+        """Return file-path keys for a comparison subset."""
+        paths: list[str] = []
+        for tab in dataset_tabs:
+            dataset = tab.get_dataset() if hasattr(tab, "get_dataset") else getattr(tab, "dataset", None)
+            file_path = getattr(dataset, "file_path", "") if dataset is not None else ""
+            if file_path:
+                paths.append(file_path)
+        return paths
 
     def _update_plot(self) -> None:
         """Push datasets into the comparison plot widget."""
@@ -722,6 +745,32 @@ class ComparisonTab(QWidget):
         self._plot_widget.set_datasets(self.selected_datasets)
         if hasattr(self._plot_widget, "refresh_plot"):
             self._plot_widget.refresh_plot()
+
+    def _clear_views(self) -> None:
+        """Clear stale comparison output when fewer than two datasets are selected."""
+        if hasattr(self._plot_widget, "show_empty_state"):
+            self._plot_widget.show_empty_state("Select at least 2 datasets to compare")
+
+        for table in (self._grain_table, self._k_table):
+            table.clearContents()
+            table.setRowCount(0)
+            table.setColumnCount(0)
+
+        for fig, canvas, message in [
+            (self._box_fig, self._box_canvas, "Select at least 2 datasets to compare"),
+            (self._heat_fig, self._heat_canvas, "Select at least 2 datasets to compare"),
+        ]:
+            fig.clear()
+            ax = fig.add_subplot(1, 1, 1)
+            ax.text(
+                0.5, 0.5, message,
+                transform=ax.transAxes,
+                ha='center', va='center',
+                fontsize=11, color=C.TEXT_MUTED,
+            )
+            ax.set_xticks([])
+            ax.set_yticks([])
+            canvas.draw()
 
     # ── Grain parameter table ─────────────────────────────────────────────────
 
@@ -1110,7 +1159,7 @@ class ComparisonTab(QWidget):
 
         bp = ax.boxplot(
             p_data,
-            labels=p_labels,
+            tick_labels=p_labels,
             patch_artist=True,
             medianprops={"color": C.TEXT, "linewidth": 1.5},
             whiskerprops={"color": C.BORDER_DK, "linewidth": 1.0},
