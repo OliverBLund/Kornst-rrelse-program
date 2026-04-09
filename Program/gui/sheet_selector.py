@@ -111,6 +111,7 @@ class SheetSelectorDialog(FramelessDialogBase):
 
         # Sheet list
         self._sheet_list = QListWidget()
+        self.sheet_list = self._sheet_list
         self._sheet_list.setSelectionMode(QListWidget.SelectionMode.ExtendedSelection)
         self._sheet_list.setStyleSheet(
             f"QListWidget {{ background: {C.BG_RAISED}; border: 1px solid {C.BORDER}; "
@@ -135,6 +136,7 @@ class SheetSelectorDialog(FramelessDialogBase):
 
         # Info label
         self._info_label = QLabel("")
+        self.info_label = self._info_label
         self._info_label.setWordWrap(True)
         self._info_label.setStyleSheet(
             f"color: {C.TEXT_MUTED}; font-size: {F.SZ_SM}pt; background: transparent;"

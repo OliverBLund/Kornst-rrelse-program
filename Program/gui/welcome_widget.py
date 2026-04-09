@@ -11,7 +11,7 @@ import sys
 from pathlib import Path
 from typing import List
 
-from PyQt6.QtCore import QRect, QSettings, QSize, Qt, pyqtSignal
+from PyQt6.QtCore import QRect, QSize, Qt, pyqtSignal
 from PyQt6.QtGui import QColor, QCursor, QLinearGradient, QPainter, QPaintEvent, QPixmap
 from PyQt6.QtWidgets import (
     QCheckBox,
@@ -29,7 +29,7 @@ from PyQt6.QtWidgets import (
 from .theme import C, F, icon
 
 # Max width of the centred cards (px)
-_CARD_W = 740
+_CARD_W = 660
 
 
 class WelcomeWidget(QWidget):
@@ -38,15 +38,21 @@ class WelcomeWidget(QWidget):
     load_files_requested       = pyqtSignal()
     load_sample_data_requested = pyqtSignal()
     open_recent_file_requested = pyqtSignal(str)
+    open_recent_session_requested = pyqtSignal(dict)
     open_help_topic_requested  = pyqtSignal(str)
     dont_show_again_changed    = pyqtSignal(bool)
     clear_sessions_requested   = pyqtSignal()
 
-    def __init__(self, recent_files: List[str] = None, parent=None):
+    def __init__(self, recent_files: List[str] = None, recent_sessions: List[dict] = None, parent=None):
         super().__init__(parent)
         self.recent_files = recent_files or []
+        self.recent_sessions = recent_sessions or []
         self.setAutoFillBackground(False)
         self._bg_pixmap = self._load_bg_pixmap()
+        self._title_card = None
+        self._main_card = None
+        self._footer = None
+        self._footer_attr = None
         self._setup_ui()
 
     @staticmethod
@@ -65,6 +71,7 @@ class WelcomeWidget(QWidget):
 
     def resizeEvent(self, event):
         super().resizeEvent(event)
+        self._sync_card_widths()
         self.update()   # repaint soil image whenever widget resizes
 
     def paintEvent(self, event: QPaintEvent):
@@ -107,31 +114,39 @@ class WelcomeWidget(QWidget):
         lay.setSpacing(14)
         lay.setAlignment(Qt.AlignmentFlag.AlignHCenter)
 
-        lay.addWidget(self._build_title_card(), 0, Qt.AlignmentFlag.AlignHCenter)
-        lay.addWidget(self._build_main_card(),  0, Qt.AlignmentFlag.AlignHCenter)
-        lay.addWidget(self._build_footer(),     0, Qt.AlignmentFlag.AlignHCenter)
+        self._title_card = self._build_title_card()
+        self._main_card = self._build_main_card()
+        self._footer = self._build_footer()
+
+        lay.addWidget(self._title_card, 0, Qt.AlignmentFlag.AlignHCenter)
+        lay.addWidget(self._main_card,  0, Qt.AlignmentFlag.AlignHCenter)
+        lay.addWidget(self._footer,     0, Qt.AlignmentFlag.AlignHCenter)
         lay.addStretch()
 
         scroll.setWidget(content)
         root.addWidget(scroll, 1)
+        self._sync_card_widths()
 
     # ── Title card ───────────────────────────────────────────────
 
     def _build_title_card(self) -> QFrame:
+        return self._build_title_card_concept_v2()
+
+    def _build_title_card_concept(self) -> QFrame:
         card = QFrame()
         card.setObjectName("wlc-title")
         card.setStyleSheet("""
             QFrame#wlc-title {
-                background: rgba(252,248,240,210);
-                border: 1.5px solid rgba(255,255,255,200);
-                border-radius: 12px;
+                background: rgba(255,255,255,56);
+                border: 1px solid rgba(255,255,255,97);
+                border-radius: 8px;
             }
         """)
         card.setMaximumWidth(_CARD_W)
         card.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
 
         lay = QVBoxLayout(card)
-        lay.setContentsMargins(28, 20, 28, 18)
+        lay.setContentsMargins(22, 13, 22, 11)
         lay.setSpacing(0)
         lay.setAlignment(Qt.AlignmentFlag.AlignHCenter)
 
@@ -246,15 +261,88 @@ class WelcomeWidget(QWidget):
 
     # ── Main card ────────────────────────────────────────────────
 
+    def _build_title_card_concept_v2(self) -> QFrame:
+        card = QFrame()
+        card.setObjectName("wlc-title-concept")
+        card.setStyleSheet("""
+            QFrame#wlc-title-concept {
+                background: rgba(255,255,255,56);
+                border: 1px solid rgba(255,255,255,97);
+                border-radius: 8px;
+            }
+        """)
+        card.setMaximumWidth(_CARD_W)
+        card.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
+
+        lay = QVBoxLayout(card)
+        lay.setContentsMargins(22, 13, 22, 11)
+        lay.setSpacing(0)
+        lay.setAlignment(Qt.AlignmentFlag.AlignHCenter)
+
+        title = QLabel("Grain Size Analysis")
+        title.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        title.setStyleSheet(
+            f'color: {C.TEXT}; font-family: "{F.DISP}"; font-size: {F.SZ_2XL}pt;'
+            ' font-weight: 700; letter-spacing: 0.02em; background: transparent;'
+        )
+        lay.addWidget(title)
+        lay.addSpacing(3)
+
+        sub = QLabel("Hydraulic Conductivity Calculator")
+        sub.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        sub.setStyleSheet(
+            f"color: {C.TEXT_MID}; font-size: {F.SZ_BASE}pt; font-weight: 400;"
+            " background: transparent;"
+        )
+        lay.addWidget(sub)
+        lay.addSpacing(8)
+
+        note = QWidget()
+        note.setObjectName("wlc-title-note-v2")
+        note.setStyleSheet("""
+            QWidget#wlc-title-note-v2 {
+                background: rgba(255,255,255,71);
+                border: 1px solid rgba(120,95,60,41);
+                border-radius: 99px;
+            }
+        """)
+        note_lay = QHBoxLayout(note)
+        note_lay.setContentsMargins(10, 4, 10, 4)
+        note_lay.setSpacing(6)
+
+        note_icon = QLabel()
+        note_icon.setPixmap(icon("fa6s.layer-group", C.OLIVE).pixmap(QSize(10, 10)))
+        note_icon.setStyleSheet("background: transparent; border: none;")
+        note_lay.addWidget(note_icon)
+
+        note_text = QLabel(
+            "Built for batch loading, rapid sample switching, comparison, and export."
+        )
+        note_text.setWordWrap(False)
+        note_text.setStyleSheet(
+            f"color: {C.TEXT_MID}; font-size: {F.SZ_XS}pt; background: transparent; border: none;"
+        )
+        note_lay.addWidget(note_text)
+        lay.addWidget(note, 0, Qt.AlignmentFlag.AlignHCenter)
+        lay.addSpacing(5)
+
+        ver = QLabel("v0.9.0-beta")
+        ver.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        ver.setStyleSheet(
+            f"color: {C.TEXT_MUTED}; font-family: '{F.MONO}'; font-size: {F.SZ_XS - 1}pt;"
+            " background: transparent;"
+        )
+        lay.addWidget(ver)
+        return card
+
     def _build_main_card(self) -> QFrame:
         card = QFrame()
         card.setObjectName("wlc-card")
         card.setStyleSheet("""
             QFrame#wlc-card {
-                background: qlineargradient(x1:0,y1:0,x2:0,y2:1,
-                    stop:0 #fdfcf9, stop:0.5 #f8f4ee, stop:1 #f1ece3);
-                border: 1.5px solid rgba(180,160,130,90);
-                border-radius: 12px;
+                background: rgba(255,255,255,247);
+                border: 1px solid rgba(180,160,130,64);
+                border-radius: 10px;
             }
         """)
         card.setMaximumWidth(_CARD_W)
@@ -287,15 +375,22 @@ class WelcomeWidget(QWidget):
         )
         grid.setColumnStretch(0, 1)
         grid.setColumnStretch(1, 1)
-        # Equal row stretch so sections share space proportionally
-        grid.setRowStretch(0, 1)
-        grid.setRowStretch(1, 0)
         return card
 
     # ── Section box ──────────────────────────────────────────────
 
     def _build_section(self, icon_name: str, title: str, content: QWidget,
                        clear_btn: bool = False, accent: str = None) -> QFrame:
+        return self._build_section_concept_v3(
+            icon_name=icon_name,
+            title=title,
+            content=content,
+            clear_btn=clear_btn,
+            accent=accent,
+        )
+
+    def _build_section_concept_v2(self, icon_name: str, title: str, content: QWidget,
+                                  clear_btn: bool = False, accent: str = None) -> QFrame:
         _accent = accent or C.BORDER
         sec = QFrame()
         sec.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Preferred)
@@ -386,6 +481,71 @@ class WelcomeWidget(QWidget):
 
     # ── Recent Sessions ──────────────────────────────────────────
 
+    def _build_section_concept_v3(self, icon_name: str, title: str, content: QWidget,
+                                  clear_btn: bool = False, accent: str = None) -> QFrame:
+        _accent = accent or C.BORDER
+        sec = QFrame()
+        sec.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Preferred)
+        sec.setStyleSheet(f"""
+            QFrame {{
+                background: #f8f6f2;
+                border: 1px solid {C.BORDER};
+                border-radius: 6px;
+            }}
+        """)
+
+        lay = QVBoxLayout(sec)
+        lay.setContentsMargins(10, 10, 10, 10)
+        lay.setSpacing(7)
+
+        header = QWidget()
+        header.setStyleSheet("background: transparent; border: none;")
+        header_lay = QHBoxLayout(header)
+        header_lay.setContentsMargins(0, 0, 0, 0)
+        header_lay.setSpacing(6)
+
+        ico_lbl = QLabel()
+        ico_lbl.setPixmap(icon(icon_name, _accent).pixmap(QSize(11, 11)))
+        ico_lbl.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        ico_lbl.setStyleSheet("background: transparent; border: none;")
+        ico_lbl.setFixedWidth(14)
+
+        ttl_lbl = QLabel(title)
+        ttl_lbl.setStyleSheet(
+            f"color: {C.TEXT}; font-size: {F.SZ_BASE}pt; font-weight: 600;"
+            " background: transparent; border: none;"
+        )
+
+        header_lay.addWidget(ico_lbl)
+        header_lay.addWidget(ttl_lbl)
+        header_lay.addStretch()
+
+        if clear_btn:
+            clr = QPushButton("Clear")
+            clr.setIcon(icon("fa6s.trash-can", "#ffffff"))
+            clr.setFixedHeight(22)
+            clr.setCursor(QCursor(Qt.CursorShape.PointingHandCursor))
+            clr.setStyleSheet(f"""
+                QPushButton {{
+                    background: #dc3545;
+                    color: white;
+                    border: none;
+                    border-radius: 3px;
+                    padding: 0 8px;
+                    font-size: {F.SZ_XS}pt;
+                }}
+                QPushButton:hover {{
+                    background: #c82333;
+                }}
+            """)
+            clr.clicked.connect(self.clear_sessions_requested.emit)
+            header_lay.addWidget(clr)
+
+        lay.addWidget(header)
+        lay.addWidget(content, 0, Qt.AlignmentFlag.AlignTop)
+        lay.addStretch(1)
+        return sec
+
     def _build_recent(self) -> QWidget:
         w = QWidget()
         w.setStyleSheet("background: transparent; border: none;")
@@ -393,13 +553,8 @@ class WelcomeWidget(QWidget):
         lay.setContentsMargins(0, 0, 0, 0)
         lay.setSpacing(5)
 
-        settings = QSettings("GrainSizeAnalysis", "MainWindow")
-        sessions = settings.value("recent_sessions", [])
-        if not isinstance(sessions, list):
-            sessions = []
-
-        if sessions:
-            for s in sessions[:4]:
+        if self.recent_sessions:
+            for s in self.recent_sessions[:4]:
                 lay.addWidget(self._build_session_row(s))
         else:
             empty = QLabel("No recent sessions")
@@ -477,7 +632,7 @@ class WelcomeWidget(QWidget):
         row_lay.addWidget(tx, 1)
         row_lay.addWidget(chev)
 
-        row.mousePressEvent = lambda e, f=files: self._load_session_files(f)
+        row.mousePressEvent = lambda e, session=dict(s): self.open_recent_session_requested.emit(session)
         return row
 
     # ── What's New ───────────────────────────────────────────────
@@ -719,7 +874,7 @@ class WelcomeWidget(QWidget):
             "Don't show this welcome screen on startup"
         )
         self.dont_show_checkbox.setStyleSheet(
-            f"color: rgba(80,60,30,191); font-size: {F.SZ_BASE}pt; background: transparent;"
+            f"color: rgba(80,60,30,191); font-size: {F.SZ_SM}pt; background: transparent;"
         )
         self.dont_show_checkbox.stateChanged.connect(
             lambda state: self.dont_show_again_changed.emit(
@@ -729,15 +884,30 @@ class WelcomeWidget(QWidget):
         lay.addWidget(self.dont_show_checkbox)
         lay.addStretch()
 
-        attr = QLabel("Batch import · compare selected · export chosen scope")
-        attr.setStyleSheet(
-            f"color: rgba(80,60,30,140); font-family: '{F.MONO}'; font-size: {F.SZ_XS}pt;"
+        self._footer_attr = QLabel("Batch import · compare selected · export chosen scope")
+        self._footer_attr.setStyleSheet(
+            f"color: rgba(80,60,30,140); font-family: '{F.MONO}'; font-size: {F.SZ_XS - 1}pt;"
             " background: rgba(255,255,255,140); padding: 2px 8px; border-radius: 3px;"
         )
-        lay.addWidget(attr)
+        lay.addWidget(self._footer_attr)
         return w
 
     # ── Helpers ──────────────────────────────────────────────────
+
+    def _sync_card_widths(self):
+        if self.width() <= 0:
+            return
+
+        target = min(_CARD_W, max(280, self.width() - 40))
+        for widget in (self._title_card, self._main_card, self._footer):
+            if widget is not None:
+                widget.setFixedWidth(target)
+
+        if self._footer_attr is not None:
+            if target < 600:
+                self._footer_attr.setText("Batch import · compare · export")
+            else:
+                self._footer_attr.setText("Batch import · compare selected · export chosen scope")
 
     def _load_session_files(self, files: List[str]):
         for f in files:
@@ -760,6 +930,10 @@ class WelcomeWidget(QWidget):
     def update_recent_files(self, recent_files: List[str]):
         """Called by main_window; full refresh is handled by _refresh_welcome_widget."""
         self.recent_files = recent_files
+
+    def update_recent_sessions(self, recent_sessions: List[dict]):
+        """Called by main_window; full refresh is handled by _refresh_welcome_widget."""
+        self.recent_sessions = recent_sessions
 
 
 class _ClearWidget(QWidget):

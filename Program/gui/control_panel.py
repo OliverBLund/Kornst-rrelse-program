@@ -18,6 +18,7 @@ import os
 from PyQt6.QtCore import Qt, pyqtSignal, QSize, QRectF, QPoint
 from PyQt6.QtGui import (QIcon, QFont, QAction, QPainter, QColor,
                          QLinearGradient, QBrush, QPixmap, QPen, QFontMetrics)
+from gui.loading_dialog import BatchImportWorker, LoadingDialog
 from gui.theme import C, F, SZ, icon
 from qt_chrome.frameless_dialog_base import FramelessDialogBase
 from grain_classification import (
@@ -161,7 +162,6 @@ class _SampleCard(QWidget):
 
     _STATUS_DOT = {
         'pending': C.SB_MUTED,
-        'auto':    C.OLIVE,
         'failed':  C.LED_ERR,
         'review':  C.LED_WARN,
         'loaded':  C.OLIVE,
@@ -387,7 +387,6 @@ class _SampleCard(QWidget):
 
     def _refresh(self):
         led_color = self._STATUS_DOT.get(self._status, C.SB_MUTED)
-        shadow = f"box-shadow: 0 0 4px rgba(90,170,58,0.4);" if self._status in ('loaded', 'auto') else ""
 
         # Card background and border
         if self._active:
@@ -432,7 +431,6 @@ class _SampleCard(QWidget):
         # Status line text
         status_text = {
             'pending': '\u23f3 Loading...',
-            'auto': '\u2705 Auto-loaded',
             'failed': '\u274c Load failed',
             'review': '\u26a0 Needs review',
             'loaded': '\u2705 Loaded successfully',
@@ -1310,7 +1308,6 @@ class _FractionsLine(QWidget):
 
 class ControlPanel(QFrame):
     # Signals for communication with main window
-    files_loaded = pyqtSignal(list)  # Emitted when files are loaded
     analysis_requested = pyqtSignal(dict)  # Emitted when analysis is requested
     sample_selected = pyqtSignal(str)  # Emitted when a sample is selected
     error_dataset = pyqtSignal(str, str)  # Emitted when dataset fails to load (file_path, error_message)
@@ -1325,8 +1322,11 @@ class ControlPanel(QFrame):
         self.loaded_samples = {}  # Dictionary to store sample data
         self.validation_errors = []  # Track validation issues
         self.data_loader = DataLoader()  # Data loading engine
-        self.file_statuses = {}  # Track file loading status: 'pending', 'auto', 'failed', 'review', 'loaded'
+        self.file_statuses = {}  # Track file loading status: 'pending', 'failed', 'review', 'loaded'
         self._active_scheme: GrainClassificationScheme = ISO14688
+        self._import_thread = None
+        self._import_worker = None
+        self._import_dialog = None
 
         # Temperature change debouncing timer
         self.temp_change_timer = QTimer()
@@ -1609,12 +1609,6 @@ class ControlPanel(QFrame):
         mini_btns = QHBoxLayout()
         mini_btns.setSpacing(5)
 
-        self.load_auto_btn = QPushButton("Load Auto")
-        self.load_auto_btn.clicked.connect(self.load_auto_files)
-        self.load_auto_btn.setEnabled(False)
-        self.load_auto_btn.setToolTip("Load all auto-detected files")
-        self.load_auto_btn.setStyleSheet(_MINI_BTN)
-
         self.review_failed_btn = QPushButton("\u26a0 Review")
         self.review_failed_btn.clicked.connect(self.review_failed_files)
         self.review_failed_btn.setEnabled(False)
@@ -1630,7 +1624,6 @@ class ControlPanel(QFrame):
             f"QPushButton:hover {{ color: {C.LED_ERR}; }}"
         )
 
-        mini_btns.addWidget(self.load_auto_btn, 1)
         mini_btns.addWidget(self.review_failed_btn, 1)
         mini_btns.addStretch()
         mini_btns.addWidget(self.clear_all_btn)
@@ -1865,7 +1858,7 @@ class ControlPanel(QFrame):
             act = QAction("Map Columns\u2026", self)
             act.triggered.connect(lambda: self.edit_file_mapping(file_path))
             menu.addAction(act)
-        elif status in ('auto', 'loaded'):
+        elif status == 'loaded':
             act = QAction("Show Info\u2026", self)
             act.triggered.connect(lambda: self.show_file_info(file_path))
             menu.addAction(act)
@@ -2220,22 +2213,10 @@ class ControlPanel(QFrame):
         # Update visual card list
         self._file_list.add_card(file_path, file_name, status)
 
-    def get_status_icon(self, status: str) -> str:
-        """Get icon for file status"""
-        icons = {
-            'pending': '🔄',
-            'auto': '✅',
-            'failed': '❌',
-            'review': '⚠️',
-            'loaded': '📄'
-        }
-        return icons.get(status, '❓')
-
     def get_status_text(self, status: str) -> str:
         """Get descriptive status text with icon"""
         status_map = {
             'pending': '🔄 Processing...',
-            'auto': '✅ Auto-loaded',
             'failed': '❌ Failed',
             'review': '⚠️ Needs Review',
             'loaded': '📄 Loaded'
@@ -2246,7 +2227,6 @@ class ControlPanel(QFrame):
         """Get tooltip text for status"""
         tooltip_map = {
             'pending': 'File is being processed',
-            'auto': 'File was automatically loaded and validated',
             'failed': 'File failed validation - contains errors',
             'review': 'File needs manual column mapping',
             'loaded': 'File successfully loaded and ready for analysis'
@@ -2279,7 +2259,7 @@ class ControlPanel(QFrame):
             map_action.triggered.connect(lambda: self.edit_file_mapping(file_path))
             menu.addAction(map_action)
 
-        elif status in ['auto', 'loaded']:
+        elif status == 'loaded':
             info_action = QAction("ℹ️ Show Info...", self)
             info_action.triggered.connect(lambda: self.show_file_info(file_path))
             menu.addAction(info_action)
@@ -2332,54 +2312,21 @@ class ControlPanel(QFrame):
     def edit_file_mapping(self, file_path: str):
         """Open column mapping dialog for a specific file"""
         try:
-            dialog = ColumnMapperDialog(file_path, self)
-            if dialog.exec() == QMessageBox.StandardButton.Ok.value:
+            actual_file_path, sheet_name = self._split_sheet_key(file_path)
+            dialog = ColumnMapperDialog(actual_file_path, self, self.window(), sheet_name=sheet_name)
+            if dialog.exec() == QDialog.DialogCode.Accepted:
                 mapping_results = dialog.get_mapping_results()
                 if not mapping_results:
                     QMessageBox.warning(self, "No Data", "No sheet data was extracted.")
                     return
-
-                from data_loader import GrainSizeData
-                created_datasets = []
-
-                for mapping in mapping_results:
-                    dataset = GrainSizeData(
-                        sample_name=mapping['sample_name'],
-                        temperature=mapping['temperature'],
-                        porosity=mapping['porosity'],
-                        particle_sizes=mapping['particle_sizes'],
-                        percent_passing=mapping['percent_passing'],
-                        file_path=file_path
-                    )
-                    created_datasets.append(dataset)
-
-                base_sample_name = self.extract_sample_name(file_path)
-                sheet_names = [mapping.get('sheet_name', '') or '' for mapping in mapping_results]
-                entry = {
-                    'file_path': file_path,
-                    'data': created_datasets[0],
-                    'datasets': created_datasets,
-                    'status': 'loaded',
-                    'sheet_names': sheet_names
-                }
-                self.loaded_samples[base_sample_name] = entry
-
-                self.file_statuses[file_path] = 'loaded'
-                self.update_file_in_table(file_path, 'loaded')
-                self._push_card_meta(file_path)
-                self._update_inventory_bar()
-
-                for dataset in created_datasets:
-                    self.dataset_loaded_successfully.emit(dataset, file_path)
-
-                if sheet_names:
-                    summary = ", ".join(sheet_names)
-                    self.sample_info_label.setText(f"\u2705 Loaded {len(created_datasets)} sheet(s): {summary}")
-                else:
-                    self.sample_info_label.setText(f"\u2705 Loaded {len(created_datasets)} sheet(s)")
+                self._apply_mapping_results(file_path, mapping_results, forced_sheet_name=sheet_name)
 
         except Exception as e:
-            QMessageBox.warning(self, "Error", f"Failed to edit {os.path.basename(file_path)}:\n{str(e)}")
+            actual_file_path, sheet_name = self._split_sheet_key(file_path)
+            file_name = os.path.basename(actual_file_path)
+            if sheet_name:
+                file_name = f"{file_name} [{sheet_name}]"
+            QMessageBox.warning(self, "Error", f"Failed to edit {file_name}:\n{str(e)}")
 
     def show_file_info(self, file_path: str):
         """Show tabbed inspector: Stats + Raw Data."""
@@ -2613,107 +2560,6 @@ class ControlPanel(QFrame):
         dlg_v.addWidget(btn_box)
         dlg.exec()
 
-    def batch_auto_load(self, file_paths: list):
-        """Attempt to auto-load all files in the list"""
-        self.progress_bar.setVisible(True)
-        self.progress_label.setVisible(True)
-        self.progress_bar.setMaximum(len(file_paths) * 3)  # 3 steps per file
-
-        auto_loaded = 0
-        failed_files = 0
-
-        for i, file_path in enumerate(file_paths):
-            base_progress = i * 3
-            file_name = os.path.basename(file_path)
-
-            # Step 1: Detecting format
-            self.progress_bar.setValue(base_progress)
-            self.progress_label.setText(f"🔍 Analyzing {file_name}...")
-            QApplication.processEvents()  # Update UI
-
-            try:
-                # Step 2: Loading data
-                self.progress_bar.setValue(base_progress + 1)
-                self.progress_label.setText(f"📊 Loading {file_name}...")
-                QApplication.processEvents()  # Update UI
-                # Attempt to auto-load
-                dataset = self.data_loader.load_file(file_path)
-
-                # Step 3: Validating and processing
-                self.progress_bar.setValue(base_progress + 2)
-                self.progress_label.setText(f"✅ Validating {file_name}...")
-                QApplication.processEvents()  # Update UI
-
-                # Success - mark as auto-loaded, but check for validation issues
-                sample_name = self.extract_sample_name(file_path)
-
-                # Determine status based on validation messages
-                if dataset.has_errors():
-                    status = 'failed'
-                    failed_files += 1
-                elif dataset.has_warnings():
-                    status = 'auto'  # Still usable, but with warnings
-                    auto_loaded += 1
-                else:
-                    status = 'auto'
-                    auto_loaded += 1
-
-                self.file_statuses[file_path] = status
-                self.loaded_samples[sample_name] = {
-                    'file_path': file_path,
-                    'data': dataset,
-                    'datasets': [dataset],
-                    'status': status
-                }
-
-                # Update table with detailed info
-                self.update_file_in_table(file_path, status)
-
-            except Exception as e:
-                # Failed - mark for review with specific error info
-                self.file_statuses[file_path] = 'review'
-
-                # Create user-friendly error message
-                error_str = str(e)
-                if "could not parse" in error_str.lower():
-                    detailed_error = "Could not auto-detect column format"
-                elif "no valid" in error_str.lower():
-                    detailed_error = "No valid grain size data found in file"
-                elif "delimiter" in error_str.lower():
-                    detailed_error = "Could not determine file delimiter format"
-                else:
-                    detailed_error = str(e)
-
-                # Update table for sidebar status
-                self.update_file_in_table(file_path, 'review')
-
-                # Emit signal to create error tab
-                self.error_dataset.emit(file_path, detailed_error)
-
-                failed_files += 1
-
-        # Final progress update
-        self.progress_bar.setValue(len(file_paths) * 3)
-        self.progress_label.setText("🎉 Batch processing complete!")
-        QApplication.processEvents()
-
-        # Small delay to show completion
-        QTimer.singleShot(1000, lambda: self.progress_bar.setVisible(False))
-        QTimer.singleShot(1000, lambda: self.progress_label.setVisible(False))
-
-        # Update summary with detailed feedback
-        if auto_loaded > 0 and failed_files == 0:
-            summary = f"🎉 Successfully loaded all {auto_loaded} file{'s' if auto_loaded != 1 else ''}!"
-        elif auto_loaded > 0 and failed_files > 0:
-            summary = f"✅ {auto_loaded} loaded successfully, ⚠️ {failed_files} need review"
-        elif failed_files > 0:
-            summary = f"⚠️ {failed_files} file{'s' if failed_files != 1 else ''} need manual mapping"
-        else:
-            summary = "No files processed"
-
-        self.sample_info_label.setText(summary)
-        self.update_ui_state()
-
     def update_file_in_table(self, file_path: str, status: str):
         """Update file status in table"""
         for row in range(self.samples_table.rowCount()):
@@ -2753,68 +2599,26 @@ class ControlPanel(QFrame):
         self.update_ui_state()
         self.sample_info_label.setText(f"{len(self.loaded_samples)} sample(s) loaded")
 
-    def load_auto_files(self):
-        """Load all successfully auto-processed files into the analysis"""
-        auto_files = [path for path, status in self.file_statuses.items() if status == 'auto']
-        if auto_files:
-            loaded_datasets = []
-            for file_path in auto_files:
-                sample_name = self.extract_sample_name(file_path)
-                if sample_name in self.loaded_samples:
-                    entry = self.loaded_samples[sample_name]
-                    datasets = entry.get('datasets') or ([entry['data']] if entry.get('data') else [])
-                    loaded_datasets.extend(datasets)
-
-            if loaded_datasets:
-                self.files_loaded.emit([ds.sample_name for ds in loaded_datasets])
-                self.sample_info_label.setText(f"✅ Loaded {len(loaded_datasets)} dataset(s) for analysis")
-
     def review_failed_files(self):
         """Open manual column mapping for files that need review"""
         review_files = [path for path, status in self.file_statuses.items() if status == 'review']
 
         for file_path in review_files:
             try:
-                dialog = ColumnMapperDialog(file_path, self)
-                if dialog.exec() == QMessageBox.StandardButton.Ok.value:
+                actual_file_path, sheet_name = self._split_sheet_key(file_path)
+                dialog = ColumnMapperDialog(actual_file_path, self, self.window(), sheet_name=sheet_name)
+                if dialog.exec() == QDialog.DialogCode.Accepted:
                     mapping_results = dialog.get_mapping_results()
                     if not mapping_results:
                         continue
-
-                    from data_loader import GrainSizeData
-                    created_datasets = []
-                    for mapping in mapping_results:
-                        dataset = GrainSizeData(
-                            sample_name=mapping['sample_name'],
-                            temperature=mapping['temperature'],
-                            porosity=mapping['porosity'],
-                            particle_sizes=mapping['particle_sizes'],
-                            percent_passing=mapping['percent_passing'],
-                            file_path=file_path
-                        )
-                        created_datasets.append(dataset)
-
-                    base_sample_name = self.extract_sample_name(file_path)
-                    sheet_names = [mapping.get('sheet_name', '') or '' for mapping in mapping_results]
-                    entry = {
-                        'file_path': file_path,
-                        'data': created_datasets[0],
-                        'datasets': created_datasets,
-                        'status': 'loaded',
-                        'sheet_names': sheet_names
-                    }
-                    self.loaded_samples[base_sample_name] = entry
-
-                    for dataset in created_datasets:
-                        self.dataset_loaded_successfully.emit(dataset, file_path)
-
-                    self.file_statuses[file_path] = 'loaded'
-                    self.update_file_in_table(file_path, 'loaded')
-                    self._push_card_meta(file_path)
-                    self._update_inventory_bar()
+                    self._apply_mapping_results(file_path, mapping_results, forced_sheet_name=sheet_name)
 
             except Exception as e:
-                QMessageBox.warning(self, "Error", f"Failed to process {os.path.basename(file_path)}:\n{str(e)}")
+                actual_file_path, sheet_name = self._split_sheet_key(file_path)
+                file_name = os.path.basename(actual_file_path)
+                if sheet_name:
+                    file_name = f"{file_name} [{sheet_name}]"
+                QMessageBox.warning(self, "Error", f"Failed to process {file_name}:\n{str(e)}")
 
         self.update_ui_state()
 
@@ -2885,7 +2689,7 @@ class ControlPanel(QFrame):
 
             # If this is a loaded dataset, emit signal
             sample_name = self.extract_sample_name(file_path)
-            if sample_name in self.loaded_samples and status in ['auto', 'loaded']:
+            if sample_name in self.loaded_samples and status == 'loaded':
                 self.sample_selected.emit(sample_name)
         else:
             self._file_list.set_active(None)
@@ -2895,12 +2699,68 @@ class ControlPanel(QFrame):
     def extract_sample_name(self, file_path):
         """Extract a clean sample name from file path"""
         import os
-        base_name = os.path.basename(file_path)
+        actual_path, sheet_name = self._split_sheet_key(file_path)
+        base_name = os.path.basename(actual_path)
         # Remove extension
         name = os.path.splitext(base_name)[0]
         # Clean up common prefixes/suffixes
         name = name.replace('_grainsize', '').replace('_sieve', '').replace('_data', '')
+        if sheet_name:
+            name = f"{name} [{sheet_name}]"
         return name if name else base_name
+
+    def _split_sheet_key(self, file_path: str):
+        if ":::" in file_path:
+            return file_path.split(":::", 1)
+        return file_path, None
+
+    def _apply_mapping_results(self, file_path: str, mapping_results: list, *, forced_sheet_name: str | None = None):
+        from data_loader import GrainSizeData
+
+        created_datasets = []
+        for mapping in mapping_results:
+            sample_name = mapping['sample_name']
+            sheet_name = mapping.get('sheet_name') or forced_sheet_name
+            if sheet_name and f"[{sheet_name}]" not in sample_name:
+                sample_name = f"{sample_name} [{sheet_name}]"
+
+            dataset = GrainSizeData(
+                sample_name=sample_name,
+                temperature=mapping['temperature'],
+                porosity=mapping['porosity'],
+                particle_sizes=mapping['particle_sizes'],
+                percent_passing=mapping['percent_passing'],
+                file_path=file_path
+            )
+            created_datasets.append(dataset)
+
+        if not created_datasets:
+            return
+
+        sample_key = created_datasets[0].sample_name
+        sheet_names = [(mapping.get('sheet_name') or forced_sheet_name or '') for mapping in mapping_results]
+        entry = {
+            'file_path': file_path,
+            'data': created_datasets[0],
+            'datasets': created_datasets,
+            'status': 'loaded',
+            'sheet_names': sheet_names
+        }
+        self.loaded_samples[sample_key] = entry
+
+        self.file_statuses[file_path] = 'loaded'
+        self.update_file_in_table(file_path, 'loaded')
+        self._push_card_meta(file_path)
+        self._update_inventory_bar()
+
+        for dataset in created_datasets:
+            self.dataset_loaded_successfully.emit(dataset, file_path)
+
+        if any(sheet_names):
+            summary = ", ".join(name for name in sheet_names if name)
+            self.sample_info_label.setText(f"\u2705 Loaded {len(created_datasets)} sheet(s): {summary}")
+        else:
+            self.sample_info_label.setText(f"\u2705 Loaded {len(created_datasets)} sheet(s)")
 
     def update_ui_state(self):
         """Update UI state based on loaded samples and file statuses"""
@@ -2908,12 +2768,10 @@ class ControlPanel(QFrame):
         has_selection = self.samples_table.currentRow() >= 0
 
         # Count files by status
-        auto_count = sum(1 for status in self.file_statuses.values() if status == 'auto')
         review_count = sum(1 for status in self.file_statuses.values() if status == 'review')
         loaded_count = sum(1 for status in self.file_statuses.values() if status == 'loaded')
 
         # Update batch action buttons
-        self.load_auto_btn.setEnabled(auto_count > 0)
         self.review_failed_btn.setEnabled(review_count > 0)
 
         # Basic UI state
@@ -2921,8 +2779,8 @@ class ControlPanel(QFrame):
 
         # If no manual status update, show file counts
         if has_files and not hasattr(self, '_manual_status_update'):
-            if auto_count > 0 or loaded_count > 0:
-                summary = f"📊 {auto_count + loaded_count} ready"
+            if loaded_count > 0:
+                summary = f"📊 {loaded_count} ready"
                 if review_count > 0:
                     summary += f", {review_count} need review"
             else:
@@ -3176,137 +3034,139 @@ class ControlPanel(QFrame):
         dialog = PorosityDialog(main_window, self)
         dialog.exec()
 
-    # ================================
-    # FILE PREVIEW / VALIDATION
-    # ================================
-    def load_file_preview(self, file_path: str) -> None:
-        """Validate the given file and update UI/sample status.
-
-        This provides a lightweight preview/validation step after adding files.
-        """
-        try:
-            # Lazy import to avoid any potential import cycles
-            from data_loader import DataLoader
-            data_loader = DataLoader()
-            is_valid, message = data_loader.validate_file_format(file_path)
-
-            # Find the corresponding sample name
-            sample_name = None
-            for name, info in self.loaded_samples.items():
-                if info.get('file_path') == file_path:
-                    sample_name = name
-                    break
-
-            if is_valid:
-                if sample_name:
-                    self.set_sample_status(sample_name, f"✅ {message}")
-                self.sample_info_label.setText(f"Preview OK: {sample_name or file_path}\n{message}")
-            else:
-                if sample_name:
-                    self.set_sample_status(sample_name, f"❌ {message}")
-                self.sample_info_label.setText(f"Preview Error: {sample_name or file_path}\n{message}")
-        except Exception as e:
-            # Best-effort UI update on unexpected errors
-            self.sample_info_label.setText(f"Preview failed: {e}")
-
     def process_files_with_immediate_tabs(self, file_entries: list):
         """Process files by creating tabs immediately, then attempting to load data
 
         Args:
             file_entries: List of file paths or (file_path, sheet_name) tuples
         """
-        self.progress_bar.setVisible(True)
-        self.progress_label.setVisible(True)
-        self.progress_bar.setMaximum(len(file_entries))
+        return self._process_files_with_loading_dialog(file_entries)
 
-        for i, file_entry in enumerate(file_entries):
-            # Extract file path and sheet name if applicable
+    def _process_files_with_loading_dialog(self, file_entries: list):
+        if not file_entries:
+            return
+        if self._import_thread is not None:
+            if self._import_dialog is not None:
+                self._import_dialog.raise_()
+                self._import_dialog.activateWindow()
+            return
+
+        for file_entry in file_entries:
             if isinstance(file_entry, tuple):
                 file_path, sheet_name = file_entry
                 file_key = f"{file_path}:::{sheet_name}"
-                display_name = f"{os.path.basename(file_path)} [{sheet_name}]"
             else:
-                file_path = file_entry
-                sheet_name = None
-                file_key = file_path
-                display_name = os.path.basename(file_path)
-
-            # Update progress
-            self.progress_bar.setValue(i)
-            self.progress_label.setText(f"Processing {display_name}...")
-            QApplication.processEvents()  # Update UI
-
-            # Step 1: Create tab immediately for visual feedback
+                file_key = file_entry
             self.error_dataset.emit(file_key, "Loading...")
 
-            # Step 2: Try to load the data
-            try:
-                # Load data from specific sheet if provided
-                if sheet_name:
-                    import pandas as pd
-                    from data_loader import GrainSizeData
+        self._import_dialog = LoadingDialog(
+            "Loading Files",
+            "Parsing selected grain-size datasets",
+            parent=self.window(),
+            cancellable=False,
+        )
+        self._import_dialog.update_progress(0, len(file_entries), "Preparing load...", "Creating placeholder tabs")
+        self._import_dialog.set_activity("The import now runs on a worker thread.")
+        self._import_dialog.open()
 
-                    # Try to auto-load the specific sheet
-                    df = pd.read_excel(file_path, sheet_name=sheet_name, header=None, nrows=100)
-                    # This will likely fail auto-detection, triggering manual mapping
-                    raise ValueError(f"Excel sheet requires manual column mapping")
-                else:
-                    dataset = self.data_loader.load_file(file_path)
+        self._import_worker = BatchImportWorker(file_entries)
+        self._import_thread = QThread(self)
+        self._import_worker.moveToThread(self._import_thread)
+        self._import_thread.started.connect(self._import_worker.run)
+        self._import_worker.progress.connect(self._on_import_worker_progress)
+        self._import_worker.item_loaded.connect(self._on_import_worker_loaded)
+        self._import_worker.item_validation_failed.connect(self._on_import_worker_validation_failed)
+        self._import_worker.item_failed.connect(self._on_import_worker_failed)
+        self._import_worker.finished.connect(self._on_import_worker_finished)
+        self._import_worker.finished.connect(self._import_thread.quit)
+        self._import_thread.finished.connect(self._cleanup_import_worker)
+        self._import_thread.finished.connect(self._import_thread.deleteLater)
+        self._import_thread.finished.connect(self._import_worker.deleteLater)
+        self._import_thread.start()
 
-                # Success! Replace error tab with dataset tab
-                sample_name = self.extract_sample_name(file_key)
+    def _on_import_worker_progress(self, current: int, total: int, stage: str, detail: str):
+        if self._import_dialog is not None:
+            self._import_dialog.update_progress(current, total, stage, detail)
 
-                # Determine status based on validation messages
-                if dataset.has_errors():
-                    status = 'failed'
-                    # Keep as error tab but with validation info
-                    detailed_error = f"Data loaded but has validation errors"
-                    self.update_error_tab_message.emit(file_key, detailed_error)
-                else:
-                    status = 'auto'
-                    # Replace error tab with normal dataset tab
-                    self.dataset_loaded_successfully.emit(dataset, file_key)
+    def _on_import_worker_loaded(self, file_key: str, dataset, status: str, sample_name: str):
+        self.file_statuses[file_key] = status
+        self.loaded_samples[sample_name] = {
+            'file_path': file_key,
+            'data': dataset,
+            'datasets': [dataset],
+            'status': status
+        }
+        self.dataset_loaded_successfully.emit(dataset, file_key)
+        self.update_file_in_table(file_key, status)
+        self._push_card_meta(file_key)
+        self._update_inventory_bar()
 
-                self.file_statuses[file_key] = status
-                self.loaded_samples[sample_name] = {
-                    'file_path': file_key,
-                    'data': dataset,
-                    'datasets': [dataset],
-                    'status': status
-                }
-                self.update_file_in_table(file_key, status)
-                self._push_card_meta(file_key)
-                self._update_inventory_bar()
+    def _on_import_worker_validation_failed(self, file_key: str, dataset, sample_name: str, detail: str):
+        self.file_statuses[file_key] = 'failed'
+        self.loaded_samples[sample_name] = {
+            'file_path': file_key,
+            'data': dataset,
+            'datasets': [dataset],
+            'status': 'failed'
+        }
+        self.update_file_in_table(file_key, 'failed')
+        self.update_error_tab_message.emit(file_key, detail)
+        self._push_card_meta(file_key)
+        self._update_inventory_bar()
 
-            except Exception as e:
-                # Failed - update error tab with real error message
-                self.file_statuses[file_key] = 'review'
+    def _on_import_worker_failed(self, file_key: str, detail: str):
+        self.file_statuses[file_key] = 'review'
+        self.update_file_in_table(file_key, 'review')
+        self.update_error_tab_message.emit(file_key, detail)
+        self._update_inventory_bar()
 
-                error_str = str(e)
-                if "requires manual" in error_str.lower() or "column mapping" in error_str.lower():
-                    detailed_error = "Excel sheet requires manual column mapping"
-                elif "could not parse" in error_str.lower():
-                    detailed_error = "Could not auto-detect column format"
-                elif "no valid" in error_str.lower():
-                    detailed_error = "No valid grain size data found"
-                elif "delimiter" in error_str.lower():
-                    detailed_error = "Could not determine file delimiter format"
-                else:
-                    detailed_error = str(e)
+    def _on_import_worker_finished(self, summary: dict):
+        loaded = summary.get('loaded', 0)
+        review = summary.get('review', 0)
+        failed = summary.get('failed', 0)
+        canceled = summary.get('canceled', False)
 
-                self.update_file_in_table(file_key, 'review')
-                # Update the existing error tab with real error
-                self.update_error_tab_message.emit(file_key, detailed_error)
+        if canceled:
+            headline = "Import canceled"
+            detail = f"{loaded} loaded before cancellation"
+            ok = False
+            summary_text = detail
+        elif loaded and not review and not failed:
+            headline = "Files loaded"
+            detail = f"{loaded} file{'s' if loaded != 1 else ''} loaded successfully."
+            ok = True
+            summary_text = f"Loaded {loaded} file{'s' if loaded != 1 else ''}"
+        else:
+            parts = []
+            if loaded:
+                parts.append(f"{loaded} loaded")
+            if review:
+                parts.append(f"{review} need review")
+            if failed:
+                parts.append(f"{failed} invalid")
+            headline = "Import complete"
+            detail = " · ".join(parts) if parts else "No files were processed."
+            ok = not review and not failed
+            summary_text = detail
 
-        # Final progress update
-        self.progress_bar.setValue(len(file_entries))
-        self.progress_label.setText("🎉 Processing complete!")
+        if self._import_dialog is not None:
+            dialog = self._import_dialog
+            dialog.mark_finished(headline, detail, ok=ok)
+            QTimer.singleShot(420, lambda d=dialog: self._dismiss_import_dialog(d))
 
-        # Hide progress indicators
-        import time
-        time.sleep(0.5)  # Brief pause to show completion
-        self.progress_bar.setVisible(False)
-        self.progress_label.setVisible(False)
+        self.sample_info_label.setText(summary_text)
+        self.update_ui_state()
+
+    def _dismiss_import_dialog(self, dialog):
+        if dialog is not None:
+            dialog.accept()
+            dialog.deleteLater()
+        if self._import_dialog is dialog:
+            self._import_dialog = None
+
+    def _cleanup_import_worker(self):
+        self._import_thread = None
+        self._import_worker = None
 
     # ================================
     # SENSITIVITY ANALYSIS

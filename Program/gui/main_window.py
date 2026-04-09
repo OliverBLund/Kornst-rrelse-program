@@ -7,10 +7,10 @@ from __future__ import annotations
 from PyQt6.QtWidgets import (
     QMainWindow, QWidget, QHBoxLayout, QVBoxLayout,
     QStatusBar, QStackedWidget, QTabWidget, QMessageBox,
-    QProgressBar, QLabel, QFrame, QFileDialog, QDialog,
+    QProgressBar, QLabel, QFrame, QFileDialog,
     QPushButton, QSizePolicy, QToolButton, QMenu, QSplitter,
 )
-from PyQt6.QtCore import Qt, pyqtSignal, QSettings, QSize, QTimer
+from PyQt6.QtCore import Qt, pyqtSignal, QSettings, QSize, QTimer, QThread
 from PyQt6.QtGui import QAction, QColor, QFont
 from typing import List, Optional
 import os
@@ -21,6 +21,7 @@ from gui.comparison_tab import ComparisonTab
 from gui.reporting_tab import ReportingTab
 from gui.export_tab import ExportTab
 from gui.error_tab import ErrorTab
+from gui.loading_dialog import ExternalLoadWorker, LoadingDialog
 from gui.welcome_widget import WelcomeWidget
 from gui.theme import C, F, SZ, build_stylesheet, icon, apply_matplotlib_style
 from qt_chrome import FramelessMainWindowMixin
@@ -368,6 +369,10 @@ class MainWindow(FramelessMainWindowMixin, QMainWindow):
         self.dataset_tabs: List[DatasetTab] = []
         self.dataset_counter = 0
         self.active_scheme = ISO14688
+        self._external_load_thread = None
+        self._external_load_worker = None
+        self._external_load_dialog = None
+        self._external_load_context = None
 
         # Global stylesheet
         self.setStyleSheet(build_stylesheet())
@@ -395,7 +400,6 @@ class MainWindow(FramelessMainWindowMixin, QMainWindow):
         # ── Sidebar (resizable via splitter) ───────────────────────
         self.control_panel = ControlPanel()
         self.control_panel.setMinimumWidth(280)
-        self.control_panel.files_loaded.connect(self.on_files_loaded)
         self.control_panel.error_dataset.connect(self.add_error_tab)
         self.control_panel.dataset_loaded_successfully.connect(self.replace_error_tab_with_dataset)
         self.control_panel.update_error_tab_message.connect(self.update_error_tab_message)
@@ -437,7 +441,11 @@ class MainWindow(FramelessMainWindowMixin, QMainWindow):
         # Tab styling handled by global QSS in theme.build_stylesheet()
 
         recent_files = self._load_recent_files()
-        self.welcome_widget = WelcomeWidget(recent_files=recent_files)
+        recent_sessions = self._load_recent_sessions()
+        self.welcome_widget = WelcomeWidget(
+            recent_files=recent_files,
+            recent_sessions=recent_sessions,
+        )
         self._connect_welcome_signals()
 
         # Inner stack: index 0 = welcome (full-area, no tab chrome),
@@ -781,6 +789,7 @@ class MainWindow(FramelessMainWindowMixin, QMainWindow):
         self.welcome_widget.load_files_requested.connect(self.on_welcome_load_files)
         self.welcome_widget.load_sample_data_requested.connect(self.on_welcome_load_sample)
         self.welcome_widget.open_recent_file_requested.connect(self.on_welcome_open_recent)
+        self.welcome_widget.open_recent_session_requested.connect(self.on_welcome_open_session)
         self.welcome_widget.open_help_topic_requested.connect(self.on_welcome_open_help)
         self.welcome_widget.dont_show_again_changed.connect(self.on_welcome_dont_show_again)
         self.welcome_widget.clear_sessions_requested.connect(self.on_clear_sessions)
@@ -790,44 +799,128 @@ class MainWindow(FramelessMainWindowMixin, QMainWindow):
         self._show_status_message("Select files to load\u2026")
 
     def on_welcome_load_sample(self):
-        import os
         test_data_folder = os.path.join(os.path.dirname(os.path.dirname(__file__)), "test_data")
         if os.path.exists(test_data_folder):
             for file in os.listdir(test_data_folder):
                 if file.endswith('.csv'):
-                    sample_path = os.path.join(test_data_folder, file)
-                    try:
-                        dataset = self.data_loader.load_file(sample_path)
-                        self.add_dataset_tab(dataset)
+                    sample_path = os.path.normpath(os.path.join(test_data_folder, file))
+                    if sample_path in self._get_open_file_paths():
                         self._save_recent_file(sample_path)
-                        self._update_welcome_recent_files()
-                        self._show_status_message(f"Loaded sample data: {file}")
+                        self._update_welcome_recents()
+                        self._switch_to_tab(0)
+                        self._hide_welcome()
+                        self._show_status_message(f"Already open: {file}")
                         return
-                    except Exception as e:
-                        QMessageBox.warning(self, "Error", f"Failed to load sample data:\n{str(e)}")
-                        return
+                    self._start_external_load(
+                        [sample_path],
+                        title="Loading Sample Data",
+                        subtitle="Opening the bundled demo dataset",
+                        stage_title="Loading sample data",
+                        context={
+                            "mode": "sample",
+                            "missing_files": [],
+                            "skipped_count": 0,
+                            "session": None,
+                            "requested_label": file,
+                            "failed_files": [],
+                        },
+                    )
+                    return
         QMessageBox.information(
             self, "No Sample Data",
             "No sample data files found. Use \u2018Add Files\u2019 to load your own data."
         )
 
     def on_welcome_open_recent(self, file_path: str):
-        try:
-            if os.path.exists(file_path):
-                dataset = self.data_loader.load_file(file_path)
-                dataset.file_path = file_path
-                self.add_dataset_tab(dataset)
-                self.control_panel.register_external_file(file_path, dataset)
+        normalized_path = os.path.normpath(file_path)
+        if not os.path.exists(normalized_path):
+            QMessageBox.warning(self, "File Not Found",
+                                f"The file no longer exists:\n{file_path}")
+            self._remove_recent_file(file_path)
+            self._update_welcome_recents()
+            return
+
+        if normalized_path in self._get_open_file_paths():
+            self._save_recent_file(normalized_path)
+            self._update_welcome_recents()
+            self._show_status_message(f"Already open: {os.path.basename(normalized_path)}")
+            return
+
+        self._start_external_load(
+            [normalized_path],
+            title="Opening Dataset",
+            subtitle="Loading a recent file into the current workspace",
+            stage_title="Opening recent file",
+            context={
+                "mode": "recent",
+                "missing_files": [],
+                "skipped_count": 0,
+                "session": None,
+                "requested_label": os.path.basename(normalized_path),
+                "failed_files": [],
+            },
+        )
+
+    def on_welcome_open_session(self, session_data: dict):
+        session = self._normalize_session_entry(session_data)
+        if session is None:
+            return
+
+        valid_files = [path for path in session["files"] if os.path.exists(path)]
+        missing_files = [path for path in session["files"] if not os.path.exists(path)]
+
+        if not valid_files:
+            QMessageBox.warning(
+                self,
+                "Session Unavailable",
+                "None of the files in this saved session still exist.",
+            )
+            self._remove_recent_session(session)
+            self._update_welcome_recents()
+            return
+
+        open_paths = self._get_open_file_paths()
+        skipped_count = 0
+        files_to_load = []
+
+        for file_path in valid_files:
+            if file_path in open_paths:
                 self._save_recent_file(file_path)
-                self._update_welcome_recent_files()
-                self._show_status_message(f"Opened: {os.path.basename(file_path)}")
-            else:
-                QMessageBox.warning(self, "File Not Found",
-                                    f"The file no longer exists:\n{file_path}")
-                self._remove_recent_file(file_path)
-                self._update_welcome_recent_files()
-        except Exception as e:
-            QMessageBox.critical(self, "Error Loading File", f"Failed to load file:\n{str(e)}")
+                skipped_count += 1
+                continue
+            files_to_load.append(file_path)
+
+        cleaned_session = dict(session)
+        cleaned_session["files"] = valid_files
+
+        if not files_to_load:
+            self._upsert_recent_session(cleaned_session)
+            self._update_welcome_recents()
+            if skipped_count:
+                self._switch_to_tab(0)
+                self._hide_welcome()
+                self._show_status_message(
+                    f"Session already open ({skipped_count} file{'s' if skipped_count != 1 else ''})"
+                )
+            if missing_files:
+                missing_lines = "\n".join(os.path.basename(path) for path in missing_files[:6])
+                QMessageBox.warning(self, "Session Partially Restored", "Missing files:\n" + missing_lines)
+            return
+
+        self._start_external_load(
+            files_to_load,
+            title="Restoring Session",
+            subtitle="Loading saved datasets into the current workspace",
+            stage_title="Restoring saved session",
+            context={
+                "mode": "session",
+                "missing_files": missing_files,
+                "skipped_count": skipped_count,
+                "session": cleaned_session,
+                "requested_label": cleaned_session.get("name", "Session"),
+                "failed_files": [],
+            },
+        )
 
     def on_welcome_open_help(self, topic_file: str):
         from gui.help_dialog import HelpDialog
@@ -846,9 +939,8 @@ class MainWindow(FramelessMainWindowMixin, QMainWindow):
             QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
         )
         if reply == QMessageBox.StandardButton.Yes:
-            settings = QSettings("GrainSizeAnalysis", "MainWindow")
-            settings.setValue("recent_sessions", [])
-            self._refresh_welcome_widget()
+            self._save_recent_sessions([])
+            self._update_welcome_recents()
             self._show_status_message("All sessions cleared")
 
     # ──────────────────────────────────────────────────────────────────
@@ -859,122 +951,386 @@ class MainWindow(FramelessMainWindowMixin, QMainWindow):
         settings = QSettings("GrainSizeAnalysis", "MainWindow")
         recent = settings.value("recent_files", [])
         if isinstance(recent, str):
-            return [recent] if recent else []
-        return recent if recent else []
+            recent = [recent] if recent else []
+        elif not isinstance(recent, list):
+            recent = []
+
+        cleaned: List[str] = []
+        seen = set()
+        changed = False
+        for file_path in recent:
+            if not isinstance(file_path, str) or not file_path.strip():
+                changed = True
+                continue
+            normalized = os.path.normpath(file_path)
+            if normalized in seen:
+                changed = True
+                continue
+            if not os.path.exists(normalized):
+                changed = True
+                continue
+            seen.add(normalized)
+            cleaned.append(normalized)
+
+        cleaned = cleaned[:10]
+        if changed or cleaned != recent:
+            settings.setValue("recent_files", cleaned)
+        return cleaned
 
     def _save_recent_file(self, file_path: str):
         settings = QSettings("GrainSizeAnalysis", "MainWindow")
         recent = self._load_recent_files()
-        if file_path in recent:
-            recent.remove(file_path)
-        recent.insert(0, file_path)
+        normalized = os.path.normpath(file_path)
+        if normalized in recent:
+            recent.remove(normalized)
+        recent.insert(0, normalized)
         recent = recent[:10]
         settings.setValue("recent_files", recent)
 
-    def _save_current_session(self):
-        if not self.dataset_tabs:
-            return
+    def _normalize_session_files(self, file_paths) -> List[str]:
+        if isinstance(file_paths, str):
+            file_paths = [file_paths]
+        if not isinstance(file_paths, list):
+            return []
+
+        cleaned: List[str] = []
+        seen = set()
+        for file_path in file_paths:
+            if not isinstance(file_path, str) or not file_path.strip():
+                continue
+            normalized = os.path.normpath(file_path)
+            if normalized in seen:
+                continue
+            seen.add(normalized)
+            cleaned.append(normalized)
+        return cleaned
+
+    def _normalize_session_entry(self, session_data) -> Optional[dict]:
+        if not isinstance(session_data, dict):
+            return None
+
+        files = self._normalize_session_files(session_data.get("files", []))
+        if not files:
+            return None
+
+        timestamp = str(session_data.get("timestamp") or "")
+        date = str(session_data.get("date") or "")
+        if not date and "T" in timestamp:
+            date = timestamp.split("T", 1)[0]
+
+        sample_names = session_data.get("samples", [])
+        if isinstance(sample_names, str):
+            sample_names = [sample_names]
+        elif not isinstance(sample_names, list):
+            sample_names = []
+
+        cleaned_samples = []
+        seen_samples = set()
+        for sample_name in sample_names:
+            if not isinstance(sample_name, str):
+                continue
+            sample_name = sample_name.strip()
+            if not sample_name or sample_name in seen_samples:
+                continue
+            seen_samples.add(sample_name)
+            cleaned_samples.append(sample_name)
+
+        name = str(session_data.get("name") or "").strip()
+        if not name:
+            name = f"Session {timestamp[:16].replace('T', ' ')}" if timestamp else "Session"
+
+        return {
+            "name": name,
+            "date": date,
+            "files": files,
+            "timestamp": timestamp,
+            "samples": cleaned_samples,
+        }
+
+    def _session_match_key(self, session_data: dict) -> tuple[str, ...]:
+        return tuple(sorted(self._normalize_session_files(session_data.get("files", []))))
+
+    def _load_recent_sessions(self) -> List[dict]:
         settings = QSettings("GrainSizeAnalysis", "MainWindow")
-        current_files = []
+        raw_sessions = settings.value("recent_sessions", [])
+        if isinstance(raw_sessions, dict):
+            raw_sessions = [raw_sessions]
+        elif not isinstance(raw_sessions, list):
+            raw_sessions = []
+
+        cleaned_sessions: List[dict] = []
+        seen_keys = set()
+        changed = False
+
+        for raw_session in raw_sessions:
+            session = self._normalize_session_entry(raw_session)
+            if session is None:
+                changed = True
+                continue
+
+            existing_files = [path for path in session["files"] if os.path.exists(path)]
+            if existing_files != session["files"]:
+                changed = True
+                session["files"] = existing_files
+            if not session["files"]:
+                changed = True
+                continue
+
+            key = self._session_match_key(session)
+            if key in seen_keys:
+                changed = True
+                continue
+            seen_keys.add(key)
+            cleaned_sessions.append(session)
+
+        cleaned_sessions = cleaned_sessions[:10]
+        if changed or cleaned_sessions != raw_sessions:
+            settings.setValue("recent_sessions", cleaned_sessions)
+        return cleaned_sessions
+
+    def _save_recent_sessions(self, sessions: List[dict]):
+        settings = QSettings("GrainSizeAnalysis", "MainWindow")
+        settings.setValue("recent_sessions", sessions[:10])
+
+    def _build_current_session(self) -> Optional[dict]:
+        if not self.dataset_tabs:
+            return None
+
+        current_files: List[str] = []
+        sample_names: List[str] = []
+        seen_files = set()
+        seen_samples = set()
         for tab in self.dataset_tabs:
             dataset = tab.get_dataset()
-            if hasattr(dataset, 'file_path') and dataset.file_path:
-                current_files.append(dataset.file_path)
+            file_path = getattr(dataset, "file_path", "")
+            if file_path:
+                normalized = os.path.normpath(file_path)
+                if normalized not in seen_files:
+                    seen_files.add(normalized)
+                    current_files.append(normalized)
+
+            sample_name = getattr(dataset, "sample_name", "")
+            if sample_name and sample_name not in seen_samples:
+                seen_samples.add(sample_name)
+                sample_names.append(sample_name)
+
         if not current_files:
-            return
+            return None
+
         from datetime import datetime
-        session = {
-            'name': f"Session {datetime.now().strftime('%Y-%m-%d %H:%M')}",
-            'date': datetime.now().strftime('%Y-%m-%d'),
-            'files': current_files,
-            'timestamp': datetime.now().isoformat(),
+
+        now = datetime.now()
+        return {
+            "name": f"Session {now.strftime('%Y-%m-%d %H:%M')}",
+            "date": now.strftime('%Y-%m-%d'),
+            "files": current_files,
+            "timestamp": now.isoformat(),
+            "samples": sample_names,
         }
-        recent_sessions = settings.value("recent_sessions", [])
-        if not isinstance(recent_sessions, list):
-            recent_sessions = []
-        if not any(set(s.get('files', [])) == set(current_files) for s in recent_sessions):
-            recent_sessions.insert(0, session)
-            recent_sessions = recent_sessions[:10]
-            settings.setValue("recent_sessions", recent_sessions)
-            self._update_welcome_recent_files()
+
+    def _upsert_recent_session(self, session: dict):
+        normalized = self._normalize_session_entry(session)
+        if normalized is None:
+            return
+
+        key = self._session_match_key(normalized)
+        sessions = [
+            existing
+            for existing in self._load_recent_sessions()
+            if self._session_match_key(existing) != key
+        ]
+        sessions.insert(0, normalized)
+        self._save_recent_sessions(sessions)
+
+    def _remove_recent_session(self, session: dict):
+        key = self._session_match_key(session)
+        sessions = [
+            existing
+            for existing in self._load_recent_sessions()
+            if self._session_match_key(existing) != key
+        ]
+        self._save_recent_sessions(sessions)
+
+    def _save_current_session(self):
+        session = self._build_current_session()
+        if session is None:
+            return
+        self._upsert_recent_session(session)
+        self._update_welcome_recents()
 
     def _remove_recent_file(self, file_path: str):
         settings = QSettings("GrainSizeAnalysis", "MainWindow")
         recent = self._load_recent_files()
-        if file_path in recent:
-            recent.remove(file_path)
+        normalized = os.path.normpath(file_path)
+        if normalized in recent:
+            recent.remove(normalized)
             settings.setValue("recent_files", recent)
 
-    def _update_welcome_recent_files(self):
-        self.welcome_widget.update_recent_files(self._load_recent_files())
+    def _get_open_file_paths(self) -> set[str]:
+        open_paths = set()
+        for tab in self.dataset_tabs:
+            dataset = tab.get_dataset()
+            file_path = getattr(dataset, "file_path", "")
+            if file_path:
+                open_paths.add(os.path.normpath(file_path))
+        return open_paths
 
-    def _refresh_welcome_widget(self):
+    def _start_external_load(
+        self,
+        file_paths: List[str],
+        *,
+        title: str,
+        subtitle: str,
+        stage_title: str,
+        context: dict,
+    ):
+        if not file_paths:
+            return
+        if self._external_load_thread is not None:
+            if self._external_load_dialog is not None:
+                self._external_load_dialog.raise_()
+                self._external_load_dialog.activateWindow()
+            return
+
+        self._external_load_context = dict(context)
+        self._external_load_dialog = LoadingDialog(
+            title,
+            subtitle,
+            parent=self,
+            cancellable=False,
+        )
+        self._external_load_dialog.update_progress(0, len(file_paths), "Preparing load...", "Initializing worker thread")
+        self._external_load_dialog.set_activity("The workspace remains responsive while files are being read.")
+        self._external_load_dialog.open()
+
+        self._external_load_worker = ExternalLoadWorker(file_paths, stage_title=stage_title)
+        self._external_load_thread = QThread(self)
+        self._external_load_worker.moveToThread(self._external_load_thread)
+        self._external_load_thread.started.connect(self._external_load_worker.run)
+        self._external_load_worker.progress.connect(self._on_external_load_progress)
+        self._external_load_worker.file_loaded.connect(self._on_external_load_file_loaded)
+        self._external_load_worker.file_failed.connect(self._on_external_load_file_failed)
+        self._external_load_worker.finished.connect(self._on_external_load_finished)
+        self._external_load_worker.finished.connect(self._external_load_thread.quit)
+        self._external_load_thread.finished.connect(self._cleanup_external_load_worker)
+        self._external_load_thread.finished.connect(self._external_load_thread.deleteLater)
+        self._external_load_thread.finished.connect(self._external_load_worker.deleteLater)
+        self._external_load_thread.start()
+
+    def _on_external_load_progress(self, current: int, total: int, stage: str, detail: str):
+        if self._external_load_dialog is not None:
+            self._external_load_dialog.update_progress(current, total, stage, detail)
+
+    def _on_external_load_file_loaded(self, file_path: str, dataset):
+        dataset.file_path = file_path
+        self.add_dataset_tab(dataset)
+        self.control_panel.register_external_file(file_path, dataset)
+        self._save_recent_file(file_path)
+
+    def _on_external_load_file_failed(self, file_path: str, detail: str):
+        if self._external_load_context is None:
+            return
+        self._external_load_context.setdefault("failed_files", []).append(
+            f"{os.path.basename(file_path)}: {detail}"
+        )
+
+    def _on_external_load_finished(self, summary: dict):
+        context = self._external_load_context or {}
+        mode = context.get("mode", "recent")
+        loaded = summary.get("loaded", 0)
+        canceled = summary.get("canceled", False)
+        failed_files = context.get("failed_files", [])
+        missing_files = context.get("missing_files", [])
+        skipped_count = context.get("skipped_count", 0)
+
+        if mode == "session":
+            session = context.get("session")
+            if session:
+                self._upsert_recent_session(session)
+
+        self._update_welcome_recents()
+
+        if loaded or skipped_count:
+            self._switch_to_tab(0)
+            self._hide_welcome()
+
+        if mode == "session":
+            details = []
+            if missing_files:
+                details.append(f"{len(missing_files)} missing")
+            if skipped_count:
+                details.append(f"{skipped_count} already open")
+            if failed_files:
+                details.append(f"{len(failed_files)} failed")
+            headline = "Session restored" if not failed_files and not missing_files else "Session restore complete"
+            detail = f"{loaded} loaded"
+            if details:
+                detail = f"{detail} ({', '.join(details)})"
+            ok = not failed_files and not missing_files and not canceled
+            status = f"Resumed session: {detail}"
+        else:
+            requested_label = context.get("requested_label", "dataset")
+            headline = "Dataset opened" if not failed_files and not canceled else "Open complete"
+            detail = f"{loaded} loaded"
+            ok = not failed_files and not canceled
+            status = f"Opened: {requested_label}" if ok else f"Open complete: {detail}"
+
+        self._show_status_message(status, ok=ok)
+
+        if self._external_load_dialog is not None:
+            dialog = self._external_load_dialog
+            dialog.mark_finished(headline, detail, ok=ok)
+            QTimer.singleShot(420, lambda d=dialog: self._dismiss_external_load_dialog(d))
+
+        if missing_files or failed_files:
+            missing_lines = "\n".join(os.path.basename(path) for path in missing_files[:6])
+            failed_lines = "\n".join(failed_files[:6])
+            parts = []
+            if missing_files:
+                parts.append("Missing files:\n" + missing_lines)
+            if failed_files:
+                parts.append("Failed to load:\n" + failed_lines)
+            QMessageBox.warning(self, "Load Completed With Issues", "\n\n".join(parts))
+
+    def _cleanup_external_load_worker(self):
+        self._external_load_thread = None
+        self._external_load_worker = None
+        self._external_load_context = None
+
+    def _dismiss_external_load_dialog(self, dialog):
+        if dialog is not None:
+            dialog.accept()
+            dialog.deleteLater()
+        if self._external_load_dialog is dialog:
+            self._external_load_dialog = None
+
+    def _update_welcome_recents(self):
+        self._refresh_welcome_widget(preserve_visibility=True)
+
+    def _refresh_welcome_widget(self, preserve_visibility: bool = True):
+        current_index = self._samples_stack.currentIndex()
+        sidebar_visible = self.control_panel.isVisible()
         recent_files = self._load_recent_files()
+        recent_sessions = self._load_recent_sessions()
+        old_widget = self.welcome_widget
         self._samples_stack.removeWidget(self.welcome_widget)
-        self.welcome_widget = WelcomeWidget(recent_files=recent_files)
+        self.welcome_widget = WelcomeWidget(
+            recent_files=recent_files,
+            recent_sessions=recent_sessions,
+        )
         self._connect_welcome_signals()
         self._samples_stack.insertWidget(0, self.welcome_widget)
-        self._show_welcome()
+        if preserve_visibility:
+            self._samples_stack.setCurrentIndex(current_index)
+            self.control_panel.setVisible(sidebar_visible)
+        else:
+            self._show_welcome()
         self._refresh_dataset_tab_icons()
+        old_widget.deleteLater()
 
     # ──────────────────────────────────────────────────────────────────
     # DATASET MANAGEMENT
     # ──────────────────────────────────────────────────────────────────
-
-    def on_files_loaded(self, sample_names: List[str]):
-        try:
-            loaded_samples = self.control_panel.get_loaded_samples()
-            self.progress_bar.setVisible(True)
-            self.progress_bar.setMaximum(len(sample_names))
-            self.progress_bar.setValue(0)
-
-            for i, sample_name in enumerate(sample_names):
-                if sample_name in loaded_samples:
-                    file_path = loaded_samples[sample_name]['file_path']
-                    try:
-                        dataset = self.data_loader.load_file(file_path)
-                        self.add_dataset_tab(dataset)
-                        self.control_panel.set_sample_status(sample_name, "\u2705 Loaded")
-                    except Exception as e:
-                        print(f"Failed to load {file_path}: {e}")
-                        datasets = self.load_file_with_mapper(file_path)
-                        if datasets:
-                            for dataset in datasets:
-                                self.add_dataset_tab(dataset)
-                            self.control_panel.set_sample_status(sample_name, "\u2705 Loaded")
-                        else:
-                            self.control_panel.set_sample_status(sample_name, "\u274c Failed")
-                self.progress_bar.setValue(i + 1)
-
-            self._show_status_message(f"Loaded {len(sample_names)} dataset(s)")
-
-        except Exception as e:
-            QMessageBox.critical(self, "Load Error", f"Error loading files:\n{str(e)}")
-            self._show_status_message("Error loading files", ok=False)
-        finally:
-            self.progress_bar.setVisible(False)
-
-    def load_file_with_mapper(self, file_path: str) -> List[GrainSizeData]:
-        from gui.column_mapper import ColumnMapperDialog
-        dialog = ColumnMapperDialog(file_path, self)
-        if dialog.exec() == QDialog.DialogCode.Accepted:
-            try:
-                mapping_results = dialog.get_mapping_results()
-                datasets: List[GrainSizeData] = []
-                for mapping in mapping_results:
-                    dataset = GrainSizeData(
-                        sample_name=mapping['sample_name'],
-                        particle_sizes=mapping['particle_sizes'],
-                        percent_passing=mapping['percent_passing'],
-                        temperature=mapping.get('temperature', 20.0),
-                        porosity=mapping.get('porosity', 0.4),
-                        file_path=file_path,
-                    )
-                    datasets.append(dataset)
-                return datasets
-            except Exception as e:
-                QMessageBox.critical(self, "Mapping Error", f"Error creating dataset:\n{str(e)}")
-        return []
 
     def _get_selected_dataset_tabs(self) -> List[DatasetTab]:
         """Return dataset tabs for sidebar-selected cards, or all tabs if none selected."""
@@ -1040,6 +1396,7 @@ class MainWindow(FramelessMainWindowMixin, QMainWindow):
         self._show_status_message(f"Loaded: {dataset.sample_name}")
 
     def add_error_tab(self, file_path: str, error_message: str):
+        self._hide_welcome()
         error_tab = ErrorTab(file_path, error_message, self)
         error_tab.dataset_fixed.connect(self.on_dataset_fixed)
         file_name = os.path.basename(file_path)
