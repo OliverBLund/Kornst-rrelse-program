@@ -19,6 +19,7 @@ from datetime import datetime
 from data_loader import GrainSizeData
 from k_calculations_v2 import KCalculationResult
 from grain_classification import ISO14688
+from .stack_fade import TabFadeInController
 
 
 class ExportTab(QWidget):
@@ -1317,6 +1318,11 @@ class ExportTab(QWidget):
         self.grain_data_preview.setAlternatingRowColors(True)
         self.grain_data_preview.setEditTriggers(QTableWidget.EditTrigger.NoEditTriggers)
         self.preview_tabs.addTab(self.grain_data_preview, "Grain Data")
+        self._preview_tabs_fader = TabFadeInController(
+            self.preview_tabs,
+            self,
+            duration_ms=95,
+        )
 
         right_layout.addWidget(self.preview_tabs)
 

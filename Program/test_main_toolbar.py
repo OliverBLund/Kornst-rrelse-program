@@ -39,6 +39,12 @@ class TestAppToolbar(unittest.TestCase):
         self.assertGreaterEqual(button.width(), button.minimumWidth())
         self.assertLessEqual(badge.x() + badge.width(), button.width())
 
+    def test_toolbar_uses_explicit_chrome_icon_sizes(self):
+        self.assertEqual(self.toolbar._add_btn.iconSize().width(), 13)
+        self.assertEqual(self.toolbar._calc_btn.iconSize().width(), 13)
+        self.assertEqual(self.toolbar._help_btn.iconSize().width(), 13)
+        self.assertEqual(self.toolbar._nav_btns[0].iconSize().width(), 13)
+
 
 if __name__ == '__main__':
     unittest.main(verbosity=2)

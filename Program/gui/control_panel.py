@@ -231,7 +231,7 @@ class _SampleCard(QWidget):
 
         # Meta row (D50, K value)
         self._meta = QLabel()
-        self._meta.setFont(QFont(F.MONO, 7))
+        self._meta.setFont(QFont(F.MONO, F.SZ_XS))
         self._meta.setStyleSheet(f"color: {C.SB_MUTED}; background: transparent;")
         self._update_meta_text()
         info_col.addWidget(self._meta)
@@ -245,7 +245,7 @@ class _SampleCard(QWidget):
         # Selected toggle — .s-pick-btn in CSS
         self._sel_btn = QPushButton()
         self._sel_btn.setObjectName("card-pick")
-        self._sel_btn.setFixedSize(18, 18)
+        self._sel_btn.setFixedSize(20, 20)
         self._sel_btn.setCursor(Qt.CursorShape.PointingHandCursor)
         self._sel_btn.setToolTip("Toggle selection")
         self._sel_btn.clicked.connect(self._toggle_selected)
@@ -254,12 +254,12 @@ class _SampleCard(QWidget):
         # Expand chevron — .s-expand-btn in CSS
         self._expand_btn = QPushButton()
         self._expand_btn.setObjectName("card-expand")
-        self._expand_btn.setFixedSize(16, 16)
+        self._expand_btn.setFixedSize(18, 18)
         self._expand_btn.setCursor(Qt.CursorShape.PointingHandCursor)
         self._expand_btn.setToolTip("Expand details")
         try:
             self._expand_btn.setIcon(icon('fa6s.chevron-right', C.SB_MUTED))
-            self._expand_btn.setIconSize(QSize(9, 9))
+            self._expand_btn.setIconSize(QSize(10, 10))
         except Exception:
             self._expand_btn.setText("\u25B8")
         self._expand_btn.setStyleSheet(
@@ -297,11 +297,11 @@ class _SampleCard(QWidget):
         ]:
             btn = QPushButton(btn_text)
             btn.setObjectName("card-action")
-            btn.setFixedHeight(22)
+            btn.setFixedHeight(24)
             try:
                 btn.setIcon(icon(btn_icon_name,
                                  "#a03020" if is_danger else C.SB_MID))
-                btn.setIconSize(QSize(9, 9))
+                btn.setIconSize(QSize(10, 10))
             except Exception:
                 pass
             danger_ss = (f"color: #a03020; border-color: rgba(160,48,32,0.28);"
@@ -365,7 +365,7 @@ class _SampleCard(QWidget):
         try:
             chevron = 'fa6s.chevron-down' if self._expanded else 'fa6s.chevron-right'
             self._expand_btn.setIcon(icon(chevron, C.SB_MID if self._expanded else C.SB_MUTED))
-            self._expand_btn.setIconSize(QSize(9, 9))
+            self._expand_btn.setIconSize(QSize(10, 10))
         except Exception:
             pass
 
@@ -377,7 +377,7 @@ class _SampleCard(QWidget):
                 f"padding: 0; color: {C.OLIVE}; font-size: 9px; }}")
             try:
                 self._sel_btn.setIcon(icon('fa6s.check', C.OLIVE))
-                self._sel_btn.setIconSize(QSize(9, 9))
+                self._sel_btn.setIconSize(QSize(10, 10))
             except Exception:
                 self._sel_btn.setText("\u2713")
         else:

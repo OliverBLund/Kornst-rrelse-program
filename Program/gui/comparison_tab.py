@@ -34,6 +34,7 @@ from PyQt6.QtGui import QColor, QFont, QBrush, QPixmap, QPainter, QIcon
 from .matplotlib_canvas import FigureCanvas
 from .comparison_plot_widget import ComparisonPlotWidget
 from .dataset_selection_dialog import DatasetSelectionDialog
+from .stack_fade import TabFadeInController
 from .theme import C, F, icon as theme_icon
 from k_calculations_v2 import CalculationStatus
 from grain_classification import (
@@ -257,6 +258,11 @@ class ComparisonTab(QWidget):
             except Exception:
                 self._tabs.addTab(page, label)
         self._tabs.setIconSize(QSize(12, 12))
+        self._tabs_fader = TabFadeInController(
+            self._tabs,
+            self,
+            duration_ms=100,
+        )
 
     def _build_header(self) -> QWidget:
         """Top 52 px header bar — title/subtitle block + action buttons."""

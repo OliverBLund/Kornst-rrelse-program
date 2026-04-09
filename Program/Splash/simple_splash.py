@@ -8,7 +8,7 @@ import math
 from typing import Optional
 
 from PyQt6.QtCore import QEasingCurve, QPointF, QPropertyAnimation, QRectF, QTimer, Qt, QVariantAnimation
-from PyQt6.QtGui import QBrush, QColor, QFont, QLinearGradient, QPainter, QPainterPath, QPen, QRegion
+from PyQt6.QtGui import QBrush, QColor, QFont, QFontMetricsF, QLinearGradient, QPainter, QPainterPath, QPen, QRegion
 from PyQt6.QtWidgets import QApplication, QWidget
 
 
@@ -238,34 +238,72 @@ class SimpleSplash(QWidget):
         painter.setPen(QPen(QColor(86, 100, 59, 100), 1.1))
         painter.drawPath(self._boundary_path(3))
 
+    def _title_font(self) -> QFont:
+        """Return the title font used in the poster header."""
+        title_font = QFont("Source Sans 3", 28, QFont.Weight.DemiBold)
+        title_font.setLetterSpacing(QFont.SpacingType.AbsoluteSpacing, 0.2)
+        return title_font
+
+    def _title_layout(self) -> tuple[QFont, QPointF, QPointF]:
+        """Compute title baselines from live font metrics."""
+        left = 40.0
+        title_top = 48.0
+
+        title_font = self._title_font()
+        title_metrics = QFontMetricsF(title_font)
+        glyph_height = max(
+            title_metrics.tightBoundingRect("Grain Size").height(),
+            title_metrics.tightBoundingRect("Analysis").height(),
+        )
+        line_step = max(
+            33.0,
+            min(
+                title_metrics.lineSpacing() - 5.0,
+                math.ceil(glyph_height + 2.0),
+            ),
+        )
+
+        grain_pos = QPointF(left, title_top + title_metrics.ascent())
+        analysis_pos = QPointF(left, title_top + title_metrics.ascent() + line_step)
+        return title_font, grain_pos, analysis_pos
+
     def _draw_text_block(self, painter: QPainter) -> None:
         left = 40
 
-        title_font = QFont("Source Sans 3", 28, QFont.Weight.DemiBold)
-        title_font.setLetterSpacing(QFont.SpacingType.AbsoluteSpacing, 0.2)
+        title_font, grain_pos, analysis_pos = self._title_layout()
+        title_metrics = QFontMetricsF(title_font)
         painter.setFont(title_font)
         painter.setPen(QColor(44, 41, 35))
-        painter.drawText(QRectF(left, 48, 270, 34), Qt.AlignmentFlag.AlignLeft, "Grain Size")
-        painter.drawText(QRectF(left, 82, 270, 38), Qt.AlignmentFlag.AlignLeft, "Analysis")
+        painter.drawText(grain_pos, "Grain Size")
+        painter.drawText(analysis_pos, "Analysis")
+
+        analysis_top = analysis_pos.y() - title_metrics.ascent()
+        analysis_bottom = analysis_top + title_metrics.tightBoundingRect("Analysis").height()
+        subtitle_top = analysis_bottom + 10.0
 
         subtitle_font = QFont("Source Sans 3", 11, QFont.Weight.Medium)
         subtitle_font.setLetterSpacing(QFont.SpacingType.AbsoluteSpacing, 0.8)
         painter.setFont(subtitle_font)
         painter.setPen(QColor(104, 91, 72))
         painter.drawText(
-            QRectF(left, 127, 320, 18),
-            Qt.AlignmentFlag.AlignLeft,
+            QRectF(left, subtitle_top, 320, 18),
+            Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter,
             "Hydraulic conductivity calculator",
         )
 
+        label_top = subtitle_top + 27.0
         label_font = QFont("Source Sans 3", 9, QFont.Weight.DemiBold)
         label_font.setLetterSpacing(QFont.SpacingType.AbsoluteSpacing, 1.1)
         painter.setFont(label_font)
         painter.setPen(QColor(118, 106, 88))
-        painter.drawText(QRectF(left, 154, 200, 16), Qt.AlignmentFlag.AlignLeft, "STARTUP STATUS")
+        painter.drawText(
+            QRectF(left, label_top, 200, 16),
+            Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter,
+            "STARTUP STATUS",
+        )
 
-        stage_rect = QRectF(left, 172, 420, 18)
-        detail_rect = QRectF(left, 192, 360, 16)
+        stage_rect = QRectF(left, label_top + 18.0, 420, 18)
+        detail_rect = QRectF(left, label_top + 38.0, 360, 16)
         self._draw_transition_text(
             painter,
             stage_rect,
@@ -283,7 +321,7 @@ class SimpleSplash(QWidget):
             QColor(112, 100, 82),
         )
         painter.setPen(QPen(QColor(107, 142, 35, 125), 1.4))
-        painter.drawLine(left, 147, left + 26, 147)
+        painter.drawLine(QPointF(left, label_top - 7.0), QPointF(left + 26, label_top - 7.0))
 
     def _draw_transition_text(
         self,

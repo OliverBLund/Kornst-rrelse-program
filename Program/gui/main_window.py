@@ -17,7 +17,7 @@ from PyQt6.QtWidgets import (
 )
 from PyQt6.QtCore import Qt, pyqtSignal, QSettings, QSize, QTimer
 from PyQt6.QtGui import QAction, QColor, QFont
-from typing import List, Optional
+from typing import Callable, List, Optional
 
 from gui.control_panel import ControlPanel
 from gui.dataset_tab import DatasetTab
@@ -26,6 +26,7 @@ from gui.reporting_tab import ReportingTab
 from gui.export_tab import ExportTab
 from gui.error_tab import ErrorTab
 from gui.loading_dialog import LoadingDialog
+from gui.stack_fade import StackFadeController
 from gui.welcome_widget import WelcomeWidget
 from gui.theme import C, F, SZ, build_stylesheet, icon, apply_matplotlib_style
 from qt_chrome import FramelessMainWindowMixin
@@ -55,6 +56,7 @@ class _AppToolbar(QWidget):
         ("fa6s.file-contract", "Reports"),
         ("fa6s.file-export",   "Export"),
     ]
+    _CHROME_ICON_SIZE = QSize(13, 13)
 
     def __init__(self, parent: QWidget | None = None) -> None:
         super().__init__(parent)
@@ -115,7 +117,7 @@ class _AppToolbar(QWidget):
         self._add_btn.setProperty("toolaction", True)
         try:
             self._add_btn.setIcon(icon("fa6s.folder-open", C.TEXT_MID))
-            self._add_btn.setIconSize(QSize(11, 11))
+            self._add_btn.setIconSize(self._CHROME_ICON_SIZE)
         except Exception:
             pass
         self._add_btn.setCursor(Qt.CursorShape.PointingHandCursor)
@@ -129,7 +131,7 @@ class _AppToolbar(QWidget):
         self._calc_btn.setProperty("toolprimary", True)
         try:
             self._calc_btn.setIcon(icon("fa6s.bolt", "#ffffff"))
-            self._calc_btn.setIconSize(QSize(11, 11))
+            self._calc_btn.setIconSize(self._CHROME_ICON_SIZE)
         except Exception:
             pass
         self._calc_btn.setCursor(Qt.CursorShape.PointingHandCursor)
@@ -144,7 +146,7 @@ class _AppToolbar(QWidget):
         self._help_btn.setProperty("toolaction", True)
         try:
             self._help_btn.setIcon(icon("fa6s.book", C.TEXT_MID))
-            self._help_btn.setIconSize(QSize(11, 11))
+            self._help_btn.setIconSize(self._CHROME_ICON_SIZE)
         except Exception:
             pass
         self._help_btn.setCursor(Qt.CursorShape.PointingHandCursor)
@@ -241,7 +243,7 @@ class _AppToolbar(QWidget):
                     self._TABS[i][0],
                     C.OLIVE if active else C.TEXT_MUTED,
                 ))
-                btn.setIconSize(QSize(11, 11))
+                btn.setIconSize(self._CHROME_ICON_SIZE)
             except Exception:
                 pass
 
@@ -289,7 +291,7 @@ class _RichStatusBar(QStatusBar):
         # Status text (e.g. "Ready")
         self._status_lbl = QLabel("Ready")
         self._status_lbl.setStyleSheet(
-            f"color: #a0d070; font-family: '{F.MONO}'; font-size: {F.SZ_XS}pt;")
+            f"color: #a0d070; font-family: '{F.MONO}'; font-size: {F.SZ_SM}pt;")
         layout.addWidget(self._status_lbl)
 
         # Segments: SAMPLE · D50 · K̄ · TEMP · METHODS · DATASETS
@@ -298,7 +300,7 @@ class _RichStatusBar(QStatusBar):
             layout.addWidget(self._vline())
             lbl_k = QLabel(f" {key} ")
             lbl_k.setStyleSheet(
-                f"color: {C.ST_DIM}; font-family: '{F.MONO}'; font-size: 7pt;")
+                f"color: {C.ST_DIM}; font-family: '{F.MONO}'; font-size: {F.SZ_XS}pt;")
             lbl_v = QLabel("\u2014")
             lbl_v.setStyleSheet(
                 f"color: {C.ST_TEXT}; font-family: '{F.MONO}'; "
@@ -320,7 +322,7 @@ class _RichStatusBar(QStatusBar):
         # Version label (right side) — JetBrains Mono, st-dim color
         ver = QLabel("v0.9-beta ")
         ver.setStyleSheet(
-            f"color: {C.ST_DIM}; font-family: '{F.MONO}'; font-size: 7pt; "
+            f"color: {C.ST_DIM}; font-family: '{F.MONO}'; font-size: {F.SZ_XS}pt; "
             f"padding-left: 10px; border-left: 1px solid rgba(255,255,255,0.15);")
         self.addPermanentWidget(ver)
 
@@ -354,7 +356,7 @@ class _RichStatusBar(QStatusBar):
         text_color = "#a0d070" if ok else C.LED_WARN
         self._led.setStyleSheet(f"background: {color}; border-radius: 3px;")
         self._status_lbl.setStyleSheet(
-            f"color: {text_color}; font-family: '{F.MONO}'; font-size: {F.SZ_XS}pt;")
+            f"color: {text_color}; font-family: '{F.MONO}'; font-size: {F.SZ_SM}pt;")
 
     def set_segment(self, key: str, value: str) -> None:
         if key in self._seg_vals:
@@ -368,8 +370,12 @@ class _RichStatusBar(QStatusBar):
 class MainWindow(FramelessMainWindowMixin, QMainWindow):
     """Main application window."""
 
-    def __init__(self):
+    def __init__(
+        self,
+        startup_progress_callback: Callable[[int, str, str], None] | None = None,
+    ):
         super().__init__()
+        self._startup_progress_callback = startup_progress_callback
         self.setWindowTitle("Grain Size Analysis \u2014 Hydraulic Conductivity Calculator")
         self.init_frameless_window_chrome(
             default_windows="frameless",
@@ -381,6 +387,11 @@ class MainWindow(FramelessMainWindowMixin, QMainWindow):
         )
 
         # Apply matplotlib styling before any plots are created
+        self._emit_startup_progress(
+            82,
+            "Configuring plot styles",
+            "Applying plot defaults and typography.",
+        )
         apply_matplotlib_style()
 
         # Data structures
@@ -410,13 +421,43 @@ class MainWindow(FramelessMainWindowMixin, QMainWindow):
         self._external_load_ui_timer.timeout.connect(self._process_external_load_ui_slice)
 
         # Global stylesheet
+        self._emit_startup_progress(
+            85,
+            "Applying interface theme",
+            "Styling the application shell and controls.",
+        )
         self.setStyleSheet(build_stylesheet())
 
+        self._emit_startup_progress(
+            88,
+            "Building workspace shell",
+            "Creating the sidebar, tabs, and startup views.",
+        )
         self.setup_ui()
+        self._emit_startup_progress(
+            92,
+            "Building navigation",
+            "Preparing menus, toolbar actions, and window chrome.",
+        )
         self.setup_menus()
+        self._emit_startup_progress(
+            95,
+            "Preparing status panels",
+            "Connecting the status bar and welcome workspace.",
+        )
         self.setup_statusbar()
 
         self._show_status_message("Ready")
+        self._emit_startup_progress(
+            97,
+            "Workspace assembled",
+            "Final startup checks are complete.",
+        )
+
+    def _emit_startup_progress(self, percent: int, stage: str, detail: str) -> None:
+        """Forward startup milestones to the splash when one is active."""
+        if self._startup_progress_callback is not None:
+            self._startup_progress_callback(percent, stage, detail)
 
     # ──────────────────────────────────────────────────────────────────
     # UI SETUP
@@ -461,6 +502,12 @@ class MainWindow(FramelessMainWindowMixin, QMainWindow):
 
         # Content stack (one page per top-level tab)
         self.content_stack = QStackedWidget()
+        self._content_stack_fader = StackFadeController(
+            self.content_stack,
+            self,
+            fade_out_ms=90,
+            fade_in_ms=120,
+        )
         main_layout.addWidget(self.content_stack)
 
         # Page 0 — Individual Samples
@@ -471,7 +518,7 @@ class MainWindow(FramelessMainWindowMixin, QMainWindow):
 
         self.dataset_tabs_widget = QTabWidget()
         self.dataset_tabs_widget.setDocumentMode(True)
-        self.dataset_tabs_widget.setIconSize(QSize(10, 10))
+        self.dataset_tabs_widget.setIconSize(QSize(12, 12))
         self.dataset_tabs_widget.setTabsClosable(True)
         self.dataset_tabs_widget.tabCloseRequested.connect(self.close_dataset_tab)
         self._configure_dataset_tab_bar()
@@ -488,6 +535,12 @@ class MainWindow(FramelessMainWindowMixin, QMainWindow):
         # Inner stack: index 0 = welcome (full-area, no tab chrome),
         #              index 1 = dataset_tabs_widget
         self._samples_stack = QStackedWidget()
+        self._samples_stack_fader = StackFadeController(
+            self._samples_stack,
+            self,
+            fade_out_ms=80,
+            fade_in_ms=110,
+        )
         self._samples_stack.addWidget(self.welcome_widget)
         self._samples_stack.addWidget(self.dataset_tabs_widget)
 
@@ -713,7 +766,7 @@ class MainWindow(FramelessMainWindowMixin, QMainWindow):
         self._win_max_btn.setIcon(icon(max_icon, C.TEXT_MID))
         self._win_close_btn.setIcon(icon("fa6s.xmark", C.TEXT_MID))
         for btn in (self._win_min_btn, self._win_max_btn, self._win_close_btn):
-            btn.setIconSize(QSize(10, 10))
+            btn.setIconSize(QSize(12, 12))
 
     def on_window_chrome_state_changed(self, is_frameless: bool, is_maximized: bool) -> None:
         """Sync custom caption controls with the active chrome mode."""
@@ -734,13 +787,17 @@ class MainWindow(FramelessMainWindowMixin, QMainWindow):
 
     def _show_welcome(self) -> None:
         """Show the welcome panel (hide dataset tabs and sidebar)."""
-        self._samples_stack.setCurrentIndex(0)
-        self.control_panel.setVisible(False)
+        self._samples_stack_fader.switch_to(
+            0,
+            after_switch=lambda: self.control_panel.setVisible(False),
+        )
 
     def _hide_welcome(self) -> None:
         """Show the dataset tabs (restore sidebar)."""
-        self._samples_stack.setCurrentIndex(1)
-        self.control_panel.setVisible(True)
+        self._samples_stack_fader.switch_to(
+            1,
+            after_switch=lambda: self.control_panel.setVisible(True),
+        )
 
     def _dataset_tab_icon(self, widget: QWidget, active: bool):
         """Return the appropriate qtawesome icon for each dataset sub-tab."""
@@ -772,26 +829,32 @@ class MainWindow(FramelessMainWindowMixin, QMainWindow):
 
     def _switch_to_tab(self, index: int) -> None:
         """Switch to a top-level tab and keep toolbar in sync."""
-        self.content_stack.setCurrentIndex(index)
         self.app_toolbar.activate_tab(index)
-        self._on_nav_tab_changed(index, _internal=True)
+        self._switch_content_page(index)
 
-    def _on_nav_tab_changed(self, index: int, _internal: bool = False) -> None:
-        """Respond to top-level tab change (from toolbar or programmatic)."""
-        if not _internal:
-            self.content_stack.setCurrentIndex(index)
-        if index == 1:  # Comparison
-            if len(self.dataset_tabs) >= 2:
-                self.comparison_tab.update_comparison()
-        elif index == 2:  # Reports
+    def _on_nav_tab_changed(self, index: int) -> None:
+        """Respond to top-level tab changes emitted by the toolbar."""
+        self._switch_content_page(index)
+
+    def _switch_content_page(self, index: int) -> None:
+        """Animate a top-level page switch, then run the page-specific refresh."""
+        self._content_stack_fader.switch_to(
+            index,
+            after_switch=lambda idx=index: self._post_nav_tab_switch(idx),
+        )
+
+    def _post_nav_tab_switch(self, index: int) -> None:
+        """Run lightweight page-entry sync after the top-level view changes."""
+        if index == 1 and len(self.dataset_tabs) >= 2:
+            self.comparison_tab.update_comparison()
+        elif index == 2:
             self.reporting_tab.set_dataset_tabs(self.dataset_tabs)
 
     def _on_sidebar_sample_selected(self, sample_name: str) -> None:
         """When a sidebar card is clicked, switch to that dataset's tab."""
         # Also make sure we're on the Individual Samples page
         if self.content_stack.currentIndex() != 0:
-            self.content_stack.setCurrentIndex(0)
-            self.app_toolbar.activate_tab(0)
+            self._switch_to_tab(0)
         self._hide_welcome()
         for i in range(self.dataset_tabs_widget.count()):
             tab = self.dataset_tabs_widget.widget(i)

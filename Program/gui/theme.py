@@ -467,13 +467,13 @@ QWidget#app-menubar QLabel {{
     background: transparent;
 }}
 QToolButton[menubaritem="true"] {{
-    padding: 3px 10px;
+    padding: 3px 11px;
     border: none;
     border-radius: 2px;
     background: transparent;
     color: {C.TEXT_MID};
     font-family: "{F.UI}";
-    font-size: {F.SZ_SM}pt;
+    font-size: {F.SZ_BASE}pt;
 }}
 QToolButton[menubaritem="true"]:hover,
 QToolButton[menubaritem="true"]:pressed,
@@ -490,8 +490,9 @@ QWidget#menubar-spacer {{
 }}
 QLabel#menubar-title {{
     color: {C.TEXT_MUTED};
-    font-family: "{F.MONO}";
+    font-family: "{F.UI}";
     font-size: {F.SZ_SM}pt;
+    font-weight: 500;
     padding-right: 4px;
 }}
 QWidget#window-controls {{
@@ -535,7 +536,7 @@ QMenu {{
     border: 1px solid {C.BORDER};
     border-radius: 6px;
     padding: 4px 0;
-    font-size: {F.SZ_SM}pt;
+    font-size: {F.SZ_BASE}pt;
     color: {C.TEXT_MID};
 }}
 QMenu::item {{
@@ -580,9 +581,9 @@ QWidget#app-toolbar QPushButton[navtab="true"] {{
     border-radius: 0;
     color: {C.TEXT_MUTED};
     font-family: "{F.UI}";
-    font-size: {F.SZ_SM}pt;
+    font-size: {F.SZ_BASE}pt;
     font-weight: 500;
-    padding: 0 15px;
+    padding: 0 16px;
     min-height: {SZ.TOOLBAR_H}px;
     max-height: {SZ.TOOLBAR_H}px;
 }}
@@ -599,7 +600,7 @@ QWidget#app-toolbar QPushButton[toolaction="true"] {{
     border: 1px solid transparent;
     border-radius: {r}px;
     color: {C.TEXT_MID};
-    font-size: {F.SZ_SM}pt;
+    font-size: {F.SZ_BASE}pt;
     padding: 0 11px;
     min-height: 26px;
     max-height: 28px;
@@ -616,7 +617,7 @@ QWidget#app-toolbar QPushButton[toolprimary="true"] {{
     border-radius: {r}px;
     color: white;
     font-weight: 600;
-    font-size: {F.SZ_SM}pt;
+    font-size: {F.SZ_BASE}pt;
     padding: 0 13px;
     min-height: 26px;
     max-height: 28px;
@@ -636,7 +637,7 @@ QStatusBar {{
     border-top: 1px solid #7a6448;
     color: {C.ST_TEXT};
     font-family: "{F.MONO}";
-    font-size: {F.SZ_XS}pt;
+    font-size: {F.SZ_SM}pt;
     min-height: {SZ.STATUS_H}px;
     max-height: {SZ.STATUS_H}px;
     padding: 0;
@@ -947,7 +948,7 @@ QProgressBar {{
     border: 1px solid {C.ST_MUTED};
     border-radius: 2px;
     text-align: center;
-    font-size: 7pt;
+    font-size: {F.SZ_XS}pt;
     color: {C.ST_TEXT};
 }}
 QProgressBar::chunk {{
@@ -1046,13 +1047,13 @@ QTabBar::tab {{
     border: 1px solid transparent;
     border-bottom: none;
     border-radius: {r}px {r}px 0 0;
-    padding: 3px 8px;
+    padding: 4px 10px;
     margin-right: 1px;
     margin-bottom: -1px;
     font-family: "{F.UI}";
-    font-size: {F.SZ_SM}pt;
+    font-size: {F.SZ_BASE}pt;
     color: {C.TEXT_MUTED};
-    min-height: {SZ.DS_TABBAR_H - 8}px;
+    min-height: {SZ.DS_TABBAR_H - 6}px;
     max-height: {SZ.DS_TABBAR_H - 2}px;
 }}
 QTabBar::tab:selected {{
@@ -1068,8 +1069,8 @@ QTabBar::tab:hover:!selected {{
 }}
 QTabBar::close-button {{
     subcontrol-position: right;
-    width: 14px;
-    height: 14px;
+    width: 15px;
+    height: 15px;
     border-radius: 7px;
     background: transparent;
 }}
@@ -1080,7 +1081,7 @@ QTabBar QToolButton {{
     border: 1px solid transparent;
     background: transparent;
     color: {C.TEXT_MUTED};
-    width: 18px;
+    width: 20px;
     padding: 0;
     margin-bottom: 1px;
 }}

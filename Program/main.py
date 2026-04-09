@@ -153,18 +153,37 @@ class LoaderThread(QThread):
         """Load MainWindow in background thread"""
         try:
             self.progress.emit(
-                38,
-                "Loading analysis engine",
-                "Importing plotting, data-processing, and UI modules.",
+                28,
+                "Loading data models",
+                "Preparing file loaders and dataset structures.",
             )
+            import data_loader  # noqa: F401
 
-            # Import MainWindow here (loads matplotlib, numpy, pandas, etc.)
+            self.progress.emit(
+                40,
+                "Loading calculation methods",
+                "Preparing hydraulic conductivity equations and helpers.",
+            )
+            import k_calculations  # noqa: F401
+
+            self.progress.emit(
+                52,
+                "Loading plotting stack",
+                "Importing matplotlib and plot styling components.",
+            )
+            import matplotlib  # noqa: F401
+
+            self.progress.emit(
+                64,
+                "Loading workspace widgets",
+                "Importing the main interface modules and dialogs.",
+            )
             from gui.main_window import MainWindow
 
             self.progress.emit(
-                76,
+                78,
                 "Preparing workspace",
-                "The main window is ready to be created.",
+                "The main window class is ready to be created.",
             )
             self.loaded.emit(MainWindow)
         except Exception as e:
@@ -210,7 +229,7 @@ def main() -> None:
             return
 
         splash.set_progress(
-            92,
+            80,
             "Finalizing startup",
             "Creating the main workspace and restoring the window.",
         )
@@ -218,10 +237,16 @@ def main() -> None:
 
         # Create and show main window
         try:
-            window = MainWindow()
+            window = MainWindow(startup_progress_callback=on_progress)
             if not app.windowIcon().isNull():
                 window.setWindowIcon(app.windowIcon())
             # Show window first, then maximize after native HWND is ready
+            splash.set_progress(
+                99,
+                "Opening workspace",
+                "Showing the main window and restoring its state.",
+            )
+            app.processEvents()
             window.show()
             QTimer.singleShot(50, window.showMaximized)
             app.processEvents()

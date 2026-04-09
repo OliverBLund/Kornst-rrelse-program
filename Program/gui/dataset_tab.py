@@ -23,12 +23,13 @@ from PyQt6.QtWidgets import (
     QApplication,
 )
 from PyQt6.QtGui import QColor, QFont
-from PyQt6.QtCore import Qt, pyqtSignal
+from PyQt6.QtCore import Qt, pyqtSignal, QSize
 from typing import Optional, List, Dict
 import numpy as np
 
 from data_loader import GrainSizeData
 from k_calculations import KCalculator, KCalculationResult, CalculationStatus
+from .stack_fade import TabFadeInController
 
 
 _METHOD_META = {
@@ -156,6 +157,7 @@ class DatasetTab(QWidget):
         # Create nested tab widget
         self.nested_tabs = QTabWidget()
         self.nested_tabs.setObjectName("nested-subtabs")
+        self.nested_tabs.setIconSize(QSize(12, 12))
 
         # Style to match .ntab-bar concept: 32px bar, earth bottom border on active
         from .theme import C, F, SZ
@@ -174,11 +176,11 @@ class DatasetTab(QWidget):
                 border: none;
                 border-bottom: 2px solid transparent;
                 border-radius: 0;
-                padding: 0 14px;
+                padding: 0 15px;
                 margin-bottom: -2px;
                 margin-right: 0;
                 font-family: "{F.UI}";
-                font-size: {F.SZ_SM}pt;
+                font-size: {F.SZ_BASE}pt;
                 font-weight: 500;
                 color: {C.TEXT_MUTED};
                 min-height: {SZ.SUB_TABBAR_H}px;
@@ -208,6 +210,11 @@ class DatasetTab(QWidget):
         # Statistics tab
         self.statistics_widget = self.create_statistics_tab()
         self.nested_tabs.addTab(self.statistics_widget, icon("fa6s.chart-column", C.TEXT_MID), "Statistics")
+        self._nested_tab_fader = TabFadeInController(
+            self.nested_tabs,
+            self,
+            duration_ms=105,
+        )
 
         layout.addWidget(self.nested_tabs)
 
