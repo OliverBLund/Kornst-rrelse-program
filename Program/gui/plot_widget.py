@@ -12,6 +12,7 @@ from typing import Optional, List, Dict
 from unit_conversions import HydraulicConductivityConverter, HydraulicConductivityUnit, get_default_plot_unit
 from .plot_styles import PlotStyle, PROFESSIONAL_STYLE
 from .matplotlib_canvas import FigureCanvas, NavigationToolbar
+from .k_plot_helpers import annotate_log_bars, apply_log_bar_limits, format_method_label
 from .theme import C, apply_matplotlib_style
 from grain_classification import ISO14688, interpolate_at as _gc_interpolate_at
 
@@ -266,6 +267,13 @@ class PlotWidget(QWidget):
             labels = labels + ['Flagged / Warning']
         if handles:
             ax.legend(handles, labels, loc='upper right', fontsize=8)
+
+    def _annotate_k_value_bars(self, ax, bars, methods, values, *, fontsize: float = 7.0):
+        labels = [
+            self._format_k_value(values[method]).split()[0]
+            for method in methods
+        ]
+        annotate_log_bars(ax, bars, labels, fontsize=fontsize)
 
     def set_scheme(self, scheme):
         """Set the classification scheme and trigger a redraw if zones are visible."""
@@ -524,27 +532,27 @@ class PlotWidget(QWidget):
             bars = ax2.bar(x_pos, k_values, color=colors, alpha=0.8)
             ax2.set_axisbelow(True)
 
-            # Add value labels on bars with proper formatting
             for bar, method, color in zip(bars, methods, colors):
                 self._style_k_bar(bar, method, color, flagged)
-
-                height = bar.get_height()
-                formatted_value = self._format_k_value(k_values_display[method])
-                ax2.text(bar.get_x() + bar.get_width()/2., height*1.1,
-                        formatted_value.split()[0], ha='center', va='bottom', fontsize=7)  # Show only number
 
             # Apply styling to K-values plot
             ax2.set_xlabel('Method', fontsize=style.label_fontsize - 1, fontfamily=style.font_family)
             ax2.set_ylabel(self._get_k_axis_label(), fontsize=style.label_fontsize - 1, fontfamily=style.font_family)
             ax2.set_title('Hydraulic Conductivity', fontsize=style.title_fontsize - 2, fontweight=style.title_fontweight, fontfamily=style.font_family)
             ax2.set_xticks(x_pos)
-            ax2.set_xticklabels([m[:6] for m in methods], rotation=45, ha='right', fontsize=style.tick_fontsize - 1)
-            ax2.set_yscale('log')
+            ax2.set_xticklabels(
+                [format_method_label(method, compact=True) for method in methods],
+                rotation=45,
+                ha='right',
+                fontsize=style.tick_fontsize - 1,
+            )
             ax2.set_facecolor(style.axes_facecolor)
             ax2.tick_params(labelsize=style.tick_fontsize - 1)
+            apply_log_bar_limits(ax2, k_values)
             if self.show_grid and style.grid_show:
                 ax2.grid(True, alpha=style.grid_alpha, axis='y', linestyle=style.grid_linestyle, color=style.grid_color, linewidth=style.grid_linewidth)
             self._add_k_reference_lines(ax2, k_values, style)
+            self._annotate_k_value_bars(ax2, bars, methods, k_values_display, fontsize=7.0)
             if self.show_legend:
                 self._add_k_status_legend(ax2, flagged)
         else:
@@ -598,14 +606,8 @@ class PlotWidget(QWidget):
         bars = self.current_ax.bar(x_pos, k_values, color=colors, alpha=0.8)
         self.current_ax.set_axisbelow(True)
 
-        # Add value labels on bars with proper formatting
         for bar, method, color in zip(bars, methods, colors):
             self._style_k_bar(bar, method, color, flagged)
-
-            height = bar.get_height()
-            formatted_value = self._format_k_value(k_values_display[method])
-            self.current_ax.text(bar.get_x() + bar.get_width()/2., height*1.1,
-                                formatted_value.split()[0], ha='center', va='bottom', fontsize=8)  # Show only number
 
         # Setup plot formatting using current style
         style = self.current_style
@@ -615,14 +617,15 @@ class PlotWidget(QWidget):
                                  fontsize=style.title_fontsize, fontweight=style.title_fontweight, fontfamily=style.font_family)
         self.current_ax.set_xticks(x_pos)
         self.current_ax.set_xticklabels(methods, rotation=45, ha='right', fontsize=style.tick_fontsize)
-        self.current_ax.set_yscale('log')
         self.current_ax.set_facecolor(style.axes_facecolor)
         self.current_ax.tick_params(labelsize=style.tick_fontsize)
+        apply_log_bar_limits(self.current_ax, k_values)
         if self.show_grid and style.grid_show:
             self.current_ax.grid(True, alpha=style.grid_alpha, axis='y', linestyle=style.grid_linestyle,
                                color=style.grid_color, linewidth=style.grid_linewidth)
         
         self._add_k_reference_lines(self.current_ax, k_values, style)
+        self._annotate_k_value_bars(self.current_ax, bars, methods, k_values_display, fontsize=8.0)
         if self.show_legend:
             self._add_k_status_legend(self.current_ax, flagged)
         
@@ -676,7 +679,7 @@ class PlotWidget(QWidget):
             # K-value plot - use converted values for proper scaling
             k_values_display = self._convert_k_values_for_display(self.k_results)
             k_values = list(k_values_display.values())
-            self.current_ax.set_ylim(min(k_values)*0.1, max(k_values)*10)
+            apply_log_bar_limits(self.current_ax, k_values)
         else:
             # Default grain size limits
             if hasattr(self.current_ax, 'get_xscale') and self.current_ax.get_xscale() == 'log':

@@ -207,25 +207,29 @@ class GrainSizeData:
 
         return cleaned_values
 
+    def get_percentile_size(self, percentile: float) -> Optional[float]:
+        """Calculate grain size at an arbitrary percent passing."""
+        return self._interpolate_grain_size(float(percentile))
+
     def get_d10(self) -> Optional[float]:
         """Calculate D10 (grain size at 10% passing)"""
-        return self._interpolate_grain_size(10.0)
+        return self.get_percentile_size(10.0)
 
     def get_d20(self) -> Optional[float]:
         """Calculate D20 (grain size at 20% passing)"""
-        return self._interpolate_grain_size(20.0)
+        return self.get_percentile_size(20.0)
 
     def get_d30(self) -> Optional[float]:
         """Calculate D30 (grain size at 30% passing)"""
-        return self._interpolate_grain_size(30.0)
+        return self.get_percentile_size(30.0)
 
     def get_d50(self) -> Optional[float]:
         """Calculate D50 (median grain size at 50% passing)"""
-        return self._interpolate_grain_size(50.0)
+        return self.get_percentile_size(50.0)
 
     def get_d60(self) -> Optional[float]:
         """Calculate D60 (grain size at 60% passing)"""
-        return self._interpolate_grain_size(60.0)
+        return self.get_percentile_size(60.0)
 
     def get_uniformity_coefficient(self) -> Optional[float]:
         """Calculate uniformity coefficient Cu = D60/D10"""
@@ -245,7 +249,7 @@ class GrainSizeData:
         return None
 
     def _interpolate_grain_size(self, target_percent: float) -> Optional[float]:
-        """Interpolate grain size at target percent passing using proper grain size distribution logic"""
+        """Interpolate grain size at target percent passing using the VBA path."""
         if not self.percent_passing or not self.particle_sizes:
             return None
 
@@ -256,11 +260,13 @@ class GrainSizeData:
         if len(percents) != len(sizes):
             return None
 
-        # Sort data by percent passing (ascending order) for proper interpolation
-        sorted_data = sorted(zip(percents, sizes))
-        percents_sorted, sizes_sorted = zip(*sorted_data)
-        percents_sorted = list(percents_sorted)
+        # Scan the sieve curve from coarse to fine like the workbook VBA.
+        # This avoids choosing the wrong interval when flat percent-passing
+        # plateaus create duplicate x-values.
+        sorted_data = sorted(zip(sizes, percents), reverse=True)
+        sizes_sorted, percents_sorted = zip(*sorted_data)
         sizes_sorted = list(sizes_sorted)
+        percents_sorted = list(percents_sorted)
 
         # Check if target is within data range
         min_percent, max_percent = min(percents_sorted), max(percents_sorted)
@@ -281,34 +287,25 @@ class GrainSizeData:
             return None
 
         # Check for exact match first
-        if target_percent in percents_sorted:
-            idx = percents_sorted.index(target_percent)
-            return sizes_sorted[idx]
+        for size_mm, percent in sorted_data:
+            if percent == target_percent:
+                return size_mm
 
         # Find the two points that bracket our target percent
-        for i in range(len(percents_sorted) - 1):
-            p1, p2 = percents_sorted[i], percents_sorted[i + 1]
-            if p1 <= target_percent <= p2:
-                s1, s2 = sizes_sorted[i], sizes_sorted[i + 1]
-
-                # Perform interpolation in log space for grain sizes (more appropriate for grain size distributions)
-                if s1 > 0 and s2 > 0:
-                    import math
-                    log_s1 = math.log(s1)
-                    log_s2 = math.log(s2)
-
-                    # Linear interpolation in log space
-                    if p2 != p1:  # Avoid division by zero
-                        log_result = log_s1 + (target_percent - p1) * (log_s2 - log_s1) / (p2 - p1)
-                        return math.exp(log_result)
-                    else:
-                        return s1  # Same percent, return first size
-                else:
-                    # Fallback to linear interpolation if log interpolation fails
-                    if p2 != p1:
-                        return s1 + (target_percent - p1) * (s2 - s1) / (p2 - p1)
-                    else:
-                        return s1
+        for i in range(1, len(percents_sorted)):
+            percent_prev = percents_sorted[i - 1]
+            percent_curr = percents_sorted[i]
+            if percent_prev == percent_curr:
+                continue
+            if percent_prev >= target_percent and percent_curr < target_percent:
+                size_prev = sizes_sorted[i - 1]
+                size_curr = sizes_sorted[i]
+                return (
+                    (size_prev - size_curr)
+                    * (target_percent - percent_curr)
+                    / (percent_prev - percent_curr)
+                    + size_curr
+                )
 
         return None
 

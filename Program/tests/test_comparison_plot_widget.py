@@ -115,6 +115,22 @@ class TestComparisonPlotWidget(unittest.TestCase):
         self.assertIn('////', hatches)
         self.assertTrue(any(line.get_visible() for line in ax.yaxis.get_gridlines()))
 
+    def test_k_value_overlay_staggers_value_labels_between_datasets(self):
+        self.widget.on_plot_type_changed('K-Values')
+        self.widget.set_display_mode('overlay')
+        self.widget.refresh_plot()
+
+        ax = self.widget.figure.axes[0]
+        self.assertEqual(len(ax.texts), len(ax.patches))
+
+        ratios = [
+            round(text.get_position()[1] / bar.get_height(), 4)
+            for bar, text in zip(ax.patches, ax.texts)
+            if bar.get_height() > 0
+        ]
+
+        self.assertGreater(len(set(ratios)), 1)
+
     def test_reset_view_rebuilds_default_k_value_limits(self):
         self.widget.on_plot_type_changed('K-Values')
         self.widget.refresh_plot()

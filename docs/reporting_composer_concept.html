@@ -1,0 +1,750 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Reports Tab Composer Concept</title>
+    <style>
+        :root {
+            --bg: #efe7db;
+            --panel: rgba(255, 252, 247, 0.86);
+            --panel-strong: rgba(255, 255, 252, 0.96);
+            --paper: #fffefb;
+            --ink: #1f1b16;
+            --muted: #756c5f;
+            --line: rgba(64, 49, 31, 0.12);
+            --line-strong: rgba(64, 49, 31, 0.22);
+            --accent: #61711f;
+            --accent-2: #8a5f31;
+            --accent-soft: rgba(97, 113, 31, 0.12);
+            --danger-soft: rgba(145, 74, 41, 0.12);
+            --shadow: 0 24px 56px rgba(69, 50, 24, 0.14);
+        }
+
+        * { box-sizing: border-box; }
+
+        html, body {
+            margin: 0;
+            min-height: 100%;
+            background:
+                radial-gradient(circle at top left, rgba(255,255,255,0.42), transparent 32%),
+                linear-gradient(180deg, #f1eadf 0%, #e4d8c8 100%);
+            color: var(--ink);
+            font-family: "Aptos", "Segoe UI Variable Text", sans-serif;
+        }
+
+        body { padding: 20px; }
+
+        .app {
+            min-height: calc(100vh - 40px);
+            display: grid;
+            grid-template-columns: 96px 1.35fr 1fr;
+            gap: 16px;
+        }
+
+        .rail,
+        .workbench,
+        .inspector,
+        .panel,
+        .preview {
+            border: 1px solid rgba(255,255,255,0.42);
+            background: linear-gradient(180deg, rgba(255,255,255,0.6), var(--panel));
+            box-shadow: var(--shadow);
+        }
+
+        .rail {
+            border-radius: 28px;
+            padding: 16px 12px;
+            display: grid;
+            align-content: start;
+            gap: 12px;
+        }
+
+        .rail-title {
+            font-size: 10px;
+            letter-spacing: 0.14em;
+            text-transform: uppercase;
+            color: var(--muted);
+            text-align: center;
+            padding: 6px 2px 10px;
+        }
+
+        .step {
+            position: relative;
+            border: none;
+            border-radius: 20px;
+            padding: 11px 8px;
+            background: #f3eee5;
+            color: #524b42;
+            text-align: center;
+            cursor: pointer;
+            font-size: 11px;
+            line-height: 1.2;
+        }
+
+        .step.active {
+            background: var(--accent);
+            color: white;
+        }
+
+        .step small {
+            display: block;
+            margin-top: 4px;
+            font-size: 10px;
+            opacity: 0.78;
+        }
+
+        .workbench {
+            border-radius: 30px;
+            display: grid;
+            grid-template-rows: auto auto minmax(0, 1fr);
+            gap: 14px;
+            padding: 16px;
+            min-width: 0;
+        }
+
+        .context {
+            border-radius: 22px;
+            border: 1px solid var(--line);
+            background: linear-gradient(135deg, rgba(97,113,31,0.1), rgba(255,255,255,0.8));
+            padding: 16px 18px;
+            display: flex;
+            justify-content: space-between;
+            gap: 16px;
+            align-items: flex-start;
+        }
+
+        .context h1 {
+            margin: 6px 0 8px;
+            font-size: 28px;
+            line-height: 0.98;
+            letter-spacing: -0.03em;
+        }
+
+        .context p {
+            margin: 0;
+            font-size: 12px;
+            line-height: 1.45;
+            color: var(--muted);
+            max-width: 48ch;
+        }
+
+        .context .meta {
+            display: grid;
+            gap: 8px;
+            text-align: right;
+            font-size: 12px;
+            color: var(--muted);
+        }
+
+        .context .meta strong { color: var(--ink); }
+
+        .subnav {
+            display: flex;
+            gap: 8px;
+            flex-wrap: wrap;
+        }
+
+        .pill,
+        .scope-chip,
+        .tag {
+            border: none;
+            border-radius: 999px;
+            padding: 8px 11px;
+            font-size: 12px;
+            line-height: 1;
+        }
+
+        .pill {
+            background: #eee7db;
+            color: #554d43;
+        }
+
+        .pill.active,
+        .scope-chip.active {
+            background: var(--accent);
+            color: white;
+        }
+
+        .workspace {
+            min-height: 0;
+            display: grid;
+            grid-template-columns: minmax(0, 1.15fr) minmax(320px, 0.85fr);
+            gap: 14px;
+        }
+
+        .panel,
+        .preview {
+            border-radius: 26px;
+            padding: 16px;
+            min-width: 0;
+        }
+
+        .panel {
+            display: grid;
+            grid-template-rows: auto auto minmax(0, 1fr) auto;
+            gap: 14px;
+        }
+
+        .panel h2,
+        .preview h2 {
+            margin: 0;
+            font-size: 18px;
+            letter-spacing: -0.02em;
+        }
+
+        .panel p,
+        .preview p,
+        .rail p {
+            margin: 0;
+            color: var(--muted);
+            font-size: 12px;
+            line-height: 1.45;
+        }
+
+        .searchbar {
+            position: relative;
+        }
+
+        .searchbar input {
+            width: 100%;
+            border: 1px solid var(--line);
+            border-radius: 14px;
+            padding: 12px 14px;
+            background: #faf5ec;
+            color: var(--ink);
+            font: inherit;
+        }
+
+        .searchbar::after {
+            content: "Sample browser";
+            position: absolute;
+            top: -9px;
+            left: 12px;
+            padding: 0 6px;
+            font-size: 10px;
+            letter-spacing: 0.12em;
+            text-transform: uppercase;
+            color: var(--muted);
+            background: linear-gradient(180deg, rgba(255,255,252,0.96), rgba(255,255,255,0.86));
+        }
+
+        .browser-toolbar {
+            display: flex;
+            justify-content: space-between;
+            gap: 12px;
+            align-items: center;
+            flex-wrap: wrap;
+        }
+
+        .browser-toolbar .group {
+            display: flex;
+            gap: 8px;
+            flex-wrap: wrap;
+        }
+
+        .browser {
+            min-height: 0;
+            display: grid;
+            grid-template-columns: minmax(0, 1fr) 220px;
+            gap: 12px;
+        }
+
+        .table-wrap {
+            min-height: 0;
+            border: 1px solid var(--line);
+            border-radius: 18px;
+            background: var(--panel-strong);
+            overflow: hidden;
+        }
+
+        .table-head,
+        .table-row {
+            display: grid;
+            grid-template-columns: 34px minmax(0, 1.6fr) 108px 108px 78px;
+            gap: 10px;
+            align-items: center;
+            padding: 11px 14px;
+        }
+
+        .table-head {
+            position: sticky;
+            top: 0;
+            background: rgba(245, 241, 233, 0.98);
+            border-bottom: 1px solid var(--line);
+            font-size: 10px;
+            letter-spacing: 0.12em;
+            text-transform: uppercase;
+            color: var(--muted);
+        }
+
+        .table-body {
+            max-height: 420px;
+            overflow: auto;
+        }
+
+        .table-row {
+            border-bottom: 1px solid rgba(64, 49, 31, 0.08);
+            font-size: 12px;
+        }
+
+        .table-row:hover { background: rgba(97,113,31,0.05); }
+        .table-row.selected { background: rgba(97,113,31,0.1); }
+
+        .check {
+            width: 18px;
+            height: 18px;
+            border-radius: 5px;
+            border: 1px solid rgba(64,49,31,0.2);
+            display: grid;
+            place-items: center;
+            background: white;
+            font-size: 11px;
+            color: white;
+        }
+        .table-row.selected .check {
+            border-color: var(--accent);
+            background: var(--accent);
+        }
+
+        .name {
+            font-size: 13px;
+            font-weight: 600;
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
+        }
+
+        .cell-muted { color: var(--muted); }
+        .status {
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            border-radius: 999px;
+            padding: 5px 8px;
+            font-size: 11px;
+            background: #eee6d8;
+            color: #5e554a;
+        }
+        .status.warn { background: var(--danger-soft); color: #9b5632; }
+        .status.ok { background: rgba(88, 116, 59, 0.12); color: #58743b; }
+
+        .selected-tray {
+            border: 1px solid var(--line);
+            border-radius: 18px;
+            background: #fcf8f1;
+            padding: 12px;
+            display: grid;
+            gap: 8px;
+            align-content: start;
+        }
+        .tray-head {
+            display: flex;
+            justify-content: space-between;
+            gap: 10px;
+            align-items: center;
+            margin-bottom: 4px;
+        }
+        .tray-head strong { font-size: 12px; text-transform: uppercase; letter-spacing: 0.1em; color: var(--accent-2); }
+        .tray-item {
+            display: flex;
+            justify-content: space-between;
+            gap: 10px;
+            padding: 10px 11px;
+            border-radius: 14px;
+            background: white;
+            border: 1px solid rgba(64,49,31,0.08);
+            font-size: 12px;
+        }
+        .tray-item span:last-child { color: var(--muted); }
+
+        .footerbar {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            gap: 12px;
+            padding-top: 4px;
+            border-top: 1px solid var(--line);
+        }
+        .summary {
+            display: flex;
+            gap: 8px;
+            flex-wrap: wrap;
+            font-size: 12px;
+            color: var(--muted);
+        }
+        .summary .tag { background: rgba(255,255,255,0.9); border: 1px solid rgba(97,113,31,0.16); }
+        .generate {
+            border: none;
+            border-radius: 16px;
+            padding: 13px 16px;
+            background: linear-gradient(135deg, #728929, #5c6f19);
+            color: white;
+            font-weight: 700;
+            font-size: 14px;
+            box-shadow: 0 12px 24px rgba(97,113,31,0.22);
+        }
+
+        .preview {
+            display: grid;
+            grid-template-rows: auto 1fr auto;
+            gap: 14px;
+        }
+
+        .preview-stage {
+            border: 1px solid var(--line);
+            border-radius: 24px;
+            background:
+                linear-gradient(180deg, rgba(255,255,255,0.56), rgba(255,255,252,0.88)),
+                var(--panel);
+            padding: 16px;
+            display: grid;
+            grid-template-rows: auto 1fr;
+            gap: 14px;
+        }
+
+        .paper {
+            background: var(--paper);
+            border-radius: 18px;
+            box-shadow: 0 16px 36px rgba(69, 50, 24, 0.14);
+            padding: 30px 34px;
+            min-height: 0;
+        }
+
+        .paper h3 {
+            margin: 0;
+            font-size: 31px;
+            line-height: 0.98;
+            letter-spacing: -0.04em;
+            max-width: 18ch;
+        }
+
+        .paper-grid {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 16px;
+            margin-top: 22px;
+        }
+
+        .paper-block {
+            border-top: 1px solid var(--line);
+            padding-top: 12px;
+        }
+
+        .paper-block h4 {
+            margin: 0 0 10px;
+            font-size: 11px;
+            text-transform: uppercase;
+            letter-spacing: 0.12em;
+            color: var(--muted);
+        }
+
+        .paper-line {
+            display: flex;
+            justify-content: space-between;
+            gap: 12px;
+            padding: 9px 0;
+            border-bottom: 1px solid rgba(64,49,31,0.08);
+            font-size: 13px;
+        }
+
+        .paper-appendix {
+            margin-top: 24px;
+            padding-top: 14px;
+            border-top: 2px solid rgba(97,113,31,0.34);
+        }
+
+        .paper-appendix strong {
+            font-size: 11px;
+            letter-spacing: 0.12em;
+            text-transform: uppercase;
+            color: var(--accent);
+        }
+
+        .paper-appendix .entry {
+            margin-top: 10px;
+            padding: 10px 12px;
+            border-left: 3px solid rgba(97,113,31,0.36);
+            background: rgba(241,236,227,0.78);
+            font-size: 13px;
+        }
+
+        .inspector {
+            border-radius: 30px;
+            padding: 16px;
+            display: grid;
+            gap: 14px;
+            align-content: start;
+        }
+
+        .inspector .card {
+            border: 1px solid var(--line);
+            border-radius: 20px;
+            background: rgba(255,252,247,0.9);
+            padding: 14px;
+        }
+
+        .inspector h4 {
+            margin: 0 0 8px;
+            font-size: 14px;
+        }
+
+        .inspector p {
+            margin: 0;
+            font-size: 12px;
+            line-height: 1.45;
+            color: var(--muted);
+        }
+
+        .muted-box {
+            padding: 12px;
+            border-radius: 16px;
+            background: linear-gradient(135deg, rgba(97,113,31,0.08), rgba(255,255,255,0.7));
+            font-size: 12px;
+            line-height: 1.45;
+            color: #524b40;
+        }
+
+        .stack {
+            display: grid;
+            gap: 10px;
+        }
+
+        .stack .line {
+            padding-top: 10px;
+            border-top: 1px solid var(--line);
+        }
+
+        .stack .line:first-child {
+            padding-top: 0;
+            border-top: none;
+        }
+
+        .stack .line strong {
+            display: block;
+            margin-bottom: 4px;
+            font-size: 11px;
+            text-transform: uppercase;
+            letter-spacing: 0.1em;
+            color: var(--accent-2);
+        }
+
+        @media (max-width: 1200px) {
+            .app { grid-template-columns: 1fr; }
+            .workspace { grid-template-columns: 1fr; }
+        }
+
+        @media (max-width: 720px) {
+            body { padding: 12px; }
+            .table-head, .table-row { grid-template-columns: 30px 1fr 0 0 0; }
+            .table-head > :nth-child(n+3),
+            .table-row > :nth-child(n+3) { display: none; }
+        }
+    </style>
+</head>
+<body>
+    <div class="app">
+        <nav class="rail">
+            <div class="rail-title">Composer</div>
+            <button class="step active" type="button">1<small>Samples</small></button>
+            <button class="step" type="button">2<small>Sections</small></button>
+            <button class="step" type="button">3<small>Appendix</small></button>
+            <button class="step" type="button">4<small>Brand</small></button>
+            <button class="step" type="button">5<small>Export</small></button>
+        </nav>
+
+        <main class="workbench">
+            <section class="context">
+                <div>
+                    <div class="subnav">
+                        <button class="pill active" type="button">Individual</button>
+                        <button class="pill" type="button">Comparison</button>
+                        <button class="pill" type="button">Full project</button>
+                    </div>
+                    <h1>Reports tab as a composer</h1>
+                    <p>The information architecture changes from one long sidebar into a guided workspace. Samples get their own browser, report structure gets its own step, and the right side stays focused on what the final document will look like.</p>
+                </div>
+                <div class="meta">
+                    <div><strong>48</strong> samples loaded</div>
+                    <div><strong>12</strong> selected</div>
+                    <div><strong>Appendix A</strong> combined mode</div>
+                </div>
+            </section>
+
+            <section class="workspace">
+                <section class="panel">
+                    <div>
+                        <h2>Sample browser</h2>
+                        <p>Search once, filter by state, and keep the bulk selection visible without pushing every other control down the page.</p>
+                    </div>
+
+                    <div class="browser-toolbar">
+                        <div class="searchbar" style="flex:1 1 240px;">
+                            <input type="search" placeholder="Search session, borehole, lab code, or date">
+                        </div>
+                        <div class="group">
+                            <button class="scope-chip active" type="button">All</button>
+                            <button class="scope-chip" type="button">Selected</button>
+                            <button class="scope-chip" type="button">Warnings</button>
+                            <button class="scope-chip" type="button">Recent</button>
+                        </div>
+                    </div>
+
+                    <div class="browser">
+                        <div class="table-wrap">
+                            <div class="table-head">
+                                <div></div>
+                                <div>Name</div>
+                                <div>Groups</div>
+                                <div>Updated</div>
+                                <div>Status</div>
+                            </div>
+                            <div class="table-body" id="sampleTable"></div>
+                        </div>
+
+                        <aside class="selected-tray">
+                            <div class="tray-head">
+                                <strong>Selected tray</strong>
+                                <span class="cell-muted" style="font-size:12px;">12 samples</span>
+                            </div>
+                            <div class="tray-item"><span>Session 2026-04-09 13:57</span><span>5 datasets</span></div>
+                            <div class="tray-item"><span>BH-04 Channel Sand</span><span>4 datasets</span></div>
+                            <div class="tray-item"><span>Harbor East B</span><span>1 dataset</span></div>
+                            <div class="tray-item"><span>QA Batch 04</span><span>7 datasets</span></div>
+                            <div class="tray-item"><span>Archive 2025-11-30</span><span>4 datasets</span></div>
+                            <div class="muted-box">
+                                This tray becomes the fast path for bulk operations: deselect, compare, or export scope without hunting through the full list again.
+                            </div>
+                        </aside>
+                    </div>
+
+                    <div class="footerbar">
+                        <div class="summary">
+                            <span class="tag">Template: Appendix</span>
+                            <span class="tag">Structure: single appendix</span>
+                            <span class="tag">Word export ready</span>
+                        </div>
+                        <button class="generate" type="button">Generate report</button>
+                    </div>
+                </section>
+
+                <section class="preview">
+                    <div>
+                        <h2>Document preview</h2>
+                        <p>The preview is tied to the same step flow, so the user sees report shape rather than UI chrome.</p>
+                    </div>
+                    <div class="preview-stage">
+                        <article class="paper">
+                            <h3>Hydraulic conductivity appendix</h3>
+                            <div class="paper-grid">
+                                <section class="paper-block">
+                                    <h4>Current scope</h4>
+                                    <div class="paper-line"><span>Mode</span><strong>Combined</strong></div>
+                                    <div class="paper-line"><span>Appendix layout</span><strong>Single combined</strong></div>
+                                    <div class="paper-line"><span>Branding</span><strong>Persistent</strong></div>
+                                </section>
+                                <section class="paper-block">
+                                    <h4>Navigation logic</h4>
+                                    <div class="paper-line"><span>Step rail</span><strong>5 steps</strong></div>
+                                    <div class="paper-line"><span>Sample browser</span><strong>Searchable table</strong></div>
+                                    <div class="paper-line"><span>Inspector</span><strong>Live summary</strong></div>
+                                </section>
+                            </div>
+                            <section class="paper-appendix">
+                                <strong>Appendix A</strong>
+                                <div class="entry">Detailed percentile data</div>
+                                <div class="entry">Gradation analysis</div>
+                                <div class="entry">Raw measurement data</div>
+                            </section>
+                        </article>
+                    </div>
+                    <div class="card">
+                        <h4>What changes in the real UI</h4>
+                        <div class="stack">
+                            <div class="line">
+                                <strong>Rail</strong>
+                                <p>The current sidebar is replaced by a compact step rail that does not try to hold every control at once.</p>
+                            </div>
+                            <div class="line">
+                                <strong>Samples</strong>
+                                <p>Many samples are handled in a table-like browser with selection states and a compact tray for what is currently active.</p>
+                            </div>
+                            <div class="line">
+                                <strong>Structure</strong>
+                                <p>Appendix, metadata, and branding become separate steps instead of one continuous scroll stack.</p>
+                            </div>
+                        </div>
+                    </div>
+                </section>
+            </section>
+        </main>
+
+        <aside class="inspector">
+            <div class="card">
+                <h4>Design thesis</h4>
+                <p>Move the reporting tab from a deep sidebar into a composer: narrow rail, focused workbench, live inspector. The user should never have to scroll past branding and notes to manage samples.</p>
+            </div>
+            <div class="card">
+                <h4>Why this should work better</h4>
+                <div class="stack">
+                    <div class="line">
+                        <strong>Scales with many samples</strong>
+                        <p>A table browser handles density better than a checkbox stack and supports grouping, status scanning, and selection at a glance.</p>
+                    </div>
+                    <div class="line">
+                        <strong>Less sidebar overload</strong>
+                        <p>Only the current step is foregrounded. The rest collapses into the rail and inspector.</p>
+                    </div>
+                    <div class="line">
+                        <strong>Clearer reporting flow</strong>
+                        <p>Compose scope, shape appendix, then export. The order matches how people actually decide what the report is.</p>
+                    </div>
+                </div>
+            </div>
+            <div class="card">
+                <h4>Next port</h4>
+                <p>If this direction lands, the first production step should be moving sample selection into a browser-like component and collapsing the rest of the sidebar into step sections.</p>
+            </div>
+        </aside>
+    </div>
+
+    <script>
+        const rows = [
+            ["Session 2026-04-09 13:57", "5 datasets", "2026-04-09", "selected"],
+            ["Session 2026-04-09 09:20", "3 datasets", "2026-04-09", "warning"],
+            ["BH-01 Upper Sand", "2 datasets", "2026-04-08", "selected"],
+            ["BH-01 Lower Sand", "2 datasets", "2026-04-08", "warning"],
+            ["BH-02 Transition Layer", "1 dataset", "2026-04-08", "selected"],
+            ["BH-03 Silt Lens", "2 datasets", "2026-04-07", "warning"],
+            ["BH-04 Channel Sand", "4 datasets", "2026-04-09", "selected"],
+            ["BH-05 Coarse Fraction", "1 dataset", "2026-04-06", "ok"],
+            ["BH-06 Fine Fraction", "1 dataset", "2026-04-06", "warning"],
+            ["BH-07 Fill Material", "2 datasets", "2026-04-09", "recent"],
+            ["Archive 2025-12-16", "6 datasets", "2025-12-16", "ok"],
+            ["Archive 2025-11-30", "4 datasets", "2025-11-30", "warning"],
+            ["Harbor East A", "1 dataset", "2026-04-02", "selected"],
+            ["Harbor East B", "1 dataset", "2026-04-02", "selected warning"],
+            ["Harbor East C", "1 dataset", "2026-04-02", "ok"],
+            ["Harbor West A", "2 datasets", "2026-04-01", "ok"],
+            ["Harbor West B", "2 datasets", "2026-04-01", "warning"],
+            ["Harbor West C", "1 dataset", "2026-04-09", "warning recent"]
+        ];
+        const table = document.getElementById("sampleTable");
+        table.innerHTML = rows.map(([name, groups, updated, state], index) => `
+            <div class="table-row ${state.includes("selected") ? "selected" : ""}" data-id="${index}">
+                <div class="check">${state.includes("selected") ? "✓" : ""}</div>
+                <div class="name">${name}</div>
+                <div class="cell-muted">${groups}</div>
+                <div class="cell-muted">${updated}</div>
+                <div>
+                    <span class="status ${state.includes("warning") ? "warn" : state.includes("selected") ? "ok" : ""}">${state.replace("selected ", "") || "ready"}</span>
+                </div>
+            </div>
+        `).join("");
+
+        table.querySelectorAll(".table-row").forEach((row) => {
+            row.addEventListener("click", () => row.classList.toggle("selected"));
+        });
+    </script>
+</body>
+</html>

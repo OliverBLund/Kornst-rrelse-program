@@ -291,44 +291,50 @@ class PlotWorkspace(QWidget):
         lay.setSpacing(0)
 
         # ── Axis Controls ──
-        lay.addWidget(self._sect_label("Axis Controls"))
-        for label_text, default, attr in [
-            ("X min (mm)", "0.001", "_in_xmin"),
-            ("X max (mm)", "100",   "_in_xmax"),
-            ("Y min (%)",  "0",     "_in_ymin"),
-            ("Y max (%)",  "102",   "_in_ymax"),
+        self._sect_axis = self._sect_label("Axis Controls")
+        lay.addWidget(self._sect_axis)
+        for label_text, default, row_attr, label_attr, input_attr in [
+            ("X min (mm)", "0.001", "_row_xmin", "_lbl_xmin", "_in_xmin"),
+            ("X max (mm)", "100",   "_row_xmax", "_lbl_xmax", "_in_xmax"),
+            ("Y min (%)",  "0",     "_row_ymin", "_lbl_ymin", "_in_ymin"),
+            ("Y max (%)",  "102",   "_row_ymax", "_lbl_ymax", "_in_ymax"),
         ]:
-            row, inp = self._axis_row(label_text, default)
-            setattr(self, attr, inp)
+            row, inp, lbl = self._axis_row(label_text, default)
+            setattr(self, row_attr, row)
+            setattr(self, label_attr, lbl)
+            setattr(self, input_attr, inp)
             inp.editingFinished.connect(self._on_axis_changed)
             lay.addWidget(row)
 
         # ── Display Options ──
-        lay.addWidget(self._sect_label("Display Options"))
-        for label_text, checked, attr in [
-            ("Show grid lines",      True,  "_sw_grid"),
-            ("Show soil zones",      False, "_sw_zones"),
-            ("Show D10 / D30 / D60", False, "_sw_dlines"),
+        self._sect_display = self._sect_label("Display Options")
+        lay.addWidget(self._sect_display)
+        for label_text, checked, row_attr, switch_attr in [
+            ("Show grid lines",      True,  "_row_grid",        "_sw_grid"),
+            ("Show soil zones",      False, "_row_zones",       "_sw_zones"),
+            ("Show D10 / D30 / D60", False, "_row_dlines",      "_sw_dlines"),
         ]:
             row_w, sw = self._toggle_row(label_text, checked)
-            setattr(self, attr, sw)
+            setattr(self, row_attr, row_w)
+            setattr(self, switch_attr, sw)
             lay.addWidget(row_w)
 
         # Fill curve + sub-option (zone labels)
-        row_fill, self._sw_fill = self._toggle_row("Fill curve area", False)
-        lay.addWidget(row_fill)
+        self._row_fill, self._sw_fill = self._toggle_row("Fill curve area", False)
+        lay.addWidget(self._row_fill)
 
-        row_fill_lbl, self._sw_fill_labels = self._toggle_row("  └ Zone % in fill", False)
-        row_fill_lbl.layout().setContentsMargins(22, 4, 10, 4)
-        row_fill_lbl.setStyleSheet(
+        self._row_fill_labels, self._sw_fill_labels = self._toggle_row("  └ Zone % in fill", False)
+        self._row_fill_labels.layout().setContentsMargins(22, 4, 10, 4)
+        self._row_fill_labels.setStyleSheet(
             f"border-bottom: 1px solid rgba(212,196,168,0.4); background: rgba(0,0,0,0.02);")
-        lay.addWidget(row_fill_lbl)
+        lay.addWidget(self._row_fill_labels)
 
-        row_mkr, self._sw_markers = self._toggle_row("Markers on curve", False)
-        lay.addWidget(row_mkr)
+        self._row_markers, self._sw_markers = self._toggle_row("Markers on curve", False)
+        lay.addWidget(self._row_markers)
 
         # ── Curve Color ──
-        lay.addWidget(self._sect_label("Curve Color"))
+        self._sect_curve_color = self._sect_label("Curve Color")
+        lay.addWidget(self._sect_curve_color)
         self._color_container = QWidget()
         self._color_container_lay = QVBoxLayout(self._color_container)
         self._color_container_lay.setContentsMargins(0, 0, 0, 0)
@@ -338,7 +344,8 @@ class PlotWorkspace(QWidget):
         lay.addWidget(self._color_container)
 
         # ── K-value unit selector ──
-        lay.addWidget(self._sect_label("K-Value Units"))
+        self._sect_units = self._sect_label("K-Value Units")
+        lay.addWidget(self._sect_units)
         self._unit_combo = QComboBox()
         self._unit_combo.setObjectName("pw-style-sel")
         all_units = HydraulicConductivityConverter.get_all_units()
@@ -347,14 +354,15 @@ class PlotWorkspace(QWidget):
         default_index = list(all_units.keys()).index(HydraulicConductivityUnit.M_PER_DAY)
         self._unit_combo.setCurrentIndex(default_index)
         self._unit_combo.currentIndexChanged.connect(self._on_unit_changed)
-        unit_row = QWidget()
-        unit_lay = QHBoxLayout(unit_row)
+        self._row_units = QWidget()
+        unit_lay = QHBoxLayout(self._row_units)
         unit_lay.setContentsMargins(10, 5, 10, 5)
         unit_lay.addWidget(self._unit_combo)
-        lay.addWidget(unit_row)
+        lay.addWidget(self._row_units)
 
         # ── Export controls ──
-        lay.addWidget(self._sect_label("Export"))
+        self._sect_export = self._sect_label("Export")
+        lay.addWidget(self._sect_export)
         export_w = QWidget()
         export_lay = QVBoxLayout(export_w)
         export_lay.setContentsMargins(10, 5, 10, 8)
@@ -370,6 +378,7 @@ class PlotWorkspace(QWidget):
         lay.addWidget(export_w)
 
         lay.addStretch(1)
+        self._update_contextual_controls()
         return sidebar
 
     # ── Sidebar sub-builders ───────────────────────────────────
@@ -392,7 +401,7 @@ class PlotWorkspace(QWidget):
         inp.setAlignment(Qt.AlignmentFlag.AlignRight)
         lay.addWidget(lbl, 1)
         lay.addWidget(inp, 0)
-        return row, inp
+        return row, inp, lbl
 
     def _toggle_row(self, label: str, checked: bool):
         """Return (row_widget, ToggleSwitch) — caller adds to layout."""
@@ -462,6 +471,7 @@ class PlotWorkspace(QWidget):
         self._more_plots.blockSignals(True)
         self._more_plots.setCurrentIndex(0)
         self._more_plots.blockSignals(False)
+        self._update_contextual_controls()
         self.refresh_plot()
 
     def _on_more_plot_changed(self, index: int):
@@ -479,6 +489,7 @@ class PlotWorkspace(QWidget):
             btn.style().unpolish(btn)
             btn.style().polish(btn)
         self._seg_group.setExclusive(True)
+        self._update_contextual_controls()
         self.refresh_plot()
 
     def _on_style_changed(self, style_name: str):
@@ -556,6 +567,76 @@ class PlotWorkspace(QWidget):
         selected_unit = self._unit_combo.currentData()
         if selected_unit:
             self.plot_widget.set_display_unit(selected_unit)
+        self._update_contextual_controls()
+        self._sync_axis_inputs_from_ax(getattr(self.plot_widget, 'current_ax', None))
+
+    def _set_context_visibility(self, widget: QWidget, visible: bool):
+        widget.setHidden(not visible)
+
+    def _update_contextual_controls(self):
+        """Show only the controls that make sense for the active plot type."""
+        plot_type = self.current_plot_type
+        is_distribution_like = plot_type in {"distribution", "combined", "cumulative"}
+        is_k_plot = plot_type == "k-values"
+        supports_k_units = plot_type in {"k-values", "combined"}
+        supports_zones = plot_type in {"distribution", "combined", "cumulative"}
+        supports_dlines = plot_type in {"distribution", "combined"}
+        supports_fill = plot_type in {"distribution", "combined"}
+        supports_markers = plot_type in {"distribution", "combined", "cumulative"}
+
+        # Toolbar checks
+        self._chk_zones.setHidden(not supports_zones)
+        self._chk_dlines.setHidden(not supports_dlines)
+
+        # Axis rows
+        show_x_axis_rows = is_distribution_like
+        self._set_context_visibility(self._row_xmin, show_x_axis_rows)
+        self._set_context_visibility(self._row_xmax, show_x_axis_rows)
+        self._set_context_visibility(self._row_ymin, True)
+        self._set_context_visibility(self._row_ymax, True)
+
+        self._lbl_xmin.setText("X min (mm)" if is_distribution_like else "X min")
+        self._lbl_xmax.setText("X max (mm)" if is_distribution_like else "X max")
+        if is_k_plot:
+            unit = self._unit_combo.currentData() or HydraulicConductivityUnit.M_PER_DAY
+            symbol = HydraulicConductivityConverter.UNIT_SYMBOLS[unit]
+            self._lbl_ymin.setText(f"Y min ({symbol})")
+            self._lbl_ymax.setText(f"Y max ({symbol})")
+        else:
+            self._lbl_ymin.setText("Y min (%)")
+            self._lbl_ymax.setText("Y max (%)")
+
+        # Sidebar section rows
+        self._set_context_visibility(self._row_grid, True)
+        self._set_context_visibility(self._row_zones, supports_zones)
+        self._set_context_visibility(self._row_dlines, supports_dlines)
+        self._set_context_visibility(self._row_fill, supports_fill)
+        self._set_context_visibility(self._row_fill_labels, supports_fill)
+        self._set_context_visibility(self._row_markers, supports_markers)
+
+        self._set_context_visibility(self._sect_curve_color, not is_k_plot)
+        self._set_context_visibility(self._color_container, not is_k_plot)
+        self._set_context_visibility(self._sect_units, supports_k_units)
+        self._set_context_visibility(self._row_units, supports_k_units)
+
+        display_section_visible = any(
+            not row.isHidden()
+            for row in (
+                self._row_grid,
+                self._row_zones,
+                self._row_dlines,
+                self._row_fill,
+                self._row_fill_labels,
+                self._row_markers,
+            )
+        )
+        self._set_context_visibility(self._sect_display, display_section_visible)
+
+        axis_section_visible = any(
+            not row.isHidden()
+            for row in (self._row_xmin, self._row_xmax, self._row_ymin, self._row_ymax)
+        )
+        self._set_context_visibility(self._sect_axis, axis_section_visible)
 
     def _apply_plot_options(self):
         """Push workspace toggles into the active plot widget."""
@@ -575,6 +656,7 @@ class PlotWorkspace(QWidget):
         if not self.plot_widget:
             return
 
+        self._update_contextual_controls()
         self._apply_plot_options()
 
         if self.current_plot_type == "distribution":
@@ -591,6 +673,10 @@ class PlotWorkspace(QWidget):
             else:
                 self.plot_widget.figure.clear()
                 ax = self.plot_widget.figure.add_subplot(1, 1, 1)
+                self.plot_widget.current_ax = ax
+                self.plot_widget.grain_size_ax = None
+                self.plot_widget.k_value_ax = ax
+                self.plot_widget.active_axes = [ax]
                 ax.text(0.5, 0.5,
                         'Please calculate K-values first\n(Go to Results tab and click Recalculate)',
                         transform=ax.transAxes, ha='center', va='center',
@@ -629,7 +715,7 @@ class PlotWorkspace(QWidget):
             ax.plot(sizes, cumulative, color=style.curve_color,
                     linewidth=style.curve_linewidth,
                     label=self.dataset.sample_name,
-                    marker=style.curve_marker,
+                    marker=self.plot_widget._get_curve_marker(style),
                     markersize=style.curve_markersize,
                     markeredgecolor=style.curve_markeredgecolor,
                     markeredgewidth=style.curve_markeredgewidth)

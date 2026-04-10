@@ -3,11 +3,15 @@ Report generator for creating professional analysis reports
 """
 
 from typing import List, Dict, Optional, Any
+from dataclasses import dataclass, field
 from html import escape
+from html.parser import HTMLParser
+import importlib.util
 import numpy as np
 from datetime import datetime
 import base64
 import io
+import os
 import re
 import matplotlib
 matplotlib.use('Agg')  # Use non-interactive backend
@@ -22,6 +26,53 @@ from grain_classification import (
     permeability_class as _gc_perm_class,
     cc_label as _gc_cc_label,
 )
+from report_model import (
+    AppendixLabelConfig,
+    HeadingBlock,
+    HtmlBlock,
+    ImageBlock,
+    PageBreakBlock,
+    ParagraphBlock,
+    ReportDocument,
+    ReportSection,
+    TableBlock,
+)
+
+
+DOCX_AVAILABLE = importlib.util.find_spec("docx") is not None
+
+
+@dataclass
+class _HtmlNode:
+    tag: str
+    attrs: dict[str, str] = field(default_factory=dict)
+    children: list[Any] = field(default_factory=list)
+
+
+class _HtmlTreeBuilder(HTMLParser):
+    def __init__(self) -> None:
+        super().__init__(convert_charrefs=True)
+        self.root = _HtmlNode("document")
+        self._stack = [self.root]
+
+    def handle_starttag(self, tag: str, attrs: list[tuple[str, Optional[str]]]) -> None:
+        node = _HtmlNode(tag, {key: value or "" for key, value in attrs})
+        self._stack[-1].children.append(node)
+        self._stack.append(node)
+
+    def handle_startendtag(self, tag: str, attrs: list[tuple[str, Optional[str]]]) -> None:
+        node = _HtmlNode(tag, {key: value or "" for key, value in attrs})
+        self._stack[-1].children.append(node)
+
+    def handle_endtag(self, tag: str) -> None:
+        while len(self._stack) > 1:
+            node = self._stack.pop()
+            if node.tag == tag:
+                break
+
+    def handle_data(self, data: str) -> None:
+        if data:
+            self._stack[-1].children.append(data)
 
 
 class ReportGenerator:
@@ -338,6 +389,17 @@ class ReportGenerator:
                 letter-spacing: 0.5px;
             }
 
+            .appendix-subsection {
+                margin-top: 18px;
+            }
+
+            .appendix-subtitle {
+                margin: 0 0 10px 0;
+                color: var(--text);
+                font-size: 12pt;
+                font-weight: 700;
+            }
+
             /* ── Footer ───────────────────────────────────────── */
             .footer {
                 margin-top: 56px;
@@ -478,6 +540,547 @@ class ReportGenerator:
         if abs(high - low) < 1e-9:
             return f"{low_text}{suffix}"
         return f"Varies by sample ({low_text} to {high_text}{suffix})"
+
+    @staticmethod
+    def _coerce_appendix_label_config(config: Optional[Any]) -> AppendixLabelConfig:
+        if config is None:
+            return AppendixLabelConfig()
+        if isinstance(config, AppendixLabelConfig):
+            return config
+        if isinstance(config, dict):
+            return AppendixLabelConfig(
+                mode=config.get("mode", "auto"),
+                scheme=config.get("scheme", "alpha"),
+                layout=config.get("layout", "separate"),
+                prefix=config.get("prefix", "Appendix "),
+                alpha_numeric_root=config.get("alpha_numeric_root", "A"),
+                single_label=config.get("single_label", ""),
+                manual_labels=dict(config.get("manual_labels") or {}),
+            )
+        raise TypeError("appendix_label_config must be an AppendixLabelConfig or dict")
+
+    @staticmethod
+    def docx_export_available() -> bool:
+        return DOCX_AVAILABLE
+
+    @staticmethod
+    def _node_classes(node: _HtmlNode) -> set[str]:
+        return {name for name in node.attrs.get("class", "").split() if name}
+
+    @staticmethod
+    def _child_nodes(node: _HtmlNode) -> list[_HtmlNode]:
+        return [child for child in node.children if isinstance(child, _HtmlNode)]
+
+    @classmethod
+    def _node_text(cls, node: _HtmlNode) -> str:
+        parts: list[str] = []
+        for child in node.children:
+            if isinstance(child, str):
+                parts.append(child)
+            else:
+                parts.append(cls._node_text(child))
+        return re.sub(r"\s+", " ", " ".join(parts)).strip()
+
+    @classmethod
+    def _find_first_node(cls, node: _HtmlNode, tag: str) -> Optional[_HtmlNode]:
+        if node.tag.lower() == tag.lower():
+            return node
+        for child in cls._child_nodes(node):
+            match = cls._find_first_node(child, tag)
+            if match is not None:
+                return match
+        return None
+
+    @staticmethod
+    def _parse_html_tree(html_text: str) -> _HtmlNode:
+        parser = _HtmlTreeBuilder()
+        parser.feed(html_text)
+        parser.close()
+        return parser.root
+
+    @staticmethod
+    def _hex_to_rgb_triplet(hex_color: str) -> tuple[int, int, int]:
+        color = (hex_color or "#2c3e50").strip().lstrip("#")
+        if len(color) == 3:
+            color = "".join(ch * 2 for ch in color)
+        if len(color) != 6:
+            return (44, 62, 80)
+        return tuple(int(color[i:i + 2], 16) for i in range(0, 6, 2))
+
+    def _set_docx_heading_color(self, paragraph, brand_rgb: tuple[int, int, int], ctx: dict[str, Any]) -> None:
+        rgb = ctx["RGBColor"](*brand_rgb)
+        for run in paragraph.runs:
+            run.font.color.rgb = rgb
+
+    def _add_docx_paragraph(self, container, text: str, ctx: dict[str, Any],
+                            *, bold: bool = False, align=None, style: Optional[str] = None) -> None:
+        clean = re.sub(r"\s+", " ", text).strip()
+        if not clean:
+            return
+        paragraph = container.add_paragraph(style=style)
+        if align is not None:
+            paragraph.alignment = align
+        run = paragraph.add_run(clean)
+        run.bold = bold
+        paragraph.paragraph_format.space_after = ctx["Pt"](6)
+
+    def _render_docx_metadata_grid(self, container, node: _HtmlNode,
+                                   ctx: dict[str, Any], brand_rgb: tuple[int, int, int]) -> None:
+        items: list[tuple[str, str]] = []
+        pending_label = ""
+        for child in self._child_nodes(node):
+            text = self._node_text(child)
+            if not text:
+                continue
+            classes = self._node_classes(child)
+            if "metadata-label" in classes:
+                pending_label = text
+            elif "metadata-value" in classes and pending_label:
+                items.append((pending_label, text))
+                pending_label = ""
+
+        if not items:
+            return
+
+        table = container.add_table(rows=len(items), cols=2)
+        table.style = "Table Grid"
+        table.alignment = ctx["WD_TABLE_ALIGNMENT"].LEFT
+        for row_index, (label, value) in enumerate(items):
+            label_para = table.cell(row_index, 0).paragraphs[0]
+            label_run = label_para.add_run(label.rstrip(":"))
+            label_run.bold = True
+            label_run.font.color.rgb = ctx["RGBColor"](*brand_rgb)
+            table.cell(row_index, 1).paragraphs[0].add_run(value)
+
+    def _render_docx_summary_stats(self, container, node: _HtmlNode, ctx: dict[str, Any]) -> None:
+        cards = [
+            child for child in self._child_nodes(node)
+            if "stat-card" in self._node_classes(child)
+        ]
+        if not cards:
+            return
+
+        table = container.add_table(rows=1, cols=len(cards))
+        table.style = "Table Grid"
+        table.alignment = ctx["WD_TABLE_ALIGNMENT"].CENTER
+        for index, card in enumerate(cards):
+            label = ""
+            value = ""
+            unit = ""
+            for child in self._child_nodes(card):
+                classes = self._node_classes(child)
+                text = self._node_text(child)
+                if "stat-label" in classes:
+                    label = text
+                elif "stat-value" in classes:
+                    value = text
+                elif "stat-unit" in classes:
+                    unit = text
+
+            cell = table.cell(0, index)
+            cell_para = cell.paragraphs[0]
+            cell_para.alignment = ctx["WD_ALIGN_PARAGRAPH"].CENTER
+            label_run = cell_para.add_run(label)
+            label_run.bold = True
+            if value:
+                value_para = cell.add_paragraph()
+                value_para.alignment = ctx["WD_ALIGN_PARAGRAPH"].CENTER
+                value_run = value_para.add_run(value)
+                value_run.bold = True
+                value_run.font.size = ctx["Pt"](13)
+            if unit:
+                unit_para = cell.add_paragraph()
+                unit_para.alignment = ctx["WD_ALIGN_PARAGRAPH"].CENTER
+                unit_para.add_run(unit)
+
+    def _iter_table_rows(self, node: _HtmlNode) -> list[_HtmlNode]:
+        rows: list[_HtmlNode] = []
+        for child in self._child_nodes(node):
+            tag = child.tag.lower()
+            if tag == "tr":
+                rows.append(child)
+            elif tag in {"thead", "tbody", "tfoot"}:
+                rows.extend(self._iter_table_rows(child))
+        return rows
+
+    def _apply_docx_header_shading(self, cell, fill_hex: str, ctx: dict[str, Any]) -> None:
+        shading = ctx["parse_xml"](f'<w:shd {ctx["nsdecls"]("w")} w:fill="{fill_hex}"/>')
+        cell._tc.get_or_add_tcPr().append(shading)
+
+    def _render_docx_table(self, container, node: _HtmlNode,
+                           ctx: dict[str, Any], brand_rgb: tuple[int, int, int]) -> None:
+        rows = self._iter_table_rows(node)
+        if not rows:
+            return
+
+        col_count = max(
+            sum(1 for child in self._child_nodes(row) if child.tag.lower() in {"th", "td"})
+            for row in rows
+        )
+        table = container.add_table(rows=len(rows), cols=col_count)
+        table.style = "Table Grid"
+        table.alignment = ctx["WD_TABLE_ALIGNMENT"].CENTER
+        fill_hex = "".join(f"{value:02X}" for value in brand_rgb)
+
+        for row_index, row_node in enumerate(rows):
+            cells = [child for child in self._child_nodes(row_node) if child.tag.lower() in {"th", "td"}]
+            for col_index, cell_node in enumerate(cells):
+                cell = table.cell(row_index, col_index)
+                paragraph = cell.paragraphs[0]
+                text = self._node_text(cell_node)
+                if text:
+                    run = paragraph.add_run(text)
+                    if cell_node.tag.lower() == "th":
+                        run.bold = True
+                if row_index == 0 and any(child.tag.lower() == "th" for child in cells):
+                    self._apply_docx_header_shading(cell, fill_hex, ctx)
+                    for run in paragraph.runs:
+                        run.font.color.rgb = ctx["RGBColor"](255, 255, 255)
+
+    def _render_docx_image(self, container, node: _HtmlNode, ctx: dict[str, Any]) -> None:
+        src = node.attrs.get("src", "")
+        if not src:
+            return
+
+        image_bytes = None
+        if src.startswith("data:"):
+            match = re.match(r"data:([^;]+);base64,(.*)", src, flags=re.DOTALL)
+            if not match:
+                return
+            mime_type = match.group(1).lower()
+            if "svg" in mime_type:
+                return
+            image_bytes = base64.b64decode(match.group(2))
+        elif os.path.exists(src):
+            with open(src, "rb") as fh:
+                image_bytes = fh.read()
+
+        if not image_bytes:
+            return
+
+        paragraph = container.add_paragraph()
+        paragraph.alignment = ctx["WD_ALIGN_PARAGRAPH"].CENTER
+        run = paragraph.add_run()
+        alt_text = (node.attrs.get("alt", "") or "").lower()
+        width = ctx["Inches"](2.0 if "logo" in alt_text else 6.0)
+        run.add_picture(io.BytesIO(image_bytes), width=width)
+
+    def _render_docx_node(self, container, node: _HtmlNode,
+                          ctx: dict[str, Any], brand_rgb: tuple[int, int, int],
+                          state: dict[str, bool]) -> None:
+        tag = node.tag.lower()
+        classes = self._node_classes(node)
+
+        if tag in {"document", "html", "body"}:
+            for child in self._child_nodes(node):
+                self._render_docx_node(container, child, ctx, brand_rgb, state)
+            return
+
+        if tag in {"head", "style", "script", "meta", "title"}:
+            return
+
+        if tag == "div":
+            if "report-top-bar" in classes or "footer" in classes:
+                return
+            if "page-break" in classes and state.get("started_content") and hasattr(container, "add_page_break"):
+                container.add_page_break()
+            if "metadata-grid" in classes:
+                self._render_docx_metadata_grid(container, node, ctx, brand_rgb)
+                state["started_content"] = True
+                return
+            if "summary-stats" in classes:
+                self._render_docx_summary_stats(container, node, ctx)
+                state["started_content"] = True
+                return
+            if "cover-title" in classes:
+                paragraph = container.add_heading(self._node_text(node), level=0)
+                paragraph.alignment = ctx["WD_ALIGN_PARAGRAPH"].CENTER
+                self._set_docx_heading_color(paragraph, brand_rgb, ctx)
+                state["started_content"] = True
+                return
+            if "cover-subtitle" in classes:
+                self._add_docx_paragraph(
+                    container,
+                    self._node_text(node),
+                    ctx,
+                    align=ctx["WD_ALIGN_PARAGRAPH"].CENTER,
+                )
+                state["started_content"] = True
+                return
+
+            child_nodes = self._child_nodes(node)
+            if not child_nodes:
+                text = self._node_text(node)
+                if text:
+                    self._add_docx_paragraph(container, text, ctx)
+                    state["started_content"] = True
+                return
+
+            block_tags = {"div", "p", "h1", "h2", "h3", "h4", "table", "ul", "ol", "img"}
+            if not any(child.tag.lower() in block_tags for child in child_nodes):
+                text = self._node_text(node)
+                if text:
+                    self._add_docx_paragraph(container, text, ctx)
+                    state["started_content"] = True
+                return
+
+            for child in child_nodes:
+                self._render_docx_node(container, child, ctx, brand_rgb, state)
+            return
+
+        if tag in {"h1", "h2", "h3", "h4"}:
+            heading_level = {"h1": 1, "h2": 2, "h3": 3, "h4": 4}[tag]
+            paragraph = container.add_heading(self._node_text(node), level=heading_level)
+            self._set_docx_heading_color(paragraph, brand_rgb, ctx)
+            state["started_content"] = True
+            return
+
+        if tag == "p":
+            self._add_docx_paragraph(container, self._node_text(node), ctx)
+            state["started_content"] = True
+            return
+
+        if tag in {"ul", "ol"}:
+            for child in self._child_nodes(node):
+                self._render_docx_node(container, child, ctx, brand_rgb, state)
+            return
+
+        if tag == "li":
+            self._add_docx_paragraph(container, self._node_text(node), ctx, style="List Bullet")
+            state["started_content"] = True
+            return
+
+        if tag == "table":
+            self._render_docx_table(container, node, ctx, brand_rgb)
+            state["started_content"] = True
+            return
+
+        if tag == "img":
+            self._render_docx_image(container, node, ctx)
+            state["started_content"] = True
+            return
+
+        for child in self._child_nodes(node):
+            self._render_docx_node(container, child, ctx, brand_rgb, state)
+
+    def generate_docx_from_html(self, html_text: str, brand=None) -> bytes:
+        if not DOCX_AVAILABLE:
+            raise RuntimeError("python-docx is not installed.")
+
+        from docx import Document
+        from docx.enum.table import WD_TABLE_ALIGNMENT
+        from docx.enum.text import WD_ALIGN_PARAGRAPH
+        from docx.oxml import parse_xml
+        from docx.oxml.ns import nsdecls
+        from docx.shared import Inches, Mm, Pt, RGBColor
+
+        document = Document()
+        section = document.sections[0]
+        section.top_margin = Mm(20)
+        section.right_margin = Mm(20)
+        section.bottom_margin = Mm(20)
+        section.left_margin = Mm(20)
+
+        normal_style = document.styles["Normal"]
+        normal_style.font.name = "Calibri"
+        normal_style.font.size = Pt(10.5)
+
+        body_html = self._extract_body_contents(html_text)
+        root = self._parse_html_tree(body_html)
+        body = self._find_first_node(root, "body") or root
+        brand_rgb = self._hex_to_rgb_triplet(getattr(brand, "primary_color", "#2c3e50"))
+        ctx = {
+            "Inches": Inches,
+            "Mm": Mm,
+            "Pt": Pt,
+            "RGBColor": RGBColor,
+            "WD_ALIGN_PARAGRAPH": WD_ALIGN_PARAGRAPH,
+            "WD_TABLE_ALIGNMENT": WD_TABLE_ALIGNMENT,
+            "parse_xml": parse_xml,
+            "nsdecls": nsdecls,
+        }
+        state = {"started_content": False}
+        for child in self._child_nodes(body):
+            self._render_docx_node(document, child, ctx, brand_rgb, state)
+
+        buffer = io.BytesIO()
+        document.save(buffer)
+        return buffer.getvalue()
+
+    def _render_table_block_html(self, block: TableBlock) -> str:
+        html = "<table>"
+        if block.columns:
+            html += "<thead><tr>"
+            for column in block.columns:
+                html += f"<th>{self._esc(column)}</th>"
+            html += "</tr></thead>"
+
+        html += "<tbody>"
+        for row in block.rows:
+            html += "<tr>"
+            for cell in row:
+                html += f"<td>{self._esc(cell)}</td>"
+            html += "</tr>"
+        html += "</tbody></table>"
+
+        if block.caption:
+            html += f'<div class="figure-caption">{self._esc(block.caption)}</div>'
+        return html
+
+    def _render_report_block_html(self, block: Any) -> str:
+        if isinstance(block, HeadingBlock):
+            level = min(max(block.level, 1), 4)
+            return f"<h{level}>{self._esc(block.text)}</h{level}>"
+        if isinstance(block, ParagraphBlock):
+            return f"<p>{self._note_html(block.text)}</p>"
+        if isinstance(block, TableBlock):
+            return self._render_table_block_html(block)
+        if isinstance(block, HtmlBlock):
+            return block.html
+        if isinstance(block, ImageBlock):
+            caption = ""
+            if block.caption:
+                caption = f'<div class="figure-caption">{self._esc(block.caption)}</div>'
+            return (
+                f'<div class="plot-container">'
+                f'<img src="{self._esc(block.source)}" alt="{self._esc(block.alt_text or block.caption)}" />'
+                f'{caption}'
+                f'</div>'
+            )
+        if isinstance(block, PageBreakBlock):
+            return '<div class="page-break"></div>'
+        raise TypeError(f"Unsupported report block: {type(block)!r}")
+
+    def _calculate_percentile_values(self, dataset: GrainSizeData,
+                                     percentiles_list: List[int]) -> Dict[int, Optional[float]]:
+        values: Dict[int, Optional[float]] = {}
+        for percentile in percentiles_list:
+            values[percentile] = dataset.get_percentile_size(percentile)
+        return values
+
+    def _create_percentiles_table_block(self, dataset: GrainSizeData) -> TableBlock:
+        percentiles_list = [5, 10, 16, 20, 25, 30, 40, 50, 60, 75, 84, 90, 95]
+        percentiles_dict = self._calculate_percentile_values(dataset, percentiles_list)
+        max_val = max((value for value in percentiles_dict.values() if value is not None), default=0)
+        rows: list[list[str]] = []
+        for percentile in percentiles_list:
+            value = percentiles_dict[percentile]
+            relative = int((value / max_val) * 100) if value is not None and max_val > 0 else 0
+            label = f"D{percentile}{'*' if percentile in [10, 30, 50, 60] else ''}"
+            rows.append([label, f"{value:.3f}" if value is not None else "N/A", f"{relative}%"])
+
+        return TableBlock(
+            columns=["Percentile", "Size (mm)", "Relative (%)"],
+            rows=rows,
+        )
+
+    def _create_data_quality_table_block(self, dataset: GrainSizeData) -> TableBlock:
+        n_points = len(dataset.particle_sizes)
+        size_min = min(dataset.particle_sizes)
+        size_max = max(dataset.particle_sizes)
+        size_range = size_max / size_min if size_min > 0 else 0
+
+        sorted_indices = np.argsort(dataset.particle_sizes)[::-1]
+        sorted_passing = [dataset.percent_passing[i] for i in sorted_indices]
+        monotonic = all(sorted_passing[i] >= sorted_passing[i + 1] for i in range(len(sorted_passing) - 1))
+        monotonicity_score = "Excellent" if monotonic else "Good"
+        coverage_score = "Excellent" if size_range > 100 else "Good" if size_range > 10 else "Limited"
+        density_score = "Excellent" if n_points > 20 else "Good" if n_points > 10 else "Adequate"
+        confidence_score = "High" if (n_points > 15 and size_range > 50) else "Moderate" if n_points > 8 else "Low"
+
+        rows = [
+            ["Number of Data Points", str(n_points), density_score],
+            ["Size Range", f"{size_min:.3f} - {size_max:.1f} mm", coverage_score],
+            ["Span Ratio", f"{size_range:.1f}x", coverage_score],
+            ["Curve Monotonicity", "Monotonic" if monotonic else "Some variation", monotonicity_score],
+            ["Interpolation Confidence", "", confidence_score],
+        ]
+        return TableBlock(
+            columns=["Quality Metric", "Value", "Assessment"],
+            rows=rows,
+        )
+
+    def _create_raw_data_table_block(self, dataset: GrainSizeData) -> TableBlock:
+        rows: list[list[str]] = []
+        for size, passing in zip(dataset.particle_sizes, dataset.percent_passing):
+            retained = 100 - passing
+            rows.append([f"{size:.4f}", f"{passing:.2f}", f"{retained:.2f}"])
+
+        return TableBlock(
+            columns=["Grain Size (mm)", "Percent Passing (%)", "Percent Retained (%)"],
+            rows=rows,
+        )
+
+    def _build_grain_size_appendix_document(self, dataset: GrainSizeData,
+                                            sections: Dict[str, bool],
+                                            appendix_label_config: Optional[Any] = None) -> ReportDocument:
+        document = ReportDocument(
+            title="Appendices",
+            appendix_label_config=self._coerce_appendix_label_config(appendix_label_config),
+        )
+
+        if sections.get('percentiles', True):
+            document.add_section(ReportSection(
+                section_id="grain_percentiles",
+                title="Detailed Percentile Data",
+                kind="appendix",
+                blocks=[HtmlBlock(self._create_percentiles_table(dataset))],
+            ))
+        if sections.get('data_quality', False):
+            document.add_section(ReportSection(
+                section_id="grain_data_quality",
+                title="Data Quality Assessment",
+                kind="appendix",
+                blocks=[HtmlBlock(self._create_data_quality_table(dataset))],
+            ))
+        if sections.get('raw_data', False):
+            raw_data_table = '<table class="table-compact"><thead><tr><th>Grain Size (mm)</th><th>Percent Passing (%)</th><th>Percent Retained (%)</th></tr></thead><tbody>'
+            for size, passing in zip(dataset.particle_sizes, dataset.percent_passing):
+                retained = 100 - passing
+                raw_data_table += f'<tr><td>{size:.4f}</td><td>{passing:.2f}</td><td>{retained:.2f}</td></tr>'
+            raw_data_table += '</tbody></table>'
+            document.add_section(ReportSection(
+                section_id="grain_raw_data",
+                title="Raw Measurement Data",
+                kind="appendix",
+                blocks=[HtmlBlock(raw_data_table)],
+            ))
+
+        return document
+
+    def _render_appendix_document_html(self, document: ReportDocument) -> str:
+        appendix_sections = document.appendix_sections()
+        if not appendix_sections:
+            return ""
+
+        html = '<div class="appendix-section page-break">'
+        html += f'<h1 class="appendix-title">{self._esc(document.title)}</h1>'
+
+        if document.single_appendix_enabled():
+            html += '<div class="appendix-item">'
+            html += f'<h3 class="appendix-item-title">{self._esc(document.single_appendix_label())}</h3>'
+            for section in appendix_sections:
+                html += '<div class="appendix-subsection">'
+                if section.title:
+                    html += f'<h4 class="appendix-subtitle">{self._esc(section.title)}</h4>'
+                if section.notes:
+                    html += f"<p>{self._note_html(section.notes)}</p>"
+                for block in section.blocks:
+                    html += self._render_report_block_html(block)
+                html += '</div>'
+            html += '</div>'
+        else:
+            for section in appendix_sections:
+                html += '<div class="appendix-item">'
+                html += f'<h3 class="appendix-item-title">{self._esc(document.appendix_display_title(section))}</h3>'
+                if section.notes:
+                    html += f"<p>{self._note_html(section.notes)}</p>"
+                for block in section.blocks:
+                    html += self._render_report_block_html(block)
+                html += '</div>'
+
+        html += '</div>'
+        return html
 
     def _create_cover_page(self, title: str, subtitle: str,
                            metadata: Dict[str, str], brand=None) -> str:
@@ -804,7 +1407,8 @@ class ReportGenerator:
                                   metadata: Optional[Dict[str, str]] = None,
                                   sections: Optional[Dict[str, bool]] = None,
                                   report_template: str = "standard",
-                                  brand=None) -> str:
+                                  brand=None,
+                                  appendix_label_config: Optional[Any] = None) -> str:
         """
         Generate a grain size analysis report for a single sample
 
@@ -1089,32 +1693,12 @@ class ReportGenerator:
 """
             html += "</div>"
 
-        # APPENDIX SECTION - Clean, organized appendix
-        appendix_items = []
-        if sections.get('percentiles', True):
-            appendix_items.append(('A', 'Detailed Percentile Data', self._create_percentiles_table(dataset)))
-        if sections.get('data_quality', False):
-            appendix_items.append(('B', 'Data Quality Assessment', self._create_data_quality_table(dataset)))
-        if sections.get('raw_data', False):
-            raw_data_table = '<table class="table-compact"><thead><tr><th>Grain Size (mm)</th><th>Percent Passing (%)</th><th>Percent Retained (%)</th></tr></thead><tbody>'
-            for size, passing in zip(dataset.particle_sizes, dataset.percent_passing):
-                retained = 100 - passing
-                raw_data_table += f'<tr><td>{size:.4f}</td><td>{passing:.2f}</td><td>{retained:.2f}</td></tr>'
-            raw_data_table += '</tbody></table>'
-            appendix_items.append(('C', 'Raw Measurement Data', raw_data_table))
-
-        if appendix_items:
-            html += '<div class="appendix-section page-break">'
-            html += '<h1 class="appendix-title">Appendices</h1>'
-
-            for letter, title, content in appendix_items:
-                html += f'''
-<div class="appendix-item">
-    <h3 class="appendix-item-title">Appendix {letter}: {title}</h3>
-    {content}
-</div>
-'''
-            html += '</div>'
+        appendix_document = self._build_grain_size_appendix_document(
+            dataset,
+            sections,
+            appendix_label_config=appendix_label_config,
+        )
+        html += self._render_appendix_document_html(appendix_document)
 
         # Footer
         html += """
@@ -1425,7 +2009,8 @@ class ReportGenerator:
                                 porosity: float,
                                 metadata: Optional[Dict[str, str]] = None,
                                 sections: Optional[Dict[str, bool]] = None,
-                                brand=None) -> str:
+                                brand=None,
+                                appendix_label_config: Optional[Any] = None) -> str:
         """Generate a combined report with both grain size and K-value analysis"""
 
         # Set defaults
@@ -1450,6 +2035,7 @@ class ReportGenerator:
             metadata=metadata,
             sections=grain_sections,
             brand=brand,
+            appendix_label_config=appendix_label_config,
         )
         k_report = self.generate_k_value_report(
             dataset,
@@ -2074,15 +2660,8 @@ class ReportGenerator:
     def _create_percentiles_table(self, dataset: GrainSizeData) -> str:
         """Generate HTML table with percentiles (D5, D10, D16, D20, D25, D30, D40, D50, D60, D75, D84, D90, D95)"""
         percentiles_list = [5, 10, 16, 20, 25, 30, 40, 50, 60, 75, 84, 90, 95]
-
-        # Calculate percentiles using interpolation
-        percentiles_dict = {}
-        for p in percentiles_list:
-            value = np.interp(p, dataset.percent_passing, dataset.particle_sizes)
-            percentiles_dict[p] = value
-
-        # Find max value for bar scaling
-        max_val = max(percentiles_dict.values())
+        percentiles_dict = self._calculate_percentile_values(dataset, percentiles_list)
+        max_val = max((value for value in percentiles_dict.values() if value is not None), default=0)
 
         html = """
         <table>
@@ -2098,7 +2677,7 @@ class ReportGenerator:
 
         for p in percentiles_list:
             val = percentiles_dict[p]
-            bar_width = int((val / max_val) * 100) if max_val > 0 else 0
+            bar_width = int((val / max_val) * 100) if val is not None and max_val > 0 else 0
 
             # Highlight key percentiles (D10, D30, D50, D60)
             is_key = p in [10, 30, 50, 60]
@@ -2106,7 +2685,7 @@ class ReportGenerator:
             html += f"""
             <tr>
                 <td style="text-align: center;"><strong>D{p}{'*' if is_key else ''}</strong></td>
-                <td style="text-align: right;">{val:.3f}</td>
+                <td style="text-align: right;">{f'{val:.3f}' if val is not None else 'N/A'}</td>
                 <td style="text-align: right;">{bar_width}%</td>
             </tr>
             """

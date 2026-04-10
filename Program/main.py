@@ -11,7 +11,7 @@ from pathlib import Path
 import tempfile
 
 from PyQt6.QtWidgets import QApplication
-from PyQt6.QtCore import Qt, QTimer, QThread, pyqtSignal, QRectF
+from PyQt6.QtCore import Qt, QTimer, QThread, pyqtSignal, QRectF, QCoreApplication
 from PyQt6.QtGui import QColor, QFont, QFontDatabase, QIcon, QPainter, QPen, QPixmap
 
 # Must be set before QApplication is created.
@@ -21,12 +21,27 @@ from PyQt6.QtGui import QColor, QFont, QFontDatabase, QIcon, QPainter, QPen, QPi
 QApplication.setHighDpiScaleFactorRoundingPolicy(
     Qt.HighDpiScaleFactorRoundingPolicy.PassThrough
 )
+QCoreApplication.setAttribute(Qt.ApplicationAttribute.AA_ShareOpenGLContexts, True)
 
 from Splash.simple_splash import SimpleSplash
 # MainWindow imported later to speed up splash appearance
 
 
 APP_USER_MODEL_ID = "DTU.GrainSizeAnalysis.Desktop"
+
+
+def _prime_qt_webengine() -> None:
+    """
+    Import Qt WebEngine before QApplication is created.
+
+    ReportingTab is imported later during lazy startup, and that import path pulls in
+    QWebEngineView. If Qt WebEngine is first imported after QApplication exists,
+    Qt can disable WebEngine with the exact error the user reported.
+    """
+    try:
+        from PyQt6.QtWebEngineWidgets import QWebEngineView  # noqa: F401
+    except Exception as exc:
+        _log_startup_error("QtWebEngine preload", exc)
 
 
 def _startup_font_base_dir() -> Path:
@@ -194,6 +209,7 @@ class LoaderThread(QThread):
 
 def main() -> None:
     _set_windows_app_user_model_id(APP_USER_MODEL_ID)
+    _prime_qt_webengine()
     app = QApplication(sys.argv)
     app.setApplicationName("Grain Size Analysis")
     app.setApplicationVersion("1.0.0")

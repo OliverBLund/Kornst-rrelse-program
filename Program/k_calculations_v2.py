@@ -24,10 +24,6 @@ VALIDATION STATUS (Tested across 5 datasets):
    - Chapuis            (0.0-10.8%)  - Void ratio dependent (one outlier)
    - Shepherd           (0.0%)       - Pure empirical, no temperature correction
 
-✅ EXCELLENT ACCURACY (0.6-2.6% error):
-   - Barr               (0.6-2.6%)   - Uses cubic ratio porosity function
-                                      Note: Requires effective porosity (O10) for perfect accuracy
-
 ⚠️ KNOWN LIMITATION:
    - Krumbein-Monk      (up to ~10% error on current references)
                                       Formula/unit path verified, but geometric mean still
@@ -309,35 +305,60 @@ class KCalculator:
     ) -> Optional[float]:
         """
         Interpolate grain diameter at a target percent passing.
-        Uses LINEAR interpolation to match Excel's VBA implementation.
+        Uses the Excel VBA interpolation path:
+        linear interpolation in mm space while scanning the sieve curve from
+        coarse to fine. This matters when percent-passing plateaus create
+        duplicate x-values; the VBA logic uses the first bracketing interval,
+        not the last duplicate point.
         """
 
         distribution = self._build_distribution(grain_data)
         if not distribution:
             return None
 
-        # Sort by percent passing to make interpolation monotonic.
-        by_percent = sorted(distribution, key=lambda item: item[1])
-        percents = [p for _, p in by_percent]
-        sizes = [d for d, _ in by_percent]
+        # Follow the workbook convention explicitly: scan from largest to
+        # smallest sieve and use the first valid bracket.
+        by_size = sorted(distribution, key=lambda item: item[0], reverse=True)
+        sizes = [d for d, _ in by_size]
+        percents = [p for _, p in by_size]
 
-        if target_percent <= percents[0]:
-            return sizes[0]
-        if target_percent >= percents[-1]:
-            return sizes[-1]
+        min_percent = min(percents)
+        max_percent = max(percents)
+        if target_percent <= min_percent:
+            return sizes[percents.index(min_percent)]
+        if target_percent >= max_percent:
+            return sizes[percents.index(max_percent)]
 
-        for (size_low, percent_low), (size_high, percent_high) in zip(
-            zip(sizes, percents), zip(sizes[1:], percents[1:])
-        ):
-            if percent_low <= target_percent <= percent_high:
-                if percent_high == percent_low:
-                    return size_low
-                # LINEAR interpolation (matches Excel VBA):
-                # d = size_low + (size_high - size_low) * (target - percent_low) / (percent_high - percent_low)
-                fraction = (target_percent - percent_low) / (percent_high - percent_low)
-                return size_low + fraction * (size_high - size_low)
+        for size_mm, percent in by_size:
+            if percent == target_percent:
+                return size_mm
+
+        for i in range(1, len(by_size)):
+            percent_prev = percents[i - 1]
+            percent_curr = percents[i]
+            if percent_prev == percent_curr:
+                continue
+            if percent_prev >= target_percent and percent_curr < target_percent:
+                size_prev = sizes[i - 1]
+                size_curr = sizes[i]
+                return (
+                    (size_prev - size_curr)
+                    * (target_percent - percent_curr)
+                    / (percent_prev - percent_curr)
+                    + size_curr
+                )
 
         return None
+
+    def _get_percentile_value(
+        self, grain_data: Dict[str, float], target_percent: float
+    ) -> Optional[float]:
+        """Return a percentile diameter, interpolating from the full curve when needed."""
+        key = f"D{int(target_percent)}" if float(target_percent).is_integer() else f"D{target_percent}"
+        value = grain_data.get(key)
+        if value is not None:
+            return value
+        return self._interpolate_percentile(grain_data, target_percent)
 
     def _harmonic_mean_diameter_cm(
         self, grain_data: Dict[str, float]
@@ -1036,8 +1057,7 @@ class KCalculator:
         d10_cm = self._to_cm(d10)
         rho_ratio = self._rho_g_over_mu(temperature)
         phi_n = self._porosity_cubic_ratio(porosity)
-        Cs_squared = 1.35  # angular grains (1.0 for spherical)
-        coefficient = 1.0 / (36.0 * 5.0 * Cs_squared)
+        coefficient = 4.02e-3
         k_cm_s = rho_ratio * coefficient * phi_n * d10_cm**2
         k_m_s = k_cm_s / 100.0
 
@@ -1048,7 +1068,7 @@ class KCalculator:
         return KCalculationResult(
             method_name="Barr",
             k_value=k_m_s,
-            formula_used="K = (ρg/μ) * 1/(36×5×Cₛ²) * n³/(1-n)² * d₁₀² (Cₛ²=1.35 angular)",
+            formula_used="K = (ρg/μ) * 0.00402 * n³/(1-n)² * d₁₀²",
             status=status,
             status_message=note,
             conditions_met=conditions_met,
@@ -1131,9 +1151,12 @@ class KCalculator:
         if not (0.3 < porosity < 0.7):
             conditions_met = False
             note_parts.append("0.3 < n < 0.7 not satisfied")
-        if not (0.10 < d10 < 2.0):
+        if not (d10 > 0.10):
             conditions_met = False
-            note_parts.append("0.10 < D10 < 2.0 mm not satisfied")
+            note_parts.append("D10 > 0.10 mm not satisfied")
+        if not (de < 2.0):
+            conditions_met = False
+            note_parts.append("Transformed de < 2.0 not satisfied")
         if d60 and d10:
             U = d60 / d10
             if not (2.0 < U < 12.0):
@@ -1215,10 +1238,11 @@ class KCalculator:
         # Converting d_geom to cm before squaring introduces a 100x underestimation.
 
         # Need D5, D16, D50, D84, D95 for sigma calculation
-        required = ['D5', 'D16', 'D50', 'D84', 'D95']
+        required = [5.0, 16.0, 50.0, 84.0, 95.0]
         sizes_mm: Dict[str, float] = {}
-        for key in required:
-            value = grain_data.get(key)
+        for percentile in required:
+            key = f"D{int(percentile)}"
+            value = self._get_percentile_value(grain_data, percentile)
             if value is None:
                 return self._create_error("Krumbein-Monk", f"{key} required", temperature, porosity)
             sizes_mm[key] = value

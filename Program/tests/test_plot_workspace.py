@@ -115,6 +115,37 @@ class TestPlotWorkspaceWiring(unittest.TestCase):
         self.assertTrue(all(height >= 0 for height in heights))
         self.assertAlmostEqual(sum(heights), 100.0, places=6)
 
+    def test_k_value_sidebar_context_hides_distribution_specific_controls(self):
+        self.workspace.add_k_results({'Hazen': 1.0e-4, 'Beyer': 1.5e-4})
+        self.workspace.current_plot_type = 'k-values'
+
+        self.workspace.refresh_plot()
+
+        self.assertTrue(self.workspace._row_xmin.isHidden())
+        self.assertTrue(self.workspace._row_xmax.isHidden())
+        self.assertFalse(self.workspace._row_units.isHidden())
+        self.assertTrue(self.workspace._row_zones.isHidden())
+        self.assertTrue(self.workspace._row_dlines.isHidden())
+        self.assertTrue(self.workspace._row_fill.isHidden())
+        self.assertTrue(self.workspace._row_markers.isHidden())
+        self.assertEqual(self.workspace._lbl_ymin.text(), 'Y min (m/d)')
+        self.assertEqual(self.workspace._lbl_ymax.text(), 'Y max (m/d)')
+
+    def test_distribution_sidebar_context_hides_k_value_units(self):
+        self.workspace.current_plot_type = 'distribution'
+
+        self.workspace.refresh_plot()
+
+        self.assertFalse(self.workspace._row_xmin.isHidden())
+        self.assertFalse(self.workspace._row_xmax.isHidden())
+        self.assertTrue(self.workspace._row_units.isHidden())
+        self.assertFalse(self.workspace._row_zones.isHidden())
+        self.assertFalse(self.workspace._row_dlines.isHidden())
+        self.assertFalse(self.workspace._row_fill.isHidden())
+        self.assertFalse(self.workspace._row_markers.isHidden())
+        self.assertEqual(self.workspace._lbl_xmin.text(), 'X min (mm)')
+        self.assertEqual(self.workspace._lbl_ymax.text(), 'Y max (%)')
+
     def test_k_value_plot_shows_grid_and_warning_hatch(self):
         self.workspace.add_k_results(
             {'Hazen': 1.0e-4, 'Beyer': 1.5e-4},
@@ -129,6 +160,34 @@ class TestPlotWorkspaceWiring(unittest.TestCase):
 
         self.assertTrue(any(line.get_visible() for line in ax.yaxis.get_gridlines()))
         self.assertIn('////', hatches)
+
+    def test_k_value_plot_places_value_labels_close_to_bar_tops(self):
+        self.workspace.add_k_results({'Hazen': 1.0e-4, 'Beyer': 1.5e-4})
+        self.workspace.current_plot_type = 'k-values'
+
+        self.workspace.refresh_plot()
+
+        ax = self.workspace.plot_widget.current_ax
+        bars = ax.patches
+        self.assertEqual(len(ax.texts), len(bars))
+
+        for bar, text in zip(bars, ax.texts):
+            ratio = text.get_position()[1] / bar.get_height()
+            self.assertGreater(ratio, 1.0)
+            self.assertLess(ratio, 1.05)
+
+    def test_cumulative_plot_respects_marker_toggle(self):
+        self.workspace.current_plot_type = 'cumulative'
+        self.workspace.show_markers = False
+
+        self.workspace.refresh_plot()
+        ax = self.workspace.plot_widget.current_ax
+        self.assertEqual(ax.lines[0].get_marker(), 'None')
+
+        self.workspace.show_markers = True
+        self.workspace.refresh_plot()
+        ax = self.workspace.plot_widget.current_ax
+        self.assertNotEqual(ax.lines[0].get_marker(), 'None')
 
     def test_combined_plot_shows_k_side_legend(self):
         self.workspace.add_k_results({'Hazen': 1.0e-4, 'Beyer': 1.5e-4})

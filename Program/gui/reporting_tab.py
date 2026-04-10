@@ -16,11 +16,14 @@ from PyQt6.QtWidgets import (
 
 try:
     from PyQt6.QtWebEngineWidgets import QWebEngineView
-    from PyQt6.QtGui import QPageLayout, QPageSize
-    from PyQt6.QtCore import QMarginsF
     HAS_WEBENGINE = True
-except ImportError:
+    WEBENGINE_IMPORT_ERROR = ""
+except ImportError as exc:
     HAS_WEBENGINE = False
+    WEBENGINE_IMPORT_ERROR = str(exc)
+
+from PyQt6.QtGui import QPageLayout, QPageSize
+from PyQt6.QtCore import QMarginsF
 
 from .theme import C, F
 from .report_brand import ReportBrand
@@ -83,6 +86,29 @@ def _line_edit(placeholder: str = "") -> QLineEdit:
         QLineEdit:focus {{ border-color: {C.OLIVE}; }}
     """)
     return edit
+
+
+def _combo_box() -> QComboBox:
+    combo = QComboBox()
+    combo.setStyleSheet(f"""
+        QComboBox {{
+            font-family: "{F.UI}";
+            font-size: {F.SZ_BASE}pt;
+            color: {C.TEXT};
+            background: white;
+            border: 1px solid {C.BORDER};
+            border-radius: 3px;
+            padding: 3px 6px;
+        }}
+        QComboBox:focus {{ border-color: {C.OLIVE}; }}
+        QComboBox QAbstractItemView {{
+            background: white;
+            border: 1px solid {C.BORDER};
+            selection-background-color: rgba(107,142,35,0.12);
+            selection-color: {C.TEXT};
+        }}
+    """)
+    return combo
 
 
 # ── Report type card button ───────────────────────────────────────────────────
@@ -168,6 +194,15 @@ class _SubtypeChips(QWidget):
         idx = self._group.checkedId()
         return self.NAMES[idx] if idx >= 0 else "Grain Size"
 
+    def set_selected(self, name: str) -> None:
+        try:
+            index = self.NAMES.index(name)
+        except ValueError:
+            index = 0
+        button = self._group.button(index)
+        if button is not None:
+            button.setChecked(True)
+
 
 # ── Color swatch ──────────────────────────────────────────────────────────────
 
@@ -210,7 +245,12 @@ class ReportingTab(QWidget):
         self._sample_checkboxes: list[tuple[QCheckBox, dict]] = []
         self.current_report_html = ""
         self.brand = ReportBrand.load()
+        self._settings = QSettings("GrainSizeAnalysis", "ReportingTab")
+        self._restoring_settings = False
         self._init_ui()
+        self._load_appendix_label_settings()
+        self._connect_report_setting_signals()
+        self._load_report_settings()
 
     def _init_ui(self):
         root = QHBoxLayout(self)
@@ -271,6 +311,12 @@ class ReportingTab(QWidget):
         # Sections
         lay.addWidget(_cat_label("Sections"))
         for w in self._build_section_checks():
+            lay.addWidget(w)
+        lay.addWidget(_hdivider())
+
+        # Appendix labeling
+        lay.addWidget(_cat_label("Appendix Labels"))
+        for w in self._build_appendix_label_widgets():
             lay.addWidget(w)
         lay.addWidget(_hdivider())
 
@@ -370,26 +416,8 @@ class ReportingTab(QWidget):
         return w
 
     def _build_template_selector(self) -> QComboBox:
-        combo = QComboBox()
+        combo = _combo_box()
         combo.addItems(["Standard", "Executive", "Technical", "Appendix"])
-        combo.setStyleSheet(f"""
-            QComboBox {{
-                font-family: "{F.UI}";
-                font-size: {F.SZ_BASE}pt;
-                color: {C.TEXT};
-                background: white;
-                border: 1px solid {C.BORDER};
-                border-radius: 3px;
-                padding: 3px 6px;
-            }}
-            QComboBox:focus {{ border-color: {C.OLIVE}; }}
-            QComboBox QAbstractItemView {{
-                background: white;
-                border: 1px solid {C.BORDER};
-                selection-background-color: rgba(107,142,35,0.12);
-                selection-color: {C.TEXT};
-            }}
-        """)
         combo.currentTextChanged.connect(self._apply_template)
         self._template_combo = combo
         return combo
@@ -438,6 +466,7 @@ class ReportingTab(QWidget):
         self.s_k_stats.setChecked(cfg["k_stats"])
         self.s_quality.setChecked(cfg["quality"])
         self.s_raw.setChecked(cfg["raw"])
+        self._save_report_settings()
 
     def _build_section_checks(self) -> list:
         cb_style = f"""
@@ -489,6 +518,108 @@ class ReportingTab(QWidget):
             self.s_percentiles, self.s_gradation, self.s_k_stats,
             self.s_quality, self.s_raw,
         ]
+
+    def _build_appendix_label_widgets(self) -> list[QWidget]:
+        hint = QLabel(
+            "Used for appendix sections in grain-size and combined reports."
+        )
+        hint.setWordWrap(True)
+        hint.setStyleSheet(f"""
+            QLabel {{
+                font-family: "{F.UI}";
+                font-size: {F.SZ_XS}pt;
+                color: {C.TEXT_MUTED};
+                padding: 1px 0 6px 0;
+            }}
+        """)
+
+        self.appendix_mode_combo = _combo_box()
+        self.appendix_mode_combo.addItem("Auto", "auto")
+        self.appendix_mode_combo.addItem("Manual", "manual")
+
+        self.appendix_layout_combo = _combo_box()
+        self.appendix_layout_combo.addItem("Separate appendix sections", "separate")
+        self.appendix_layout_combo.addItem("Single combined appendix", "single")
+
+        self.appendix_scheme_combo = _combo_box()
+        self.appendix_scheme_combo.addItem("Appendix A / B / C", "alpha")
+        self.appendix_scheme_combo.addItem("Appendix 1 / 2 / 3", "numeric")
+        self.appendix_scheme_combo.addItem("A1 / A2 / A3", "alpha_numeric")
+
+        self.appendix_prefix_edit = _line_edit("Appendix ")
+        self.appendix_prefix_edit.setText("Appendix ")
+        self.appendix_root_edit = _line_edit("A")
+        self.appendix_root_edit.setText("A")
+        self.appendix_single_label_edit = _line_edit("Optional combined appendix label")
+
+        self.appendix_percentiles_label_edit = _line_edit("Optional manual label")
+        self.appendix_quality_label_edit = _line_edit("Optional manual label")
+        self.appendix_raw_label_edit = _line_edit("Optional manual label")
+
+        auto_widget = QWidget()
+        auto_lay = QVBoxLayout(auto_widget)
+        auto_lay.setContentsMargins(0, 0, 0, 0)
+        auto_lay.setSpacing(4)
+        self._appendix_scheme_label = _field_label("Automatic scheme")
+        self._appendix_prefix_label = _field_label("Prefix")
+        self._appendix_root_label = _field_label("Alpha-numeric root")
+        auto_lay.addWidget(self._appendix_scheme_label)
+        auto_lay.addWidget(self.appendix_scheme_combo)
+        auto_lay.addWidget(self._appendix_prefix_label)
+        auto_lay.addWidget(self.appendix_prefix_edit)
+        auto_lay.addWidget(self._appendix_root_label)
+        auto_lay.addWidget(self.appendix_root_edit)
+        self._appendix_auto_widget = auto_widget
+
+        manual_widget = QWidget()
+        manual_lay = QVBoxLayout(manual_widget)
+        manual_lay.setContentsMargins(0, 0, 0, 0)
+        manual_lay.setSpacing(4)
+        self._appendix_single_label = _field_label("Combined appendix label")
+        manual_lay.addWidget(self._appendix_single_label)
+        manual_lay.addWidget(self.appendix_single_label_edit)
+        self._appendix_percentiles_label = _field_label("Percentile appendix label")
+        self._appendix_quality_label = _field_label("Data quality appendix label")
+        self._appendix_raw_label = _field_label("Raw data appendix label")
+        manual_lay.addWidget(self._appendix_percentiles_label)
+        manual_lay.addWidget(self.appendix_percentiles_label_edit)
+        manual_lay.addWidget(self._appendix_quality_label)
+        manual_lay.addWidget(self.appendix_quality_label_edit)
+        manual_lay.addWidget(self._appendix_raw_label)
+        manual_lay.addWidget(self.appendix_raw_label_edit)
+        self._appendix_manual_widget = manual_widget
+
+        for widget in [
+            self.appendix_mode_combo,
+            self.appendix_layout_combo,
+            self.appendix_scheme_combo,
+            self.appendix_prefix_edit,
+            self.appendix_root_edit,
+            self.appendix_single_label_edit,
+            self.appendix_percentiles_label_edit,
+            self.appendix_quality_label_edit,
+            self.appendix_raw_label_edit,
+        ]:
+            if isinstance(widget, QComboBox):
+                widget.currentIndexChanged.connect(self._on_appendix_label_settings_changed)
+            else:
+                widget.textChanged.connect(self._save_appendix_label_settings)
+
+        self._sync_appendix_label_ui()
+
+        container = QWidget()
+        lay = QVBoxLayout(container)
+        lay.setContentsMargins(0, 0, 0, 0)
+        lay.setSpacing(4)
+        lay.addWidget(hint)
+        lay.addWidget(_field_label("Label mode"))
+        lay.addWidget(self.appendix_mode_combo)
+        lay.addWidget(_field_label("Appendix structure"))
+        lay.addWidget(self.appendix_layout_combo)
+        lay.addWidget(self._appendix_auto_widget)
+        lay.addWidget(self._appendix_manual_widget)
+
+        return [container]
 
     def _build_branding_widgets(self) -> list:
         self.org_name_edit    = _line_edit()
@@ -588,11 +719,16 @@ class ReportingTab(QWidget):
             self.web_view.setHtml(self._empty_preview_html())
             lay.addWidget(self.web_view)
 
-            warn = QLabel("PyQt6-WebEngine not installed — PDF export unavailable.")
+            detail = WEBENGINE_IMPORT_ERROR or "Unknown import error."
+            warn = QLabel(
+                "WebEngine preview unavailable - PDF export disabled.\n"
+                f"Import detail: {detail}"
+            )
             warn.setStyleSheet(
                 f"color: {C.TEXT_MUTED}; font-size: {F.SZ_SM}pt; "
                 f"font-family: '{F.UI}'; padding: 4px; background: transparent;"
             )
+            warn.setWordWrap(True)
             warn.setAlignment(Qt.AlignmentFlag.AlignCenter)
             lay.addWidget(warn)
 
@@ -674,6 +810,8 @@ class ReportingTab(QWidget):
         self._set_preview_html(self._inject_preview_css(report_html))
         self.btn_html.setEnabled(True)
         self.btn_pdf.setEnabled(HAS_WEBENGINE)
+        self.btn_md.setEnabled(False)
+        self.btn_docx.setEnabled(self.report_generator.docx_export_available())
 
     def _clear_report_output(self, message: str | None = None) -> None:
         self.current_report_html = ""
@@ -763,6 +901,7 @@ class ReportingTab(QWidget):
         self._subtype_chips.setVisible(is_individual)
         self.sample_combo.setVisible(is_individual)
         self.sample_checks_widget.setVisible(not is_individual)
+        self._save_report_settings()
 
     def _pick_color(self):
         dlg = QColorDialog(QColor(self._color_swatch.color()), self)
@@ -802,6 +941,172 @@ class ReportingTab(QWidget):
         self.brand.primary_color = self._color_swatch.color()
         self.brand.save()
 
+    def _connect_report_setting_signals(self) -> None:
+        self._subtype_chips._group.idToggled.connect(lambda *_args: self._save_report_settings())
+        self.sample_combo.currentIndexChanged.connect(lambda *_args: self._save_report_settings())
+        for checkbox in [
+            self.s_cover,
+            self.s_executive,
+            self.s_methodology,
+            self.s_results,
+            self.s_plots,
+            self.s_interp,
+            self.s_percentiles,
+            self.s_gradation,
+            self.s_k_stats,
+            self.s_quality,
+            self.s_raw,
+        ]:
+            checkbox.toggled.connect(lambda *_args: self._save_report_settings())
+        for edit in [
+            self.project_name_edit,
+            self.location_edit,
+            self.client_edit,
+            self.analyst_edit,
+            self.notes_edit,
+        ]:
+            if isinstance(edit, QTextEdit):
+                edit.textChanged.connect(self._save_report_settings)
+            else:
+                edit.textChanged.connect(self._save_report_settings)
+
+    def _save_report_settings(self) -> None:
+        if self._restoring_settings:
+            return
+
+        settings = self._settings
+        settings.setValue("report/type_id", self._card_group.checkedId())
+        settings.setValue("report/subtype", self._subtype_chips.selected())
+        settings.setValue("report/template", self._template_combo.currentText())
+        settings.setValue("report/section_cover", self.s_cover.isChecked())
+        settings.setValue("report/section_executive", self.s_executive.isChecked())
+        settings.setValue("report/section_methodology", self.s_methodology.isChecked())
+        settings.setValue("report/section_results", self.s_results.isChecked())
+        settings.setValue("report/section_plots", self.s_plots.isChecked())
+        settings.setValue("report/section_interp", self.s_interp.isChecked())
+        settings.setValue("report/section_percentiles", self.s_percentiles.isChecked())
+        settings.setValue("report/section_gradation", self.s_gradation.isChecked())
+        settings.setValue("report/section_k_stats", self.s_k_stats.isChecked())
+        settings.setValue("report/section_quality", self.s_quality.isChecked())
+        settings.setValue("report/section_raw", self.s_raw.isChecked())
+        settings.setValue("report/project_name", self.project_name_edit.text())
+        settings.setValue("report/location", self.location_edit.text())
+        settings.setValue("report/client", self.client_edit.text())
+        settings.setValue("report/analyst", self.analyst_edit.text())
+        settings.setValue("report/notes", self.notes_edit.toPlainText())
+
+    def _load_report_settings(self) -> None:
+        self._restoring_settings = True
+        try:
+            type_id = int(self._settings.value("report/type_id", 0))
+            button = self._card_group.button(type_id)
+            if button is not None:
+                button.setChecked(True)
+                self._on_type_changed(type_id, True)
+
+            self._subtype_chips.set_selected(self._settings.value("report/subtype", "Grain Size"))
+
+            template = self._settings.value("report/template", "Standard")
+            index = self._template_combo.findText(template)
+            if index >= 0:
+                self._template_combo.setCurrentIndex(index)
+            else:
+                self._template_combo.setCurrentText("Standard")
+
+            self.s_cover.setChecked(self._settings.value("report/section_cover", False, type=bool))
+            self.s_executive.setChecked(self._settings.value("report/section_executive", True, type=bool))
+            self.s_methodology.setChecked(self._settings.value("report/section_methodology", True, type=bool))
+            self.s_results.setChecked(self._settings.value("report/section_results", True, type=bool))
+            self.s_plots.setChecked(self._settings.value("report/section_plots", True, type=bool))
+            self.s_interp.setChecked(self._settings.value("report/section_interp", True, type=bool))
+            self.s_percentiles.setChecked(self._settings.value("report/section_percentiles", True, type=bool))
+            self.s_gradation.setChecked(self._settings.value("report/section_gradation", True, type=bool))
+            self.s_k_stats.setChecked(self._settings.value("report/section_k_stats", True, type=bool))
+            self.s_quality.setChecked(self._settings.value("report/section_quality", False, type=bool))
+            self.s_raw.setChecked(self._settings.value("report/section_raw", False, type=bool))
+
+            self.project_name_edit.setText(self._settings.value("report/project_name", ""))
+            self.location_edit.setText(self._settings.value("report/location", ""))
+            self.client_edit.setText(self._settings.value("report/client", ""))
+            self.analyst_edit.setText(self._settings.value("report/analyst", ""))
+            self.notes_edit.setPlainText(self._settings.value("report/notes", ""))
+        finally:
+            self._restoring_settings = False
+
+    @staticmethod
+    def _set_combo_to_data(combo: QComboBox, value: str) -> None:
+        idx = combo.findData(value)
+        if idx >= 0:
+            combo.setCurrentIndex(idx)
+
+    def _on_appendix_label_settings_changed(self, *_args) -> None:
+        self._sync_appendix_label_ui()
+        self._save_appendix_label_settings()
+
+    def _sync_appendix_label_ui(self) -> None:
+        manual_mode = (self.appendix_mode_combo.currentData() or "auto") == "manual"
+        single_layout = (self.appendix_layout_combo.currentData() or "separate") == "single"
+        scheme = self.appendix_scheme_combo.currentData() or "alpha"
+        self._appendix_auto_widget.setVisible(not manual_mode)
+        self._appendix_manual_widget.setVisible(manual_mode)
+        self._appendix_prefix_label.setVisible(scheme != "alpha_numeric")
+        self.appendix_prefix_edit.setVisible(scheme != "alpha_numeric")
+        self._appendix_root_label.setVisible(scheme == "alpha_numeric")
+        self.appendix_root_edit.setVisible(scheme == "alpha_numeric")
+        self._appendix_single_label.setVisible(single_layout)
+        self.appendix_single_label_edit.setVisible(single_layout)
+        self._appendix_percentiles_label.setVisible(not single_layout)
+        self.appendix_percentiles_label_edit.setVisible(not single_layout)
+        self._appendix_quality_label.setVisible(not single_layout)
+        self.appendix_quality_label_edit.setVisible(not single_layout)
+        self._appendix_raw_label.setVisible(not single_layout)
+        self.appendix_raw_label_edit.setVisible(not single_layout)
+
+    def _save_appendix_label_settings(self) -> None:
+        settings = self._settings
+        settings.setValue("appendix_labels/layout", self.appendix_layout_combo.currentData() or "separate")
+        settings.setValue("appendix_labels/mode", self.appendix_mode_combo.currentData() or "auto")
+        settings.setValue("appendix_labels/scheme", self.appendix_scheme_combo.currentData() or "alpha")
+        settings.setValue("appendix_labels/prefix", self.appendix_prefix_edit.text())
+        settings.setValue("appendix_labels/alpha_numeric_root", self.appendix_root_edit.text())
+        settings.setValue("appendix_labels/single_label", self.appendix_single_label_edit.text())
+        settings.setValue("appendix_labels/manual_percentiles", self.appendix_percentiles_label_edit.text())
+        settings.setValue("appendix_labels/manual_quality", self.appendix_quality_label_edit.text())
+        settings.setValue("appendix_labels/manual_raw", self.appendix_raw_label_edit.text())
+
+    def _load_appendix_label_settings(self) -> None:
+        self._set_combo_to_data(
+            self.appendix_layout_combo,
+            self._settings.value("appendix_labels/layout", "separate"),
+        )
+        self._set_combo_to_data(
+            self.appendix_mode_combo,
+            self._settings.value("appendix_labels/mode", "auto"),
+        )
+        self._set_combo_to_data(
+            self.appendix_scheme_combo,
+            self._settings.value("appendix_labels/scheme", "alpha"),
+        )
+        self.appendix_prefix_edit.setText(
+            self._settings.value("appendix_labels/prefix", "Appendix ")
+        )
+        self.appendix_root_edit.setText(
+            self._settings.value("appendix_labels/alpha_numeric_root", "A")
+        )
+        self.appendix_single_label_edit.setText(
+            self._settings.value("appendix_labels/single_label", "")
+        )
+        self.appendix_percentiles_label_edit.setText(
+            self._settings.value("appendix_labels/manual_percentiles", "")
+        )
+        self.appendix_quality_label_edit.setText(
+            self._settings.value("appendix_labels/manual_quality", "")
+        )
+        self.appendix_raw_label_edit.setText(
+            self._settings.value("appendix_labels/manual_raw", "")
+        )
+        self._sync_appendix_label_ui()
+
     # ── Data collection ───────────────────────────────────────────────────────
 
     def _collect_brand(self) -> ReportBrand:
@@ -815,6 +1120,39 @@ class ReportingTab(QWidget):
             "client":       self.client_edit.text(),
             "analyst":      self.analyst_edit.text(),
             "notes":        self.notes_edit.toPlainText(),
+        }
+
+    def _collect_appendix_label_config(self) -> dict:
+        layout = self.appendix_layout_combo.currentData() or "separate"
+        mode = self.appendix_mode_combo.currentData() or "auto"
+        scheme = self.appendix_scheme_combo.currentData() or "alpha"
+        prefix = self.appendix_prefix_edit.text() or "Appendix "
+        root = self.appendix_root_edit.text().strip() or "A"
+        single_label = self.appendix_single_label_edit.text().strip()
+
+        if scheme in {"alpha", "numeric"} and prefix and not prefix[-1].isspace():
+            prefix += " "
+
+        manual_labels = {}
+        if layout != "single":
+            percentiles = self.appendix_percentiles_label_edit.text().strip()
+            quality = self.appendix_quality_label_edit.text().strip()
+            raw_data = self.appendix_raw_label_edit.text().strip()
+            if percentiles:
+                manual_labels["grain_percentiles"] = percentiles
+            if quality:
+                manual_labels["grain_data_quality"] = quality
+            if raw_data:
+                manual_labels["grain_raw_data"] = raw_data
+
+        return {
+            "layout": layout,
+            "mode": mode,
+            "scheme": scheme,
+            "prefix": prefix,
+            "alpha_numeric_root": root,
+            "single_label": single_label,
+            "manual_labels": manual_labels,
         }
 
     def _collect_sections(self) -> dict:
@@ -842,11 +1180,12 @@ class ReportingTab(QWidget):
         brand    = self._collect_brand()
         metadata = self._collect_metadata()
         sections = self._collect_sections()
+        appendix_label_config = self._collect_appendix_label_config()
 
         try:
             type_id = self._card_group.checkedId()
             if type_id == 0:
-                html = self._gen_individual(brand, metadata, sections)
+                html = self._gen_individual(brand, metadata, sections, appendix_label_config)
             elif type_id == 1:
                 html = self._gen_comparison(brand, metadata, sections)
             else:
@@ -859,7 +1198,7 @@ class ReportingTab(QWidget):
             QMessageBox.critical(self, "Report Error",
                                  f"Failed to generate report:\n{exc}")
 
-    def _gen_individual(self, brand, metadata, sections) -> str:
+    def _gen_individual(self, brand, metadata, sections, appendix_label_config) -> str:
         idx = self.sample_combo.currentIndex()
         if idx < 0 or idx >= len(self._sample_contexts):
             raise ValueError("No sample selected.")
@@ -877,10 +1216,12 @@ class ReportingTab(QWidget):
             return self.report_generator.generate_combined_report(
                 dataset, tab.get_results(), tab.temperature, tab.porosity,
                 metadata=metadata, sections=sections, brand=brand,
+                appendix_label_config=appendix_label_config,
             )
         else:
             return self.report_generator.generate_grain_size_report(
                 dataset, metadata=metadata, sections=sections, brand=brand,
+                appendix_label_config=appendix_label_config,
             )
 
     def _gen_comparison(self, brand, metadata, sections) -> str:
@@ -979,10 +1320,40 @@ class ReportingTab(QWidget):
         )
 
     def _on_export_docx(self):
-        QMessageBox.information(
-            self, "Coming Soon",
-            "Word (.docx) export will be available in a future update."
+        if not self.current_report_html:
+            return
+        if not self.report_generator.docx_export_available():
+            QMessageBox.warning(
+                self,
+                "DOCX Export Unavailable",
+                "python-docx is not installed, so Word export is unavailable.",
+            )
+            return
+
+        default = "report.docx"
+        proj = self.project_name_edit.text()
+        if proj:
+            safe = "".join(c for c in proj if c.isalnum() or c in " -_").strip()
+            default = f"{safe}_report.docx"
+
+        path, _ = QFileDialog.getSaveFileName(
+            self, "Export Word (.docx)", default, "Word Document (*.docx)"
         )
+        if not path:
+            return
+
+        try:
+            docx_bytes = self.report_generator.generate_docx_from_html(
+                self.current_report_html,
+                brand=self.brand,
+            )
+            with open(path, "wb") as fh:
+                fh.write(docx_bytes)
+        except Exception as exc:
+            QMessageBox.critical(self, "DOCX Error", f"Failed to export Word file:\n{exc}")
+            return
+
+        QMessageBox.information(self, "Exported", f"Word document saved to:\n{path}")
 
     # ── Utilities ─────────────────────────────────────────────────────────────
 

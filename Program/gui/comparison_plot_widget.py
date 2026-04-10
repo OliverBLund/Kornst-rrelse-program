@@ -12,6 +12,7 @@ from matplotlib.patches import Patch
 import matplotlib.pyplot as plt
 import numpy as np
 from typing import List, Dict, Optional
+from .k_plot_helpers import annotate_log_bars, apply_log_bar_limits, format_method_label
 from .matplotlib_canvas import FigureCanvas
 from .theme import C, apply_matplotlib_style
 
@@ -313,6 +314,10 @@ class ComparisonPlotWidget(QWidget):
         ]
         labels = labels + ['Flagged / Warning']
         ax.legend(handles, labels, loc='best', fontsize=8)
+
+    def _overlay_value_labels_enabled(self, n_methods: int, n_datasets: int) -> bool:
+        """Avoid unreadable label walls in dense comparison overlays."""
+        return n_datasets <= 4 and (n_methods * n_datasets) <= 36
     
     def on_grid_layout_changed(self, text: str):
         """Handle grid layout change"""
@@ -461,6 +466,11 @@ class ComparisonPlotWidget(QWidget):
         n_datasets = len(self.k_results_dict)
         n_methods = len(methods)
         bar_width = 0.8 / n_datasets
+        show_value_labels = self._overlay_value_labels_enabled(n_methods, n_datasets)
+        label_bars = []
+        label_texts = []
+        label_levels = []
+        positive_values = []
         
         # Plot bars for each dataset
         has_flagged = False
@@ -473,22 +483,37 @@ class ComparisonPlotWidget(QWidget):
             bars = ax.bar(positions, values, bar_width, label=name,
                           color=color, alpha=0.8, edgecolor='black', linewidth=0.5)
             
-            # Add value labels
             for bar, method, val in zip(bars, methods, values):
                 flagged = method in flagged_methods
                 has_flagged = has_flagged or flagged
                 self._style_k_bar(bar, color, flagged)
                 if val > 0:
-                    height = bar.get_height()
-                    ax.text(bar.get_x() + bar.get_width()/2, height*1.05,
-                           f'{val:.1e}', ha='center', va='bottom', fontsize=6)
+                    positive_values.append(val)
+                    if show_value_labels:
+                        label_bars.append(bar)
+                        label_texts.append(f'{val:.1e}')
+                        label_levels.append(i)
         
         ax.set_xlabel('Method', fontsize=10)
         ax.set_ylabel('K (m/s)', fontsize=10)
         ax.set_title('Hydraulic Conductivity Comparison', fontsize=12, fontweight='bold')
         ax.set_xticks(np.arange(n_methods) + bar_width * (n_datasets - 1) / 2)
-        ax.set_xticklabels(methods, rotation=45, ha='right', fontsize=8)
-        ax.set_yscale('log')
+        ax.set_xticklabels(
+            [format_method_label(method, compact=True) for method in methods],
+            rotation=45,
+            ha='right',
+            fontsize=8,
+        )
+        apply_log_bar_limits(ax, positive_values, max_label_level=max(label_levels, default=0))
+        if show_value_labels:
+            annotate_log_bars(
+                ax,
+                label_bars,
+                label_texts,
+                level_indices=label_levels,
+                fontsize=5.75 if n_datasets > 2 else 6.0,
+                add_bbox=n_datasets > 1,
+            )
         
         if self.show_grid:
             ax.grid(True, axis='y', alpha=0.3)
@@ -513,6 +538,7 @@ class ComparisonPlotWidget(QWidget):
         methods = self._ordered_methods(all_methods)
         
         bar_width = 0.8 / len(methods)
+        positive_values = []
         
         # Plot grouped by dataset
         has_flagged = False
@@ -527,13 +553,14 @@ class ComparisonPlotWidget(QWidget):
                 flagged = method in self.flagged_methods_dict.get(dataset_name, set())
                 has_flagged = has_flagged or flagged
                 self._style_k_bar(bar, color, flagged)
+            positive_values.extend(value for value in values if value > 0)
         
         ax.set_xlabel('Dataset', fontsize=10)
         ax.set_ylabel('K (m/s)', fontsize=10)
         ax.set_title('K-Values by Dataset', fontsize=12, fontweight='bold')
         ax.set_xticks(np.arange(n_datasets) + bar_width * (len(methods) - 1) / 2)
         ax.set_xticklabels(datasets, rotation=45, ha='right', fontsize=8)
-        ax.set_yscale('log')
+        apply_log_bar_limits(ax, positive_values)
         
         if self.show_grid:
             ax.grid(True, axis='y', alpha=0.3)
@@ -568,8 +595,13 @@ class ComparisonPlotWidget(QWidget):
             ax.set_xlabel('Method', fontsize=8)
             ax.set_ylabel('K (m/s)', fontsize=8)
             ax.set_xticks(range(len(methods)))
-            ax.set_xticklabels([m[:4] for m in methods], rotation=45, ha='right', fontsize=6)
-            ax.set_yscale('log')
+            ax.set_xticklabels(
+                [format_method_label(method, tiny=True) for method in methods],
+                rotation=45,
+                ha='right',
+                fontsize=6,
+            )
+            apply_log_bar_limits(ax, values)
             ax.tick_params(labelsize=7)
             
             if self.show_grid:
@@ -612,8 +644,12 @@ class ComparisonPlotWidget(QWidget):
                     self._style_k_bar(bar, self.method_colors.get(method, '#888888'), method in flagged_methods)
                 ax2.set_title(f'{dataset.sample_name} - K', fontsize=8)
                 ax2.set_xticks(range(len(methods)))
-                ax2.set_xticklabels([m[:3] for m in methods], rotation=45, fontsize=6)
-                ax2.set_yscale('log')
+                ax2.set_xticklabels(
+                    [format_method_label(method, tiny=True) for method in methods],
+                    rotation=45,
+                    fontsize=6,
+                )
+                apply_log_bar_limits(ax2, values)
                 ax2.tick_params(labelsize=6)
                 if self.show_grid:
                     ax2.grid(True, axis='y', alpha=0.3)
