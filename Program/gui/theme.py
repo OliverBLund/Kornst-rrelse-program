@@ -590,6 +590,9 @@ QWidget#app-toolbar QPushButton[navtab="true"] {{
 QWidget#app-toolbar QPushButton[navtab="true"]:hover {{
     color: {C.TEXT_MID};
 }}
+QWidget#app-toolbar QPushButton[navtab="true"]:pressed {{
+    color: {C.TEXT};
+}}
 QWidget#app-toolbar QPushButton[navtab="true"][active="true"] {{
     color: {C.OLIVE};
     border-bottom: 2px solid {C.OLIVE};
@@ -607,6 +610,11 @@ QWidget#app-toolbar QPushButton[toolaction="true"] {{
 }}
 QWidget#app-toolbar QPushButton[toolaction="true"]:hover {{
     background: {C.TAN};
+    border-color: {C.EARTH};
+    color: {C.TEXT};
+}}
+QWidget#app-toolbar QPushButton[toolaction="true"]:pressed {{
+    background: {C.BG_LOW};
     border-color: {C.EARTH};
     color: {C.TEXT};
 }}
@@ -697,6 +705,11 @@ QPushButton[filterpill="true"]:hover {{
     border-color: {C.BORDER_DK};
     color: {C.SB_TEXT};
 }}
+QPushButton[filterpill="true"]:pressed {{
+    background: {C.BG_LOW};
+    border-color: {C.EARTH};
+    color: {C.SB_TEXT};
+}}
 QPushButton[filterpill="true"][active="true"] {{
     background: {C.SB_ACT};
     border-color: {C.SB_BDR};
@@ -718,6 +731,11 @@ QPushButton[sbaction="true"]:hover {{
     border-color: {C.BORDER_DK};
     color: {C.SB_TEXT};
 }}
+QPushButton[sbaction="true"]:pressed {{
+    background: {C.BG_LOW};
+    border-color: {C.EARTH};
+    color: {C.SB_TEXT};
+}}
 QPushButton[sbaction="true"][primary="true"] {{
     background: {C.OLIVE};
     border-color: {C.OLIVE_DK};
@@ -726,6 +744,10 @@ QPushButton[sbaction="true"][primary="true"] {{
 }}
 QPushButton[sbaction="true"][primary="true"]:hover {{
     background: {C.OLIVE_H};
+}}
+QPushButton[sbaction="true"][primary="true"]:pressed {{
+    background: {C.OLIVE_DK};
+    border-color: {C.OLIVE_DK};
 }}
 
 /* ════════════════════════════════════════

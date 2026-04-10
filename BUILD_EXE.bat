@@ -216,7 +216,6 @@ if "%BUILD_MODE%"=="1" (
     --hidden-import "PyQt6.QtWidgets" ^
     --hidden-import "PyQt6.QtCore" ^
     --hidden-import "PyQt6.QtGui" ^
-    --collect-all PyQt6 ^
     --collect-data matplotlib ^
     --hidden-import "matplotlib.backends.backend_qt5agg" ^
     --hidden-import "matplotlib.backends.backend_qtagg"

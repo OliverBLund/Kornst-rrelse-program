@@ -1,6 +1,7 @@
 """Reporting tab — generates and previews professional analysis reports."""
 from __future__ import annotations
 
+from html import escape
 import os
 from typing import List
 
@@ -205,6 +206,8 @@ class ReportingTab(QWidget):
         self.report_generator = ReportGenerator()
         self._scheme = ISO14688
         self.dataset_tabs: List = []
+        self._sample_contexts: list[dict] = []
+        self._sample_checkboxes: list[tuple[QCheckBox, dict]] = []
         self.current_report_html = ""
         self.brand = ReportBrand.load()
         self._init_ui()
@@ -647,8 +650,88 @@ class ReportingTab(QWidget):
         self.dataset_tabs = dataset_tabs
         self._refresh_sample_list()
 
+    @staticmethod
+    def _build_unique_labels(names: List[str]) -> List[str]:
+        totals: dict[str, int] = {}
+        for name in names:
+            totals[name] = totals.get(name, 0) + 1
+
+        seen: dict[str, int] = {}
+        labels: list[str] = []
+        for name in names:
+            seen[name] = seen.get(name, 0) + 1
+            if totals[name] > 1:
+                labels.append(f"{name} ({seen[name]})")
+            else:
+                labels.append(name)
+        return labels
+
+    def _set_preview_html(self, html: str) -> None:
+        self.web_view.setHtml(html)
+
+    def _set_report_output(self, report_html: str) -> None:
+        self.current_report_html = report_html
+        self._set_preview_html(self._inject_preview_css(report_html))
+        self.btn_html.setEnabled(True)
+        self.btn_pdf.setEnabled(HAS_WEBENGINE)
+
+    def _clear_report_output(self, message: str | None = None) -> None:
+        self.current_report_html = ""
+        self.btn_html.setEnabled(False)
+        self.btn_pdf.setEnabled(False)
+        self.btn_md.setEnabled(False)
+        self.btn_docx.setEnabled(False)
+        if message:
+            self._set_preview_html(self._error_preview_html(message))
+        else:
+            self._set_preview_html(self._empty_preview_html())
+
+    @staticmethod
+    def _error_preview_html(message: str) -> str:
+        safe = escape(message)
+        return f"""<!DOCTYPE html>
+<html><head><meta charset="UTF-8"><style>
+  body {{
+    font-family: 'Calibri', Arial, sans-serif;
+    background: white;
+    margin: 0;
+    padding: 60px 50px;
+    color: #6a6a6a;
+  }}
+  .center {{ text-align: center; padding-top: 80px; }}
+  h2 {{ font-weight: 400; font-size: 22px; margin-bottom: 12px; color: #7b2e2e; }}
+  p  {{ font-size: 13px; line-height: 1.5; }}
+  strong {{ color: #6b8e23; }}
+  .msg {{
+    margin: 18px auto 0;
+    max-width: 520px;
+    padding: 14px 16px;
+    background: #faf7f4;
+    border: 1px solid #ddd4ca;
+    text-align: left;
+    white-space: pre-wrap;
+  }}
+</style></head>
+<body>
+  <div class="center">
+    <h2>Report Generation Failed</h2>
+    <p>The preview was cleared so stale content cannot be exported.</p>
+    <div class="msg">{safe}</div>
+  </div>
+</body></html>"""
+
+    def _selected_sample_contexts(self) -> list[dict]:
+        selected: list[dict] = []
+        for checkbox, context in self._sample_checkboxes:
+            if checkbox.isChecked():
+                selected.append(context)
+        return selected
+
     def _refresh_sample_list(self):
         self.sample_combo.clear()
+        self._sample_contexts = []
+        self._sample_checkboxes = []
+        self._clear_report_output()
         while self.sample_checks_layout.count():
             item = self.sample_checks_layout.takeAt(0)
             if item.widget():
@@ -659,11 +742,15 @@ class ReportingTab(QWidget):
             self.generate_btn.setEnabled(False)
             return
 
-        for tab in self.dataset_tabs:
-            self.sample_combo.addItem(tab.get_dataset_name())
-            cb = QCheckBox(tab.get_dataset_name())
+        labels = self._build_unique_labels([tab.get_dataset_name() for tab in self.dataset_tabs])
+        for tab, label in zip(self.dataset_tabs, labels):
+            context = {"label": label, "tab": tab}
+            self._sample_contexts.append(context)
+            self.sample_combo.addItem(label)
+            cb = QCheckBox(label)
             cb.setChecked(True)
             self.sample_checks_layout.addWidget(cb)
+            self._sample_checkboxes.append((cb, context))
 
         self.generate_btn.setEnabled(True)
 
@@ -765,22 +852,19 @@ class ReportingTab(QWidget):
             else:
                 html = self._gen_full(brand, metadata, sections)
 
-            self.current_report_html = html
-            self.web_view.setHtml(self._inject_preview_css(html))
-
-            self.btn_html.setEnabled(True)
-            if HAS_WEBENGINE:
-                self.btn_pdf.setEnabled(True)
+            self._set_report_output(html)
 
         except Exception as exc:
+            self._clear_report_output(str(exc))
             QMessageBox.critical(self, "Report Error",
                                  f"Failed to generate report:\n{exc}")
 
     def _gen_individual(self, brand, metadata, sections) -> str:
         idx = self.sample_combo.currentIndex()
-        if idx < 0 or idx >= len(self.dataset_tabs):
+        if idx < 0 or idx >= len(self._sample_contexts):
             raise ValueError("No sample selected.")
-        tab     = self.dataset_tabs[idx]
+        context = self._sample_contexts[idx]
+        tab     = context["tab"]
         dataset = tab.get_dataset()
         subtype = self._subtype_chips.selected()
 
@@ -800,35 +884,49 @@ class ReportingTab(QWidget):
             )
 
     def _gen_comparison(self, brand, metadata, sections) -> str:
-        selected = []
-        for i in range(self.sample_checks_layout.count()):
-            cb = self.sample_checks_layout.itemAt(i).widget()
-            if cb and cb.isChecked():
-                for tab in self.dataset_tabs:
-                    if tab.get_dataset_name() == cb.text():
-                        selected.append(tab)
-                        break
-
+        selected = self._selected_sample_contexts()
         if not selected:
             raise ValueError("Select at least one sample.")
 
-        datasets = [t.get_dataset() for t in selected]
-        k_dict   = {t.get_dataset_name(): t.get_results()
-                    for t in selected if t.get_results()}
-        temp     = selected[0].temperature if selected else 20.0
-        poro     = selected[0].porosity    if selected else 0.4
+        sample_details = []
+        for context in selected:
+            tab = context["tab"]
+            sample_details.append({
+                "label": context["label"],
+                "dataset": tab.get_dataset(),
+                "k_results": list(tab.get_results() or []),
+                "temperature": tab.temperature,
+                "porosity": tab.porosity,
+            })
 
         return self.report_generator.generate_comparison_report(
-            datasets, k_dict, temp, poro,
-            metadata=metadata, sections=sections, brand=brand,
+            [item["dataset"] for item in sample_details],
+            metadata=metadata,
+            sections=sections,
+            brand=brand,
+            sample_details=sample_details,
         )
 
     def _gen_full(self, brand, metadata, sections) -> str:
-        for i in range(self.sample_checks_layout.count()):
-            cb = self.sample_checks_layout.itemAt(i).widget()
-            if cb:
-                cb.setChecked(True)
-        return self._gen_comparison(brand, metadata, sections)
+        if not self._sample_contexts:
+            raise ValueError("No samples loaded.")
+
+        sample_details = []
+        for context in self._sample_contexts:
+            tab = context["tab"]
+            sample_details.append({
+                "label": context["label"],
+                "dataset": tab.get_dataset(),
+                "k_results": list(tab.get_results() or []),
+                "temperature": tab.temperature,
+                "porosity": tab.porosity,
+            })
+
+        return self.report_generator.generate_comparison_report(
+            [item["dataset"] for item in sample_details],
+            metadata=metadata, sections=sections, brand=brand,
+            sample_details=sample_details,
+        )
 
     # ── Export ────────────────────────────────────────────────────────────────
 
@@ -861,7 +959,7 @@ class ReportingTab(QWidget):
                 layout = QPageLayout(
                     QPageSize(QPageSize.PageSizeId.A4),
                     QPageLayout.Orientation.Portrait,
-                    QMarginsF(15, 15, 15, 15),
+                    QMarginsF(0, 0, 0, 0),
                 )
                 self.web_view.page().printToPdf(path, layout)
             except Exception as exc:
@@ -900,8 +998,14 @@ class ReportingTab(QWidget):
         box-shadow: 0 4px 28px rgba(0,0,0,0.22), 0 1.5px 6px rgba(0,0,0,0.10) !important;
         background: white !important;
         min-height: 297mm;
-        max-width: 210mm;
+        width: 210mm;
+        max-width: 210mm !important;
         margin: 0 auto !important;
+        padding: 0 20mm !important;
+        box-sizing: border-box !important;
+    }
+    .report-top-bar {
+        margin: 0 -20mm 40px -20mm !important;
     }
     /* Flow-based page separator — bleeds to paper edges via negative margins */
     .preview-page-sep {
@@ -910,7 +1014,7 @@ class ReportingTab(QWidget):
         justify-content: center;
         height: 40px;
         /* negative margins = body padding, so separator spans full paper width */
-        margin: 0 -50px;
+        margin: 0 -20mm;
         background: #c8c4be;
         border-top:    1px solid #b0aba5;
         border-bottom: 1px solid #b0aba5;
@@ -934,22 +1038,52 @@ class ReportingTab(QWidget):
      */
     var PAGE_PX = 252 * 96 / 25.4;
 
+    function isBreakCandidate(el) {
+        if (!el || el.classList.contains('preview-page-sep')) return false;
+        if (el.closest('table, thead, tbody, tr, td, th, ul, ol, li')) return false;
+        var style = window.getComputedStyle(el);
+        if (style.display === 'none' || style.position === 'fixed') return false;
+        if (el.offsetHeight < 12) return false;
+        return /^(H1|H2|H3|H4|P|DIV|HR|IMG|FIGURE|TABLE)$/.test(el.tagName);
+    }
+
+    function collectBreakCandidates() {
+        var bodyTop = document.body.getBoundingClientRect().top;
+        var walker = document.createTreeWalker(document.body, NodeFilter.SHOW_ELEMENT);
+        var candidates = [];
+
+        while (walker.nextNode()) {
+            var el = walker.currentNode;
+            if (!isBreakCandidate(el)) continue;
+            candidates.push({
+                el: el,
+                top: el.getBoundingClientRect().top - bodyTop
+            });
+        }
+
+        candidates.sort(function (a, b) { return a.top - b.top; });
+        return candidates;
+    }
+
     function injectPageBreaks() {
         if (document.querySelector('.preview-page-sep')) return;
 
-        var children = Array.from(document.body.children);
-        var origTops = children.map(function (el) { return el.offsetTop; });
-        var bodyH    = document.body.scrollHeight;
-        var page     = 1;
+        var candidates = collectBreakCandidates();
+        var bodyH = document.body.scrollHeight;
+        var page = 1;
+        var usedTargets = new Set();
 
         for (var boundary = PAGE_PX; boundary < bodyH; boundary += PAGE_PX) {
-            /* Find the first child whose original top is at or past the boundary */
             var target = null;
-            for (var i = 0; i < origTops.length; i++) {
-                if (origTops[i] >= boundary) { target = children[i]; break; }
+            for (var i = 0; i < candidates.length; i++) {
+                if (candidates[i].top >= boundary && !usedTargets.has(candidates[i].el)) {
+                    target = candidates[i].el;
+                    break;
+                }
             }
             if (!target) continue;
 
+            usedTargets.add(target);
             var sep = document.createElement('div');
             sep.className = 'preview-page-sep';
             sep.textContent = 'Page ' + (++page);

@@ -14,8 +14,9 @@ from PyQt6.QtWidgets import (
     QStatusBar, QStackedWidget, QTabWidget, QMessageBox,
     QProgressBar, QLabel, QFrame, QFileDialog,
     QPushButton, QSizePolicy, QToolButton, QMenu, QSplitter,
+    QGraphicsOpacityEffect,
 )
-from PyQt6.QtCore import Qt, pyqtSignal, QSettings, QSize, QTimer
+from PyQt6.QtCore import Qt, pyqtSignal, QSettings, QSize, QTimer, QEasingCurve, QPropertyAnimation
 from PyQt6.QtGui import QAction, QColor, QFont
 from typing import Callable, List, Optional
 
@@ -271,6 +272,8 @@ class _RichStatusBar(QStatusBar):
         self.setObjectName("app-statusbar")
         self.setSizeGripEnabled(False)
         self.setFixedHeight(SZ.STATUS_H)
+        self._label_effects: dict[QLabel, QGraphicsOpacityEffect] = {}
+        self._label_animations: dict[QLabel, QPropertyAnimation] = {}
 
         container = QWidget()
         container.setStyleSheet("background: transparent;")
@@ -285,6 +288,9 @@ class _RichStatusBar(QStatusBar):
         self._led_visible = True
         self._led.setStyleSheet(
             f"background: {C.LED_OK_ST}; border-radius: 3px;")
+        self._led_effect = QGraphicsOpacityEffect(self._led)
+        self._led_effect.setOpacity(1.0)
+        self._led.setGraphicsEffect(self._led_effect)
         layout.addWidget(self._led)
         layout.addSpacing(5)
 
@@ -292,6 +298,10 @@ class _RichStatusBar(QStatusBar):
         self._status_lbl = QLabel("Ready")
         self._status_lbl.setStyleSheet(
             f"color: #a0d070; font-family: '{F.MONO}'; font-size: {F.SZ_SM}pt;")
+        self._status_effect = QGraphicsOpacityEffect(self._status_lbl)
+        self._status_effect.setOpacity(1.0)
+        self._status_lbl.setGraphicsEffect(self._status_effect)
+        self._label_effects[self._status_lbl] = self._status_effect
         layout.addWidget(self._status_lbl)
 
         # Segments: SAMPLE · D50 · K̄ · TEMP · METHODS · DATASETS
@@ -344,23 +354,56 @@ class _RichStatusBar(QStatusBar):
         if not self._led_ok:
             return  # don't blink when in warning/error state
         self._led_visible = not self._led_visible
-        opacity = "1.0" if self._led_visible else "0.35"
-        shadow = "0 0 5px rgba(125,208,80,0.5)" if self._led_visible else "none"
-        self._led.setStyleSheet(
-            f"background: {C.LED_OK_ST}; border-radius: 3px; opacity: {opacity};")
+        self._led_effect.setOpacity(1.0 if self._led_visible else 0.4)
 
     def set_status(self, text: str, ok: bool = True) -> None:
+        changed = text != self._status_lbl.text() or ok != self._led_ok
         self._status_lbl.setText(text)
         self._led_ok = ok
+        self._led_visible = True
         color = C.LED_OK_ST if ok else C.LED_WARN
         text_color = "#a0d070" if ok else C.LED_WARN
         self._led.setStyleSheet(f"background: {color}; border-radius: 3px;")
+        self._led_effect.setOpacity(1.0)
         self._status_lbl.setStyleSheet(
             f"color: {text_color}; font-family: '{F.MONO}'; font-size: {F.SZ_SM}pt;")
+        if changed:
+            self._pulse_label(self._status_lbl, low_opacity=0.58, duration_ms=170)
 
     def set_segment(self, key: str, value: str) -> None:
         if key in self._seg_vals:
-            self._seg_vals[key].setText(value)
+            label = self._seg_vals[key]
+            if label.text() != value:
+                label.setText(value)
+                self._pulse_label(label, low_opacity=0.68, duration_ms=150)
+
+    def _pulse_label(
+        self,
+        label: QLabel,
+        *,
+        low_opacity: float,
+        duration_ms: int,
+    ) -> None:
+        effect = self._label_effects.get(label)
+        if effect is None:
+            effect = QGraphicsOpacityEffect(label)
+            effect.setOpacity(1.0)
+            label.setGraphicsEffect(effect)
+            self._label_effects[label] = effect
+
+        animation = self._label_animations.get(label)
+        if animation is None:
+            animation = QPropertyAnimation(effect, b"opacity", self)
+            animation.setEasingCurve(QEasingCurve.Type.OutCubic)
+            self._label_animations[label] = animation
+        else:
+            animation.stop()
+
+        effect.setOpacity(low_opacity)
+        animation.setDuration(duration_ms)
+        animation.setStartValue(low_opacity)
+        animation.setEndValue(1.0)
+        animation.start()
 
 
 # ─────────────────────────────────────────────────────────────────────

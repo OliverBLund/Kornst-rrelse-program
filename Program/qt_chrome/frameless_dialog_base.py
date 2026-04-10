@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from typing import Optional
 
-from PyQt6.QtCore import QEvent, Qt
+from PyQt6.QtCore import QEvent, QEasingCurve, QPropertyAnimation, Qt
 from PyQt6.QtWidgets import QDialog, QWidget
 
 from .dialog_controller import FramelessDialogChromeController
@@ -36,6 +36,11 @@ class FramelessDialogBase(QDialog):
             resize_margin=self._resize_margin,
         )
         self._soft_corners_pending = False
+        self._entrance_animation = QPropertyAnimation(self, b"windowOpacity", self)
+        self._entrance_animation.setDuration(170)
+        self._entrance_animation.setEasingCurve(QEasingCurve.Type.OutCubic)
+        self._entrance_animation.setStartValue(0.0)
+        self._entrance_animation.setEndValue(1.0)
 
         self._configure_window_chrome()
         self.destroyed.connect(self._cleanup_global_event_filter)
@@ -122,6 +127,8 @@ class FramelessDialogBase(QDialog):
         self._apply_frameless_round_mask()
 
     def showEvent(self, event):
+        self._prepare_entrance_animation()
+
         if self._is_frameless_active():
             self._chrome_controller.on_show()
 
@@ -131,12 +138,15 @@ class FramelessDialogBase(QDialog):
 
         super().showEvent(event)
         self._apply_frameless_round_mask()
+        self._play_entrance_animation()
 
     def hideEvent(self, event):
+        self._reset_entrance_animation()
         self._cleanup_global_event_filter()
         super().hideEvent(event)
 
     def closeEvent(self, event):
+        self._reset_entrance_animation()
         self._cleanup_global_event_filter()
         super().closeEvent(event)
 
@@ -144,3 +154,29 @@ class FramelessDialogBase(QDialog):
         super().changeEvent(event)
         if event.type() == QEvent.Type.WindowStateChange:
             self._apply_frameless_round_mask()
+
+    def _prepare_entrance_animation(self) -> None:
+        """Prime the window opacity before the dialog becomes visible."""
+        try:
+            self._entrance_animation.stop()
+            self.setWindowOpacity(0.0)
+        except Exception:
+            pass
+
+    def _play_entrance_animation(self) -> None:
+        """Play a brief fade-in when the dialog opens."""
+        try:
+            self._entrance_animation.start()
+        except Exception:
+            try:
+                self.setWindowOpacity(1.0)
+            except Exception:
+                pass
+
+    def _reset_entrance_animation(self) -> None:
+        """Restore full opacity when the dialog closes or hides."""
+        try:
+            self._entrance_animation.stop()
+            self.setWindowOpacity(1.0)
+        except Exception:
+            pass

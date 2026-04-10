@@ -120,6 +120,7 @@ def make_dialog_header(
     close_btn.setStyleSheet(
         "QPushButton#dialogCloseBtn { background: transparent; border: none; border-radius: 3px; }"
         "QPushButton#dialogCloseBtn:hover { background: rgba(180,48,32,.1); color: #a03020; }"
+        "QPushButton#dialogCloseBtn:pressed { background: rgba(180,48,32,.18); color: #7f2418; }"
     )
     close_btn.setToolTip("Close")
     close_btn.clicked.connect(close_fn)
@@ -171,6 +172,7 @@ def make_dialog_footer(
                 f"border-radius: {SZ.BORDER_RADIUS}px; color: white; font-weight: 600; "
                 f"padding: 0 14px; font-size: {F.SZ_LG}pt; }}"
                 f"QPushButton:hover {{ background: {C.OLIVE_H}; }}"
+                f"QPushButton:pressed {{ background: {C.OLIVE_DK}; border-color: {C.OLIVE_DK}; }}"
                 f"QPushButton:disabled {{ background: {C.BORDER}; border-color: {C.BORDER_DK}; "
                 f"color: {C.TEXT_MUTED}; }}"
             )
@@ -180,6 +182,7 @@ def make_dialog_footer(
                 f"border-radius: {SZ.BORDER_RADIUS}px; color: #a03020; "
                 f"background: transparent; padding: 0 14px; font-size: {F.SZ_LG}pt; }}"
                 f"QPushButton:hover {{ background: rgba(160,48,32,.06); }}"
+                f"QPushButton:pressed {{ background: rgba(160,48,32,.12); border-color: rgba(160,48,32,.50); }}"
             )
         else:  # secondary (default)
             btn.setStyleSheet(
@@ -188,6 +191,7 @@ def make_dialog_footer(
                 f"color: {C.TEXT_MID}; padding: 0 14px; font-size: {F.SZ_LG}pt; }}"
                 f"QPushButton:hover {{ background: {C.BG_RAISED}; "
                 f"border-color: {C.BORDER_DK}; color: {C.TEXT}; }}"
+                f"QPushButton:pressed {{ background: {C.BG_LOW}; border-color: {C.EARTH}; color: {C.TEXT}; }}"
             )
         btn.clicked.connect(callback)
         lay.addWidget(btn)

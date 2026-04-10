@@ -11,7 +11,7 @@ sys.path.insert(0, "Program")
 
 from PyQt6.QtWidgets import QApplication
 
-from gui.theme import default_ui_font_families, default_ui_font_family, icon
+from gui.theme import build_stylesheet, default_ui_font_families, default_ui_font_family, icon
 
 
 APP = QApplication.instance() or QApplication([])
@@ -31,6 +31,12 @@ class TestTheme(unittest.TestCase):
     def test_icon_helper_renders_requested_small_pixmap(self):
         pixmap = icon("fa6s.chevron-right", "#333333", size=8).pixmap(8, 8)
         self.assertFalse(pixmap.isNull())
+
+    def test_stylesheet_includes_pressed_feedback_for_shared_controls(self):
+        stylesheet = build_stylesheet()
+        self.assertIn('QWidget#app-toolbar QPushButton[toolaction="true"]:pressed', stylesheet)
+        self.assertIn('QPushButton[filterpill="true"]:pressed', stylesheet)
+        self.assertIn('QPushButton[sbaction="true"]:pressed', stylesheet)
 
 
 if __name__ == "__main__":

@@ -3,10 +3,12 @@ Report generator for creating professional analysis reports
 """
 
 from typing import List, Dict, Optional, Any
+from html import escape
 import numpy as np
 from datetime import datetime
 import base64
 import io
+import re
 import matplotlib
 matplotlib.use('Agg')  # Use non-interactive backend
 import matplotlib.pyplot as plt
@@ -58,7 +60,7 @@ class ReportGenerator:
             }
 
             @media print {
-                body { margin: 0; padding: 15mm 20mm; }
+                body { margin: 0; padding: 0; max-width: none; }
                 .page-break { page-break-before: always; }
                 .no-break   { page-break-inside: avoid; }
                 h1, h2, h3  { page-break-after: avoid; }
@@ -429,6 +431,54 @@ class ReportGenerator:
             .replace("--brand-light: rgba(44,62,80,0.08);", f"--brand-light: {light};")
         )
 
+    @staticmethod
+    def _esc(value: Any) -> str:
+        return escape("" if value is None else str(value), quote=True)
+
+    def _note_html(self, value: Any) -> str:
+        return self._esc(value).replace("\n", "<br>")
+
+    @staticmethod
+    def _extract_body_contents(html_text: str) -> str:
+        match = re.search(r"<body[^>]*>(.*)</body>", html_text, flags=re.IGNORECASE | re.DOTALL)
+        return match.group(1).strip() if match else html_text.strip()
+
+    @staticmethod
+    def _strip_leading_report_markup(body_html: str) -> str:
+        body_html = re.sub(r"^\s*<div class=\"report-top-bar\"></div>\s*", "", body_html, count=1, flags=re.DOTALL)
+        body_html = re.sub(
+            r"^\s*<h1>\s*Hydraulic Conductivity Analysis Report\s*</h1>\s*",
+            "",
+            body_html,
+            count=1,
+            flags=re.IGNORECASE | re.DOTALL,
+        )
+        return body_html.strip()
+
+    @staticmethod
+    def _summarize_sample_field(sample_details: List[Dict[str, Any]], key: str, suffix: str = "") -> str:
+        values = [item.get(key) for item in sample_details if item.get(key) is not None]
+        if not values:
+            return "N/A"
+        try:
+            numeric = [float(value) for value in values]
+        except (TypeError, ValueError):
+            unique = []
+            for value in values:
+                if value not in unique:
+                    unique.append(value)
+            if len(unique) == 1:
+                return f"{unique[0]}{suffix}"
+            return "Varies by sample"
+
+        low = min(numeric)
+        high = max(numeric)
+        low_text = f"{low:.3f}".rstrip("0").rstrip(".")
+        high_text = f"{high:.3f}".rstrip("0").rstrip(".")
+        if abs(high - low) < 1e-9:
+            return f"{low_text}{suffix}"
+        return f"Varies by sample ({low_text} to {high_text}{suffix})"
+
     def _create_cover_page(self, title: str, subtitle: str,
                            metadata: Dict[str, str], brand=None) -> str:
         """Create a professional cover page"""
@@ -440,26 +490,26 @@ class ReportGenerator:
             html += (
                 f'<div style="font-size:13px;font-weight:600;'
                 f'color:{brand.primary_color};margin-bottom:4px;">'
-                f'{brand.org_name}</div>'
+                f'{self._esc(brand.org_name)}</div>'
             )
             if brand.org_subtitle:
                 html += (
                     f'<div style="font-size:11px;color:#7f8c8d;'
-                    f'margin-bottom:28px;">{brand.org_subtitle}</div>'
+                    f'margin-bottom:28px;">{self._esc(brand.org_subtitle)}</div>'
                 )
 
-        html += f'<div class="cover-title">{title}</div>'
-        html += f'<div class="cover-subtitle">{subtitle}</div>'
+        html += f'<div class="cover-title">{self._esc(title)}</div>'
+        html += f'<div class="cover-subtitle">{self._esc(subtitle)}</div>'
 
         html += '<div class="cover-meta">'
         if metadata.get('project_name'):
-            html += f'<div><strong>Project:</strong> {metadata["project_name"]}</div>'
+            html += f'<div><strong>Project:</strong> {self._esc(metadata["project_name"])}</div>'
         if metadata.get('location'):
-            html += f'<div><strong>Location:</strong> {metadata["location"]}</div>'
+            html += f'<div><strong>Location:</strong> {self._esc(metadata["location"])}</div>'
         if metadata.get('client'):
-            html += f'<div><strong>Client:</strong> {metadata["client"]}</div>'
+            html += f'<div><strong>Client:</strong> {self._esc(metadata["client"])}</div>'
         if metadata.get('analyst'):
-            html += f'<div><strong>Analyst:</strong> {metadata["analyst"]}</div>'
+            html += f'<div><strong>Analyst:</strong> {self._esc(metadata["analyst"])}</div>'
         html += f'<div><strong>Date:</strong> {datetime.now().strftime("%B %d, %Y")}</div>'
         html += '</div>'
         html += '</div>'
@@ -602,15 +652,17 @@ class ReportGenerator:
         plt.tight_layout()
         return self._fig_to_base64(fig)
 
-    def _create_comparison_grain_size_plot(self, datasets: List[GrainSizeData]) -> str:
+    def _create_comparison_grain_size_plot(self, datasets: List[GrainSizeData],
+                                           sample_labels: Optional[List[str]] = None) -> str:
         """Create side-by-side grain size curves for comparison"""
         fig, ax = plt.subplots(figsize=(12, 7))
 
         colors = plt.cm.tab10(np.linspace(0, 1, len(datasets)))
+        labels = sample_labels or [dataset.sample_name for dataset in datasets]
 
-        for dataset, color in zip(datasets, colors):
+        for dataset, label, color in zip(datasets, labels, colors):
             ax.semilogx(dataset.particle_sizes, dataset.percent_passing,
-                       'o-', linewidth=2, markersize=4, label=dataset.sample_name,
+                       'o-', linewidth=2, markersize=4, label=label,
                        color=color, markerfacecolor='white', markeredgewidth=1.5)
 
         ax.set_xlabel('Grain Size (mm)', fontsize=12, fontweight='bold')
@@ -731,16 +783,16 @@ class ReportGenerator:
 
         if metadata.get('project_name'):
             html += '<div class="metadata-label">Project:</div>'
-            html += f'<div class="metadata-value">{metadata["project_name"]}</div>'
+            html += f'<div class="metadata-value">{self._esc(metadata["project_name"])}</div>'
         if metadata.get('location'):
             html += '<div class="metadata-label">Location:</div>'
-            html += f'<div class="metadata-value">{metadata["location"]}</div>'
+            html += f'<div class="metadata-value">{self._esc(metadata["location"])}</div>'
         if metadata.get('client'):
             html += '<div class="metadata-label">Client:</div>'
-            html += f'<div class="metadata-value">{metadata["client"]}</div>'
+            html += f'<div class="metadata-value">{self._esc(metadata["client"])}</div>'
         if metadata.get('analyst'):
             html += '<div class="metadata-label">Analyst:</div>'
-            html += f'<div class="metadata-value">{metadata["analyst"]}</div>'
+            html += f'<div class="metadata-value">{self._esc(metadata["analyst"])}</div>'
 
         html += '<div class="metadata-label">Report Date:</div>'
         html += f'<div class="metadata-value">{datetime.now().strftime("%B %d, %Y at %H:%M")}</div>'
@@ -1032,7 +1084,7 @@ class ReportGenerator:
                 html += f"""
 <div class="info-box">
     <h3>Additional Notes</h3>
-    <p>{metadata['notes'].replace(chr(10), '<br>')}</p>
+    <p>{self._note_html(metadata['notes'])}</p>
 </div>
 """
             html += "</div>"
@@ -1349,7 +1401,7 @@ class ReportGenerator:
                 html += f"""
                 <div class="info-box">
                     <h3>Additional Notes</h3>
-                    <p>{metadata['notes'].replace(chr(10), '<br>')}</p>
+                    <p>{self._note_html(metadata['notes'])}</p>
                 </div>
                 """
 
@@ -1389,14 +1441,28 @@ class ReportGenerator:
                 'interpretation': True
             }
 
-        # Generate both reports with shared metadata and sections
-        grain_report = self.generate_grain_size_report(dataset, metadata=metadata, sections=sections, brand=brand)
-        k_report = self.generate_k_value_report(dataset, k_results, temperature, porosity,
-                                                metadata=metadata, sections=sections, brand=brand)
+        grain_sections = dict(sections)
+        k_sections = dict(sections)
+        k_sections['cover_page'] = False
 
-        # Extract body content from both reports
-        grain_body = grain_report.split('<body>')[1].split('</body>')[0]
-        k_body = k_report.split('<h1>Hydraulic Conductivity Analysis Report</h1>')[1].split('</body>')[0]
+        grain_report = self.generate_grain_size_report(
+            dataset,
+            metadata=metadata,
+            sections=grain_sections,
+            brand=brand,
+        )
+        k_report = self.generate_k_value_report(
+            dataset,
+            k_results,
+            temperature,
+            porosity,
+            metadata=metadata,
+            sections=k_sections,
+            brand=brand,
+        )
+
+        grain_body = self._extract_body_contents(grain_report)
+        k_body = self._strip_leading_report_markup(self._extract_body_contents(k_report))
 
         # Create combined report with page break between sections
         html = f"""
@@ -1409,7 +1475,7 @@ class ReportGenerator:
         <body>
             {grain_body.replace('</body>', '').replace('</html>', '')}
 
-            <div style="page-break-before: always;"></div>
+            <div class="page-break"></div>
 
             <h1>Hydraulic Conductivity Analysis</h1>
             {k_body}
@@ -1419,13 +1485,13 @@ class ReportGenerator:
 
         return html
 
-    def generate_comparison_report(self, datasets: List[GrainSizeData],
-                                  k_results_dict: Dict[str, List[KCalculationResult]],
-                                  temperature: float,
-                                  porosity: float,
-                                  metadata: Optional[Dict[str, str]] = None,
-                                  sections: Optional[Dict[str, bool]] = None,
-                                  brand=None) -> str:
+    def _generate_comparison_report_legacy(self, datasets: List[GrainSizeData],
+                                          k_results_dict: Dict[str, List[KCalculationResult]],
+                                          temperature: float,
+                                          porosity: float,
+                                          metadata: Optional[Dict[str, str]] = None,
+                                          sections: Optional[Dict[str, bool]] = None,
+                                          brand=None) -> str:
         """Generate a comparison report for multiple samples"""
 
         # Set defaults
@@ -1670,13 +1736,316 @@ class ReportGenerator:
                 html += f"""
                 <div class="info-box">
                     <h3>Additional Notes</h3>
-                    <p>{metadata['notes'].replace(chr(10), '<br>')}</p>
+                    <p>{self._note_html(metadata['notes'])}</p>
                 </div>
                 """
 
             html += "</div>"
 
         # Add footer
+        html += """
+            <div class="footer">
+                <span><strong>Multi-Sample Comparison Report</strong></span>
+                <span>Generated by Grain Size Analysis &amp; Hydraulic Conductivity Calculator</span>
+            </div>
+        </body>
+        </html>
+        """
+
+        return html
+
+    def generate_comparison_report(self, datasets: List[GrainSizeData],
+                                  k_results_dict: Optional[Dict[str, List[KCalculationResult]]] = None,
+                                  temperature: Optional[float] = None,
+                                  porosity: Optional[float] = None,
+                                  metadata: Optional[Dict[str, str]] = None,
+                                  sections: Optional[Dict[str, bool]] = None,
+                                  brand=None,
+                                  sample_details: Optional[List[Dict[str, Any]]] = None) -> str:
+        """Generate a comparison report for multiple samples."""
+        if metadata is None:
+            metadata = {}
+        if sections is None:
+            sections = {
+                'cover_page': True,
+                'executive_summary': True,
+                'methodology': True,
+                'results': True,
+                'plots': True,
+                'interpretation': True,
+                'grain_comparison': True,
+                'k_statistics': True,
+            }
+
+        if sample_details is None:
+            k_results_dict = k_results_dict or {}
+            sample_details = []
+            for index, dataset in enumerate(datasets):
+                label = dataset.sample_name or f"Sample {index + 1}"
+                sample_details.append({
+                    "label": label,
+                    "dataset": dataset,
+                    "k_results": list(k_results_dict.get(label, [])),
+                    "temperature": temperature,
+                    "porosity": porosity,
+                })
+        else:
+            normalized_details = []
+            for index, item in enumerate(sample_details):
+                dataset = item.get("dataset")
+                if dataset is None:
+                    continue
+                normalized_details.append({
+                    "label": item.get("label") or dataset.sample_name or f"Sample {index + 1}",
+                    "dataset": dataset,
+                    "k_results": list(item.get("k_results") or []),
+                    "temperature": item.get("temperature"),
+                    "porosity": item.get("porosity"),
+                })
+            sample_details = normalized_details
+
+        datasets = [item["dataset"] for item in sample_details]
+        sample_labels = [str(item["label"]) for item in sample_details]
+        plot_results_dict = {
+            str(item["label"]): list(item.get("k_results") or [])
+            for item in sample_details
+        }
+        mean_k_by_sample = {}
+        for name, results in plot_results_dict.items():
+            k_values = [r.k_value for r in results if r.k_value is not None and r.k_value > 0]
+            if k_values:
+                mean_k_by_sample[name] = np.mean(k_values)
+
+        temperature_summary = self._summarize_sample_field(sample_details, "temperature", " °C")
+        porosity_summary = self._summarize_sample_field(sample_details, "porosity")
+
+        html = f"""
+        <!DOCTYPE html>
+        <html>
+        <head>
+            <title>Multi-Sample Comparison Report</title>
+            {self._get_branded_style(brand)}
+        </head>
+        <body>
+        <div class="report-top-bar"></div>
+        """
+
+        if sections.get('cover_page', True):
+            html += self._create_cover_page(
+                title="Multi-Sample Comparison Report",
+                subtitle=f"Hydraulic Conductivity Analysis - {len(datasets)} Samples",
+                metadata=metadata,
+                brand=brand,
+            )
+
+        html += f"""
+            <h1>Multi-Sample Comparison Report</h1>
+
+            {self._format_metadata_section(metadata)}
+
+            <div class="metadata">
+                <p><strong>Number of Samples:</strong> {len(datasets)}</p>
+                <p><strong>Temperature:</strong> {self._esc(temperature_summary)}</p>
+                <p><strong>Porosity:</strong> {self._esc(porosity_summary)}</p>
+            </div>
+        """
+
+        if sections.get('executive_summary', True):
+            html += f"""
+            <div style="page-break-before: auto;">
+            <h2>Executive Summary</h2>
+            <div class="info-box">
+                <p><strong>Comparison Analysis:</strong> This report compares {len(datasets)} soil samples
+                based on grain size distribution and hydraulic conductivity estimates.</p>
+            """
+
+            if mean_k_by_sample:
+                highest = max(mean_k_by_sample.items(), key=lambda x: x[1])
+                lowest = min(mean_k_by_sample.items(), key=lambda x: x[1])
+                html += f"""
+                <p><strong>Key Findings:</strong></p>
+                <ul>
+                    <li>Highest permeability: {self._esc(highest[0])} ({highest[1]:.2e} m/s)</li>
+                    <li>Lowest permeability: {self._esc(lowest[0])} ({lowest[1]:.2e} m/s)</li>
+                    <li>Permeability range: {highest[1]/lowest[1]:.1f}x difference</li>
+                </ul>
+                """
+
+            html += """
+            </div>
+            </div>
+            """
+
+        if sections.get('methodology', True):
+            html += """
+            <div style="page-break-before: auto;">
+            <h2>Methodology</h2>
+            <div class="info-box">
+                <h3>Comparative Analysis Approach</h3>
+                <p>This comparison report presents a side-by-side analysis of multiple soil samples
+                to identify patterns, variations, and relationships between grain size characteristics
+                and hydraulic conductivity estimates.</p>
+                <h3>Analysis Components</h3>
+                <p><strong>Grain Size Comparison:</strong> Overlapping distribution curves allow visual
+                assessment of particle size variations between samples.</p>
+                <p><strong>K-Value Comparison:</strong> Box plots and statistical summaries reveal the
+                range and reliability of hydraulic conductivity estimates across samples.</p>
+                <p><strong>Method Reliability:</strong> A reliability matrix shows which empirical methods
+                are applicable for each sample, helping identify the most suitable estimation approaches.</p>
+            </div>
+            </div>
+            """
+
+        if sections.get('results', True):
+            html += """
+            <div style="page-break-before: auto;">
+            <h2>Results & Analysis</h2>
+
+            <h3>Sample Overview</h3>
+            <table>
+                <thead>
+                    <tr>
+                        <th>Sample</th>
+                        <th>Temp (°C)</th>
+                        <th>Porosity</th>
+                        <th>D10 (mm)</th>
+                        <th>D50 (mm)</th>
+                        <th>D60 (mm)</th>
+                        <th>Cu</th>
+                        <th>Soil Type</th>
+                        <th>Mean K (m/s)</th>
+                    </tr>
+                </thead>
+                <tbody>
+            """
+
+            for item in sample_details:
+                label = str(item["label"])
+                dataset = item["dataset"]
+                d10 = dataset.get_d10()
+                d50 = dataset.get_d50()
+                d60 = dataset.get_d60()
+                cu = (d60 / d10) if (d10 and d60) else None
+
+                mean_k = "N/A"
+                if label in mean_k_by_sample:
+                    mean_k = f"{mean_k_by_sample[label]:.2e}"
+
+                temp_value = item.get("temperature")
+                porosity_value = item.get("porosity")
+                temp_display = "N/A" if temp_value is None else f"{float(temp_value):.2f}"
+                porosity_display = "N/A" if porosity_value is None else f"{float(porosity_value):.3f}".rstrip("0").rstrip(".")
+
+                html += f"""
+                <tr>
+                    <td>{self._esc(label)}</td>
+                    <td>{temp_display}</td>
+                    <td>{porosity_display}</td>
+                    <td>{f'{d10:.3f}' if d10 else 'N/A'}</td>
+                    <td>{f'{d50:.3f}' if d50 else 'N/A'}</td>
+                    <td>{f'{d60:.3f}' if d60 else 'N/A'}</td>
+                    <td>{f'{cu:.2f}' if cu else 'N/A'}</td>
+                    <td>{self._esc(dataset.classify(scheme=self._scheme).label)}</td>
+                    <td>{mean_k}</td>
+                </tr>
+                """
+
+            html += "</tbody></table>"
+
+            if sections.get('grain_comparison', True):
+                html += f"<h3>Grain Parameters Comparison</h3>{self._create_grain_parameters_comparison_table(datasets, sample_labels)}"
+
+            if sections.get('k_statistics', True) and plot_results_dict:
+                html += f"<h3>Permeability Classification Summary</h3>{self._create_permeability_classification_table(plot_results_dict)}"
+
+            html += "</div>"
+
+        if sections.get('plots', True):
+            comparison_plot = self._create_comparison_grain_size_plot(datasets, sample_labels)
+            k_boxplot = self._create_k_value_boxplot(plot_results_dict)
+            reliability_matrix = self._create_method_reliability_matrix(plot_results_dict)
+
+            if comparison_plot:
+                html += f"""
+                <div style="page-break-before: auto;">
+                <h2>Grain Size Distribution Comparison</h2>
+                <div class="plot-container">
+                    <img src="{comparison_plot}" alt="Grain Size Comparison" style="max-width: 100%; height: auto;">
+                </div>
+                </div>
+                """
+
+            if k_boxplot:
+                html += f"""
+                <div style="page-break-before: auto;">
+                <h2>Hydraulic Conductivity Distribution</h2>
+                <div class="plot-container">
+                    <img src="{k_boxplot}" alt="K-Value Boxplot" style="max-width: 100%; height: auto;">
+                </div>
+                </div>
+                """
+
+            if reliability_matrix:
+                html += f"""
+                <div style="page-break-before: always;">
+                <h2>Appendix: Method Reliability Matrix</h2>
+                <div class="plot-container">
+                    <img src="{reliability_matrix}" alt="Method Reliability Matrix" style="max-width: 100%; height: auto;">
+                </div>
+                </div>
+                """
+
+        if sections.get('interpretation', True):
+            html += """
+            <div style="page-break-before: auto;">
+            <h2>Interpretation & Discussion</h2>
+            <div class="info-box">
+                <h3>Comparative Analysis</h3>
+            """
+
+            if mean_k_by_sample:
+                highest = max(mean_k_by_sample.items(), key=lambda x: x[1])
+                lowest = min(mean_k_by_sample.items(), key=lambda x: x[1])
+
+                html += f"""
+                <p><strong>Permeability Characteristics:</strong></p>
+                <ul>
+                    <li>The highest permeability sample is {self._esc(highest[0])} with K = {highest[1]:.2e} m/s,
+                    classified as {self._classify_permeability(highest[1])}.</li>
+                    <li>The lowest permeability sample is {self._esc(lowest[0])} with K = {lowest[1]:.2e} m/s,
+                    classified as {self._classify_permeability(lowest[1])}.</li>
+                    <li>The {highest[1]/lowest[1]:.1f}-fold difference in permeability reflects the
+                    variability in grain size distribution among the samples.</li>
+                </ul>
+                """
+
+                all_k_values = list(mean_k_by_sample.values())
+                mean_all = np.mean(all_k_values)
+                std_all = np.std(all_k_values)
+
+                html += f"""
+                <p><strong>Statistical Overview:</strong></p>
+                <ul>
+                    <li>Mean K-value across all samples: {mean_all:.2e} m/s</li>
+                    <li>Standard deviation: {std_all:.2e} m/s</li>
+                    <li>Coefficient of variation: {(std_all/mean_all)*100:.1f}%</li>
+                </ul>
+                """
+
+            html += """
+            </div>
+            """
+
+            if metadata.get('notes'):
+                html += f"""
+                <div class="info-box">
+                    <h3>Additional Notes</h3>
+                    <p>{self._note_html(metadata['notes'])}</p>
+                </div>
+                """
+
+            html += "</div>"
+
         html += """
             <div class="footer">
                 <span><strong>Multi-Sample Comparison Report</strong></span>
@@ -1922,18 +2291,20 @@ class ReportGenerator:
         html += "</table>"
         return html
 
-    def _create_grain_parameters_comparison_table(self, datasets: List[GrainSizeData]) -> str:
+    def _create_grain_parameters_comparison_table(self, datasets: List[GrainSizeData],
+                                                  sample_labels: Optional[List[str]] = None) -> str:
         """Generate HTML comparison table with color-coded cells showing D10, D50, D60, Cu, Cc for all samples"""
         html = """
         <table>
             <thead>
-                <tr>
+            <tr>
                     <th>Parameter</th>
         """
 
         # Add column headers for each dataset
-        for dataset in datasets:
-            html += f"<th>{dataset.sample_name}</th>"
+        labels = sample_labels or [dataset.sample_name for dataset in datasets]
+        for label in labels:
+            html += f"<th>{self._esc(label)}</th>"
 
         # Add statistics column
         html += "<th>Statistics</th>"

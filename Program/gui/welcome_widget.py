@@ -6,13 +6,14 @@ with rgba(255,255,255,0.38) overlay. Scroll content is fully transparent
 so the painted background shows through at every screen size.
 """
 
+import math
 import os
 import sys
 from pathlib import Path
 from typing import List
 
-from PyQt6.QtCore import QRect, QSize, Qt, pyqtSignal
-from PyQt6.QtGui import QColor, QCursor, QLinearGradient, QPainter, QPaintEvent, QPixmap
+from PyQt6.QtCore import QPointF, QRect, QRectF, QSize, Qt, QTimer, pyqtProperty, pyqtSignal, QEasingCurve, QPropertyAnimation
+from PyQt6.QtGui import QBrush, QColor, QCursor, QLinearGradient, QPainter, QPainterPath, QPaintEvent, QPen, QPixmap
 from PyQt6.QtWidgets import (
     QCheckBox,
     QFrame,
@@ -32,8 +33,73 @@ from .theme import C, F, icon
 _CARD_W = 712
 
 
+def _blend(c1: QColor, c2: QColor, amount: float) -> QColor:
+    amount = max(0.0, min(1.0, amount))
+    return QColor(
+        round(c1.red() + (c2.red() - c1.red()) * amount),
+        round(c1.green() + (c2.green() - c1.green()) * amount),
+        round(c1.blue() + (c2.blue() - c1.blue()) * amount),
+        round(c1.alpha() + (c2.alpha() - c1.alpha()) * amount),
+    )
+
+
+def _with_alpha(color: QColor, alpha: int) -> QColor:
+    out = QColor(color)
+    out.setAlpha(max(0, min(255, alpha)))
+    return out
+
+
+def _hash01(value: float) -> float:
+    return (math.sin(value * 127.1 + 19.19) * 43758.5453123) % 1.0
+
+
 class WelcomeWidget(QWidget):
     """Welcome screen shown in the first dataset tab."""
+
+    _LAYER_BASES = (0.22, 0.41, 0.56, 0.68, 0.82, 1.03)
+    _LAYER_AMPLITUDES = (0.0040, 0.0054, 0.0047, 0.0040, 0.0035, 0.0)
+    _LAYER_FREQUENCIES = (1.36, 1.02, 1.19, 0.93, 0.72, 1.0)
+    _LAYER_SPEEDS = (0.60, -0.44, 0.31, -0.23, 0.16, 0.0)
+    _LAYER_COLORS = (
+        QColor(67, 48, 34),
+        QColor(219, 186, 138),
+        QColor(222, 160, 79),
+        QColor(181, 103, 40),
+        QColor(166, 89, 33),
+    )
+    _GRASS_CLUMPS = (
+        (0.11, 0.082, 0.90),
+        (0.21, 0.094, 1.05),
+        (0.31, 0.088, 0.94),
+        (0.45, 0.090, 0.98),
+        (0.56, 0.097, 1.10),
+        (0.65, 0.074, 0.82),
+        (0.74, 0.084, 0.96),
+    )
+    _STONE_SPECS = (
+        (0.035, 0.89, 0.040, 0.030, -18.0),
+        (0.085, 0.94, 0.020, 0.018, -8.0),
+        (0.148, 0.92, 0.026, 0.024, -12.0),
+        (0.287, 0.90, 0.040, 0.034, -10.0),
+        (0.368, 0.95, 0.022, 0.020, -16.0),
+        (0.442, 0.92, 0.016, 0.014, -10.0),
+        (0.528, 0.95, 0.030, 0.028, -12.0),
+        (0.585, 0.86, 0.028, 0.030, -6.0),
+        (0.732, 0.90, 0.042, 0.034, 8.0),
+        (0.788, 0.94, 0.018, 0.016, -6.0),
+        (0.846, 0.92, 0.034, 0.032, -14.0),
+        (0.930, 0.94, 0.022, 0.020, -10.0),
+        (0.972, 0.87, 0.030, 0.028, 10.0),
+    )
+    _CRACK_SPECS = (
+        (0.08, 0.095, -0.020),
+        (0.19, 0.070, 0.018),
+        (0.33, 0.088, -0.025),
+        (0.50, 0.082, 0.020),
+        (0.67, 0.100, -0.015),
+        (0.81, 0.084, 0.022),
+        (0.94, 0.075, -0.012),
+    )
 
     load_files_requested       = pyqtSignal()
     load_sample_data_requested = pyqtSignal()
@@ -49,49 +115,325 @@ class WelcomeWidget(QWidget):
         self.recent_sessions = recent_sessions or []
         self.setAutoFillBackground(False)
         self._bg_pixmap = self._load_bg_pixmap()
+        self._background_phase = 0.0
         self._title_card = None
         self._main_card = None
         self._footer = None
         self._footer_attr = None
         self._resume_btn = None
         self._resume_hint = None
+        self._background_timer = QTimer(self)
+        self._background_timer.setInterval(40)
+        self._background_timer.timeout.connect(self._advance_background)
+        if self._bg_pixmap.isNull():
+            self._background_timer.start()
         self._setup_ui()
 
     @staticmethod
     def _load_bg_pixmap() -> QPixmap:
         if getattr(sys, "frozen", False):
-            img = Path(sys._MEIPASS) / "Program" / "resources" / "soil_layers.png"  # type: ignore[attr-defined]
+            base_dir = Path(sys._MEIPASS) / "Program" / "resources"  # type: ignore[attr-defined]
         else:
-            img = Path(__file__).resolve().parent.parent / "resources" / "soil_layers.png"
-        if img.exists():
-            px = QPixmap(str(img))
-            if not px.isNull():
-                return px
+            base_dir = Path(__file__).resolve().parent.parent / "resources"
+
+        for name in ("soil_layers_refined.png", "soil_layers.png"):
+            img = base_dir / name
+            if img.exists():
+                px = QPixmap(str(img))
+                if not px.isNull():
+                    return px
         return QPixmap()
 
     # ── Background painting ──────────────────────────────────────
 
+    def _advance_background(self) -> None:
+        self._background_phase = (self._background_phase + 0.012) % (math.tau * 32.0)
+        if self.isVisible():
+            self.update()
+
+    def _sample_points(self) -> list[float]:
+        points = list(range(-24, self.width() + 25, 18))
+        if points[-1] != self.width() + 24:
+            points.append(self.width() + 24)
+        return [float(x) for x in points]
+
+    def _boundary_y(self, index: int, x: float) -> float:
+        width = max(1.0, float(self.width()))
+        height = max(1.0, float(self.height()))
+        nx = x / width
+        phase = self._background_phase * self._LAYER_SPEEDS[index]
+        amplitude = height * self._LAYER_AMPLITUDES[index]
+        ripple = (
+            0.72 * math.sin(nx * math.tau * self._LAYER_FREQUENCIES[index] + phase)
+            + 0.28 * math.cos(nx * math.tau * (self._LAYER_FREQUENCIES[index] * 0.58) + phase * 1.16)
+        )
+        return height * self._LAYER_BASES[index] + amplitude * ripple
+
+    def _layer_path(self, index: int) -> QPainterPath:
+        points = self._sample_points()
+        top = [QPointF(x, self._boundary_y(index, x)) for x in points]
+        bottom = [QPointF(x, self._boundary_y(index + 1, x)) for x in points]
+
+        path = QPainterPath(top[0])
+        for point in top[1:]:
+            path.lineTo(point)
+        for point in reversed(bottom):
+            path.lineTo(point)
+        path.closeSubpath()
+        return path
+
+    def _band_path(self, index: int, fraction: float = 0.0) -> QPainterPath:
+        points = self._sample_points()
+        path = QPainterPath()
+        for point_index, x in enumerate(points):
+            top_y = self._boundary_y(index, x)
+            bottom_y = self._boundary_y(index + 1, x)
+            y = top_y + (bottom_y - top_y) * fraction
+            point = QPointF(x, y)
+            if point_index == 0:
+                path.moveTo(point)
+            else:
+                path.lineTo(point)
+        return path
+
+    def _draw_paper_grain(self, painter: QPainter) -> None:
+        width = float(self.width())
+        sky_height = float(self.height()) * 0.44
+
+        painter.setPen(Qt.PenStyle.NoPen)
+        for speck_index in range(220):
+            seed = 700.0 + speck_index * 11.17
+            x = width * _hash01(seed + 0.11)
+            y = sky_height * _hash01(seed + 0.43)
+            radius = 0.35 + _hash01(seed + 0.79) * 0.95
+
+            if speck_index % 3 == 0:
+                tone = QColor(255, 248, 234, 9 + int(7 * _hash01(seed + 1.03)))
+            else:
+                tone = QColor(143, 112, 74, 7 + int(11 * _hash01(seed + 1.27)))
+
+            painter.setBrush(tone)
+            painter.drawEllipse(QRectF(x - radius, y - radius, radius * 2.0, radius * 2.0))
+
+    def _draw_soil_grain(self, painter: QPainter, band_index: int, base_color: QColor) -> None:
+        width = float(self.width())
+        count = 240 if band_index == 0 else 170 if band_index in (1, 2) else 135
+
+        painter.setPen(Qt.PenStyle.NoPen)
+        for dot_index in range(count):
+            seed = band_index * 91.0 + dot_index * 13.7
+            x = width * _hash01(seed + 0.23)
+            top = self._boundary_y(band_index, x)
+            bottom = self._boundary_y(band_index + 1, x)
+            y = top + (bottom - top) * (0.08 + 0.84 * _hash01(seed + 0.57))
+            radius_x = 0.45 + _hash01(seed + 0.91) * (1.45 if band_index in (0, 4) else 1.05)
+            radius_y = radius_x * (0.66 + 0.28 * _hash01(seed + 1.33))
+            shade = _blend(base_color, QColor(56, 41, 29), 0.14 + 0.26 * _hash01(seed + 1.71))
+            shade.setAlpha(9 + int(18 * _hash01(seed + 2.11)))
+            painter.setBrush(shade)
+            painter.drawEllipse(QRectF(x - radius_x, y - radius_y, radius_x * 2.0, radius_y * 2.0))
+
+            if dot_index % 4 == 0:
+                light = _blend(base_color, QColor(255, 245, 221), 0.34 + 0.18 * _hash01(seed + 2.53))
+                light.setAlpha(8 + int(11 * _hash01(seed + 2.79)))
+                painter.setBrush(light)
+                painter.drawEllipse(
+                    QRectF(
+                        x - radius_x * 0.55,
+                        y - radius_y * 0.55,
+                        radius_x * 1.1,
+                        radius_y * 1.1,
+                    )
+                )
+
+            if band_index in (3, 4) and dot_index % 17 == 0:
+                chunk = _with_alpha(QColor(78, 54, 34), 22 + int(16 * _hash01(seed + 3.1)))
+                painter.setBrush(chunk)
+                painter.drawEllipse(
+                    QRectF(
+                        x - radius_x * 1.8,
+                        y - radius_y * 1.6,
+                        radius_x * 3.6,
+                        radius_y * 3.2,
+                    )
+                )
+
+        if band_index in (1, 2, 3):
+            painter.setPen(QPen(QColor(255, 255, 255, 10), 0.8))
+            painter.drawPath(self._band_path(band_index, 0.33))
+            painter.drawPath(self._band_path(band_index, 0.68))
+
+    def _draw_cracks(self, painter: QPainter) -> None:
+        width = float(self.width())
+        height = float(self.height())
+        pen = QPen(QColor(92, 56, 30, 54), 0.9)
+        pen.setCapStyle(Qt.PenCapStyle.RoundCap)
+        painter.setPen(pen)
+        painter.setBrush(Qt.BrushStyle.NoBrush)
+
+        for crack_index, (x_ratio, depth_ratio, lean_ratio) in enumerate(self._CRACK_SPECS):
+            x = width * x_ratio
+            start_y = self._boundary_y(4, x) + 1.5
+            sway = math.sin(self._background_phase * 0.45 + crack_index * 0.9) * width * 0.0016
+            depth = height * depth_ratio * 0.92
+            mid = QPointF(x + width * lean_ratio * 0.26 + sway, start_y + depth * 0.28)
+            end = QPointF(x + width * lean_ratio + sway * 1.3, start_y + depth)
+
+            path = QPainterPath(QPointF(x, start_y))
+            path.quadTo(mid, end)
+            painter.drawPath(path)
+
+            branch_anchor = QPointF(
+                x + width * lean_ratio * 0.18 + sway * 0.5,
+                start_y + depth * (0.38 + 0.08 * _hash01(crack_index + 0.4)),
+            )
+            branch_1 = QPainterPath(branch_anchor)
+            branch_1.quadTo(
+                QPointF(branch_anchor.x() - width * 0.018, branch_anchor.y() + depth * 0.12),
+                QPointF(branch_anchor.x() - width * 0.028, branch_anchor.y() + depth * 0.28),
+            )
+            painter.drawPath(branch_1)
+
+            branch_2 = QPainterPath(branch_anchor)
+            branch_2.quadTo(
+                QPointF(branch_anchor.x() + width * 0.016, branch_anchor.y() + depth * 0.10),
+                QPointF(branch_anchor.x() + width * 0.024, branch_anchor.y() + depth * 0.24),
+            )
+            painter.drawPath(branch_2)
+
+    def _draw_stones(self, painter: QPainter) -> None:
+        width = float(self.width())
+        height = float(self.height())
+
+        for stone_index, (x_ratio, y_ratio, w_ratio, h_ratio, angle) in enumerate(self._STONE_SPECS):
+            cx = width * x_ratio
+            top = self._boundary_y(4, cx)
+            cy = max(height * y_ratio, top + height * 0.035)
+            stone_w = width * w_ratio
+            stone_h = height * h_ratio
+
+            painter.save()
+            painter.translate(cx, cy)
+            painter.rotate(angle + math.sin(self._background_phase * 0.12 + stone_index) * 0.35)
+            rect = QRectF(-stone_w / 2.0, -stone_h / 2.0, stone_w, stone_h)
+
+            fill = QLinearGradient(0, rect.top(), 0, rect.bottom())
+            fill.setColorAt(0.0, QColor(156, 123, 82, 212))
+            fill.setColorAt(1.0, QColor(126, 96, 60, 222))
+            painter.setPen(QPen(QColor(82, 58, 34, 96), 0.8))
+            painter.setBrush(QBrush(fill))
+            painter.drawEllipse(rect)
+
+            painter.setPen(Qt.PenStyle.NoPen)
+            painter.setBrush(QColor(255, 245, 222, 22))
+            painter.drawEllipse(rect.adjusted(stone_w * 0.10, stone_h * 0.06, -stone_w * 0.32, -stone_h * 0.42))
+
+            for mote_index in range(3):
+                seed = stone_index * 5.0 + mote_index
+                mote_x = rect.left() + rect.width() * (0.24 + 0.52 * _hash01(seed + 0.3))
+                mote_y = rect.top() + rect.height() * (0.24 + 0.46 * _hash01(seed + 0.7))
+                mote_r = rect.height() * (0.05 + 0.06 * _hash01(seed + 1.1))
+                painter.setBrush(QColor(99, 73, 44, 32))
+                painter.drawEllipse(QRectF(mote_x - mote_r, mote_y - mote_r, mote_r * 2.0, mote_r * 2.0))
+            painter.restore()
+
+    def _draw_grass(self, painter: QPainter) -> None:
+        width = float(self.width())
+        height = float(self.height())
+
+        painter.setPen(QPen(QColor(76, 57, 35, 118), 1.0))
+        painter.drawPath(self._band_path(0))
+
+        for clump_index, (x_ratio, height_ratio, scale) in enumerate(self._GRASS_CLUMPS):
+            base_x = width * x_ratio
+            base_y = self._boundary_y(0, base_x) + 1.0
+
+            for blade_index, offset in enumerate((-11.0, -5.5, 0.0, 5.0, 10.0)):
+                blade_height = height * height_ratio * (0.82 + blade_index * 0.06)
+                blade_offset = offset * scale
+                sway = math.sin(self._background_phase * (0.92 + clump_index * 0.09) + blade_index * 0.62) * width * 0.0034 * scale
+                tip = QPointF(base_x + blade_offset * 0.58 + sway, base_y - blade_height)
+                left_base = QPointF(base_x + blade_offset * 0.22 - 1.15 * scale, base_y + 1.0)
+                right_base = QPointF(base_x + blade_offset * 0.22 + 1.45 * scale, base_y + 1.0)
+
+                blade = QPainterPath(left_base)
+                blade.quadTo(
+                    QPointF(base_x + blade_offset * 0.14 + sway * 0.22, base_y - blade_height * 0.48),
+                    tip,
+                )
+                blade.quadTo(
+                    QPointF(base_x + blade_offset * 0.64 + sway * 0.68 + 2.0 * scale, base_y - blade_height * 0.34),
+                    right_base,
+                )
+                blade.closeSubpath()
+
+                fill = QLinearGradient(left_base, tip)
+                fill.setColorAt(0.0, QColor(88, 93, 44, 214))
+                fill.setColorAt(0.55, QColor(123, 126, 53, 220))
+                fill.setColorAt(1.0, QColor(154, 146, 81, 198))
+                painter.fillPath(blade, QBrush(fill))
+                painter.setPen(QPen(QColor(74, 73, 34, 34), 0.55))
+                painter.drawPath(blade)
+
+        painter.setPen(QPen(QColor(255, 255, 255, 14), 0.9))
+        painter.drawPath(self._band_path(0, 0.18))
+
+    def _draw_animated_background(self, painter: QPainter) -> None:
+        rect = self.rect()
+        width = float(self.width())
+        height = float(self.height())
+
+        sky = QLinearGradient(0, 0, 0, height * 0.44)
+        sky.setColorAt(0.0, QColor(246, 240, 229))
+        sky.setColorAt(0.68, QColor(238, 226, 202))
+        sky.setColorAt(1.0, QColor(232, 214, 184))
+        painter.fillRect(rect, sky)
+        self._draw_paper_grain(painter)
+
+        warm_wash = QLinearGradient(0, 0, width, height)
+        warm_wash.setColorAt(0.0, QColor(255, 255, 255, 42))
+        warm_wash.setColorAt(0.58, QColor(255, 255, 255, 0))
+        warm_wash.setColorAt(1.0, QColor(171, 128, 70, 19))
+        painter.fillRect(rect, warm_wash)
+
+        for band_index, base_color in enumerate(self._LAYER_COLORS):
+            path = self._layer_path(band_index)
+            top_y = self._boundary_y(band_index, width * 0.5)
+            bottom_y = self._boundary_y(band_index + 1, width * 0.5)
+
+            gradient = QLinearGradient(0, top_y, 0, bottom_y)
+            gradient.setColorAt(0.0, _blend(base_color, QColor(246, 239, 223), 0.11 if band_index else 0.05))
+            gradient.setColorAt(0.55, base_color)
+            gradient.setColorAt(1.0, _blend(base_color, QColor(69, 50, 33), 0.10 + band_index * 0.025))
+            painter.fillPath(path, QBrush(gradient))
+            self._draw_soil_grain(painter, band_index, base_color)
+
+            painter.setPen(QPen(QColor(73, 51, 31, 112 if band_index == 0 else 82), 0.9))
+            painter.drawPath(self._band_path(band_index))
+
+        self._draw_cracks(painter)
+        self._draw_stones(painter)
+        self._draw_grass(painter)
+
     def resizeEvent(self, event):
         super().resizeEvent(event)
         self._sync_card_widths()
-        self.update()   # repaint soil image whenever widget resizes
+        self.update()
 
     def paintEvent(self, event: QPaintEvent):
         painter = QPainter(self)
-        w, h = self.width(), self.height()
-
+        painter.setRenderHint(QPainter.RenderHint.Antialiasing, True)
         if not self._bg_pixmap.isNull():
-            # Stretch to fill — slight distortion is invisible under the overlay
             painter.drawPixmap(self.rect(), self._bg_pixmap)
         else:
-            grad = QLinearGradient(0, 0, 0, h)
-            grad.setColorAt(0.00, QColor("#b5a080"))
-            grad.setColorAt(0.45, QColor("#a0826d"))
-            grad.setColorAt(1.00, QColor("#6a94a8"))
-            painter.fillRect(self.rect(), grad)
+            self._draw_animated_background(painter)
+
+        # Background is fully procedural now; keep the overlay light for card readability.
+            # Stretch to fill — slight distortion is invisible under the overlay
+            # Static bitmap backdrop removed.
 
         # rgba(255,255,255,0.38) white overlay
-        painter.fillRect(self.rect(), QColor(255, 255, 255, 97))
+        painter.fillRect(self.rect(), QColor(255, 255, 255, 88 if not self._bg_pixmap.isNull() else 74))
         painter.end()
 
     # ── UI Setup ─────────────────────────────────────────────────
@@ -1071,20 +1413,79 @@ class _HoverFrame(QFrame):
     def __init__(self, parent=None):
         super().__init__(parent)
         self.setAttribute(Qt.WidgetAttribute.WA_Hover, True)
+        self._hover_mix = 0.0
+        self._pressed = False
+        self._hover_anim = QPropertyAnimation(self, b"hoverMix", self)
+        self._hover_anim.setDuration(140)
+        self._hover_anim.setEasingCurve(QEasingCurve.Type.OutCubic)
 
     def enterEvent(self, event):
         self.setProperty("hovered", True)
         self.style().unpolish(self)
         self.style().polish(self)
+        self._animate_hover(1.0)
         super().enterEvent(event)
 
     def leaveEvent(self, event):
         self.setProperty("hovered", False)
         self.style().unpolish(self)
         self.style().polish(self)
+        self._pressed = False
+        self._animate_hover(0.0)
         super().leaveEvent(event)
 
     def mousePressEvent(self, event):
         if event.button() == Qt.MouseButton.LeftButton:
-            self.clicked.emit()
+            self._pressed = True
+            self.update()
         super().mousePressEvent(event)
+
+    def mouseReleaseEvent(self, event):
+        if event.button() == Qt.MouseButton.LeftButton:
+            was_pressed = self._pressed
+            self._pressed = False
+            self.update()
+            if was_pressed and self.rect().contains(event.pos()):
+                self.clicked.emit()
+        super().mouseReleaseEvent(event)
+
+    def paintEvent(self, event):
+        super().paintEvent(event)
+        if self._hover_mix <= 0.0 and not self._pressed:
+            return
+
+        painter = QPainter(self)
+        painter.setRenderHint(QPainter.RenderHint.Antialiasing, True)
+
+        overlay_alpha = int(16 * self._hover_mix) + (10 if self._pressed else 0)
+        border_alpha = int(26 * self._hover_mix) + (14 if self._pressed else 0)
+        accent_alpha = int(40 * self._hover_mix) + (20 if self._pressed else 0)
+
+        rect = QRectF(self.rect()).adjusted(1.0, 1.0, -1.0, -1.0)
+        overlay = QColor(255, 255, 255, min(52, overlay_alpha))
+        border = QColor(QColor(C.OLIVE))
+        border.setAlpha(min(88, border_alpha))
+        accent = QColor(QColor(C.OLIVE))
+        accent.setAlpha(min(110, accent_alpha))
+
+        painter.setPen(border)
+        painter.setBrush(overlay)
+        painter.drawRoundedRect(rect, 8.0, 8.0)
+        painter.fillRect(QRectF(rect.left() + 1.5, rect.top() + 1.5, 2.5, rect.height() - 3.0), accent)
+
+    def _animate_hover(self, target: float) -> None:
+        self._hover_anim.stop()
+        self._hover_anim.setStartValue(self._hover_mix)
+        self._hover_anim.setEndValue(target)
+        self._hover_anim.start()
+
+    def _get_hover_mix(self) -> float:
+        return self._hover_mix
+
+    def _set_hover_mix(self, value: float) -> None:
+        value = max(0.0, min(1.0, float(value)))
+        if abs(self._hover_mix - value) > 0.001:
+            self._hover_mix = value
+            self.update()
+
+    hoverMix = pyqtProperty(float, fget=_get_hover_mix, fset=_set_hover_mix)
