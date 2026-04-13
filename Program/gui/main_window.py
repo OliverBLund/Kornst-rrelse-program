@@ -18,7 +18,7 @@ from PyQt6.QtWidgets import (
 )
 from PyQt6.QtCore import Qt, pyqtSignal, QSettings, QSize, QTimer, QEasingCurve, QPropertyAnimation
 from PyQt6.QtGui import QAction, QColor, QFont
-from typing import Callable, List, Optional
+from typing import Any, Callable, List, Mapping, Optional
 
 from gui.control_panel import ControlPanel
 from gui.dataset_tab import DatasetTab
@@ -978,8 +978,9 @@ class MainWindow(FramelessMainWindowMixin, QMainWindow):
         )
 
     def on_welcome_open_recent(self, file_path: str):
-        normalized_path = os.path.normpath(file_path)
-        if not os.path.exists(normalized_path):
+        normalized_path = self._normalize_file_key(file_path)
+        actual_path, _ = self._split_source_key(normalized_path)
+        if not os.path.exists(actual_path):
             QMessageBox.warning(self, "File Not Found",
                                 f"The file no longer exists:\n{file_path}")
             self._remove_recent_file(file_path)
@@ -1002,7 +1003,7 @@ class MainWindow(FramelessMainWindowMixin, QMainWindow):
                 "missing_files": [],
                 "skipped_count": 0,
                 "session": None,
-                "requested_label": os.path.basename(normalized_path),
+                "requested_label": self._source_display_name(normalized_path),
                 "failed_files": [],
             },
         )
@@ -1012,10 +1013,12 @@ class MainWindow(FramelessMainWindowMixin, QMainWindow):
         if session is None:
             return
 
-        valid_files = [path for path in session["files"] if os.path.exists(path)]
-        missing_files = [path for path in session["files"] if not os.path.exists(path)]
+        valid_sources = [source for source in session.get("sources", []) if self._source_exists(source)]
+        missing_sources = [source for source in session.get("sources", []) if not self._source_exists(source)]
+        valid_files = [source["file_key"] for source in valid_sources]
+        missing_files = [self._source_display_name(source) for source in missing_sources]
 
-        if not valid_files:
+        if not valid_sources:
             QMessageBox.warning(
                 self,
                 "Session Unavailable",
@@ -1029,15 +1032,18 @@ class MainWindow(FramelessMainWindowMixin, QMainWindow):
         skipped_count = 0
         files_to_load = []
 
-        for file_path in valid_files:
-            if file_path in open_paths:
-                self._save_recent_file(file_path)
+        for source in valid_sources:
+            source_key = source["file_key"]
+            if source_key in open_paths:
+                if not source.get("mapping_state"):
+                    self._save_recent_file(source_key)
                 skipped_count += 1
                 continue
-            files_to_load.append(file_path)
+            files_to_load.append(source)
 
         cleaned_session = dict(session)
         cleaned_session["files"] = valid_files
+        cleaned_session["sources"] = valid_sources
 
         if not files_to_load:
             self._upsert_recent_session(cleaned_session)
@@ -1093,6 +1099,128 @@ class MainWindow(FramelessMainWindowMixin, QMainWindow):
     # RECENT FILES / SESSIONS
     # ──────────────────────────────────────────────────────────────────
 
+    def _split_source_key(self, file_key: str) -> tuple[str, str | None]:
+        if ":::" in file_key:
+            return file_key.split(":::", 1)
+        return file_key, None
+
+    def _normalize_file_key(self, file_key: str) -> str:
+        actual_path, sheet_name = self._split_source_key(str(file_key))
+        normalized = os.path.normpath(actual_path)
+        return f"{normalized}:::{sheet_name}" if sheet_name else normalized
+
+    def _file_key_exists(self, file_key: str) -> bool:
+        actual_path, _ = self._split_source_key(file_key)
+        return os.path.exists(actual_path)
+
+    def _source_file_key(self, source: object) -> str:
+        if isinstance(source, Mapping):
+            file_key = source.get("file_key")
+            if isinstance(file_key, str) and file_key:
+                return self._normalize_file_key(file_key)
+            file_path = str(source.get("file_path") or "")
+            sheet_name = source.get("sheet_name")
+            if sheet_name:
+                return self._normalize_file_key(f"{file_path}:::{sheet_name}")
+            return self._normalize_file_key(file_path)
+        return self._normalize_file_key(str(source))
+
+    def _source_actual_path(self, source: object) -> str:
+        file_key = self._source_file_key(source)
+        actual_path, _ = self._split_source_key(file_key)
+        return actual_path
+
+    def _source_exists(self, source: object) -> bool:
+        return os.path.exists(self._source_actual_path(source))
+
+    def _normalize_session_source(self, source: object) -> Optional[dict]:
+        if isinstance(source, Mapping):
+            file_key = str(source.get("file_key") or "")
+            file_path = str(source.get("file_path") or "")
+            sheet_name = source.get("sheet_name")
+
+            if file_key and not file_path:
+                file_path, sheet_from_key = self._split_source_key(file_key)
+                sheet_name = sheet_name or sheet_from_key
+            if not file_path:
+                return None
+
+            normalized_file_path = os.path.normpath(file_path)
+            normalized_key = self._normalize_file_key(
+                f"{normalized_file_path}:::{sheet_name}" if sheet_name else normalized_file_path
+            )
+            mapping_state = source.get("mapping_state")
+            if not isinstance(mapping_state, Mapping):
+                mapping_state = None
+
+            descriptor = {
+                "file_key": normalized_key,
+                "file_path": normalized_file_path,
+                "sheet_name": str(sheet_name) if sheet_name else None,
+            }
+            for key in ("sample_name", "temperature", "porosity", "data_type", "selection_method"):
+                if source.get(key) is not None:
+                    descriptor[key] = source.get(key)
+            if mapping_state:
+                descriptor["mapping_state"] = dict(mapping_state)
+                descriptor.setdefault(
+                    "data_type",
+                    "raw_sieve" if mapping_state.get("raw_sieve_mode") else "calculated",
+                )
+                descriptor.setdefault(
+                    "selection_method",
+                    "column" if mapping_state.get("raw_sieve_mode") else mapping_state.get("calculated_selection_mode", "column"),
+                )
+            return descriptor
+
+        if isinstance(source, str) and source.strip():
+            file_key = self._normalize_file_key(source)
+            file_path, sheet_name = self._split_source_key(file_key)
+            return {
+                "file_key": file_key,
+                "file_path": file_path,
+                "sheet_name": sheet_name,
+            }
+        return None
+
+    def _normalize_session_sources(self, session_data: Mapping[str, Any]) -> List[dict]:
+        raw_sources = session_data.get("sources", [])
+        if isinstance(raw_sources, Mapping):
+            raw_sources = [raw_sources]
+        elif not isinstance(raw_sources, list):
+            raw_sources = []
+
+        if not raw_sources:
+            raw_sources = session_data.get("files", [])
+            if isinstance(raw_sources, str):
+                raw_sources = [raw_sources]
+            elif not isinstance(raw_sources, list):
+                raw_sources = []
+
+        sources: List[dict] = []
+        seen = set()
+        for raw_source in raw_sources:
+            source = self._normalize_session_source(raw_source)
+            if source is None:
+                continue
+            key = source["file_key"]
+            if key in seen:
+                continue
+            seen.add(key)
+            sources.append(source)
+        return sources
+
+    def _source_display_name(self, source: object) -> str:
+        if isinstance(source, Mapping):
+            sample_name = source.get("sample_name")
+            if isinstance(sample_name, str) and sample_name:
+                return sample_name
+        file_key = self._source_file_key(source)
+        actual_path, sheet_name = self._split_source_key(file_key)
+        if sheet_name:
+            return f"{os.path.basename(actual_path)} [{sheet_name}]"
+        return os.path.basename(actual_path)
+
     def _load_recent_files(self) -> List[str]:
         settings = QSettings("GrainSizeAnalysis", "MainWindow")
         recent = settings.value("recent_files", [])
@@ -1108,11 +1236,11 @@ class MainWindow(FramelessMainWindowMixin, QMainWindow):
             if not isinstance(file_path, str) or not file_path.strip():
                 changed = True
                 continue
-            normalized = os.path.normpath(file_path)
+            normalized = self._normalize_file_key(file_path)
             if normalized in seen:
                 changed = True
                 continue
-            if not os.path.exists(normalized):
+            if not self._file_key_exists(normalized):
                 changed = True
                 continue
             seen.add(normalized)
@@ -1126,7 +1254,7 @@ class MainWindow(FramelessMainWindowMixin, QMainWindow):
     def _save_recent_file(self, file_path: str):
         settings = QSettings("GrainSizeAnalysis", "MainWindow")
         recent = self._load_recent_files()
-        normalized = os.path.normpath(file_path)
+        normalized = self._normalize_file_key(file_path)
         if normalized in recent:
             recent.remove(normalized)
         recent.insert(0, normalized)
@@ -1144,7 +1272,7 @@ class MainWindow(FramelessMainWindowMixin, QMainWindow):
         for file_path in file_paths:
             if not isinstance(file_path, str) or not file_path.strip():
                 continue
-            normalized = os.path.normpath(file_path)
+            normalized = self._normalize_file_key(file_path)
             if normalized in seen:
                 continue
             seen.add(normalized)
@@ -1155,9 +1283,10 @@ class MainWindow(FramelessMainWindowMixin, QMainWindow):
         if not isinstance(session_data, dict):
             return None
 
-        files = self._normalize_session_files(session_data.get("files", []))
-        if not files:
+        sources = self._normalize_session_sources(session_data)
+        if not sources:
             return None
+        files = [source["file_key"] for source in sources]
 
         timestamp = str(session_data.get("timestamp") or "")
         date = str(session_data.get("date") or "")
@@ -1191,9 +1320,13 @@ class MainWindow(FramelessMainWindowMixin, QMainWindow):
             "files": files,
             "timestamp": timestamp,
             "samples": cleaned_samples,
+            "sources": sources,
         }
 
     def _session_match_key(self, session_data: dict) -> tuple[str, ...]:
+        sources = session_data.get("sources")
+        if sources:
+            return tuple(sorted(self._source_file_key(source) for source in sources))
         return tuple(sorted(self._normalize_session_files(session_data.get("files", []))))
 
     def _load_recent_sessions(self) -> List[dict]:
@@ -1214,10 +1347,12 @@ class MainWindow(FramelessMainWindowMixin, QMainWindow):
                 changed = True
                 continue
 
-            existing_files = [path for path in session["files"] if os.path.exists(path)]
+            existing_sources = [source for source in session.get("sources", []) if self._source_exists(source)]
+            existing_files = [source["file_key"] for source in existing_sources]
             if existing_files != session["files"]:
                 changed = True
                 session["files"] = existing_files
+                session["sources"] = existing_sources
             if not session["files"]:
                 changed = True
                 continue
@@ -1238,22 +1373,53 @@ class MainWindow(FramelessMainWindowMixin, QMainWindow):
         settings = QSettings("GrainSizeAnalysis", "MainWindow")
         settings.setValue("recent_sessions", sessions[:10])
 
+    def _build_dataset_source_descriptor(self, dataset: GrainSizeData) -> Optional[dict]:
+        file_path = getattr(dataset, "file_path", "")
+        if not file_path:
+            return None
+
+        file_key = self._normalize_file_key(file_path)
+        actual_path, sheet_name = self._split_source_key(file_key)
+        mapping_state = getattr(dataset, "_source_mapping_state", None)
+        if not mapping_state:
+            mapping_state = self.control_panel.file_mapping_states.get(file_key)
+
+        descriptor = {
+            "file_key": file_key,
+            "file_path": actual_path,
+            "sheet_name": sheet_name,
+            "sample_name": getattr(dataset, "sample_name", ""),
+            "temperature": getattr(dataset, "temperature", None),
+            "porosity": getattr(dataset, "porosity", None),
+        }
+        if mapping_state:
+            descriptor["mapping_state"] = dict(mapping_state)
+            descriptor["data_type"] = "raw_sieve" if mapping_state.get("raw_sieve_mode") else "calculated"
+            descriptor["selection_method"] = (
+                "column"
+                if mapping_state.get("raw_sieve_mode")
+                else mapping_state.get("calculated_selection_mode", "column")
+            )
+        return descriptor
+
     def _build_current_session(self) -> Optional[dict]:
         if not self.dataset_tabs:
             return None
 
         current_files: List[str] = []
+        current_sources: List[dict] = []
         sample_names: List[str] = []
         seen_files = set()
         seen_samples = set()
         for tab in self.dataset_tabs:
             dataset = tab.get_dataset()
-            file_path = getattr(dataset, "file_path", "")
-            if file_path:
-                normalized = os.path.normpath(file_path)
+            source = self._build_dataset_source_descriptor(dataset)
+            if source:
+                normalized = source["file_key"]
                 if normalized not in seen_files:
                     seen_files.add(normalized)
                     current_files.append(normalized)
+                    current_sources.append(source)
 
             sample_name = getattr(dataset, "sample_name", "")
             if sample_name and sample_name not in seen_samples:
@@ -1272,6 +1438,7 @@ class MainWindow(FramelessMainWindowMixin, QMainWindow):
             "files": current_files,
             "timestamp": now.isoformat(),
             "samples": sample_names,
+            "sources": current_sources,
         }
 
     def _upsert_recent_session(self, session: dict):
@@ -1307,7 +1474,7 @@ class MainWindow(FramelessMainWindowMixin, QMainWindow):
     def _remove_recent_file(self, file_path: str):
         settings = QSettings("GrainSizeAnalysis", "MainWindow")
         recent = self._load_recent_files()
-        normalized = os.path.normpath(file_path)
+        normalized = self._normalize_file_key(file_path)
         if normalized in recent:
             recent.remove(normalized)
             settings.setValue("recent_files", recent)
@@ -1318,7 +1485,7 @@ class MainWindow(FramelessMainWindowMixin, QMainWindow):
             dataset = tab.get_dataset()
             file_path = getattr(dataset, "file_path", "")
             if file_path:
-                open_paths.add(os.path.normpath(file_path))
+                open_paths.add(self._normalize_file_key(file_path))
         return open_paths
 
     def _start_external_load(
@@ -1351,7 +1518,7 @@ class MainWindow(FramelessMainWindowMixin, QMainWindow):
             progress_total,
             "Preparing files",
             "Starting the background loader and checking the selected paths.",
-            count_label=f"0 of {len(file_paths)} files",
+            count_label=f"0 of {len(file_paths)} items",
             activity_label="Starting the background loader.",
         )
         self._external_load_dialog.set_activity(
@@ -1467,8 +1634,8 @@ class MainWindow(FramelessMainWindowMixin, QMainWindow):
                 overall_total,
                 stage,
                 detail,
-                count_label=f"{current} of {total} files",
-                activity_label=f"Processing file {current} of {total}.",
+                count_label=f"{current} of {total} items",
+                activity_label=f"Processing item {current} of {total}.",
             )
 
     def _update_external_integration_progress(self) -> None:
@@ -1476,27 +1643,30 @@ class MainWindow(FramelessMainWindowMixin, QMainWindow):
             return
 
         current = max(0, min(self._external_ui_processed, self._external_ui_total))
-        noun = "dataset" if self._external_ui_total == 1 else "datasets"
         overall_total = max(1, self._external_ui_total * 2)
         activity = (
             "Preparing workspace integration."
             if current <= 0
-            else f"Integrating dataset {current} of {self._external_ui_total}."
+            else f"Integrating item {current} of {self._external_ui_total}."
         )
         self._external_load_dialog.update_progress(
             self._external_ui_total + current,
             overall_total,
-            "Integrating datasets",
-            "Adding loaded datasets to the workspace.",
-            count_label=f"{current} of {self._external_ui_total} {noun}",
+            "Integrating workspace",
+            "Adding loaded items to the workspace.",
+            count_label=f"{self._external_ui_total} items processed",
             activity_label=activity,
         )
 
     def _on_external_load_file_loaded(self, file_path: str, dataset):
         dataset.file_path = file_path
+        mapping_state = getattr(dataset, "_source_mapping_state", None)
+        if mapping_state:
+            self.control_panel.file_mapping_states[file_path] = mapping_state
         self.add_dataset_tab(dataset)
         self.control_panel.register_external_file(file_path, dataset)
-        self._save_recent_file(file_path)
+        if not mapping_state:
+            self._save_recent_file(file_path)
 
     def _on_external_load_file_failed(self, file_path: str, detail: str):
         if self._external_load_context is None:
@@ -1598,6 +1768,10 @@ class MainWindow(FramelessMainWindowMixin, QMainWindow):
 
     def _refresh_welcome_widget(self, preserve_visibility: bool = True):
         current_index = self._samples_stack.currentIndex()
+        if preserve_visibility and self.dataset_tabs:
+            # Keep the dataset workspace visible even if a fade-to-tabs request is
+            # still in flight when the welcome widget gets rebuilt.
+            current_index = 1
         sidebar_visible = self.control_panel.isVisible()
         recent_files = self._load_recent_files()
         recent_sessions = self._load_recent_sessions()
@@ -1778,6 +1952,37 @@ class MainWindow(FramelessMainWindowMixin, QMainWindow):
                 return True
         return False
 
+    def _remove_tabs_for_file(self, file_path: str) -> int:
+        """Remove stale error/dataset tabs for a file before adding corrected data."""
+        removed = 0
+        for i in range(self.dataset_tabs_widget.count() - 1, -1, -1):
+            widget = self.dataset_tabs_widget.widget(i)
+            tab_file_path = getattr(widget, "file_path", None)
+            dataset = getattr(widget, "dataset", None)
+            if dataset is not None:
+                tab_file_path = getattr(dataset, "file_path", tab_file_path)
+
+            if tab_file_path != file_path:
+                continue
+
+            if widget in self.dataset_tabs:
+                self.dataset_tabs.remove(widget)
+            self.dataset_tabs_widget.removeTab(i)
+            if hasattr(widget, "deleteLater"):
+                widget.deleteLater()
+            removed += 1
+
+        if removed:
+            self._refresh_dataset_tab_icons()
+            self._sync_comparison_dataset_state()
+            self.reporting_tab.set_dataset_tabs(self.dataset_tabs)
+            self._update_export_tab()
+            self._refresh_dataset_status_segments()
+            if not self.dataset_tabs:
+                self._show_welcome()
+
+        return removed
+
     def _ensure_dataset_list(self, dataset_input) -> List[GrainSizeData]:
         if isinstance(dataset_input, list):
             return dataset_input
@@ -1785,17 +1990,31 @@ class MainWindow(FramelessMainWindowMixin, QMainWindow):
 
     def on_dataset_fixed(self, dataset_input, original_file_path: str):
         datasets = self._ensure_dataset_list(dataset_input)
-        self._remove_error_tab(original_file_path)
-        for dataset in datasets:
-            self.add_dataset_tab(dataset)
+        self._remove_tabs_for_file(original_file_path)
+        bulk = len(datasets) > 1
+        if bulk:
+            self._begin_bulk_dataset_add()
+        try:
+            for dataset in datasets:
+                self.add_dataset_tab(dataset)
+        finally:
+            if bulk:
+                self._end_bulk_dataset_add()
         name = datasets[0].sample_name if len(datasets) == 1 else f"{len(datasets)} datasets"
         self._show_status_message(f"Fixed and loaded: {name}")
 
     def replace_error_tab_with_dataset(self, dataset_input, file_path: str):
         datasets = self._ensure_dataset_list(dataset_input)
-        self._remove_error_tab(file_path)
-        for dataset in datasets:
-            self.add_dataset_tab(dataset)
+        self._remove_tabs_for_file(file_path)
+        bulk = len(datasets) > 1
+        if bulk:
+            self._begin_bulk_dataset_add()
+        try:
+            for dataset in datasets:
+                self.add_dataset_tab(dataset)
+        finally:
+            if bulk:
+                self._end_bulk_dataset_add()
 
     def update_error_tab_message(self, file_path: str, error_message: str):
         for i in range(self.dataset_tabs_widget.count()):

@@ -174,6 +174,8 @@ class _SampleCard(QWidget):
     def __init__(self, file_path: str, display_name: str, status: str,
                  d50: str = "", k_val: str = "", parent=None):
         super().__init__(parent)
+        self.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Preferred)
+        self.setMinimumWidth(0)
         self.file_path = file_path
         self._display_name = display_name
         self._status = status
@@ -219,23 +221,31 @@ class _SampleCard(QWidget):
         row.addWidget(self._icon_box)
 
         # Name + meta column
-        info_col = QVBoxLayout()
+        info_host = QWidget()
+        info_host.setSizePolicy(QSizePolicy.Policy.Ignored, QSizePolicy.Policy.Preferred)
+        info_host.setMinimumWidth(0)
+        info_col = QVBoxLayout(info_host)
+        info_col.setContentsMargins(0, 0, 0, 0)
         info_col.setSpacing(1)
         self._name = QLabel(display_name)
         self._name.setTextFormat(Qt.TextFormat.PlainText)
+        self._name.setWordWrap(True)
         self._name.setFont(QFont(F.UI, F.SZ_SM, QFont.Weight.Medium))
         self._name.setStyleSheet(f"color: {C.SB_TEXT}; background: transparent;")
         self._name.setSizePolicy(
-            QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Preferred)
+            QSizePolicy.Policy.Ignored, QSizePolicy.Policy.Preferred)
+        self._name.setMinimumWidth(0)
         info_col.addWidget(self._name)
 
         # Meta row (D50, K value)
         self._meta = QLabel()
         self._meta.setFont(QFont(F.MONO, F.SZ_XS))
         self._meta.setStyleSheet(f"color: {C.SB_MUTED}; background: transparent;")
+        self._meta.setSizePolicy(QSizePolicy.Policy.Ignored, QSizePolicy.Policy.Preferred)
+        self._meta.setMinimumWidth(0)
         self._update_meta_text()
         info_col.addWidget(self._meta)
-        row.addLayout(info_col, 1)
+        row.addWidget(info_host, 1)
 
         # Status LED  — .s-led in CSS
         self._led = QLabel()
@@ -1338,6 +1348,7 @@ class ControlPanel(QFrame):
     def __init__(self):
         super().__init__()
         self.loaded_samples = {}  # Dictionary to store sample data
+        self.file_mapping_states = {}  # Remember mapper path and column choices per file
         self.validation_errors = []  # Track validation issues
         self.data_loader = DataLoader()  # Data loading engine
         self.file_statuses = {}  # Track file loading status: 'pending', 'failed', 'review', 'loaded'
@@ -1946,8 +1957,7 @@ class ControlPanel(QFrame):
 
     def _push_card_meta(self, file_path: str):
         """Extract D50/K from loaded dataset and update the card."""
-        sample_name = self.extract_sample_name(file_path)
-        entry = self.loaded_samples.get(sample_name)
+        _, entry = self._find_loaded_entry_by_file(file_path)
         if not entry:
             return
         dataset = entry.get('data')
@@ -2012,8 +2022,7 @@ class ControlPanel(QFrame):
                 return
             file_path = active
 
-        sample_name = self.extract_sample_name(file_path)
-        entry = self.loaded_samples.get(sample_name)
+        _, entry = self._find_loaded_entry_by_file(file_path)
         if not entry:
             self._strata_widget.update_result(None)
             return
@@ -2127,18 +2136,24 @@ class ControlPanel(QFrame):
 
         # Group files by their sheet structure
         sheet_structure_groups = defaultdict(list)
+        file_sheet_names = {}
         single_sheet_files = []
         error_files = []
 
         for file_path in excel_files:
             try:
                 excel_file = pd.ExcelFile(file_path)
-                sheet_names = tuple(excel_file.sheet_names)  # Tuple for hashability
+                try:
+                    sheet_names = tuple(excel_file.sheet_names)
+                finally:
+                    excel_file.close()
+                file_sheet_names[file_path] = sheet_names
 
                 if len(sheet_names) == 1:
                     single_sheet_files.append(file_path)
                 else:
-                    sheet_structure_groups[sheet_names].append(file_path)
+                    sheet_key = tuple(sorted(name.strip().lower() for name in sheet_names))
+                    sheet_structure_groups[sheet_key].append(file_path)
             except Exception as e:
                 error_files.append(file_path)
 
@@ -2148,7 +2163,8 @@ class ControlPanel(QFrame):
         expanded_files.extend(single_sheet_files)
 
         # Handle each group of multi-sheet files
-        for sheet_names, group_files in sheet_structure_groups.items():
+        for sheet_key, group_files in sheet_structure_groups.items():
+            sheet_names = file_sheet_names.get(group_files[0], sheet_key)
             if len(group_files) == 1:
                 # Only one file with this structure - use individual dialog
                 result = self.handle_multisheet_excel(group_files[0])
@@ -2182,8 +2198,12 @@ class ControlPanel(QFrame):
 
                     # Apply selection to all files in this group
                     for file_path in group_files:
-                        for sheet in selected_sheets:
-                            expanded_files.append((file_path, sheet))
+                        actual_sheets = file_sheet_names.get(file_path, ())
+                        actual_by_name = {name.strip().lower(): name for name in actual_sheets}
+                        for selected_sheet in selected_sheets:
+                            sheet = actual_by_name.get(selected_sheet.strip().lower())
+                            if sheet:
+                                expanded_files.append((file_path, sheet))
                 else:
                     return None  # User cancelled
 
@@ -2200,7 +2220,10 @@ class ControlPanel(QFrame):
         try:
             import pandas as pd
             excel_file = pd.ExcelFile(file_path)
-            sheet_names = excel_file.sheet_names
+            try:
+                sheet_names = list(excel_file.sheet_names)
+            finally:
+                excel_file.close()
 
             # If only one sheet, treat as normal file
             if len(sheet_names) == 1:
@@ -2230,7 +2253,7 @@ class ControlPanel(QFrame):
         self.samples_table.insertRow(row)
 
         # File name (use custom display name if provided)
-        file_name = display_name or os.path.basename(file_path)
+        file_name = display_name or self._format_file_display_name(file_path)
         file_item = QTableWidgetItem(file_name)
         file_item.setData(Qt.ItemDataRole.UserRole, file_path)  # Store full path/key
         file_item.setToolTip(file_path)
@@ -2327,11 +2350,10 @@ class ControlPanel(QFrame):
             # Remove from tracking
             if file_path in self.file_statuses:
                 del self.file_statuses[file_path]
+            self.file_mapping_states.pop(file_path, None)
 
             # Remove from loaded samples
-            sample_name = self.extract_sample_name(file_path)
-            if sample_name in self.loaded_samples:
-                del self.loaded_samples[sample_name]
+            self._remove_loaded_entries_for_file(file_path)
 
             # Remove from card list
             self._file_list.remove_card(file_path)
@@ -2346,13 +2368,24 @@ class ControlPanel(QFrame):
         """Open column mapping dialog for a specific file"""
         try:
             actual_file_path, sheet_name = self._split_sheet_key(file_path)
-            dialog = ColumnMapperDialog(actual_file_path, self, self.window(), sheet_name=sheet_name)
+            dialog = ColumnMapperDialog(
+                actual_file_path,
+                self,
+                self.window(),
+                sheet_name=sheet_name,
+                initial_state=self.file_mapping_states.get(file_path),
+            )
             if dialog.exec() == QDialog.DialogCode.Accepted:
                 mapping_results = dialog.get_mapping_results()
                 if not mapping_results:
                     QMessageBox.warning(self, "No Data", "No sheet data was extracted.")
                     return
-                self._apply_mapping_results(file_path, mapping_results, forced_sheet_name=sheet_name)
+                self._apply_mapping_results(
+                    file_path,
+                    mapping_results,
+                    forced_sheet_name=sheet_name,
+                    mapping_state=dialog.get_mapping_state(),
+                )
 
         except Exception as e:
             actual_file_path, sheet_name = self._split_sheet_key(file_path)
@@ -2442,12 +2475,12 @@ class ControlPanel(QFrame):
 
     def show_file_info(self, file_path: str):
         """Show concept-aligned data inspector for a loaded dataset."""
-        sample_name = self.extract_sample_name(file_path)
-        if sample_name not in self.loaded_samples:
+        _, entry = self._find_loaded_entry_by_file(file_path)
+        if not entry:
             QMessageBox.information(self, "Inspect", "Dataset not yet loaded.")
             return
 
-        dataset = self.loaded_samples[sample_name]['data']
+        dataset = entry['data']
         dlg = DataInspectorDialog(
             dataset=dataset,
             scheme=self._active_scheme,
@@ -2458,12 +2491,12 @@ class ControlPanel(QFrame):
 
     def show_file_log(self, file_path: str):
         """Show the load-time validation log for a dataset."""
-        sample_name = self.extract_sample_name(file_path)
-        if sample_name not in self.loaded_samples:
+        _, entry = self._find_loaded_entry_by_file(file_path)
+        if not entry:
             QMessageBox.information(self, "Log", "Dataset not yet loaded.")
             return
 
-        dataset = self.loaded_samples[sample_name]['data']
+        dataset = entry['data']
         msgs = getattr(dataset, 'validation_messages', [])
 
         dlg = QDialog(self)
@@ -2501,12 +2534,12 @@ class ControlPanel(QFrame):
 
     def show_file_props(self, file_path: str):
         """Per-dataset properties editor: temperature + porosity override."""
-        sample_name = self.extract_sample_name(file_path)
-        if sample_name not in self.loaded_samples:
+        _, entry = self._find_loaded_entry_by_file(file_path)
+        if not entry:
             QMessageBox.information(self, "Props", "Dataset not yet loaded.")
             return
 
-        dataset = self.loaded_samples[sample_name]['data']
+        dataset = entry['data']
 
         # Find the dataset tab so we can push recalculation
         ds_tab = None
@@ -2609,23 +2642,27 @@ class ControlPanel(QFrame):
 
     def register_external_file(self, file_path: str, dataset):
         """Register a file that was loaded externally (e.g., from recent files/sessions)"""
+        self._remove_loaded_entries_for_file(file_path)
         # Check if already in the list
         if file_path in self.file_statuses:
             # Already tracked, just update status
             self.file_statuses[file_path] = 'loaded'
             self.update_file_in_table(file_path, 'loaded')
+            sample_name = dataset.sample_name
         else:
             # New file, add to tracking
             self.file_statuses[file_path] = 'loaded'
-            sample_name = self.extract_sample_name(file_path)
-            self.loaded_samples[sample_name] = {
-                'file_path': file_path,
-                'data': dataset,
-                'datasets': [dataset],
-                'status': 'loaded'
-            }
+            sample_name = dataset.sample_name
             # Add to table
             self.add_file_to_table(file_path, 'loaded')
+
+        self.loaded_samples[sample_name] = {
+            'file_path': file_path,
+            'data': dataset,
+            'datasets': [dataset],
+            'status': 'loaded',
+            'mapping_state': self.file_mapping_states.get(file_path),
+        }
 
         self._push_card_meta(file_path)
         self._update_inventory_bar()
@@ -2639,12 +2676,23 @@ class ControlPanel(QFrame):
         for file_path in review_files:
             try:
                 actual_file_path, sheet_name = self._split_sheet_key(file_path)
-                dialog = ColumnMapperDialog(actual_file_path, self, self.window(), sheet_name=sheet_name)
+                dialog = ColumnMapperDialog(
+                    actual_file_path,
+                    self,
+                    self.window(),
+                    sheet_name=sheet_name,
+                    initial_state=self.file_mapping_states.get(file_path),
+                )
                 if dialog.exec() == QDialog.DialogCode.Accepted:
                     mapping_results = dialog.get_mapping_results()
                     if not mapping_results:
                         continue
-                    self._apply_mapping_results(file_path, mapping_results, forced_sheet_name=sheet_name)
+                    self._apply_mapping_results(
+                        file_path,
+                        mapping_results,
+                        forced_sheet_name=sheet_name,
+                        mapping_state=dialog.get_mapping_state(),
+                    )
 
             except Exception as e:
                 actual_file_path, sheet_name = self._split_sheet_key(file_path)
@@ -2666,11 +2714,10 @@ class ControlPanel(QFrame):
             # Remove from tracking
             if file_path in self.file_statuses:
                 del self.file_statuses[file_path]
+            self.file_mapping_states.pop(file_path, None)
 
             # Remove from loaded samples
-            sample_name = self.extract_sample_name(file_path)
-            if sample_name in self.loaded_samples:
-                del self.loaded_samples[sample_name]
+            self._remove_loaded_entries_for_file(file_path)
 
             # Remove from card list
             self._file_list.remove_card(file_path)
@@ -2695,6 +2742,7 @@ class ControlPanel(QFrame):
 
             if reply == QMessageBox.StandardButton.Yes:
                 self.loaded_samples.clear()
+                self.file_mapping_states.clear()
                 self.file_statuses.clear()
                 self.samples_table.setRowCount(0)
                 self._file_list.clear_cards()
@@ -2721,8 +2769,8 @@ class ControlPanel(QFrame):
             self.remove_file_btn.setEnabled(True)
 
             # If this is a loaded dataset, emit signal
-            sample_name = self.extract_sample_name(file_path)
-            if sample_name in self.loaded_samples and status == 'loaded':
+            sample_name, _ = self._find_loaded_entry_by_file(file_path)
+            if sample_name and status == 'loaded':
                 self.sample_selected.emit(sample_name)
         else:
             self._file_list.set_active(None)
@@ -2742,12 +2790,40 @@ class ControlPanel(QFrame):
             name = f"{name} [{sheet_name}]"
         return name if name else base_name
 
+    def _format_file_display_name(self, file_path: str) -> str:
+        actual_path, sheet_name = self._split_sheet_key(file_path)
+        file_name = os.path.basename(actual_path)
+        if sheet_name:
+            return f"{file_name} [{sheet_name}]"
+        return file_name
+
     def _split_sheet_key(self, file_path: str):
         if ":::" in file_path:
             return file_path.split(":::", 1)
         return file_path, None
 
-    def _apply_mapping_results(self, file_path: str, mapping_results: list, *, forced_sheet_name: str | None = None):
+    def _find_loaded_entry_by_file(self, file_path: str):
+        for sample_name, entry in self.loaded_samples.items():
+            if entry.get('file_path') == file_path:
+                return sample_name, entry
+        return None, None
+
+    def _remove_loaded_entries_for_file(self, file_path: str):
+        removed = []
+        for sample_name, entry in list(self.loaded_samples.items()):
+            if entry.get('file_path') == file_path:
+                removed.append((sample_name, entry))
+                del self.loaded_samples[sample_name]
+        return removed
+
+    def _apply_mapping_results(
+        self,
+        file_path: str,
+        mapping_results: list,
+        *,
+        forced_sheet_name: str | None = None,
+        mapping_state: dict | None = None,
+    ):
         from data_loader import GrainSizeData
 
         created_datasets = []
@@ -2765,10 +2841,15 @@ class ControlPanel(QFrame):
                 percent_passing=mapping['percent_passing'],
                 file_path=file_path
             )
+            dataset._source_mapping_state = mapping_state
             created_datasets.append(dataset)
 
         if not created_datasets:
             return
+
+        self._remove_loaded_entries_for_file(file_path)
+        if mapping_state is not None:
+            self.file_mapping_states[file_path] = mapping_state
 
         sample_key = created_datasets[0].sample_name
         sheet_names = [(mapping.get('sheet_name') or forced_sheet_name or '') for mapping in mapping_results]
@@ -2777,7 +2858,8 @@ class ControlPanel(QFrame):
             'data': created_datasets[0],
             'datasets': created_datasets,
             'status': 'loaded',
-            'sheet_names': sheet_names
+            'sheet_names': sheet_names,
+            'mapping_state': self.file_mapping_states.get(file_path),
         }
         self.loaded_samples[sample_key] = entry
 
@@ -2786,8 +2868,7 @@ class ControlPanel(QFrame):
         self._push_card_meta(file_path)
         self._update_inventory_bar()
 
-        for dataset in created_datasets:
-            self.dataset_loaded_successfully.emit(dataset, file_path)
+        self.dataset_loaded_successfully.emit(created_datasets, file_path)
 
         if any(sheet_names):
             summary = ", ".join(name for name in sheet_names if name)
@@ -3106,7 +3187,7 @@ class ControlPanel(QFrame):
             progress_total,
             "Preparing import",
             "Creating placeholder tabs and starting the background loader.",
-            count_label=f"0 of {len(file_entries)} files",
+            count_label=f"0 of {len(file_entries)} items",
             activity_label="Starting the background loader.",
         )
         self._import_dialog.set_activity(
@@ -3217,8 +3298,8 @@ class ControlPanel(QFrame):
                 overall_total,
                 stage,
                 detail,
-                count_label=f"{current} of {total} files",
-                activity_label=f"Processing file {current} of {total}.",
+                count_label=f"{current} of {total} items",
+                activity_label=f"Processing item {current} of {total}.",
             )
 
     def _update_import_integration_progress(self):
@@ -3226,23 +3307,23 @@ class ControlPanel(QFrame):
             return
 
         current = max(0, min(self._import_ui_processed, self._import_ui_total))
-        noun = "dataset" if self._import_ui_total == 1 else "datasets"
         overall_total = max(1, self._import_ui_total * 2)
         activity = (
             "Preparing workspace integration."
             if current <= 0
-            else f"Integrating dataset {current} of {self._import_ui_total}."
+            else f"Integrating item {current} of {self._import_ui_total}."
         )
         self._import_dialog.update_progress(
             self._import_ui_total + current,
             overall_total,
-            "Integrating datasets",
-            "Adding loaded datasets to the workspace.",
-            count_label=f"{current} of {self._import_ui_total} {noun}",
+            "Integrating workspace",
+            "Adding loaded items to the workspace.",
+            count_label=f"{self._import_ui_total} items processed",
             activity_label=activity,
         )
 
     def _on_import_worker_loaded(self, file_key: str, dataset, status: str, sample_name: str):
+        self._remove_loaded_entries_for_file(file_key)
         self.file_statuses[file_key] = status
         self.loaded_samples[sample_name] = {
             'file_path': file_key,
@@ -3256,6 +3337,7 @@ class ControlPanel(QFrame):
         self._update_inventory_bar()
 
     def _on_import_worker_validation_failed(self, file_key: str, dataset, sample_name: str, detail: str):
+        self._remove_loaded_entries_for_file(file_key)
         self.file_statuses[file_key] = 'failed'
         self.loaded_samples[sample_name] = {
             'file_path': file_key,
@@ -3269,6 +3351,8 @@ class ControlPanel(QFrame):
         self._update_inventory_bar()
 
     def _on_import_worker_failed(self, file_key: str, detail: str):
+        self._remove_loaded_entries_for_file(file_key)
+        self._file_list.update_card_meta(file_key, "", "")
         self.file_statuses[file_key] = 'review'
         self.update_file_in_table(file_key, 'review')
         self.update_error_tab_message.emit(file_key, detail)

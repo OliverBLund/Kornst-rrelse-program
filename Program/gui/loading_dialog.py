@@ -334,7 +334,7 @@ class LoadingDialog(FramelessDialogBase):
         text_col.setContentsMargins(0, 0, 0, 0)
         text_col.setSpacing(4)
 
-        self._stage_label = QLabel("Preparing files")
+        self._stage_label = QLabel("Preparing items")
         self._stage_label.setStyleSheet(
             f"color: {C.TEXT}; font-family: '{F.UI}'; font-size: {F.SZ_XL + 1}pt; font-weight: 600;"
             " background: transparent;"
@@ -352,7 +352,7 @@ class LoadingDialog(FramelessDialogBase):
         chips_row.setContentsMargins(0, 0, 0, 0)
         chips_row.setSpacing(6)
 
-        self._count_chip = QLabel("0 of 0 files")
+        self._count_chip = QLabel("0 of 0 items")
         self._count_chip.setStyleSheet(
             f"color: {C.OLIVE_DK}; background: rgba(247,243,235,0.72); "
             f"border: 1px solid rgba(107,142,35,0.24); border-radius: 99px; "
@@ -378,7 +378,7 @@ class LoadingDialog(FramelessDialogBase):
         body_lay.addWidget(self._progress)
 
         self._note_label = QLabel(
-            "Files are being processed in the background. This window closes automatically when loading is complete."
+            "Selected items are being processed in the background. This window closes automatically when loading is complete."
         )
         self._note_label.setStyleSheet(
             f"color: {C.TEXT_MUTED}; font-size: {F.SZ_XS}pt; background: transparent;"
@@ -460,9 +460,9 @@ class LoadingDialog(FramelessDialogBase):
             if current <= 0:
                 activity_label = "Starting the background loader."
             else:
-                activity_label = f"Processing file {current} of {total}."
+                activity_label = f"Processing item {current} of {total}."
         if count_label is None:
-            count_label = f"{current} of {total} files"
+            count_label = f"{current} of {total} items"
         self._activity_label.setText(activity_label)
         self._count_chip.setText(count_label)
         self._status_base = "Loading"

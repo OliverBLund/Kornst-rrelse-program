@@ -161,7 +161,10 @@ class SheetSelectorDialog(FramelessDialogBase):
     def _load_sheets(self):
         try:
             excel_file = pd.ExcelFile(self.file_path)
-            sheet_names = excel_file.sheet_names
+            try:
+                sheet_names = list(excel_file.sheet_names)
+            finally:
+                excel_file.close()
         except Exception as e:
             self._info_label.setText(f"Error reading workbook: {e}")
             self._info_label.setStyleSheet(

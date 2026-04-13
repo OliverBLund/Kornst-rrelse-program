@@ -34,8 +34,8 @@ class TestLoadingDialog(unittest.TestCase):
 
         self.assertEqual(self.dialog._stage_label.text(), "Reading datasets")
         self.assertEqual(self.dialog._detail_label.text(), "sample_b.csv")
-        self.assertEqual(self.dialog._count_chip.text(), "2 of 5 files")
-        self.assertEqual(self.dialog._activity_label.text(), "Processing file 2 of 5.")
+        self.assertEqual(self.dialog._count_chip.text(), "2 of 5 items")
+        self.assertEqual(self.dialog._activity_label.text(), "Processing item 2 of 5.")
         self.assertTrue(self.dialog._footer_status.text().startswith("Loading"))
 
     def test_set_activity_updates_guidance_copy(self):
@@ -47,14 +47,14 @@ class TestLoadingDialog(unittest.TestCase):
         self.dialog.update_progress(
             3,
             5,
-            "Integrating datasets",
-            "Adding loaded datasets to the workspace.",
-            count_label="3 of 5 datasets",
-            activity_label="Integrating dataset 3 of 5.",
+            "Integrating workspace",
+            "Adding loaded items to the workspace.",
+            count_label="3 of 5 items",
+            activity_label="Integrating item 3 of 5.",
         )
 
-        self.assertEqual(self.dialog._count_chip.text(), "3 of 5 datasets")
-        self.assertEqual(self.dialog._activity_label.text(), "Integrating dataset 3 of 5.")
+        self.assertEqual(self.dialog._count_chip.text(), "3 of 5 items")
+        self.assertEqual(self.dialog._activity_label.text(), "Integrating item 3 of 5.")
 
     def test_mark_finished_stops_live_animation_and_enables_close(self):
         self.dialog.update_progress(1, 3, "Reading datasets", "sample_a.csv")

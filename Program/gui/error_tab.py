@@ -276,14 +276,32 @@ Instructions:
             main_window = self.parent()
             while main_window and not hasattr(main_window, 'dataset_tabs_widget'):
                 main_window = main_window.parent()
+            control_panel = getattr(main_window, 'control_panel', None) if main_window else None
+            mapping_state = None
+            if control_panel is not None and hasattr(control_panel, 'file_mapping_states'):
+                mapping_state = control_panel.file_mapping_states.get(self.file_path)
 
             # Pass actual file path and optional sheet name to column mapper
-            dialog = ColumnMapperDialog(self.actual_file_path, self, main_window,
-                                       sheet_name=self.sheet_name)
+            dialog = ColumnMapperDialog(
+                self.actual_file_path,
+                self,
+                main_window,
+                sheet_name=self.sheet_name,
+                initial_state=mapping_state,
+            )
             if dialog.exec() == QDialog.DialogCode.Accepted:
                 mapping_results = dialog.get_mapping_results()
                 if not mapping_results:
                     QMessageBox.warning(self, "No Data", "No sheet data was extracted.")
+                    return
+
+                if control_panel is not None and hasattr(control_panel, '_apply_mapping_results'):
+                    control_panel._apply_mapping_results(
+                        self.file_path,
+                        mapping_results,
+                        forced_sheet_name=self.sheet_name,
+                        mapping_state=dialog.get_mapping_state(),
+                    )
                     return
 
                 datasets = []

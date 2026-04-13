@@ -3,12 +3,14 @@ Regression tests for background dataset preparation.
 """
 
 import sys
+import tempfile
 import unittest
+import os
 
 sys.path.insert(0, "Program")
 
 from data_loader import GrainSizeData
-from load_process_worker import prepare_dataset_for_ui
+from load_process_worker import _load_mapped_source, prepare_dataset_for_ui
 
 
 def build_dataset(name: str = "Sample A") -> GrainSizeData:
@@ -32,6 +34,39 @@ class TestLoadProcessWorker(unittest.TestCase):
         self.assertEqual(dataset._precomputed_k_porosity, dataset.current_porosity)
         self.assertTrue(dataset._precomputed_k_results)
         self.assertTrue(all(result.temperature == 12.5 for result in dataset._precomputed_k_results))
+
+    def test_mapped_cell_range_source_can_be_restored_without_dialog(self):
+        with tempfile.TemporaryDirectory() as tempdir:
+            csv_path = os.path.join(tempdir, "mapped.csv")
+            with open(csv_path, "w", encoding="utf-8") as handle:
+                handle.write("size,passing\n")
+                handle.write("2.0,100\n")
+                handle.write("1.0,60\n")
+                handle.write("0.5,20\n")
+
+            source = {
+                "file_key": csv_path,
+                "file_path": csv_path,
+                "sample_name": "Restored mapped sample",
+                "temperature": 12.0,
+                "porosity": 0.31,
+                "mapping_state": {
+                    "raw_sieve_mode": False,
+                    "calculated_selection_mode": "range",
+                    "selected_size_range": [[1, 0], [2, 0], [3, 0]],
+                    "selected_percent_range": [[1, 1], [2, 1], [3, 1]],
+                },
+            }
+
+            dataset = _load_mapped_source(source)
+
+        self.assertEqual(dataset.sample_name, "Restored mapped sample")
+        self.assertEqual(dataset.file_path, csv_path)
+        self.assertEqual(dataset.temperature, 12.0)
+        self.assertEqual(dataset.porosity, 0.31)
+        self.assertEqual(dataset.particle_sizes, [2.0, 1.0, 0.5])
+        self.assertEqual(dataset.percent_passing, [100.0, 60.0, 20.0])
+        self.assertEqual(dataset._source_mapping_state["calculated_selection_mode"], "range")
 
 
 if __name__ == "__main__":

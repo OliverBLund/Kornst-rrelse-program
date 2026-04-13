@@ -23,6 +23,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Error tabs display sheet names in title for multi-sheet files
 - Sample Management table shows sheet-specific entries
 
+### Fixed
+- Batch "Apply Pattern to Batch" now works for sheet-qualified Excel error tabs (`path:::sheet`)
+- Batch remap now updates Control Panel state through `_apply_mapping_results()` instead of bypassing file status tracking
+- Added regression coverage for sheet-specific pattern application and batch remap routing
+
 ### Technical
 - New file: `gui/sheet_selector.py` - Sheet selection dialog
 - Enhanced: `control_panel.handle_batch_multisheet_excel()` - Smart grouping algorithm

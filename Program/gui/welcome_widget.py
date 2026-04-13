@@ -117,9 +117,13 @@ class WelcomeWidget(QWidget):
         self._bg_pixmap = self._load_bg_pixmap()
         self._background_phase = 0.0
         self._title_card = None
+        self._title_eyebrow = None
+        self._title_desc = None
+        self._title_attr = None
         self._main_card = None
         self._footer = None
         self._footer_attr = None
+        self._outer_scroll = None
         self._resume_btn = None
         self._resume_hint = None
         self._background_timer = QTimer(self)
@@ -454,8 +458,8 @@ class WelcomeWidget(QWidget):
 
         content = _ClearWidget()
         lay = QVBoxLayout(content)
-        lay.setContentsMargins(24, 26, 24, 18)
-        lay.setSpacing(16)
+        lay.setContentsMargins(10, 10, 10, 6)
+        lay.setSpacing(8)
         lay.setAlignment(Qt.AlignmentFlag.AlignHCenter)
 
         self._title_card = self._build_title_card()
@@ -469,6 +473,7 @@ class WelcomeWidget(QWidget):
 
         scroll.setWidget(content)
         root.addWidget(scroll, 1)
+        self._outer_scroll = scroll
         self._sync_card_widths()
 
     # ── Title card ───────────────────────────────────────────────
@@ -623,7 +628,7 @@ class WelcomeWidget(QWidget):
         card.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
 
         lay = QVBoxLayout(card)
-        lay.setContentsMargins(24, 18, 24, 16)
+        lay.setContentsMargins(18, 14, 18, 12)
         lay.setSpacing(0)
         lay.setAlignment(Qt.AlignmentFlag.AlignLeft)
 
@@ -638,6 +643,7 @@ class WelcomeWidget(QWidget):
             f"color: {C.OLIVE_DK}; font-family: '{F.MONO}'; font-size: {F.SZ_XS}pt;"
             " font-weight: 700; letter-spacing: 0.16em; background: transparent; border: none;"
         )
+        self._title_eyebrow = eyebrow
         meta_lay.addWidget(eyebrow)
         meta_lay.addStretch()
 
@@ -649,16 +655,16 @@ class WelcomeWidget(QWidget):
         )
         meta_lay.addWidget(ver)
         lay.addWidget(meta_row)
-        lay.addSpacing(9)
+        lay.addSpacing(6)
 
         title = QLabel("Grain Size Analysis")
         title.setAlignment(Qt.AlignmentFlag.AlignLeft)
         title.setStyleSheet(
-            f'color: {C.TEXT}; font-family: "{F.DISP}"; font-size: 23pt;'
+            f'color: {C.TEXT}; font-family: "{F.DISP}"; font-size: 21pt;'
             ' font-weight: 700; letter-spacing: 0.01em; background: transparent; border: none;'
         )
         lay.addWidget(title)
-        lay.addSpacing(2)
+        lay.addSpacing(1)
 
         sub = QLabel("Hydraulic Conductivity Calculator")
         sub.setAlignment(Qt.AlignmentFlag.AlignLeft)
@@ -667,7 +673,7 @@ class WelcomeWidget(QWidget):
             " background: transparent; border: none;"
         )
         lay.addWidget(sub)
-        lay.addSpacing(10)
+        lay.addSpacing(6)
 
         desc = QLabel(
             "Load batches, return to recent workspaces, compare selected datasets, and export the chosen scope."
@@ -677,16 +683,18 @@ class WelcomeWidget(QWidget):
             f"color: {C.TEXT_MID}; font-size: {F.SZ_SM}pt; line-height: 1.35;"
             " background: transparent; border: none;"
         )
+        self._title_desc = desc
         lay.addWidget(desc)
-        lay.addSpacing(12)
+        lay.addSpacing(8)
 
         attr = QLabel("Batch import  ·  session restore  ·  selected-scope export")
         attr.setStyleSheet(
             f"color: {C.TEXT_MUTED}; font-family: '{F.MONO}'; font-size: {F.SZ_XS}pt;"
             " background: transparent; border: none;"
         )
+        self._title_attr = attr
         lay.addWidget(attr)
-        lay.addSpacing(10)
+        lay.addSpacing(6)
 
         rule = QFrame()
         rule.setFixedHeight(1)
@@ -708,9 +716,9 @@ class WelcomeWidget(QWidget):
         card.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Preferred)
 
         grid = QGridLayout(card)
-        grid.setContentsMargins(16, 16, 16, 16)
-        grid.setHorizontalSpacing(10)
-        grid.setVerticalSpacing(10)
+        grid.setContentsMargins(8, 8, 8, 8)
+        grid.setHorizontalSpacing(6)
+        grid.setVerticalSpacing(6)
         grid.setAlignment(Qt.AlignmentFlag.AlignTop)
 
         grid.addWidget(
@@ -855,8 +863,8 @@ class WelcomeWidget(QWidget):
         """)
 
         lay = QVBoxLayout(sec)
-        lay.setContentsMargins(12, 12, 12, 12)
-        lay.setSpacing(9)
+        lay.setContentsMargins(8, 8, 8, 8)
+        lay.setSpacing(6)
 
         header = QWidget()
         header.setStyleSheet("background: transparent; border: none;")
@@ -925,11 +933,28 @@ class WelcomeWidget(QWidget):
         w.setStyleSheet("background: transparent; border: none;")
         lay = QVBoxLayout(w)
         lay.setContentsMargins(0, 0, 0, 0)
-        lay.setSpacing(6)
+        lay.setSpacing(4)
+
+        scroll = QScrollArea()
+        scroll.setWidgetResizable(True)
+        scroll.setFrameShape(QFrame.Shape.NoFrame)
+        scroll.setMaximumHeight(168)
+        scroll.setStyleSheet(f"""
+            QScrollArea {{ background: transparent; border: none; }}
+            QScrollBar:vertical {{ background: transparent; width: 5px; }}
+            QScrollBar::handle:vertical {{ background: {C.BORDER}; border-radius: 2px; min-height: 20px; }}
+            QScrollBar::add-line:vertical, QScrollBar::sub-line:vertical {{ height: 0; }}
+        """)
+
+        sc = QWidget()
+        sc.setStyleSheet("background: transparent; border: none;")
+        sc_lay = QVBoxLayout(sc)
+        sc_lay.setContentsMargins(0, 0, 3, 0)
+        sc_lay.setSpacing(6)
 
         if self.recent_sessions:
             for index, s in enumerate(self.recent_sessions[:4]):
-                lay.addWidget(self._build_session_row(s, is_latest=index == 0))
+                sc_lay.addWidget(self._build_session_row(s, is_latest=index == 0))
         else:
             empty = QLabel("No saved sessions yet")
             empty.setStyleSheet(
@@ -937,7 +962,7 @@ class WelcomeWidget(QWidget):
                 " background: transparent; border: none; padding: 14px 6px;"
             )
             empty.setAlignment(Qt.AlignmentFlag.AlignCenter)
-            lay.addWidget(empty)
+            sc_lay.addWidget(empty)
 
             hint = QLabel("Load a batch once and it will appear here for quick return.")
             hint.setWordWrap(True)
@@ -946,7 +971,11 @@ class WelcomeWidget(QWidget):
                 f"color: {C.TEXT_MUTED}; font-size: {F.SZ_XS}pt;"
                 " background: transparent; border: none; padding: 0 16px 8px 16px;"
             )
-            lay.addWidget(hint)
+            sc_lay.addWidget(hint)
+
+        sc_lay.addStretch()
+        scroll.setWidget(sc)
+        lay.addWidget(scroll)
 
         return w
 
@@ -975,7 +1004,7 @@ class WelcomeWidget(QWidget):
         row.setProperty("hovered", False)
 
         row_lay = QHBoxLayout(row)
-        row_lay.setContentsMargins(12, 10, 12, 10)
+        row_lay.setContentsMargins(10, 8, 10, 8)
         row_lay.setSpacing(10)
 
         ico_tile = QFrame()
@@ -1058,7 +1087,7 @@ class WelcomeWidget(QWidget):
         scroll = QScrollArea()
         scroll.setWidgetResizable(True)
         scroll.setFrameShape(QFrame.Shape.NoFrame)
-        scroll.setMaximumHeight(176)
+        scroll.setMaximumHeight(132)
         scroll.setStyleSheet(f"""
             QScrollArea {{ background: transparent; border: none; }}
             QScrollBar:vertical {{ background: transparent; width: 5px; }}
@@ -1220,7 +1249,7 @@ class WelcomeWidget(QWidget):
 
         load_btn = QPushButton("Load Batch Files")
         load_btn.setIcon(icon("fa6s.folder-open", "#ffffff"))
-        load_btn.setMinimumHeight(38)
+        load_btn.setMinimumHeight(34)
         load_btn.setCursor(QCursor(Qt.CursorShape.PointingHandCursor))
         load_btn.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
         load_btn.setStyleSheet(f"""
@@ -1241,7 +1270,7 @@ class WelcomeWidget(QWidget):
 
         resume_btn = QPushButton("Resume Latest Session")
         resume_btn.setIcon(icon("fa6s.clock-rotate-left", C.TEXT_MID))
-        resume_btn.setMinimumHeight(34)
+        resume_btn.setMinimumHeight(32)
         resume_btn.setCursor(QCursor(Qt.CursorShape.PointingHandCursor))
         resume_btn.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
         resume_btn.setStyleSheet(f"""
@@ -1272,7 +1301,7 @@ class WelcomeWidget(QWidget):
 
         demo_btn = QPushButton("Open Demo Sample")
         demo_btn.setIcon(icon("fa6s.vial", C.OLIVE_DK))
-        demo_btn.setMinimumHeight(34)
+        demo_btn.setMinimumHeight(32)
         demo_btn.setCursor(QCursor(Qt.CursorShape.PointingHandCursor))
         demo_btn.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
         demo_btn.setStyleSheet(f"""
@@ -1349,11 +1378,19 @@ class WelcomeWidget(QWidget):
             return
 
         target = min(_CARD_W, max(280, self.width() - 40))
+        compact_height = self.height() < 760
         for widget in (self._title_card, self._main_card, self._footer):
             if widget is not None:
                 widget.setFixedWidth(target)
 
+        if self._title_desc is not None:
+            self._title_desc.setVisible(not compact_height)
+        if self._title_attr is not None:
+            self._title_attr.setVisible(not compact_height)
+        if self._title_eyebrow is not None:
+            self._title_eyebrow.setVisible(not compact_height)
         if self._footer_attr is not None:
+            self._footer_attr.setVisible(not compact_height)
             if target < 620:
                 self._footer_attr.setText("Batch import · compare · export")
             else:

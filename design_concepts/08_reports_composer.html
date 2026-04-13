@@ -1,0 +1,1140 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>GrainSize Analysis — Reports (Composer Concept)</title>
+
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Playfair+Display:wght@600;700&family=Source+Sans+3:wght@300;400;500;600&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/all.min.css">
+<link rel="stylesheet" href="_shared.css">
+
+<style>
+/* ══════════════════════════════════════════════════════════
+   08_reports_composer.html — v2: Accordion panel
+   Baseline: 03_reports_export.html — same shell, same tokens,
+   same preview panel. Reports builder uses accordion sections
+   instead of a monolithic scroll or sub-tabs.
+══════════════════════════════════════════════════════════ */
+
+/* ── Shared page layout ── */
+.page-host{flex:1;display:flex;flex-direction:column;overflow:hidden}
+.tab-content{display:none;flex:1;flex-direction:column;overflow:hidden}
+.tab-content.active{display:flex}
+
+/* ════════════════════════════════════════════
+   REPORTS TAB — outer layout
+════════════════════════════════════════════ */
+.rpt-layout{flex:1;display:flex;overflow:hidden}
+
+/* ─── Panel shell ─── */
+.rpt-panel{
+  width:360px;flex-shrink:0;display:flex;flex-direction:column;
+  background:var(--bg-raised);border-right:1px solid var(--border);
+  overflow:hidden;
+}
+.rpt-panel-body{
+  flex:1;overflow-y:auto;
+  scrollbar-width:thin;scrollbar-color:var(--border) transparent;
+}
+
+/* ════════════════════════════════════════════
+   ACCORDION
+   Each section: header (always visible) + body (collapses).
+   Multiple sections can be open simultaneously.
+   Headers show a summary pill when collapsed so the user can
+   see current state without opening.
+════════════════════════════════════════════ */
+.rpt-acc{
+  border-bottom:1px solid var(--border);
+}
+
+/* Header row */
+.rpt-acc-hdr{
+  display:flex;align-items:center;gap:8px;
+  padding:9px 13px 9px 12px;
+  cursor:pointer;user-select:none;
+  transition:background .1s;
+  background:var(--bg-low);
+}
+.rpt-acc-hdr:hover{background:var(--bg-raised)}
+.rpt-acc-hdr.open{background:var(--bg-raised)}
+
+/* Icon */
+.rpt-acc-icon{
+  font-size:11px;color:var(--text-muted);width:14px;text-align:center;flex-shrink:0;
+  transition:color .1s;
+}
+.rpt-acc-hdr.open .rpt-acc-icon{color:var(--olive-dk)}
+
+/* Title */
+.rpt-acc-title{
+  font-size:12px;font-weight:600;color:var(--text-mid);
+  flex:1;
+}
+.rpt-acc-hdr.open .rpt-acc-title{color:var(--text)}
+
+/* Summary pill — visible when collapsed, fades out when open */
+.rpt-acc-meta{
+  font-family:var(--fm);font-size:10px;color:var(--text-muted);
+  background:var(--bg);border:1px solid var(--border);
+  border-radius:8px;padding:1px 7px;white-space:nowrap;
+  transition:opacity .15s;
+  max-width:160px;overflow:hidden;text-overflow:ellipsis;
+}
+.rpt-acc-hdr.open .rpt-acc-meta{
+  opacity:0;pointer-events:none;
+}
+
+/* Chevron rotates */
+.rpt-acc-chev{
+  font-size:9px;color:var(--text-muted);flex-shrink:0;
+  transition:transform .18s ease, color .1s;
+  transform:rotate(-90deg);
+}
+.rpt-acc-hdr.open .rpt-acc-chev{
+  transform:rotate(0deg);
+  color:var(--olive);
+}
+
+/* Body — collapses via max-height */
+.rpt-acc-body{
+  max-height:0;
+  overflow:hidden;
+  transition:max-height .22s ease;
+}
+.rpt-acc-body.open{
+  /* large enough for any content; transition speed still feels
+     proportional because JS adds 'open' after a single frame  */
+  max-height:1400px;
+}
+
+/* ════════════════════════════════════════════
+   SECTION 1 — REPORT TYPE + OPTIONS
+════════════════════════════════════════════ */
+.rpt-type-area{padding:12px 13px 8px}
+.rpt-type-area-hdr{
+  font-size:9.5px;font-weight:600;color:var(--text-muted);
+  text-transform:uppercase;letter-spacing:.08em;margin-bottom:8px;
+}
+.rpt-type-2grid{display:grid;grid-template-columns:1fr 1fr;gap:7px}
+.rpt-type2-card{
+  display:flex;flex-direction:column;gap:6px;
+  padding:10px 10px 9px;
+  border:1.5px solid var(--border);border-radius:6px;
+  background:rgba(255,255,255,.4);cursor:pointer;transition:all .12s;
+  position:relative;
+}
+.rpt-type2-card:hover{background:rgba(255,255,255,.68);border-color:var(--border-dk)}
+.rpt-type2-card.on{
+  background:rgba(107,142,35,.07);border-color:var(--olive);
+  box-shadow:0 0 0 1.5px rgba(107,142,35,.18);
+}
+.rpt-type2-card.on::after{
+  content:'\f00c';font-family:'Font Awesome 6 Free';font-weight:900;
+  position:absolute;top:7px;right:8px;font-size:9px;color:var(--olive);
+}
+.rpt-type2-icon{
+  width:24px;height:24px;border-radius:4px;
+  display:flex;align-items:center;justify-content:center;
+  background:var(--bg-low);border:1px solid var(--border);
+  font-size:11px;color:var(--text-muted);transition:all .12s;flex-shrink:0;
+}
+.rpt-type2-card.on .rpt-type2-icon{
+  background:rgba(107,142,35,.12);border-color:rgba(107,142,35,.3);color:var(--olive);
+}
+.rpt-type2-lbl{font-size:11.5px;font-weight:600;color:var(--text);line-height:1.2}
+.rpt-type2-desc{font-size:10px;color:var(--text-muted);line-height:1.4;margin-top:1px}
+
+.rpt-form-sep{height:1px;background:var(--border);margin:0 13px}
+.rpt-form-area{padding:10px 13px 13px;display:flex;flex-direction:column;gap:7px}
+.rpt-form-lbl-hdr{
+  font-size:9.5px;font-weight:600;color:var(--text-muted);
+  text-transform:uppercase;letter-spacing:.08em;margin-bottom:1px;
+}
+.rpt-form-row{display:flex;align-items:center;gap:8px}
+.rpt-form-lbl{font-size:11.5px;color:var(--text-mid);width:96px;flex-shrink:0}
+.rpt-form-sel{
+  flex:1;height:26px;padding:0 7px;
+  border:1px solid var(--border);border-radius:var(--r);
+  font-family:var(--fu);font-size:11.5px;color:var(--text-mid);
+  background:rgba(255,255,255,.5);
+}
+.rpt-form-sel:focus{outline:none;border-color:var(--olive)}
+
+/* ════════════════════════════════════════════
+   SECTION 2 — SAMPLES
+   3-column card grid grouped by borehole.
+   Filter toolbar + group-level All buttons.
+════════════════════════════════════════════ */
+.rpt-samp-toolbar{
+  padding:9px 12px 7px;display:flex;gap:6px;align-items:center;
+  border-bottom:1px solid var(--border);flex-wrap:wrap;
+  background:rgba(255,255,255,.18);
+}
+.rpt-samp-search{
+  flex:1;min-width:90px;height:26px;padding:0 9px;
+  border:1px solid var(--border);border-radius:var(--r);
+  font-family:var(--fu);font-size:11.5px;color:var(--text);
+  background:rgba(255,255,255,.7);
+}
+.rpt-samp-search:focus{outline:none;border-color:var(--olive)}
+.rpt-samp-groupby{
+  height:26px;padding:0 6px;
+  border:1px solid var(--border);border-radius:var(--r);
+  font-family:var(--fu);font-size:11px;color:var(--text-mid);
+  background:rgba(255,255,255,.5);
+}
+.rpt-samp-count{
+  font-family:var(--fm);font-size:10px;color:var(--text-muted);
+  background:var(--bg-low);border:1px solid var(--border);
+  border-radius:10px;padding:2px 8px;white-space:nowrap;flex-shrink:0;
+}
+.rpt-samp-count strong{color:var(--olive-dk)}
+.rpt-samp-links{
+  padding:5px 12px;display:flex;gap:4px;align-items:center;
+  border-bottom:1px solid var(--border);
+  font-size:10.5px;color:var(--text-muted);
+  background:rgba(255,255,255,.12);
+}
+.rpt-samp-lnk{
+  color:var(--olive);background:none;border:none;
+  font-family:var(--fu);font-size:10.5px;
+  text-decoration:underline;cursor:pointer;padding:0;
+}
+.rpt-samp-body{padding:8px 10px 12px}
+
+/* Group header */
+.rpt-grp-hdr{
+  display:flex;align-items:center;gap:5px;
+  padding:7px 2px 4px;margin-bottom:5px;
+  border-bottom:1px solid var(--border);
+  font-size:9.5px;font-weight:600;color:var(--text-muted);
+  text-transform:uppercase;letter-spacing:.09em;
+}
+.rpt-grp-n{
+  font-family:var(--fm);font-size:9px;color:var(--text-muted);
+  background:var(--bg-low);border:1px solid var(--border);
+  border-radius:8px;padding:0 5px;margin-left:2px;
+}
+.rpt-grp-sp{flex:1}
+.rpt-grp-all{
+  color:var(--olive);background:none;border:none;
+  font-family:var(--fu);font-size:9.5px;font-weight:600;
+  text-decoration:underline;cursor:pointer;padding:0;
+}
+
+/* 3-column sample card grid */
+.rpt-samp-grid{
+  display:grid;grid-template-columns:repeat(3,1fr);gap:5px;
+  margin-bottom:10px;
+}
+.rpt-sc{
+  border:1.5px solid var(--border);border-radius:5px;
+  padding:7px 7px 6px;cursor:pointer;transition:all .12s;
+  background:rgba(255,255,255,.42);position:relative;
+}
+.rpt-sc:hover{background:rgba(255,255,255,.72);border-color:var(--border-dk)}
+.rpt-sc.on{
+  background:rgba(107,142,35,.07);border-color:var(--olive);
+  box-shadow:0 0 0 1px rgba(107,142,35,.18);
+}
+.rpt-sc-chk{
+  position:absolute;top:5px;right:5px;
+  width:12px;height:12px;
+  border:1.5px solid var(--border-dk);border-radius:2.5px;
+  background:#fff;display:flex;align-items:center;justify-content:center;
+  font-size:7px;color:transparent;transition:all .1s;
+}
+.rpt-sc.on .rpt-sc-chk{background:var(--olive);border-color:var(--olive);color:#fff}
+.rpt-sc-id{
+  font-family:var(--fm);font-size:10px;font-weight:500;color:var(--text);
+  margin-bottom:3px;padding-right:14px;
+  white-space:nowrap;overflow:hidden;text-overflow:ellipsis;
+}
+.rpt-sc-depth{font-size:9.5px;color:var(--text-muted);margin-bottom:1px}
+.rpt-sc-d50{font-size:9.5px;color:var(--olive-dk);font-weight:500}
+
+/* ════════════════════════════════════════════
+   SECTION 3 — SECTIONS & APPENDICES
+   Two labeled groups + live document outline
+════════════════════════════════════════════ */
+.rpt-sects-area{padding:10px 13px 13px}
+.rpt-sects-grp-hdr{
+  font-size:9.5px;font-weight:600;color:var(--text-muted);
+  text-transform:uppercase;letter-spacing:.09em;
+  padding:7px 0 4px;border-bottom:1px solid var(--border);margin-bottom:5px;
+  display:flex;align-items:center;gap:5px;
+}
+.rpt-sects-grp-hdr:not(:first-child){margin-top:13px}
+.rpt-sec-row{
+  display:flex;align-items:center;justify-content:space-between;
+  padding:5px 9px;border-radius:var(--r);
+  background:rgba(255,255,255,.32);border:1px solid transparent;
+  transition:all .1s;cursor:pointer;margin-bottom:3px;
+}
+.rpt-sec-row:hover{background:rgba(255,255,255,.58);border-color:var(--border)}
+.rpt-sec-lbl{
+  font-size:11.5px;color:var(--text-mid);
+  display:flex;align-items:center;gap:7px;
+}
+.rpt-sec-lbl i{font-size:10px;color:var(--text-muted);width:12px}
+.rpt-sec-reqd{
+  font-size:9px;padding:1px 5px;border-radius:7px;
+  background:var(--bg-low);color:var(--text-muted);
+  border:1px solid var(--border);margin-left:3px;
+}
+.rpt-toggle{
+  width:28px;height:15px;background:var(--border);border-radius:8px;
+  position:relative;flex-shrink:0;transition:background .15s;cursor:pointer;
+}
+.rpt-toggle.on{background:var(--olive)}
+.rpt-toggle::after{
+  content:'';position:absolute;width:11px;height:11px;
+  top:2px;left:2px;background:#fff;border-radius:50%;
+  transition:transform .15s;box-shadow:0 1px 2px rgba(0,0,0,.2);
+}
+.rpt-toggle.on::after{transform:translateX(13px)}
+
+/* Live document outline */
+.rpt-outline{
+  margin-top:12px;border:1px solid var(--border);border-radius:6px;
+  background:rgba(255,255,255,.45);overflow:hidden;
+}
+.rpt-outline-hdr{
+  padding:6px 10px;background:var(--bg-low);border-bottom:1px solid var(--border);
+  font-size:9.5px;font-weight:600;color:var(--text-muted);
+  text-transform:uppercase;letter-spacing:.09em;
+  display:flex;align-items:center;gap:5px;
+}
+.rpt-outline-body{padding:6px 10px 8px}
+.rpt-outline-item{
+  display:flex;align-items:center;gap:6px;
+  padding:2.5px 0;font-size:10.5px;color:var(--text-mid);
+}
+.rpt-outline-item.off{opacity:.35;text-decoration:line-through;color:var(--text-muted)}
+.rpt-outline-item.appendix{padding-left:10px;font-size:10px;color:var(--text-muted)}
+.rpt-outline-item.appendix.off{opacity:.25}
+.rpt-outline-dot{
+  width:5px;height:5px;border-radius:50%;background:var(--olive);flex-shrink:0;
+}
+.rpt-outline-item.off .rpt-outline-dot{background:var(--border)}
+.rpt-outline-item.appendix .rpt-outline-dot{background:var(--tan);width:4px;height:4px}
+.rpt-outline-pg{margin-left:auto;font-family:var(--fm);font-size:9px;color:var(--text-muted)}
+
+/* ════════════════════════════════════════════
+   SECTION 4 — DETAILS
+════════════════════════════════════════════ */
+.rpt-details-area{padding:12px 13px 14px;display:flex;flex-direction:column;gap:11px}
+.rpt-det-grp-hdr{
+  font-size:9.5px;font-weight:600;color:var(--text-muted);
+  text-transform:uppercase;letter-spacing:.08em;
+  padding-bottom:4px;border-bottom:1px solid var(--border);
+}
+.rpt-det-grid{display:grid;grid-template-columns:1fr 1fr;gap:7px;margin-top:7px}
+.rpt-det-field{display:flex;flex-direction:column;gap:3px}
+.rpt-det-field.full{grid-column:1/-1}
+.rpt-det-lbl{font-size:10.5px;color:var(--text-muted)}
+.rpt-det-inp{
+  height:26px;padding:0 8px;border:1px solid var(--border);border-radius:var(--r);
+  font-family:var(--fu);font-size:12px;color:var(--text);
+  background:rgba(255,255,255,.6);transition:border-color .1s;
+}
+.rpt-det-inp:focus{outline:none;border-color:var(--olive);background:#fff}
+.rpt-det-ta{
+  padding:6px 8px;border:1px solid var(--border);border-radius:var(--r);
+  font-family:var(--fu);font-size:12px;color:var(--text);
+  background:rgba(255,255,255,.6);resize:vertical;min-height:60px;
+  transition:border-color .1s;
+}
+.rpt-det-ta:focus{outline:none;border-color:var(--olive);background:#fff}
+.rpt-logo-drop{
+  border:1.5px dashed var(--border-dk);border-radius:5px;
+  padding:13px;text-align:center;cursor:pointer;
+  color:var(--text-muted);font-size:11px;line-height:1.5;
+  transition:all .12s;background:rgba(255,255,255,.3);
+}
+.rpt-logo-drop:hover{border-color:var(--olive);color:var(--olive-dk);background:rgba(107,142,35,.04)}
+.rpt-logo-drop i{display:block;font-size:18px;margin-bottom:3px;color:var(--text-muted)}
+.rpt-logo-drop:hover i{color:var(--olive)}
+
+/* ─── Generate footer (always visible) ─── */
+.rpt-gen-footer{
+  flex-shrink:0;padding:9px 12px 10px;
+  border-top:1px solid var(--border);background:var(--bg-low);
+}
+.rpt-gen-summary{
+  font-size:10.5px;color:var(--text-muted);font-family:var(--fm);
+  line-height:1.45;margin-bottom:7px;
+}
+.rpt-gen-summary strong{color:var(--text-mid)}
+.rpt-gen-btn{
+  width:100%;height:33px;display:flex;align-items:center;justify-content:center;gap:8px;
+  background:var(--olive);border:1px solid var(--olive-dk);border-radius:var(--r);
+  color:#fff;font-family:var(--fu);font-size:13px;font-weight:600;
+  cursor:pointer;transition:background .1s;
+}
+.rpt-gen-btn:hover{background:var(--olive-h)}
+.rpt-gen-btn i{font-size:11px}
+
+/* ════════════════════════════════════════════
+   PREVIEW PANEL (unchanged from 03)
+════════════════════════════════════════════ */
+.rpt-preview{flex:1;background:var(--bg-low);overflow:hidden;display:flex;flex-direction:column}
+.rpt-preview-topbar{
+  height:36px;flex-shrink:0;padding:0 14px;display:flex;align-items:center;gap:6px;
+  border-bottom:1px solid var(--border);background:rgba(255,255,255,.5);
+}
+.rpt-preview-note{font-size:11px;color:var(--text-muted)}
+.rpt-preview-note strong{color:var(--text);font-weight:600}
+.rpt-preview-sp{flex:1}
+.rpt-preview-btn{
+  height:24px;padding:0 9px;border:1px solid var(--border);border-radius:var(--r);
+  background:rgba(255,255,255,.55);font-family:var(--fu);font-size:11px;color:var(--text-mid);
+  display:flex;align-items:center;gap:4px;transition:all .1s;cursor:pointer;
+}
+.rpt-preview-btn:hover{background:var(--bg);border-color:var(--border-dk);color:var(--text)}
+.rpt-preview-canvas{
+  flex:1;overflow:auto;display:flex;align-items:flex-start;justify-content:center;
+  padding:24px 24px 32px;
+}
+
+/* Paper (unchanged from 03) */
+.rpt-paper{
+  width:680px;min-height:900px;flex-shrink:0;
+  background:#fff;
+  box-shadow:0 4px 24px rgba(60,40,20,.12),0 1px 4px rgba(60,40,20,.08);
+  border-radius:2px;font-family:'Source Sans 3',sans-serif;
+  font-size:12px;color:#2f2f2f;
+}
+.rp-header{background:#C8002A;padding:16px 28px 14px;display:flex;align-items:center;gap:16px}
+.rp-dtu{background:#fff;color:#C8002A;font-size:16px;font-weight:700;padding:4px 8px 3px;border-radius:2px;letter-spacing:.05em;flex-shrink:0;font-family:'Source Sans 3',sans-serif}
+.rp-title-block{flex:1}
+.rp-title{color:#fff;font-family:'Playfair Display',serif;font-size:18px;font-weight:700;line-height:1.2}
+.rp-subtitle{color:rgba(255,255,255,.75);font-size:11px;margin-top:3px;font-family:'JetBrains Mono',monospace;letter-spacing:.04em}
+.rp-body{padding:20px 28px 28px}
+.rp-info-grid{display:grid;grid-template-columns:1fr 1fr;gap:0;border:1px solid #ddd;border-radius:4px;overflow:hidden;margin-bottom:18px}
+.rp-info-cell{padding:8px 12px;border-bottom:1px solid #eee;border-right:1px solid #eee}
+.rp-info-cell:nth-child(2n){border-right:none}
+.rp-info-cell:nth-last-child(-n+2){border-bottom:none}
+.rp-info-key{font-size:9.5px;font-weight:600;color:#888;text-transform:uppercase;letter-spacing:.06em;margin-bottom:2px}
+.rp-info-val{font-size:12px;color:#2f2f2f;font-weight:500}
+.rp-sect{font-size:13px;font-weight:700;color:#2f2f2f;border-bottom:2px solid #C8002A;padding-bottom:4px;margin:16px 0 10px}
+.rp-tbl{width:100%;border-collapse:collapse;font-size:11px;margin-bottom:14px}
+.rp-tbl thead th{background:#f5f0e8;padding:6px 10px;text-align:left;font-weight:600;font-size:10px;text-transform:uppercase;letter-spacing:.05em;color:#666;border-bottom:1px solid #ddd}
+.rp-tbl thead th:nth-child(n+2){text-align:right}
+.rp-tbl tbody td{padding:5px 10px;border-bottom:1px solid #f0ebe4}
+.rp-tbl tbody td:nth-child(n+2){text-align:right;font-family:'JetBrains Mono',monospace;font-size:10.5px;color:#3a7ea0}
+.rp-tbl tbody tr:hover{background:#faf7f2}
+.rp-chart-ph{height:180px;background:#f8f5f0;border:1px solid #e0d8cc;border-radius:3px;display:flex;align-items:center;justify-content:center;flex-direction:column;gap:6px;color:#aaa;margin-bottom:14px}
+.rp-chart-ph i{font-size:28px}
+.rp-chart-ph span{font-size:11px}
+.rp-footer{border-top:1px solid #eee;margin-top:20px;padding-top:10px;display:flex;align-items:center;justify-content:space-between;font-size:10px;color:#aaa;font-family:'JetBrains Mono',monospace}
+
+/* ════════════════════════════════════════════
+   EXPORT TAB (unchanged from 03)
+════════════════════════════════════════════ */
+.exp-layout{flex:1;display:flex;flex-direction:column;overflow:hidden}
+.exp-header{background:var(--bg-raised);border-bottom:1px solid var(--border);padding:10px 20px;display:flex;align-items:center;gap:12px;flex-shrink:0}
+.exp-header-title{font-size:13px;font-weight:600;color:var(--text)}
+.exp-header-sub{font-size:11.5px;color:var(--text-muted)}
+.exp-sp{flex:1}
+.exp-body{flex:1;overflow-y:auto;padding:16px 20px 24px;display:flex;flex-direction:column;gap:16px}
+.exp-sect-lbl{font-size:10.5px;font-weight:600;color:var(--text-muted);text-transform:uppercase;letter-spacing:.08em;margin-bottom:8px;display:flex;align-items:center;gap:7px}
+.exp-sect-lbl::after{content:'';flex:1;height:1px;background:var(--border)}
+.exp-scope-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:8px}
+.exp-scope-card{padding:11px 12px;border:1.5px solid var(--border);border-radius:6px;background:rgba(255,255,255,.45);cursor:pointer;transition:all .12s}
+.exp-scope-card:hover{background:rgba(255,255,255,.72);border-color:var(--border-dk)}
+.exp-scope-card.on{background:rgba(107,142,35,.07);border-color:var(--olive);box-shadow:0 0 0 1px rgba(107,142,35,.12)}
+.exp-scope-top{display:flex;align-items:center;gap:7px;margin-bottom:5px}
+.exp-scope-dot{width:10px;height:10px;border-radius:50%;background:#fff;border:1px solid var(--border-dk);flex-shrink:0}
+.exp-scope-card.on .exp-scope-dot{background:var(--olive);border-color:var(--olive-dk)}
+.exp-scope-name{font-size:11.5px;font-weight:600;color:var(--text)}
+.exp-scope-desc{font-size:10.5px;color:var(--text-muted);line-height:1.45}
+.exp-content-grid{display:grid;grid-template-columns:repeat(4,1fr);gap:8px}
+.exp-content-card{padding:14px 14px 12px;border:1.5px solid var(--border);border-radius:6px;background:rgba(255,255,255,.45);cursor:pointer;transition:all .14s;display:flex;flex-direction:column;gap:7px}
+.exp-content-card:hover{background:rgba(255,255,255,.75);border-color:var(--border-dk)}
+.exp-content-card.on{background:rgba(107,142,35,.07);border-color:var(--olive);box-shadow:0 0 0 1px rgba(107,142,35,.12)}
+.exp-cc-icon{font-size:18px;color:var(--text-muted);transition:color .12s}
+.exp-content-card.on .exp-cc-icon{color:var(--olive)}
+.exp-cc-name{font-size:12px;font-weight:600;color:var(--text)}
+.exp-cc-desc{font-size:10.5px;color:var(--text-muted);line-height:1.4}
+.exp-cc-check{display:flex;align-items:center;gap:4px;font-size:10px;color:var(--text-muted);margin-top:2px}
+.exp-cc-check i{font-size:9px}
+.exp-content-card.on .exp-cc-check{color:var(--olive)}
+.exp-format-groups{display:flex;flex-direction:column;gap:12px}
+.exp-format-group-label{font-size:10px;font-weight:600;color:var(--text-muted);text-transform:uppercase;letter-spacing:.07em;margin-bottom:6px}
+.exp-format-grid{display:grid;grid-template-columns:repeat(4,1fr);gap:8px}
+.exp-fmt-card{padding:11px 12px;border:1.5px solid var(--border);border-radius:5px;background:rgba(255,255,255,.4);cursor:pointer;transition:all .12s;display:flex;flex-direction:column;gap:5px;position:relative}
+.exp-fmt-card:hover{background:rgba(255,255,255,.7);border-color:var(--border-dk)}
+.exp-fmt-card.on{background:rgba(107,142,35,.07);border-color:var(--olive);box-shadow:0 0 0 1px rgba(107,142,35,.12)}
+.exp-fmt-card.on::after{content:'\f00c';font-family:'Font Awesome 6 Free';font-weight:900;position:absolute;top:7px;right:8px;font-size:9px;color:var(--olive)}
+.exp-fmt-icon{font-size:20px;color:var(--text-muted);transition:color .12s}
+.exp-fmt-card.on .exp-fmt-icon{color:var(--olive)}
+.exp-fmt-name{font-size:12px;font-weight:600;color:var(--text)}
+.exp-fmt-desc{font-size:10.5px;color:var(--text-muted);line-height:1.4}
+.exp-fmt-size{font-family:var(--fm);font-size:9.5px;color:var(--text-muted);margin-top:2px}
+.exp-output-card{background:var(--bg-raised);border:1px solid var(--border);border-radius:6px;padding:14px 16px}
+.exp-out-row{display:flex;align-items:center;gap:10px;margin-bottom:10px}
+.exp-out-row:last-child{margin-bottom:0}
+.exp-out-lbl{font-size:12px;color:var(--text-mid);width:120px;flex-shrink:0}
+.exp-out-field{flex:1;height:28px;padding:0 9px;border:1px solid var(--border);border-radius:var(--r);font-family:var(--fu);font-size:12px;color:var(--text);background:rgba(255,255,255,.6)}
+.exp-out-field:focus{outline:none;border-color:var(--olive);background:rgba(255,255,255,.9)}
+.exp-browse-btn{height:28px;padding:0 11px;border:1px solid var(--border);border-radius:var(--r);font-size:12px;color:var(--text-mid);background:rgba(255,255,255,.4);display:flex;align-items:center;gap:5px;transition:all .1s;cursor:pointer}
+.exp-browse-btn:hover{background:var(--bg-low);border-color:var(--border-dk)}
+.exp-browse-btn i{font-size:10px}
+.exp-out-hint{font-size:10.5px;color:var(--text-muted);font-family:var(--fm)}
+.exp-action-bar{background:var(--bg-raised);border:1px solid var(--border);border-radius:6px;padding:12px 16px;display:flex;align-items:center;gap:14px;position:sticky;bottom:0}
+.exp-summary{flex:1}
+.exp-summary-line{font-size:12px;color:var(--text);font-weight:500}
+.exp-summary-detail{font-size:10.5px;color:var(--text-muted);margin-top:3px;font-family:var(--fm)}
+.exp-do-btn{height:34px;padding:0 20px;border-radius:var(--r);background:var(--olive);border:1px solid var(--olive-dk);color:#fff;font-size:13px;font-weight:600;display:flex;align-items:center;gap:8px;transition:background .1s;flex-shrink:0;cursor:pointer}
+.exp-do-btn:hover{background:var(--olive-h)}
+.exp-do-btn i{font-size:12px}
+</style>
+</head>
+<body>
+<div class="app">
+  <main class="main">
+
+    <div class="page-host">
+
+      <!-- ═══ REPORTS TAB ═══ -->
+      <div class="tab-content active" id="tab-reports">
+        <div class="rpt-layout">
+
+          <!-- ─── Composer Panel ─────────────────────── -->
+          <div class="rpt-panel">
+            <div class="rpt-panel-body">
+
+              <!-- ══ Accordion 1: Report Type ══ -->
+              <div class="rpt-acc">
+                <div class="rpt-acc-hdr open" onclick="toggleAcc(this)">
+                  <i class="fa-solid fa-file-lines rpt-acc-icon"></i>
+                  <span class="rpt-acc-title">Report Type</span>
+                  <span class="rpt-acc-meta" id="acc-meta-type">Cross-sample · PDF</span>
+                  <i class="fa-solid fa-chevron-down rpt-acc-chev"></i>
+                </div>
+                <div class="rpt-acc-body open">
+
+                  <div class="rpt-type-area">
+                    <div class="rpt-type-area-hdr">Report type</div>
+                    <div class="rpt-type-2grid">
+
+                      <div class="rpt-type2-card" onclick="pickType(this)">
+                        <div class="rpt-type2-icon"><i class="fa-solid fa-vial"></i></div>
+                        <div class="rpt-type2-lbl">Individual Sample</div>
+                        <div class="rpt-type2-desc">Full report for one sample — grain data, plot, K-values, statistics.</div>
+                      </div>
+
+                      <div class="rpt-type2-card on" onclick="pickType(this)">
+                        <div class="rpt-type2-icon"><i class="fa-solid fa-code-compare"></i></div>
+                        <div class="rpt-type2-lbl">Cross-Sample Comparison</div>
+                        <div class="rpt-type2-desc">Side-by-side parameters and K-values for selected samples.</div>
+                      </div>
+
+                      <div class="rpt-type2-card" onclick="pickType(this)">
+                        <div class="rpt-type2-icon"><i class="fa-solid fa-layer-group"></i></div>
+                        <div class="rpt-type2-lbl">Full Project Summary</div>
+                        <div class="rpt-type2-desc">All samples, all methods — complete project documentation.</div>
+                      </div>
+
+                      <div class="rpt-type2-card" onclick="pickType(this)">
+                        <div class="rpt-type2-icon"><i class="fa-solid fa-chart-column"></i></div>
+                        <div class="rpt-type2-lbl">K-Value Focus</div>
+                        <div class="rpt-type2-desc">Compact report centred on hydraulic conductivity results.</div>
+                      </div>
+
+                    </div>
+                  </div>
+
+                  <div class="rpt-form-sep"></div>
+                  <div class="rpt-form-area">
+                    <div class="rpt-form-lbl-hdr">Output options</div>
+                    <div class="rpt-form-row">
+                      <span class="rpt-form-lbl">Template</span>
+                      <select class="rpt-form-sel" onchange="updateTypeMeta()">
+                        <option>Standard</option>
+                        <option>Detailed</option>
+                        <option>Minimal</option>
+                        <option>DTU Official</option>
+                      </select>
+                    </div>
+                    <div class="rpt-form-row">
+                      <span class="rpt-form-lbl">Output format</span>
+                      <select class="rpt-form-sel" onchange="updateTypeMeta()">
+                        <option>PDF</option>
+                        <option>HTML</option>
+                        <option>Word (.docx)</option>
+                      </select>
+                    </div>
+                    <div class="rpt-form-row">
+                      <span class="rpt-form-lbl">Language</span>
+                      <select class="rpt-form-sel">
+                        <option>English</option>
+                        <option>Danish</option>
+                      </select>
+                    </div>
+                  </div>
+
+                </div><!-- /acc-body -->
+              </div><!-- /acc 1 -->
+
+              <!-- ══ Accordion 2: Samples ══ -->
+              <div class="rpt-acc">
+                <div class="rpt-acc-hdr open" onclick="toggleAcc(this)">
+                  <i class="fa-solid fa-vials rpt-acc-icon"></i>
+                  <span class="rpt-acc-title">Samples</span>
+                  <span class="rpt-acc-meta" id="acc-meta-samples">12 / 18 selected</span>
+                  <i class="fa-solid fa-chevron-down rpt-acc-chev"></i>
+                </div>
+                <div class="rpt-acc-body open">
+
+                  <div class="rpt-samp-toolbar">
+                    <input class="rpt-samp-search" type="text" placeholder="Search samples…" oninput="filterSamples(this.value)">
+                    <select class="rpt-samp-groupby">
+                      <option>By borehole</option>
+                      <option>By zone</option>
+                      <option>By depth</option>
+                    </select>
+                    <span class="rpt-samp-count" id="samp-count-label"><strong>12</strong> / 18</span>
+                  </div>
+                  <div class="rpt-samp-links">
+                    <button class="rpt-samp-lnk" onclick="sampAll(true)">Select all</button>
+                    <span style="margin:0 3px;color:var(--text-muted)">·</span>
+                    <button class="rpt-samp-lnk" onclick="sampAll(false)">Clear</button>
+                    <span style="margin:0 3px;color:var(--text-muted)">·</span>
+                    <button class="rpt-samp-lnk" onclick="sampInvert()">Invert</button>
+                  </div>
+                  <div class="rpt-samp-body" id="samp-body">
+                    <!-- populated by JS -->
+                  </div>
+
+                </div><!-- /acc-body -->
+              </div><!-- /acc 2 -->
+
+              <!-- ══ Accordion 3: Sections & Appendices ══ -->
+              <div class="rpt-acc">
+                <div class="rpt-acc-hdr" onclick="toggleAcc(this)">
+                  <i class="fa-solid fa-list-ul rpt-acc-icon"></i>
+                  <span class="rpt-acc-title">Sections &amp; Appendices</span>
+                  <span class="rpt-acc-meta" id="acc-meta-sects">6 sections · 1 appendix</span>
+                  <i class="fa-solid fa-chevron-down rpt-acc-chev"></i>
+                </div>
+                <div class="rpt-acc-body">
+                  <div class="rpt-sects-area">
+
+                    <div class="rpt-sects-grp-hdr">
+                      <i class="fa-solid fa-file-lines" style="font-size:9px"></i> Main sections
+                    </div>
+                    <div class="rpt-sec-row" onclick="toggleSec(this)">
+                      <span class="rpt-sec-lbl"><i class="fa-solid fa-address-card"></i>Cover Page<span class="rpt-sec-reqd">required</span></span>
+                      <div class="rpt-toggle on"></div>
+                    </div>
+                    <div class="rpt-sec-row" onclick="toggleSec(this)">
+                      <span class="rpt-sec-lbl"><i class="fa-solid fa-align-left"></i>Executive Summary</span>
+                      <div class="rpt-toggle on"></div>
+                    </div>
+                    <div class="rpt-sec-row" onclick="toggleSec(this)">
+                      <span class="rpt-sec-lbl"><i class="fa-solid fa-table"></i>Grain Size Data</span>
+                      <div class="rpt-toggle on"></div>
+                    </div>
+                    <div class="rpt-sec-row" onclick="toggleSec(this)">
+                      <span class="rpt-sec-lbl"><i class="fa-solid fa-chart-line"></i>Distribution Plot</span>
+                      <div class="rpt-toggle on"></div>
+                    </div>
+                    <div class="rpt-sec-row" onclick="toggleSec(this)">
+                      <span class="rpt-sec-lbl"><i class="fa-solid fa-water"></i>K-Values Table</span>
+                      <div class="rpt-toggle on"></div>
+                    </div>
+                    <div class="rpt-sec-row" onclick="toggleSec(this)">
+                      <span class="rpt-sec-lbl"><i class="fa-solid fa-chart-bar"></i>Statistics</span>
+                      <div class="rpt-toggle on"></div>
+                    </div>
+                    <div class="rpt-sec-row" onclick="toggleSec(this)">
+                      <span class="rpt-sec-lbl"><i class="fa-solid fa-book"></i>Method References</span>
+                      <div class="rpt-toggle"></div>
+                    </div>
+
+                    <div class="rpt-sects-grp-hdr">
+                      <i class="fa-solid fa-paperclip" style="font-size:9px"></i> Appendices
+                    </div>
+                    <div class="rpt-sec-row" onclick="toggleSec(this)">
+                      <span class="rpt-sec-lbl"><i class="fa-solid fa-table-list"></i>A — Raw Sieve Data</span>
+                      <div class="rpt-toggle"></div>
+                    </div>
+                    <div class="rpt-sec-row" onclick="toggleSec(this)">
+                      <span class="rpt-sec-lbl"><i class="fa-solid fa-chart-line"></i>B — Full-Size Plots</span>
+                      <div class="rpt-toggle on"></div>
+                    </div>
+                    <div class="rpt-sec-row" onclick="toggleSec(this)">
+                      <span class="rpt-sec-lbl"><i class="fa-solid fa-flask"></i>C — Method Details</span>
+                      <div class="rpt-toggle"></div>
+                    </div>
+
+                    <!-- Live document outline -->
+                    <div class="rpt-outline">
+                      <div class="rpt-outline-hdr">
+                        <i class="fa-regular fa-file-lines"></i> Document outline
+                      </div>
+                      <div class="rpt-outline-body" id="outline-body">
+                        <!-- synced with toggles by JS -->
+                      </div>
+                    </div>
+
+                  </div>
+                </div><!-- /acc-body -->
+              </div><!-- /acc 3 -->
+
+              <!-- ══ Accordion 4: Details ══ -->
+              <div class="rpt-acc">
+                <div class="rpt-acc-hdr" onclick="toggleAcc(this)">
+                  <i class="fa-solid fa-pen-to-square rpt-acc-icon"></i>
+                  <span class="rpt-acc-title">Details &amp; Branding</span>
+                  <span class="rpt-acc-meta">Project info, logo, notes</span>
+                  <i class="fa-solid fa-chevron-down rpt-acc-chev"></i>
+                </div>
+                <div class="rpt-acc-body">
+                  <div class="rpt-details-area">
+
+                    <div>
+                      <div class="rpt-det-grp-hdr">Project information</div>
+                      <div class="rpt-det-grid">
+                        <div class="rpt-det-field full">
+                          <span class="rpt-det-lbl">Project name</span>
+                          <input class="rpt-det-inp" type="text" placeholder="e.g. Grundvandskortlægning Roskilde 2026">
+                        </div>
+                        <div class="rpt-det-field">
+                          <span class="rpt-det-lbl">Project no.</span>
+                          <input class="rpt-det-inp" type="text" placeholder="PRJ-2026-041">
+                        </div>
+                        <div class="rpt-det-field">
+                          <span class="rpt-det-lbl">Date</span>
+                          <input class="rpt-det-inp" type="text" placeholder="2026-04-10">
+                        </div>
+                        <div class="rpt-det-field">
+                          <span class="rpt-det-lbl">Analyst</span>
+                          <input class="rpt-det-inp" type="text" placeholder="Name">
+                        </div>
+                        <div class="rpt-det-field">
+                          <span class="rpt-det-lbl">Client</span>
+                          <input class="rpt-det-inp" type="text" placeholder="Client / organisation">
+                        </div>
+                      </div>
+                    </div>
+
+                    <div>
+                      <div class="rpt-det-grp-hdr">Logo</div>
+                      <div style="margin-top:7px">
+                        <div class="rpt-logo-drop">
+                          <i class="fa-regular fa-image"></i>
+                          Upload logo (PNG, SVG) — drag or click
+                        </div>
+                      </div>
+                    </div>
+
+                    <div>
+                      <div class="rpt-det-grp-hdr">Report notes</div>
+                      <div style="margin-top:7px">
+                        <textarea class="rpt-det-ta" placeholder="Optional notes — appear in the report footer or cover page…"></textarea>
+                      </div>
+                    </div>
+
+                  </div>
+                </div><!-- /acc-body -->
+              </div><!-- /acc 4 -->
+
+            </div><!-- /panel-body -->
+
+            <!-- Generate footer — always visible -->
+            <div class="rpt-gen-footer">
+              <div class="rpt-gen-summary" id="gen-summary">
+                <strong>Cross-sample</strong> · <strong>12</strong> samples · PDF · Standard
+              </div>
+              <button class="rpt-gen-btn">
+                <i class="fa-solid fa-print"></i> Generate Report
+              </button>
+            </div>
+
+          </div><!-- /panel -->
+
+          <!-- ─── Preview panel (unchanged from 03) ─── -->
+          <div class="rpt-preview">
+            <div class="rpt-preview-topbar">
+              <span class="rpt-preview-note" id="preview-note"><strong>Preview</strong> · Cross-sample · 12 samples</span>
+              <div class="rpt-preview-sp"></div>
+              <button class="rpt-preview-btn"><i class="fa-solid fa-rotate"></i>&nbsp;Refresh</button>
+              <button class="rpt-preview-btn"><i class="fa-solid fa-print"></i>&nbsp;Print</button>
+              <button class="rpt-preview-btn"><i class="fa-solid fa-file-pdf"></i>&nbsp;Save PDF</button>
+            </div>
+            <div class="rpt-preview-canvas">
+            <div class="rpt-paper">
+
+              <div class="rp-header">
+                <div class="rp-dtu">DTU</div>
+                <div class="rp-title-block">
+                  <div class="rp-title">Cross-Sample Comparison Report</div>
+                  <div class="rp-subtitle">GRAIN SIZE ANALYSIS · HYDRAULIC CONDUCTIVITY · v0.9-β</div>
+                </div>
+              </div>
+
+              <div class="rp-body">
+                <div class="rp-info-grid">
+                  <div class="rp-info-cell"><div class="rp-info-key">Samples</div><div class="rp-info-val">12 included</div></div>
+                  <div class="rp-info-cell"><div class="rp-info-key">Date</div><div class="rp-info-val">2026-04-10</div></div>
+                  <div class="rp-info-cell"><div class="rp-info-key">Boreholes</div><div class="rp-info-val">BH-01, 03, 04, 05, 06</div></div>
+                  <div class="rp-info-cell"><div class="rp-info-key">Depth range</div><div class="rp-info-val">1.5 – 9.0 m b.g.</div></div>
+                  <div class="rp-info-cell"><div class="rp-info-key">Analyst</div><div class="rp-info-val">—</div></div>
+                  <div class="rp-info-cell"><div class="rp-info-key">Project</div><div class="rp-info-val">—</div></div>
+                </div>
+
+                <div class="rp-sect">Grain Size Parameters — Summary</div>
+                <table class="rp-tbl">
+                  <thead><tr><th>Sample</th><th>D10</th><th>D50</th><th>D60</th><th>Cu</th><th>USCS</th></tr></thead>
+                  <tbody>
+                    <tr><td>BH-01 / 1.5 m</td><td>0.160</td><td>0.420</td><td>0.560</td><td>3.50</td><td>SP</td></tr>
+                    <tr><td>BH-01 / 3.0 m</td><td>0.112</td><td>0.280</td><td>0.380</td><td>3.39</td><td>SP</td></tr>
+                    <tr><td>BH-01 / 4.5 m</td><td>0.085</td><td>0.195</td><td>0.260</td><td>3.06</td><td>SP</td></tr>
+                    <tr><td>BH-03 / 1.5 m</td><td>0.210</td><td>0.540</td><td>0.720</td><td>3.43</td><td>SW</td></tr>
+                    <tr><td>BH-03 / 3.0 m</td><td>0.175</td><td>0.450</td><td>0.610</td><td>3.49</td><td>SP</td></tr>
+                    <tr style="background:#faf7f2;color:#aaa;font-size:10.5px"><td colspan="6" style="text-align:center;padding:4px">… 7 more rows</td></tr>
+                  </tbody>
+                </table>
+
+                <div class="rp-sect">K-Value Results — Geometric Mean (K̄)</div>
+                <table class="rp-tbl">
+                  <thead><tr><th>Sample</th><th>K̄ (m/s)</th><th>K̄ (m/d)</th><th>Valid methods</th></tr></thead>
+                  <tbody>
+                    <tr><td>BH-01 / 1.5 m</td><td>1.42×10⁻⁴</td><td>12.3</td><td>14 / 14</td></tr>
+                    <tr><td>BH-01 / 3.0 m</td><td>7.10×10⁻⁵</td><td>6.1</td><td>14 / 14</td></tr>
+                    <tr><td>BH-01 / 4.5 m</td><td>4.05×10⁻⁵</td><td>3.5</td><td>12 / 14</td></tr>
+                    <tr><td>BH-03 / 1.5 m</td><td>2.31×10⁻⁴</td><td>20.0</td><td>14 / 14</td></tr>
+                    <tr><td>BH-03 / 3.0 m</td><td>1.73×10⁻⁴</td><td>14.9</td><td>14 / 14</td></tr>
+                    <tr style="background:#faf7f2;color:#aaa;font-size:10.5px"><td colspan="4" style="text-align:center;padding:4px">… 7 more rows</td></tr>
+                  </tbody>
+                </table>
+
+                <div class="rp-sect">Grain Size Distribution</div>
+                <div class="rp-chart-ph">
+                  <i class="fa-solid fa-chart-line"></i>
+                  <span>Combined Grain Size Curves — 12 samples</span>
+                </div>
+
+                <div class="rp-footer">
+                  <span>Generated by GrainSize Analysis v0.9-β · DTU</span>
+                  <span>Page 1 of 4</span>
+                </div>
+              </div>
+
+            </div><!-- /paper -->
+            </div><!-- /canvas -->
+          </div><!-- /preview -->
+
+        </div><!-- /rpt-layout -->
+      </div><!-- /tab-reports -->
+
+      <!-- ═══ EXPORT TAB (unchanged) ═══ -->
+      <div class="tab-content" id="tab-export">
+        <div class="exp-layout">
+          <div class="exp-header">
+            <i class="fa-solid fa-file-export" style="color:var(--text-muted)"></i>
+            <span class="exp-header-title">Export Data</span>
+            <span class="exp-header-sub">Select what to export and in which formats</span>
+            <div class="exp-sp"></div>
+            <span style="font-family:var(--fm);font-size:11px;color:var(--text-muted)">18 loaded · 12 selected</span>
+          </div>
+          <div class="exp-body">
+            <div>
+              <div class="exp-sect-lbl"><i class="fa-solid fa-bullseye"></i>Export scope</div>
+              <div class="exp-scope-grid">
+                <div class="exp-scope-card" onclick="pickExportScope(this)"><div class="exp-scope-top"><div class="exp-scope-dot"></div><div class="exp-scope-name">Current dataset</div></div><div class="exp-scope-desc">Export only the dataset currently in focus.</div></div>
+                <div class="exp-scope-card on" onclick="pickExportScope(this)"><div class="exp-scope-top"><div class="exp-scope-dot"></div><div class="exp-scope-name">Selected datasets</div></div><div class="exp-scope-desc">Use the chosen batch subset for comparison and export.</div></div>
+                <div class="exp-scope-card" onclick="pickExportScope(this)"><div class="exp-scope-top"><div class="exp-scope-dot"></div><div class="exp-scope-name">All loaded datasets</div></div><div class="exp-scope-desc">Export everything currently loaded into the project.</div></div>
+              </div>
+            </div>
+            <div>
+              <div class="exp-sect-lbl"><i class="fa-solid fa-layer-group"></i>What to include</div>
+              <div class="exp-content-grid">
+                <div class="exp-content-card on" onclick="this.classList.toggle('on')"><i class="fa-solid fa-table exp-cc-icon"></i><div class="exp-cc-name">Grain Size Data</div><div class="exp-cc-desc">Raw sieve data, percentiles D5–D90, gradation parameters</div><div class="exp-cc-check"><i class="fa-solid fa-check-circle"></i>Included</div></div>
+                <div class="exp-content-card on" onclick="this.classList.toggle('on')"><i class="fa-solid fa-water exp-cc-icon"></i><div class="exp-cc-name">K-Values</div><div class="exp-cc-desc">All 14 method results in cm/s, m/s, m/d + geometric mean</div><div class="exp-cc-check"><i class="fa-solid fa-check-circle"></i>Included</div></div>
+                <div class="exp-content-card on" onclick="this.classList.toggle('on')"><i class="fa-solid fa-chart-bar exp-cc-icon"></i><div class="exp-cc-name">Statistics</div><div class="exp-cc-desc">Soil classification, gradation coefficients, K̄ statistics</div><div class="exp-cc-check"><i class="fa-solid fa-check-circle"></i>Included</div></div>
+                <div class="exp-content-card" onclick="this.classList.toggle('on')"><i class="fa-solid fa-chart-line exp-cc-icon"></i><div class="exp-cc-name">Plots</div><div class="exp-cc-desc">Grain size distribution curves, one per dataset or combined</div><div class="exp-cc-check" style="color:var(--text-muted)"><i class="fa-regular fa-circle-xmark"></i>Not included</div></div>
+              </div>
+            </div>
+            <div>
+              <div class="exp-sect-lbl"><i class="fa-solid fa-file-arrow-down"></i>Export formats</div>
+              <div class="exp-format-groups">
+                <div><div class="exp-format-group-label">Data</div><div class="exp-format-grid">
+                  <div class="exp-fmt-card on" onclick="this.classList.toggle('on')"><i class="fa-solid fa-file-csv exp-fmt-icon"></i><div class="exp-fmt-name">CSV — Long</div><div class="exp-fmt-desc">One row per sample + method.</div><div class="exp-fmt-size">~18 KB · 12 datasets</div></div>
+                  <div class="exp-fmt-card on" onclick="this.classList.toggle('on')"><i class="fa-solid fa-table-columns exp-fmt-icon"></i><div class="exp-fmt-name">CSV — Wide</div><div class="exp-fmt-desc">One column per sample.</div><div class="exp-fmt-size">~6 KB · 12 datasets</div></div>
+                  <div class="exp-fmt-card" onclick="this.classList.toggle('on')"><i class="fa-solid fa-file-excel exp-fmt-icon"></i><div class="exp-fmt-name">Excel (.xlsx)</div><div class="exp-fmt-desc">Multi-sheet workbook.</div><div class="exp-fmt-size">~45 KB · 12 datasets</div></div>
+                  <div class="exp-fmt-card" onclick="this.classList.toggle('on')"><i class="fa-solid fa-brackets-curly exp-fmt-icon"></i><div class="exp-fmt-name">JSON</div><div class="exp-fmt-desc">Machine-readable format.</div><div class="exp-fmt-size">~22 KB · 12 datasets</div></div>
+                </div></div>
+                <div><div class="exp-format-group-label">Visualizations</div><div class="exp-format-grid">
+                  <div class="exp-fmt-card on" onclick="this.classList.toggle('on')"><i class="fa-regular fa-image exp-fmt-icon"></i><div class="exp-fmt-name">PNG</div><div class="exp-fmt-desc">Raster image at 300 dpi.</div><div class="exp-fmt-size">~120 KB each</div></div>
+                  <div class="exp-fmt-card" onclick="this.classList.toggle('on')"><i class="fa-solid fa-bezier-curve exp-fmt-icon"></i><div class="exp-fmt-name">SVG</div><div class="exp-fmt-desc">Vector, scales perfectly.</div><div class="exp-fmt-size">~28 KB each</div></div>
+                  <div class="exp-fmt-card" onclick="this.classList.toggle('on')"><i class="fa-solid fa-file-pdf exp-fmt-icon"></i><div class="exp-fmt-name">PDF Report</div><div class="exp-fmt-desc">Full printable report.</div><div class="exp-fmt-size">~380 KB · all datasets</div></div>
+                  <div></div>
+                </div></div>
+              </div>
+            </div>
+            <div>
+              <div class="exp-sect-lbl"><i class="fa-solid fa-folder-open"></i>Output location</div>
+              <div class="exp-output-card">
+                <div class="exp-out-row"><span class="exp-out-lbl">Save to</span><input class="exp-out-field" type="text" value="C:\Users\Projects\GrainSize\Output" readonly><button class="exp-browse-btn"><i class="fa-solid fa-folder-open"></i> Browse…</button></div>
+                <div class="exp-out-row"><span class="exp-out-lbl">Filename pattern</span><input class="exp-out-field" type="text" value="{sample}_{date}_{format}"><span class="exp-out-hint">&nbsp;e.g. BH-01_1.5m_2026-04-10_wide.csv</span></div>
+              </div>
+            </div>
+            <div class="exp-action-bar">
+              <div class="exp-summary"><div class="exp-summary-line">Ready to export: 12 datasets · 3 formats · grain data + K-values + statistics</div><div class="exp-summary-detail">12 datasets × CSV Long, CSV Wide, PNG → ~620 KB estimated · 14 files</div></div>
+              <button class="exp-do-btn"><i class="fa-solid fa-download"></i> Export Now</button>
+            </div>
+          </div>
+        </div>
+      </div><!-- /tab-export -->
+
+    </div><!-- /page-host -->
+  </main>
+</div><!-- /app -->
+
+<script src="_shell.js"></script>
+<script>
+/* ── Page tab handler ── */
+function _onPageTab(id) {
+  document.querySelectorAll('.tab-content').forEach(c => c.classList.remove('active'));
+  const el = document.getElementById('tab-' + id);
+  if (el) el.classList.add('active');
+  document.querySelectorAll('.tab').forEach(t => {
+    t.classList.toggle('on', t.getAttribute('onclick')?.includes("'" + id + "'"));
+  });
+}
+
+/* ══════════════════════════════════════════════
+   ACCORDION
+   Toggle header open/closed; body collapses via max-height CSS.
+   Multiple accordions can be open at once.
+══════════════════════════════════════════════ */
+function toggleAcc(hdr) {
+  const body = hdr.nextElementSibling;
+  const isOpen = hdr.classList.contains('open');
+  hdr.classList.toggle('open', !isOpen);
+  body.classList.toggle('open', !isOpen);
+}
+
+/* ── Report type picker ── */
+function pickType(el) {
+  document.querySelectorAll('.rpt-type2-card').forEach(c => c.classList.remove('on'));
+  el.classList.add('on');
+  updateTypeMeta();
+}
+
+function updateTypeMeta() {
+  const activeType = document.querySelector('.rpt-type2-card.on .rpt-type2-lbl');
+  const fmt = document.querySelectorAll('.rpt-form-sel')[1]?.value || 'PDF';
+  const tmpl = document.querySelectorAll('.rpt-form-sel')[0]?.value || 'Standard';
+  const typeShort = {
+    'Individual Sample': 'Individual',
+    'Cross-Sample Comparison': 'Cross-sample',
+    'Full Project Summary': 'Full project',
+    'K-Value Focus': 'K-Value focus',
+  }[activeType?.textContent] || 'Cross-sample';
+  const meta = document.getElementById('acc-meta-type');
+  if (meta) meta.textContent = `${typeShort} · ${fmt}`;
+  updateGenSummary();
+}
+
+/* ── Section toggles + outline + meta ── */
+function toggleSec(el) {
+  const t = el.querySelector('.rpt-toggle');
+  if (t) t.classList.toggle('on');
+  buildOutline();
+  updateSectMeta();
+}
+
+function updateSectMeta() {
+  const toggles = document.querySelectorAll('.rpt-sec-row .rpt-toggle');
+  // first 7 are main sections, last 3 are appendices
+  const mainOn    = [...toggles].slice(0,7).filter(t => t.classList.contains('on')).length;
+  const appendOn  = [...toggles].slice(7).filter(t => t.classList.contains('on')).length;
+  const meta = document.getElementById('acc-meta-sects');
+  if (meta) {
+    let parts = [`${mainOn} section${mainOn!==1?'s':''}`];
+    if (appendOn) parts.push(`${appendOn} appendix`);
+    meta.textContent = parts.join(' · ');
+  }
+}
+
+/* ── Export scope ── */
+function pickExportScope(el) {
+  document.querySelectorAll('.exp-scope-card').forEach(c => c.classList.remove('on'));
+  el.classList.add('on');
+}
+
+/* ══════════════════════════════════════════════
+   SAMPLE DATA
+══════════════════════════════════════════════ */
+const BOREHOLE_GROUPS = [
+  { id:'BH-01', zone:'North Zone', samples:[
+    {id:'BH-01/1.5m', depth:'1.5 m b.g.', d50:'0.42 mm', sel:true},
+    {id:'BH-01/3.0m', depth:'3.0 m b.g.', d50:'0.28 mm', sel:true},
+    {id:'BH-01/4.5m', depth:'4.5 m b.g.', d50:'0.20 mm', sel:true},
+    {id:'BH-01/6.0m', depth:'6.0 m b.g.', d50:'0.14 mm', sel:false},
+  ]},
+  { id:'BH-02', zone:'North Zone', samples:[
+    {id:'BH-02/1.5m', depth:'1.5 m b.g.', d50:'0.37 mm', sel:false},
+    {id:'BH-02/3.0m', depth:'3.0 m b.g.', d50:'0.24 mm', sel:false},
+  ]},
+  { id:'BH-03', zone:'Central', samples:[
+    {id:'BH-03/1.5m', depth:'1.5 m b.g.', d50:'0.54 mm', sel:true},
+    {id:'BH-03/3.0m', depth:'3.0 m b.g.', d50:'0.45 mm', sel:true},
+    {id:'BH-03/4.5m', depth:'4.5 m b.g.', d50:'0.31 mm', sel:true},
+  ]},
+  { id:'BH-04', zone:'Central', samples:[
+    {id:'BH-04/1.5m', depth:'1.5 m b.g.', d50:'0.62 mm', sel:true},
+    {id:'BH-04/3.0m', depth:'3.0 m b.g.', d50:'0.48 mm', sel:true},
+    {id:'BH-04/6.0m', depth:'6.0 m b.g.', d50:'0.29 mm', sel:true},
+    {id:'BH-04/9.0m', depth:'9.0 m b.g.', d50:'0.11 mm', sel:false},
+  ]},
+  { id:'BH-05', zone:'South', samples:[
+    {id:'BH-05/1.5m', depth:'1.5 m b.g.', d50:'0.35 mm', sel:true},
+    {id:'BH-05/3.0m', depth:'3.0 m b.g.', d50:'0.22 mm', sel:false},
+  ]},
+  { id:'BH-06', zone:'South', samples:[
+    {id:'BH-06/1.5m', depth:'1.5 m b.g.', d50:'0.51 mm', sel:true},
+    {id:'BH-06/4.5m', depth:'4.5 m b.g.', d50:'0.33 mm', sel:true},
+    {id:'BH-06/7.5m', depth:'7.5 m b.g.', d50:'0.16 mm', sel:false},
+  ]},
+];
+
+function buildSampGrid() {
+  const body = document.getElementById('samp-body');
+  if (!body) return;
+  body.innerHTML = BOREHOLE_GROUPS.map(grp => {
+    const selN  = grp.samples.filter(s => s.sel).length;
+    const cards = grp.samples.map(s => `
+      <div class="rpt-sc${s.sel?' on':''}" onclick="toggleSamp(this)">
+        <div class="rpt-sc-chk"><i class="fa-solid fa-check" style="font-size:7px"></i></div>
+        <div class="rpt-sc-id">${s.id}</div>
+        <div class="rpt-sc-depth">${s.depth}</div>
+        <div class="rpt-sc-d50">d₅₀ ${s.d50}</div>
+      </div>`).join('');
+    return `
+      <div class="rpt-grp-hdr">
+        ${grp.id}
+        <span style="color:var(--text-muted);font-weight:400;font-style:italic;font-size:9px;margin-left:2px">${grp.zone}</span>
+        <span class="rpt-grp-n">${selN}/${grp.samples.length}</span>
+        <span class="rpt-grp-sp"></span>
+        <button class="rpt-grp-all" onclick="grpAll(event,'${grp.id}')">All</button>
+      </div>
+      <div class="rpt-samp-grid">${cards}</div>`;
+  }).join('');
+  updateSampCount();
+}
+
+function toggleSamp(el) {
+  el.classList.toggle('on');
+  updateSampCount();
+}
+
+function updateSampCount() {
+  const total = document.querySelectorAll('.rpt-sc').length;
+  const sel   = document.querySelectorAll('.rpt-sc.on').length;
+  const lbl   = document.getElementById('samp-count-label');
+  const badge = document.getElementById('acc-meta-samples');
+  if (lbl)   lbl.innerHTML = `<strong>${sel}</strong> / ${total}`;
+  if (badge) badge.textContent = `${sel} / ${total} selected`;
+  updateGenSummary();
+}
+
+function updateGenSummary() {
+  const sel  = document.querySelectorAll('.rpt-sc.on').length;
+  const type = document.querySelector('.rpt-type2-card.on .rpt-type2-lbl')?.textContent || 'Cross-sample';
+  const fmt  = document.querySelectorAll('.rpt-form-sel')[1]?.value || 'PDF';
+  const tmpl = document.querySelectorAll('.rpt-form-sel')[0]?.value || 'Standard';
+  const typeShort = {
+    'Individual Sample': 'Individual',
+    'Cross-Sample Comparison': 'Cross-sample',
+    'Full Project Summary': 'Full project',
+    'K-Value Focus': 'K-Value focus',
+  }[type] || 'Cross-sample';
+
+  const sum = document.getElementById('gen-summary');
+  if (sum) sum.innerHTML = `<strong>${typeShort}</strong> · <strong>${sel}</strong> sample${sel!==1?'s':''} · ${fmt} · ${tmpl}`;
+
+  const pn = document.getElementById('preview-note');
+  if (pn) pn.innerHTML = `<strong>Preview</strong> · ${typeShort} · ${sel} sample${sel!==1?'s':''}`;
+}
+
+function sampAll(val) {
+  document.querySelectorAll('.rpt-sc').forEach(c => {
+    if (val) c.classList.add('on'); else c.classList.remove('on');
+  });
+  updateSampCount();
+}
+
+function sampInvert() {
+  document.querySelectorAll('.rpt-sc').forEach(c => c.classList.toggle('on'));
+  updateSampCount();
+}
+
+function grpAll(evt, grpId) {
+  evt.stopPropagation();
+  const grpCards = [...document.querySelectorAll('.rpt-sc')].filter(
+    c => c.querySelector('.rpt-sc-id')?.textContent.startsWith(grpId)
+  );
+  const allSel = grpCards.every(c => c.classList.contains('on'));
+  grpCards.forEach(c => { if (allSel) c.classList.remove('on'); else c.classList.add('on'); });
+  updateSampCount();
+}
+
+function filterSamples(q) {
+  document.querySelectorAll('.rpt-sc').forEach(c => {
+    const id = c.querySelector('.rpt-sc-id')?.textContent.toLowerCase() || '';
+    c.style.display = (!q || id.includes(q.toLowerCase())) ? '' : 'none';
+  });
+}
+
+/* ══════════════════════════════════════════════
+   DOCUMENT OUTLINE (synced with section toggles)
+══════════════════════════════════════════════ */
+const OUTLINE_ITEMS = [
+  {label:'Cover Page',                    pg:1,  appendix:false},
+  {label:'Executive Summary',             pg:2,  appendix:false},
+  {label:'Grain Size Data',               pg:3,  appendix:false},
+  {label:'Distribution Plot',             pg:5,  appendix:false},
+  {label:'K-Values Table',                pg:7,  appendix:false},
+  {label:'Statistics',                    pg:9,  appendix:false},
+  {label:'Method References',             pg:11, appendix:false},
+  {label:'Appendix A — Raw Sieve Data',   pg:13, appendix:true},
+  {label:'Appendix B — Full-Size Plots',  pg:15, appendix:true},
+  {label:'Appendix C — Method Details',   pg:17, appendix:true},
+];
+
+function buildOutline() {
+  const ob = document.getElementById('outline-body');
+  if (!ob) return;
+  const toggles = document.querySelectorAll('.rpt-sec-row .rpt-toggle');
+  ob.innerHTML = OUTLINE_ITEMS.map((item, i) => {
+    const on = toggles[i] ? toggles[i].classList.contains('on') : true;
+    return `<div class="rpt-outline-item${item.appendix?' appendix':''}${!on?' off':''}">
+      <div class="rpt-outline-dot"></div>
+      <span>${item.label}</span>
+      <span class="rpt-outline-pg">${on ? item.pg : '—'}</span>
+    </div>`;
+  }).join('');
+}
+
+/* ── Init ── */
+function _onPageInit() {
+  const p = new URLSearchParams(location.search);
+  _onPageTab(p.get('tab') || 'reports');
+  buildSampGrid();
+  buildOutline();
+  updateSectMeta();
+  updateTypeMeta();
+}
+</script>
+</body>
+</html>

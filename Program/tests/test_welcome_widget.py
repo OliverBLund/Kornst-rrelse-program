@@ -38,6 +38,25 @@ class TestWelcomeWidget(unittest.TestCase):
         self.assertEqual(opened[0]["name"], "North Core Batch")
         widget.deleteLater()
 
+    def test_welcome_screen_fits_720p_without_outer_scroll(self):
+        sessions = [
+            {"name": "North Core Batch", "date": "2026-04-09", "files": ["a.csv", "b.csv"]},
+            {"name": "Older Batch", "date": "2026-03-18", "files": ["c.csv"]},
+            {"name": "Third Batch", "date": "2026-03-01", "files": ["d.csv"]},
+            {"name": "Fourth Batch", "date": "2026-02-11", "files": ["e.csv"]},
+        ]
+        widget = WelcomeWidget(recent_files=[], recent_sessions=sessions)
+        widget.resize(1280, 720)
+        widget.show()
+        APP.processEvents()
+
+        self.assertEqual(widget._outer_scroll.verticalScrollBar().maximum(), 0)
+        self.assertFalse(widget._title_desc.isVisible())
+        self.assertFalse(widget._title_attr.isVisible())
+        self.assertFalse(widget._footer_attr.isVisible())
+
+        widget.deleteLater()
+
 
 if __name__ == "__main__":
     unittest.main(verbosity=2)
