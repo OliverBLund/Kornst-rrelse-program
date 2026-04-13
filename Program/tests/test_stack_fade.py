@@ -5,6 +5,7 @@ Regression tests for stacked-page fade transitions.
 import os
 import sys
 import time
+import inspect
 import unittest
 
 os.environ.setdefault('QT_QPA_PLATFORM', 'offscreen')
@@ -13,9 +14,10 @@ sys.path.insert(0, 'Program')
 from PyQt6.QtWidgets import QApplication, QLabel, QStackedWidget, QTabWidget
 
 from gui.stack_fade import StackFadeController, TabFadeInController
+from gui.main_window import MainWindow
 
 
-APP = QApplication.instance() or QApplication([])
+APP = QApplication.instance() or QApplication(["codex-test"])
 
 
 def _pump_events(milliseconds: int) -> None:
@@ -118,6 +120,13 @@ class TestTabFadeInController(unittest.TestCase):
         self.assertEqual(self.tabs.currentIndex(), 1)
         self.assertFalse(self.controller.is_animating)
         self.assertIsNone(self.tabs.currentWidget().graphicsEffect())
+
+
+class TestMainWindowDatasetTabFade(unittest.TestCase):
+    def test_main_window_installs_dataset_tab_fader(self):
+        setup_ui_source = inspect.getsource(MainWindow.setup_ui)
+        self.assertIn("self._dataset_tab_fader = TabFadeInController(", setup_ui_source)
+        self.assertIn("self.dataset_tabs_widget", setup_ui_source)
 
 
 if __name__ == '__main__':

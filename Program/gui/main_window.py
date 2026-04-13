@@ -27,7 +27,7 @@ from gui.reporting_tab import ReportingTab
 from gui.export_tab import ExportTab
 from gui.error_tab import ErrorTab
 from gui.loading_dialog import LoadingDialog
-from gui.stack_fade import StackFadeController
+from gui.stack_fade import StackFadeController, TabFadeInController
 from gui.welcome_widget import WelcomeWidget
 from gui.theme import C, F, SZ, build_stylesheet, icon, apply_matplotlib_style
 from qt_chrome import FramelessMainWindowMixin
@@ -564,6 +564,11 @@ class MainWindow(FramelessMainWindowMixin, QMainWindow):
         self.dataset_tabs_widget.setIconSize(QSize(12, 12))
         self.dataset_tabs_widget.setTabsClosable(True)
         self.dataset_tabs_widget.tabCloseRequested.connect(self.close_dataset_tab)
+        self._dataset_tab_fader = TabFadeInController(
+            self.dataset_tabs_widget,
+            self,
+            duration_ms=105,
+        )
         self._configure_dataset_tab_bar()
         # Tab styling handled by global QSS in theme.build_stylesheet()
 

@@ -2,6 +2,7 @@
 
 # GUI Framework
 PyQt6>=6.4.0
+qtawesome>=1.2.0         # Font Awesome icons used throughout the UI (lazy-imported in gui/theme.py)
 
 # Data Processing
 numpy>=1.24.0

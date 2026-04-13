@@ -120,16 +120,24 @@ REM Setup build environment
 if "%USE_CLEAN_ENV%"=="2" (
     echo [1/5] Creating clean virtual environment...
 
-    REM Use short path to avoid Windows path length limits
-    set VENV_DIR=.build_venv_temp
+    REM Create venv OUTSIDE the OneDrive project path to avoid Windows MAX_PATH (260 char)
+    REM limits. Nested package paths (e.g. PyQt6\Qt6\qml\QtWebEngine\...) easily exceed
+    REM 260 chars when combined with the long OneDrive base path, which causes pip install
+    REM to fail with OSError [Errno 2] on files like WebEngineQuickDelegatesQml.qmltypes.
+    set VENV_DIR=C:\gsa_venv_%RANDOM%
+    echo Venv path: !VENV_DIR!
 
-    REM Remove old venv if exists
+    REM Remove old venv if exists (also clean up any leftover legacy in-project venv)
+    if exist ".build_venv_temp" (
+        echo Cleaning up legacy in-project venv...
+        rmdir /s /q ".build_venv_temp" 2>nul
+    )
     if exist "!VENV_DIR!" (
         echo Cleaning up old venv...
         rmdir /s /q "!VENV_DIR!" 2>nul
     )
 
-    REM Create venv in project root (shorter path)
+    REM Create venv at short absolute path
     python -m venv "!VENV_DIR!"
     if ERRORLEVEL 1 (
         echo ERROR: Failed to create virtual environment
@@ -151,7 +159,7 @@ if "%USE_CLEAN_ENV%"=="2" (
 
     echo Clean environment ready.
     echo.
-    set PYTHON_CMD=!VENV_DIR!\Scripts\python.exe
+    set "PYTHON_CMD=!VENV_DIR!\Scripts\python.exe"
 ) else (
     echo [1/5] Using current Python environment...
 
@@ -218,7 +226,8 @@ if "%BUILD_MODE%"=="1" (
     --hidden-import "PyQt6.QtGui" ^
     --collect-data matplotlib ^
     --hidden-import "matplotlib.backends.backend_qt5agg" ^
-    --hidden-import "matplotlib.backends.backend_qtagg"
+    --hidden-import "matplotlib.backends.backend_qtagg" ^
+    --collect-all "qtawesome"
 
 if ERRORLEVEL 1 (
     echo.
@@ -269,6 +278,10 @@ echo.
 REM Cleanup temporary venv if created
 if "%USE_CLEAN_ENV%"=="2" (
     echo [4/5] Cleaning up temporary virtual environment...
+    if defined VENV_DIR if exist "!VENV_DIR!" (
+        rmdir /s /q "!VENV_DIR!" 2>nul
+    )
+    REM Also clean up any legacy in-project venv that might be left behind
     if exist ".build_venv_temp" (
         rmdir /s /q ".build_venv_temp" 2>nul
     )

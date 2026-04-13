@@ -322,7 +322,6 @@ class DatasetTab(QWidget):
             }}
             QTableWidget::item:selected {{
                 background: rgba(107,142,35,0.07);
-                border-left: 3px solid {C.OLIVE};
                 color: {C.TEXT};
             }}
             QTableWidget::item:hover {{
@@ -345,15 +344,13 @@ class DatasetTab(QWidget):
 
         header = self.results_table.horizontalHeader()
         if header:
-            header.setSectionResizeMode(0, QHeaderView.ResizeMode.Interactive)
-            header.setSectionResizeMode(1, QHeaderView.ResizeMode.Interactive)
+            header.setSectionResizeMode(0, QHeaderView.ResizeMode.Stretch)
+            header.setSectionResizeMode(1, QHeaderView.ResizeMode.Stretch)
             header.setSectionResizeMode(2, QHeaderView.ResizeMode.ResizeToContents)
             header.setSectionResizeMode(3, QHeaderView.ResizeMode.ResizeToContents)
             header.setSectionResizeMode(4, QHeaderView.ResizeMode.ResizeToContents)
             header.setSectionResizeMode(5, QHeaderView.ResizeMode.ResizeToContents)
             header.setStretchLastSection(False)
-            self.results_table.setColumnWidth(0, 180)
-            self.results_table.setColumnWidth(1, 160)
 
         self.results_table.itemSelectionChanged.connect(self.on_result_row_selected)
         tc_layout.addWidget(self.results_table)
