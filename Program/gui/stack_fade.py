@@ -89,10 +89,11 @@ class StackFadeController(QObject):
         animation.setStartValue(1.0)
         animation.setEndValue(0.0)
         animation.setEasingCurve(QEasingCurve.Type.InOutQuad)
-        animation.finished.connect(
-            lambda idx=index, cb=after_switch, widget=current_widget, eff=effect:
-            self._on_fade_out_finished(idx, cb, widget, eff)
-        )
+
+        def _handle_finished(*_args) -> None:
+            self._on_fade_out_finished(index, after_switch, current_widget, effect)
+
+        animation.finished.connect(_handle_finished)
 
         self._active_widget = current_widget
         self._active_effect = effect
@@ -125,9 +126,11 @@ class StackFadeController(QObject):
         animation.setStartValue(0.0)
         animation.setEndValue(1.0)
         animation.setEasingCurve(QEasingCurve.Type.OutCubic)
-        animation.finished.connect(
-            lambda widget=incoming_widget, eff=effect: self._on_fade_in_finished(widget, eff)
-        )
+
+        def _handle_finished(*_args) -> None:
+            self._on_fade_in_finished(incoming_widget, effect)
+
+        animation.finished.connect(_handle_finished)
 
         self._active_widget = incoming_widget
         self._active_effect = effect
@@ -213,9 +216,11 @@ class TabFadeInController(QObject):
         animation.setStartValue(0.0)
         animation.setEndValue(1.0)
         animation.setEasingCurve(QEasingCurve.Type.OutCubic)
-        animation.finished.connect(
-            lambda target=widget, eff=effect: self._on_fade_finished(target, eff)
-        )
+
+        def _handle_finished(*_args) -> None:
+            self._on_fade_finished(widget, effect)
+
+        animation.finished.connect(_handle_finished)
 
         self._active_widget = widget
         self._active_effect = effect

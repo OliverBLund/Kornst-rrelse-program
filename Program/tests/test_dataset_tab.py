@@ -56,6 +56,10 @@ class TestDatasetTabResultsTable(unittest.TestCase):
         self.assertEqual(header.sectionResizeMode(1), QHeaderView.ResizeMode.Stretch)
         self.assertEqual(header.sectionResizeMode(5), QHeaderView.ResizeMode.ResizeToContents)
 
+    def test_statistics_tab_does_not_force_tall_minimum_height(self):
+        self.assertLessEqual(self.tab.statistics_widget.minimumSizeHint().height(), 120)
+        self.assertLessEqual(self.tab.minimumSizeHint().height(), 520)
+
 
 if __name__ == "__main__":
     unittest.main(verbosity=2)

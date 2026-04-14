@@ -423,6 +423,39 @@ class GrainSizeData:
             ))
             return None
 
+    def recalculate_porosity(
+        self,
+        mode: str = "simple",
+        *,
+        preserve_manual_override: bool = True,
+    ) -> Optional[float]:
+        """Recalculate automatic porosity while respecting manual overrides."""
+        old_calculated = self.calculated_porosity
+        old_current = self.current_porosity
+
+        if mode == "simple":
+            new_porosity = self._calculate_simple_porosity()
+        elif mode == "urumovic":
+            new_porosity = self._calculate_urumovic_porosity()
+        else:
+            raise ValueError(f"Unknown porosity mode: {mode}")
+
+        self.calculated_porosity = new_porosity
+
+        if old_current is None:
+            should_apply_to_current = True
+        elif not preserve_manual_override:
+            should_apply_to_current = True
+        else:
+            baseline = old_calculated if old_calculated is not None else self.porosity
+            should_apply_to_current = baseline is None or abs(old_current - baseline) <= 1e-9
+
+        if should_apply_to_current and new_porosity is not None:
+            self.current_porosity = new_porosity
+            self.porosity = new_porosity
+
+        return new_porosity
+
     def _calculate_urumovic_porosity(self) -> Optional[float]:
         """
         Calculate porosity using Urumovic & Urumovic (2016) method

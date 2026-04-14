@@ -23,6 +23,7 @@ from PyQt6.QtWidgets import (
     QSplitter,
     QHeaderView,
     QMessageBox,
+    QScrollArea,
 )
 from PyQt6.QtCore import Qt, pyqtSignal
 from PyQt6.QtGui import QColor, QFont
@@ -402,7 +403,18 @@ class StatisticsTab(QWidget):
 
     def init_ui(self):
         """Initialize the statistics tab UI with comprehensive grain analysis panels"""
-        layout = QVBoxLayout(self)
+        outer_layout = QVBoxLayout(self)
+        outer_layout.setContentsMargins(0, 0, 0, 0)
+        outer_layout.setSpacing(0)
+
+        scroll = QScrollArea()
+        scroll.setWidgetResizable(True)
+        scroll.setFrameShape(QFrame.Shape.NoFrame)
+        scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+        scroll.setStyleSheet("QScrollArea { background: transparent; border: none; }")
+
+        content = QWidget()
+        layout = QVBoxLayout(content)
         layout.setContentsMargins(8, 8, 8, 8)
         layout.setSpacing(8)
 
@@ -425,6 +437,10 @@ class StatisticsTab(QWidget):
         # 5. EXPORT BUTTONS
         button_layout = self.create_export_buttons()
         layout.addLayout(button_layout)
+        layout.addStretch(1)
+
+        scroll.setWidget(content)
+        outer_layout.addWidget(scroll)
 
         # Initial display with placeholder data
         self.update_display()

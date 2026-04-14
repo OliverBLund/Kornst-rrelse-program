@@ -3,7 +3,7 @@ Plot widget with real matplotlib integration for grain size distribution visuali
 """
 
 from PyQt6.QtWidgets import QWidget, QVBoxLayout, QHBoxLayout, QPushButton, QLabel
-from PyQt6.QtCore import Qt
+from PyQt6.QtCore import Qt, pyqtSignal
 from matplotlib.figure import Figure
 from matplotlib.patches import Patch
 import matplotlib.pyplot as plt
@@ -13,11 +13,13 @@ from unit_conversions import HydraulicConductivityConverter, HydraulicConductivi
 from .plot_styles import PlotStyle, PROFESSIONAL_STYLE
 from .matplotlib_canvas import FigureCanvas, NavigationToolbar
 from .k_plot_helpers import annotate_log_bars, apply_log_bar_limits, format_method_label
+from .plot_interactions import AxesInteractionController
 from .theme import C, apply_matplotlib_style
 from grain_classification import ISO14688, interpolate_at as _gc_interpolate_at
 
 
 class PlotWidget(QWidget):
+    axes_view_changed = pyqtSignal(object)
     _DIST_X_PADDING_FACTOR = 2.5
     _DIST_Y_MAX = 102.0
 
@@ -29,6 +31,7 @@ class PlotWidget(QWidget):
         self.grain_size_ax = None
         self.k_value_ax = None
         self.active_axes = []
+        self.current_ax = None
         
         # Data storage
         self.grain_data = None
@@ -96,6 +99,15 @@ class PlotWidget(QWidget):
         self.toolbar = NavigationToolbar(self.canvas, self)
         self.toolbar.setVisible(False)
 
+        self.interactions = AxesInteractionController(
+            figure=self.figure,
+            canvas=self.canvas,
+            get_current_ax=lambda: self.current_ax,
+            set_current_ax=lambda ax: setattr(self, "current_ax", ax),
+            get_active_axes=lambda: self.active_axes,
+            on_view_changed=lambda ax: self.axes_view_changed.emit(ax),
+        )
+
         layout.addWidget(self.canvas)
 
         # Initialize empty plots
@@ -132,6 +144,9 @@ class PlotWidget(QWidget):
             color=C.TEXT_MUTED, fontstyle='italic',
         )
 
+        self.interactions.prime_current_ax()
+        self.interactions.capture_default_limits()
+        self.interactions.apply_active_axes_styling()
         self.canvas.draw()
 
     def _get_curve_marker(self, style: PlotStyle):
@@ -446,6 +461,9 @@ class PlotWidget(QWidget):
             )
         
         self.figure.tight_layout()
+        self.interactions.prime_current_ax()
+        self.interactions.capture_default_limits()
+        self.interactions.apply_active_axes_styling()
         self.canvas.draw()
         
     def add_k_calculation_results(self, k_results: Dict[str, float]):
@@ -569,6 +587,9 @@ class PlotWidget(QWidget):
         self.active_axes = [ax1, ax2]
         
         self.figure.tight_layout()
+        self.interactions.prime_current_ax()
+        self.interactions.capture_default_limits()
+        self.interactions.apply_active_axes_styling()
         self.canvas.draw()
     
     def plot_k_values_only(self, k_results: Dict[str, float]):
@@ -631,6 +652,9 @@ class PlotWidget(QWidget):
         
         # Adjust layout and redraw
         self.figure.tight_layout()
+        self.interactions.prime_current_ax()
+        self.interactions.capture_default_limits()
+        self.interactions.apply_active_axes_styling()
         self.canvas.draw()
 
     def set_display_unit(self, unit: HydraulicConductivityUnit):
@@ -665,28 +689,7 @@ class PlotWidget(QWidget):
 
     def reset_view(self):
         """Reset plot view to default zoom"""
-        if not self.current_ax:
-            return
-            
-        # Reset based on current plot type
-        if self.grain_size_ax == self.current_ax and self.grain_data:
-            # Grain size plot — same padded limits as update_plot
-            diameters, cumulative = self.grain_data
-            x_min, x_max, y_min, y_max = self._distribution_limits(diameters, cumulative)
-            self.current_ax.set_xlim(x_min, x_max)
-            self.current_ax.set_ylim(y_min, y_max)
-        elif self.k_value_ax == self.current_ax and self.k_results:
-            # K-value plot - use converted values for proper scaling
-            k_values_display = self._convert_k_values_for_display(self.k_results)
-            k_values = list(k_values_display.values())
-            apply_log_bar_limits(self.current_ax, k_values)
-        else:
-            # Default grain size limits
-            if hasattr(self.current_ax, 'get_xscale') and self.current_ax.get_xscale() == 'log':
-                self.current_ax.set_xlim(0.001, 100)
-            self.current_ax.set_ylim(0, self._DIST_Y_MAX)
-        
-        self.canvas.draw()
+        self.interactions.reset_current_axes()
         
     def clear_plots(self):
         """Clear all plot data"""

@@ -19,7 +19,8 @@ except ImportError:
     from matplotlib.backends.backend_qt5agg import FigureCanvasQTAgg as _FigureCanvas  # type: ignore
     from matplotlib.backends.backend_qt5agg import NavigationToolbar2QT as NavigationToolbar  # type: ignore
 
-from PyQt6.QtCore import QEvent, QTimer
+from PyQt6.QtCore import QEvent, QSize, QTimer
+from PyQt6.QtWidgets import QSizePolicy
 
 
 _RESYNC_EVENTS = {QEvent.Type.ParentWindowChange}
@@ -31,9 +32,23 @@ if _dpr_change_event is not None:
 class FigureCanvas(_FigureCanvas):
     """Qt canvas that eagerly syncs matplotlib to the active screen DPR."""
 
+    _MAX_EMBEDDED_HINT = QSize(960, 560)
+
     def __init__(self, *args, **kwargs) -> None:
         super().__init__(*args, **kwargs)
         self._deferred_draw_pending = False
+        self.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
+        self.setMinimumSize(0, 0)
+
+    def sizeHint(self) -> QSize:  # type: ignore[override]
+        """Cap the natural figure hint so embedded plots do not resize the app off-screen."""
+        hint = super().sizeHint()
+        if not hint.isValid():
+            return QSize(self._MAX_EMBEDDED_HINT)
+        return QSize(
+            min(hint.width(), self._MAX_EMBEDDED_HINT.width()),
+            min(hint.height(), self._MAX_EMBEDDED_HINT.height()),
+        )
 
     def draw(self, *args, **kwargs) -> None:  # type: ignore[override]
         if not self.isVisible():

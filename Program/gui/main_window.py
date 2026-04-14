@@ -835,17 +835,13 @@ class MainWindow(FramelessMainWindowMixin, QMainWindow):
 
     def _show_welcome(self) -> None:
         """Show the welcome panel (hide dataset tabs and sidebar)."""
-        self._samples_stack_fader.switch_to(
-            0,
-            after_switch=lambda: self.control_panel.setVisible(False),
-        )
+        self._samples_stack.setCurrentIndex(0)
+        self.control_panel.setVisible(False)
 
     def _hide_welcome(self) -> None:
         """Show the dataset tabs (restore sidebar)."""
-        self._samples_stack_fader.switch_to(
-            1,
-            after_switch=lambda: self.control_panel.setVisible(True),
-        )
+        self._samples_stack.setCurrentIndex(1)
+        self.control_panel.setVisible(True)
 
     def _dataset_tab_icon(self, widget: QWidget, active: bool):
         """Return the appropriate qtawesome icon for each dataset sub-tab."""

@@ -101,51 +101,66 @@ class ColumnMapperDialog(FramelessDialogBase):
 
     def load_csv_preview(self, sheet_name: Optional[str] = None):
         """Load first few rows of file for preview"""
-        file_ext = os.path.splitext(self.file_path)[1].lower()
-        rows = []
+        target_sheet = None
+        if self.forced_sheet_name:
+            target_sheet = self.forced_sheet_name
+        else:
+            target_sheet = sheet_name or self.current_sheet
+
+        rows, excel_sheets, resolved_sheet = self.load_preview_rows(
+            self.file_path,
+            sheet_name=target_sheet,
+            excel_sheets=self.excel_sheets,
+        )
+        if self.forced_sheet_name:
+            self.excel_sheets = [self.forced_sheet_name]
+        else:
+            self.excel_sheets = excel_sheets
+        self.current_sheet = resolved_sheet
+        self.headers = self.detect_headers(rows)
+        self.sample_data = rows[:50]
+
+    @staticmethod
+    def load_preview_rows(
+        file_path: str,
+        *,
+        sheet_name: Optional[str] = None,
+        excel_sheets: Optional[List[str]] = None,
+    ) -> tuple[List[List[str]], List[str], Optional[str]]:
+        """Load raw preview rows using the same strategy across preview surfaces."""
+        file_ext = os.path.splitext(file_path)[1].lower()
+        rows: List[List[str]] = []
+        discovered_sheets = list(excel_sheets or [])
+        resolved_sheet = sheet_name
 
         if file_ext == '.csv':
-            with open(self.file_path, 'r', encoding='utf-8') as file:
+            with open(file_path, 'r', encoding='utf-8') as file:
                 reader = csv.reader(file)
                 for i, row in enumerate(reader):
-                    if i >= 50:  # Load enough rows for data selection
+                    if i >= 50:
                         break
                     rows.append(row)
         elif file_ext in ['.xlsx', '.xls']:
-            # Load Excel file with pandas - handle multi-sheet files
             import pandas as pd
 
-            if not self.excel_sheets:
-                excel_file = pd.ExcelFile(self.file_path)
+            if not discovered_sheets:
+                excel_file = pd.ExcelFile(file_path)
                 try:
-                    self.excel_sheets = list(excel_file.sheet_names)
+                    discovered_sheets = list(excel_file.sheet_names)
                 finally:
                     excel_file.close()
 
-            # Determine which sheet to preview
-            # If forced_sheet_name is set, use only that sheet
-            if self.forced_sheet_name:
-                target_sheet = self.forced_sheet_name
-                self.excel_sheets = [self.forced_sheet_name]  # Hide other sheets from UI
-            else:
-                target_sheet = sheet_name or self.current_sheet
-                if not target_sheet or target_sheet not in self.excel_sheets:
-                    target_sheet = self._get_preferred_sheet_name()
+            if not resolved_sheet or resolved_sheet not in discovered_sheets:
+                resolved_sheet = discovered_sheets[0] if discovered_sheets else None
 
-            self.current_sheet = target_sheet
-
-            # Load with header=None to get raw data - load enough rows for complex Excel files
-            df = pd.read_excel(self.file_path, sheet_name=target_sheet, header=None, nrows=100)
-            # Convert dataframe to list of lists
+            df = pd.read_excel(file_path, sheet_name=resolved_sheet, header=None, nrows=100)
             rows = df.values.tolist()
-            rows = [[str(cell) if pd.notna(cell) else '' for cell in row] for row in rows]  # Convert all to strings, handle NaN
+            rows = [[str(cell) if pd.notna(cell) else '' for cell in row] for row in rows]
 
         if not rows:
             raise ValueError("CSV file is empty")
 
-        # Try to detect header row
-        self.headers = self.detect_headers(rows)
-        self.sample_data = rows[:50]  # Show first 50 rows so users can see all their data
+        return rows, discovered_sheets, resolved_sheet
 
     def detect_headers(self, rows: List[List[str]]) -> List[str]:
         """Try to detect which row contains headers"""
@@ -160,7 +175,7 @@ class ColumnMapperDialog(FramelessDialogBase):
 
                 if len(non_empty_cells) >= 2:
                     # Check if this row looks like headers
-                    text_count = sum(1 for cell in non_empty_cells if not self.is_numeric(cell))
+                    text_count = sum(1 for cell in non_empty_cells if not ColumnMapperDialog.is_numeric(cell))
 
                     # Bonus for having text in most cells
                     if text_count >= len(non_empty_cells) * 0.6:
@@ -176,7 +191,7 @@ class ColumnMapperDialog(FramelessDialogBase):
                     score += keyword_count * 5
 
                     # Penalty for rows with mostly numbers
-                    numeric_count = sum(1 for cell in non_empty_cells if self.is_numeric(cell))
+                    numeric_count = sum(1 for cell in non_empty_cells if ColumnMapperDialog.is_numeric(cell))
                     if numeric_count > len(non_empty_cells) * 0.7:
                         score -= 5
 
@@ -198,10 +213,12 @@ class ColumnMapperDialog(FramelessDialogBase):
         max_cols = max(len(row) for row in rows) if rows else 2
         return [f"Column {i+1}" for i in range(max_cols)]
 
-    def is_numeric(self, value: str) -> bool:
+    @staticmethod
+    def is_numeric(value_or_self, value: Optional[str] = None) -> bool:
         """Check if a string represents a number"""
+        raw_value = value_or_self if value is None else value
         try:
-            float(value)
+            float(raw_value)
             return True
         except ValueError:
             return False
@@ -929,39 +946,7 @@ class ColumnMapperDialog(FramelessDialogBase):
         if not self.sample_data:
             return
 
-        self.preview_table.clear()
-        max_cols = max(len(row) for row in self.sample_data)
-        self.preview_table.setRowCount(len(self.sample_data))
-        self.preview_table.setColumnCount(max_cols)
-        self.preview_table.setAlternatingRowColors(True)
-        self.preview_table.setShowGrid(False)
-        self.preview_table.setFrameShape(QFrame.Shape.NoFrame)
-        self.preview_table.setWordWrap(False)
-        self.preview_table.verticalHeader().setVisible(False)
-        self.preview_table.setStyleSheet(
-            f"QTableWidget {{ background: {C.BG}; border: none; alternate-background-color: rgba(255,255,255,.40); "
-            f"selection-background-color: rgba(107,142,35,.10); selection-color: {C.TEXT}; }}"
-            f"QHeaderView::section {{ background: {C.BG_LOW}; border: none; border-bottom: 1px solid {C.BORDER}; "
-            f"padding: 6px 8px; color: {C.TEXT_MID}; font-size: {F.SZ_SM}pt; font-weight: 600; }}"
-            f"QTableWidget::item {{ padding: 4px 8px; border-bottom: 1px solid rgba(0,0,0,.04); }}"
-        )
-
-        # Set headers
-        if len(self.headers) >= max_cols:
-            self.preview_table.setHorizontalHeaderLabels(self.headers[:max_cols])
-        else:
-            headers = self.headers + [f"Col {i+1}" for i in range(len(self.headers), max_cols)]
-            self.preview_table.setHorizontalHeaderLabels(headers)
-
-        # Fill data
-        for i, row in enumerate(self.sample_data):
-            for j, cell in enumerate(row):
-                if j < max_cols:
-                    item = QTableWidgetItem(str(cell))
-                    # Highlight numeric data
-                    if self.is_numeric(cell.strip()):
-                        item.setBackground(QColor(200, 255, 200))  # Light green
-                    self.preview_table.setItem(i, j, item)
+        self.populate_preview_table(self.preview_table, self.sample_data, self.headers)
 
         # Connect selection changed signal for range selection
         try:
@@ -974,6 +959,44 @@ class ColumnMapperDialog(FramelessDialogBase):
         self.preview_table.resizeColumnsToContents()
         self._update_preview_header_highlights()
         self._update_file_strip()
+
+    @staticmethod
+    def populate_preview_table(
+        table: QTableWidget,
+        sample_data: List[List[str]],
+        headers: List[str],
+    ) -> None:
+        """Populate a preview table using the mapper preview presentation."""
+        table.clear()
+        max_cols = max(len(row) for row in sample_data)
+        table.setRowCount(len(sample_data))
+        table.setColumnCount(max_cols)
+        table.setAlternatingRowColors(True)
+        table.setShowGrid(False)
+        table.setFrameShape(QFrame.Shape.NoFrame)
+        table.setWordWrap(False)
+        table.verticalHeader().setVisible(False)
+        table.setStyleSheet(
+            f"QTableWidget {{ background: {C.BG}; border: none; alternate-background-color: rgba(255,255,255,.40); "
+            f"selection-background-color: rgba(107,142,35,.10); selection-color: {C.TEXT}; }}"
+            f"QHeaderView::section {{ background: {C.BG_LOW}; border: none; border-bottom: 1px solid {C.BORDER}; "
+            f"padding: 6px 8px; color: {C.TEXT_MID}; font-size: {F.SZ_SM}pt; font-weight: 600; }}"
+            f"QTableWidget::item {{ padding: 4px 8px; border-bottom: 1px solid rgba(0,0,0,.04); }}"
+        )
+
+        if len(headers) >= max_cols:
+            table.setHorizontalHeaderLabels(headers[:max_cols])
+        else:
+            derived_headers = headers + [f"Col {i+1}" for i in range(len(headers), max_cols)]
+            table.setHorizontalHeaderLabels(derived_headers)
+
+        for i, row in enumerate(sample_data):
+            for j, cell in enumerate(row):
+                if j < max_cols:
+                    item = QTableWidgetItem(str(cell))
+                    if ColumnMapperDialog.is_numeric(str(cell).strip()):
+                        item.setBackground(QColor(200, 255, 200))
+                    table.setItem(i, j, item)
 
     def validate_required_fields(self):
         """Update styling based on whether required fields are filled"""

@@ -3,7 +3,6 @@ from __future__ import annotations
 
 from html import escape
 import os
-import re
 from typing import List, Optional
 
 from PyQt6.QtCore import Qt, QSettings, QSize, QRect, QPoint, pyqtSignal
@@ -40,8 +39,23 @@ PANEL_W         = 360       # composer panel width
 ACC_HDR_H       = 32        # accordion header height
 TOGGLE_W        = 28
 TOGGLE_H        = 15
-SAMPLE_COLS     = 3
 GEN_BTN_H       = 33
+
+
+# ─── icon helper ──────────────────────────────────────────────
+def _icon_pixmap(fa_name: str, color: str, px: int) -> QPixmap:
+    """Return a pixmap rendered from a qtawesome icon."""
+    return theme_icon(fa_name, color=color, size=px).pixmap(QSize(px, px))
+
+
+def _make_icon_label(fa_name: str, color: str, px: int = 14) -> QLabel:
+    """QLabel pre-loaded with a qtawesome icon pixmap."""
+    lbl = QLabel()
+    lbl.setFixedSize(px, px)
+    lbl.setPixmap(_icon_pixmap(fa_name, color, px))
+    lbl.setAlignment(Qt.AlignmentFlag.AlignCenter)
+    lbl.setStyleSheet("background: transparent;")
+    return lbl
 
 
 # ═══════════════════════════════════════════════════════════════
@@ -99,12 +113,10 @@ class _TogglePill(QWidget):
 class _AccordionSection(QWidget):
     """Collapsible section with icon + title + meta pill + chevron."""
 
-    CHEVRON_DOWN = "\u25BE"    # ▾
-    CHEVRON_RIGHT = "\u25B8"   # ▸
-
-    def __init__(self, icon_text: str, title: str, parent=None):
+    def __init__(self, fa_name: str, title: str, parent=None):
         super().__init__(parent)
         self._open = False
+        self._fa_name = fa_name
         self.setObjectName("accSection")
 
         root = QVBoxLayout(self)
@@ -121,10 +133,8 @@ class _AccordionSection(QWidget):
         hlay.setContentsMargins(12, 0, 13, 0)
         hlay.setSpacing(8)
 
-        self._icon_lbl = QLabel(icon_text)
+        self._icon_lbl = _make_icon_label(fa_name, C.TEXT_MUTED, 14)
         self._icon_lbl.setObjectName("accIcon")
-        self._icon_lbl.setFixedWidth(14)
-        self._icon_lbl.setAlignment(Qt.AlignmentFlag.AlignCenter)
 
         self._title_lbl = QLabel(title)
         self._title_lbl.setObjectName("accTitle")
@@ -132,12 +142,11 @@ class _AccordionSection(QWidget):
         self._meta_lbl = QLabel("")
         self._meta_lbl.setObjectName("accMeta")
         self._meta_lbl.setMinimumHeight(18)
-        self._meta_lbl.setMaximumWidth(180)
+        self._meta_lbl.setMaximumWidth(120)
+        self._meta_lbl.setSizePolicy(QSizePolicy.Policy.Maximum, QSizePolicy.Policy.Fixed)
 
-        self._chev_lbl = QLabel(self.CHEVRON_RIGHT)
+        self._chev_lbl = _make_icon_label("fa6s.chevron-right", C.TEXT_MUTED, 11)
         self._chev_lbl.setObjectName("accChev")
-        self._chev_lbl.setFixedWidth(12)
-        self._chev_lbl.setAlignment(Qt.AlignmentFlag.AlignCenter)
 
         hlay.addWidget(self._icon_lbl)
         hlay.addWidget(self._title_lbl)
@@ -177,7 +186,8 @@ class _AccordionSection(QWidget):
             return
         self._open = value
         self._body.setVisible(value)
-        self._chev_lbl.setText(self.CHEVRON_DOWN if value else self.CHEVRON_RIGHT)
+        chev_name = "fa6s.chevron-down" if value else "fa6s.chevron-right"
+        self._chev_lbl.setPixmap(_icon_pixmap(chev_name, C.OLIVE if value else C.TEXT_MUTED, 11))
         self._meta_lbl.setVisible(not value)
         self._apply_header_style()
 
@@ -196,8 +206,9 @@ class _AccordionSection(QWidget):
     def _apply_header_style(self) -> None:
         bg = C.BG_RAISED if self._open else C.BG_LOW
         icon_col = C.OLIVE_DK if self._open else C.TEXT_MUTED
-        chev_col = C.OLIVE if self._open else C.TEXT_MUTED
         title_col = C.TEXT if self._open else C.TEXT_MID
+        # Refresh the icon pixmap to reflect open/closed colour
+        self._icon_lbl.setPixmap(_icon_pixmap(self._fa_name, icon_col, 14))
         self._hdr.setStyleSheet(f"""
             QWidget#accHdr {{
                 background: {bg};
@@ -205,22 +216,11 @@ class _AccordionSection(QWidget):
             QWidget#accHdr:hover {{
                 background: {C.BG_RAISED};
             }}
-            QLabel#accIcon {{
-                color: {icon_col};
-                font-size: {F.SZ_SM}pt;
-                font-weight: 700;
-                background: transparent;
-            }}
             QLabel#accTitle {{
                 color: {title_col};
                 font-family: "{F.UI}";
                 font-size: {F.SZ_MD}pt;
                 font-weight: 700;
-                background: transparent;
-            }}
-            QLabel#accChev {{
-                color: {chev_col};
-                font-size: {F.SZ_MD}pt;
                 background: transparent;
             }}
             QLabel#accMeta {{
@@ -244,47 +244,35 @@ class _TypeCard(QFrame):
 
     clicked = pyqtSignal(int)
 
-    def __init__(self, card_id: int, icon_text: str, label: str, desc: str, parent=None):
+    def __init__(self, card_id: int, fa_name: str, label: str, desc: str, parent=None):
         super().__init__(parent)
         self._id = card_id
         self._on = False
+        self._fa_name = fa_name
         self.setCursor(Qt.CursorShape.PointingHandCursor)
-        self.setMinimumHeight(78)
+        self.setToolTip(f"{label} — {desc}")
+        self.setFixedHeight(46)
         self.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
 
-        lay = QVBoxLayout(self)
-        lay.setContentsMargins(10, 10, 10, 9)
-        lay.setSpacing(4)
+        lay = QHBoxLayout(self)
+        lay.setContentsMargins(8, 6, 8, 6)
+        lay.setSpacing(8)
 
-        self._icon = QLabel(icon_text)
+        self._icon = QLabel()
         self._icon.setObjectName("tcIcon")
-        self._icon.setFixedSize(24, 24)
+        self._icon.setFixedSize(26, 26)
         self._icon.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self._icon.setPixmap(_icon_pixmap(fa_name, C.TEXT_MUTED, 15))
 
         self._lbl = QLabel(label)
         self._lbl.setObjectName("tcLbl")
         self._lbl.setWordWrap(True)
+        self._lbl.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Preferred)
 
-        self._desc = QLabel(desc)
-        self._desc.setObjectName("tcDesc")
-        self._desc.setWordWrap(True)
-
-        self._check = QLabel("\u2713")
-        self._check.setObjectName("tcCheck")
-        self._check.setParent(self)
-        self._check.setFixedSize(12, 12)
-        self._check.setAlignment(Qt.AlignmentFlag.AlignCenter)
-
-        lay.addWidget(self._icon)
-        lay.addWidget(self._lbl)
-        lay.addWidget(self._desc)
-        lay.addStretch()
+        lay.addWidget(self._icon, 0, Qt.AlignmentFlag.AlignVCenter)
+        lay.addWidget(self._lbl, 1, Qt.AlignmentFlag.AlignVCenter)
 
         self._apply_style()
-
-    def resizeEvent(self, event):
-        super().resizeEvent(event)
-        self._check.move(self.width() - 18, 7)
 
     def is_on(self) -> bool:
         return self._on
@@ -314,164 +302,26 @@ class _TypeCard(QFrame):
             icon_c  = C.TEXT_MUTED
             icon_bd = C.BORDER
 
+        # Refresh icon pixmap to reflect selection colour
+        self._icon.setPixmap(_icon_pixmap(self._fa_name, icon_c, 15))
+
         self.setStyleSheet(f"""
             _TypeCard {{
                 background: {bg};
                 border: 1.5px solid {border};
-                border-radius: 6px;
+                border-radius: 5px;
             }}
             QLabel#tcIcon {{
                 background: {icon_bg};
                 border: 1px solid {icon_bd};
                 border-radius: 4px;
-                color: {icon_c};
-                font-family: "{F.UI}";
-                font-size: {F.SZ_LG}pt;
-                font-weight: 700;
             }}
             QLabel#tcLbl {{
-                color: {C.TEXT};
-                font-family: "{F.UI}";
-                font-size: {F.SZ_MD}pt;
-                font-weight: 700;
-                background: transparent;
-            }}
-            QLabel#tcDesc {{
-                color: {C.TEXT_MUTED};
+                color: {C.TEXT if self._on else C.TEXT_MID};
                 font-family: "{F.UI}";
                 font-size: {F.SZ_SM}pt;
-                background: transparent;
-            }}
-            QLabel#tcCheck {{
-                color: {"white" if self._on else "transparent"};
-                background: {C.OLIVE if self._on else "transparent"};
-                border-radius: 6px;
-                font-family: "{F.UI}";
-                font-size: {F.SZ_XS}pt;
                 font-weight: 700;
-            }}
-        """)
-
-
-# ═══════════════════════════════════════════════════════════════
-# SAMPLE CARD (Section 2)
-# ═══════════════════════════════════════════════════════════════
-
-class _SampleCard(QFrame):
-    """Compact selectable card showing sample id + depth + d50."""
-
-    toggled = pyqtSignal(int, bool)
-
-    def __init__(self, index: int, sample_id: str, depth: str, d50: str, parent=None):
-        super().__init__(parent)
-        self._index = index
-        self._on = True
-        self._sample_id = sample_id
-        self.setCursor(Qt.CursorShape.PointingHandCursor)
-        self.setFixedHeight(58)
-        self.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
-
-        lay = QVBoxLayout(self)
-        lay.setContentsMargins(7, 7, 7, 6)
-        lay.setSpacing(1)
-
-        self._id_lbl = QLabel(sample_id)
-        self._id_lbl.setObjectName("scId")
-        self._id_lbl.setToolTip(sample_id)
-
-        self._dep_lbl = QLabel(depth)
-        self._dep_lbl.setObjectName("scDepth")
-
-        self._d50_lbl = QLabel(d50)
-        self._d50_lbl.setObjectName("scD50")
-
-        lay.addWidget(self._id_lbl)
-        lay.addWidget(self._dep_lbl)
-        lay.addWidget(self._d50_lbl)
-        lay.addStretch()
-
-        self._chk = QLabel("\u2713", self)
-        self._chk.setObjectName("scChk")
-        self._chk.setFixedSize(13, 13)
-        self._chk.setAlignment(Qt.AlignmentFlag.AlignCenter)
-
-        self._apply_style()
-
-    def resizeEvent(self, event):
-        super().resizeEvent(event)
-        self._chk.move(self.width() - 18, 5)
-
-    def sample_id(self) -> str:
-        return self._sample_id
-
-    def index(self) -> int:
-        return self._index
-
-    def is_on(self) -> bool:
-        return self._on
-
-    def set_on(self, value: bool) -> None:
-        value = bool(value)
-        if value == self._on:
-            return
-        self._on = value
-        self._apply_style()
-        self.toggled.emit(self._index, self._on)
-
-    def mousePressEvent(self, event):
-        if event.button() == Qt.MouseButton.LeftButton:
-            self.set_on(not self._on)
-            event.accept()
-            return
-        super().mousePressEvent(event)
-
-    def _apply_style(self):
-        if self._on:
-            bg_css = "rgba(107,142,35,0.08)"
-            bd_css = C.OLIVE
-            chk_bg = C.OLIVE
-            chk_bd = C.OLIVE
-            chk_c  = "white"
-        else:
-            bg_css = "rgba(255,255,255,0.45)"
-            bd_css = C.BORDER
-            chk_bg = "white"
-            chk_bd = C.BORDER_DK
-            chk_c  = "transparent"
-
-        self.setStyleSheet(f"""
-            _SampleCard {{
-                background: {bg_css};
-                border: 1.5px solid {bd_css};
-                border-radius: 5px;
-            }}
-            QLabel#scId {{
-                color: {C.TEXT};
-                font-family: "{F.MONO}";
-                font-size: {F.SZ_SM}pt;
                 background: transparent;
-            }}
-            QLabel#scDepth {{
-                color: {C.TEXT_MUTED};
-                font-family: "{F.UI}";
-                font-size: {F.SZ_XS}pt;
-                background: transparent;
-            }}
-            QLabel#scD50 {{
-                color: {C.OLIVE_DK};
-                font-family: "{F.UI}";
-                font-size: {F.SZ_XS}pt;
-                font-weight: 600;
-                background: transparent;
-            }}
-            QLabel#scChk {{
-                background: {chk_bg};
-                border: 1.5px solid {chk_bd};
-                border-radius: 3px;
-                color: {chk_c};
-                font-family: "{F.UI}";
-                font-size: {F.SZ_XS}pt;
-                font-weight: 700;
             }}
         """)
 
@@ -485,7 +335,7 @@ class _SectionRow(QFrame):
 
     toggled = pyqtSignal(bool)
 
-    def __init__(self, icon_text: str, label: str, required: bool = False, parent=None):
+    def __init__(self, fa_name: str, label: str, required: bool = False, parent=None):
         super().__init__(parent)
         self.setCursor(Qt.CursorShape.PointingHandCursor)
         self.setFixedHeight(30)
@@ -494,12 +344,7 @@ class _SectionRow(QFrame):
         lay.setContentsMargins(9, 0, 9, 0)
         lay.setSpacing(7)
 
-        self._icon = QLabel(icon_text)
-        self._icon.setFixedWidth(12)
-        self._icon.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        self._icon.setStyleSheet(
-            f"color: {C.TEXT_MUTED}; font-size: {F.SZ_SM}pt; background: transparent;"
-        )
+        self._icon = _make_icon_label(fa_name, C.TEXT_MUTED, 13)
 
         self._lbl = QLabel(label)
         self._lbl.setStyleSheet(
@@ -576,18 +421,18 @@ class ReportingTab(QWidget):
 
     # Section key mapping (concept row → backend flag)
     SECTION_KEYS = [
-        ("cover",        "\u25A1",  "Cover Page",           True),
-        ("executive",    "\u2261",  "Executive Summary",    False),
-        ("results",      "\u229E",  "Grain Size Data",      False),
-        ("plots",        "\u223F",  "Distribution Plot",    False),
-        ("k_stats",      "\u2248",  "K-Values Table",       False),
-        ("gradation",    "\u2510",  "Statistics",           False),
-        ("methodology",  "\u203B",  "Method References",    False),
+        ("cover",        "fa6s.file-lines",   "Cover Page",          True),
+        ("executive",    "fa6s.align-left",   "Executive Summary",   False),
+        ("results",      "fa6s.table",        "Grain Size Data",     False),
+        ("plots",        "fa6s.chart-line",   "Distribution Plot",   False),
+        ("k_stats",      "fa6s.bolt",         "K-Values Table",      False),
+        ("gradation",    "fa6s.chart-column", "Statistics",          False),
+        ("methodology",  "fa6s.book",         "Method References",   False),
     ]
     APPENDIX_KEYS = [
-        ("raw",     "\u229E", "A \u2014 Raw Sieve Data"),
-        ("interp",  "\u223F", "B \u2014 Full-Size Plots"),
-        ("quality", "\u2692", "C \u2014 Method Details"),
+        ("raw",     "fa6s.table-list", "A \u2014 Raw Sieve Data"),
+        ("interp",  "fa6s.chart-area", "B \u2014 Full-Size Plots"),
+        ("quality", "fa6s.scroll",     "C \u2014 Method Details"),
     ]
     # Outline page hints (must match order: main sections then appendices)
     OUTLINE_PAGES = [1, 2, 3, 5, 7, 9, 11, 13, 15, 17]
@@ -607,7 +452,7 @@ class ReportingTab(QWidget):
         self._scheme = ISO14688
         self.dataset_tabs: List = []
         self._sample_contexts: list[dict] = []
-        self._sample_cards: list[_SampleCard] = []
+        self._sample_selected: list[bool] = []
         self._section_rows: dict[str, _SectionRow] = {}
         self._outline_items: list[tuple[QLabel, QLabel, bool]] = []  # (label, page, appendix?)
         self.current_report_html = ""
@@ -633,12 +478,23 @@ class ReportingTab(QWidget):
 
         splitter = QSplitter(Qt.Orientation.Horizontal)
         splitter.setChildrenCollapsible(False)
-        splitter.setHandleWidth(0)
+        splitter.setHandleWidth(6)
+        splitter.setStyleSheet(f"""
+            QSplitter::handle:horizontal {{
+                background: {C.BORDER};
+                border-left: 1px solid {C.BORDER_DK};
+                border-right: 1px solid {C.BORDER_DK};
+                margin: 0;
+            }}
+            QSplitter::handle:horizontal:hover {{
+                background: {C.OLIVE};
+            }}
+        """)
 
         # Left composer panel
         left = self._build_composer_panel()
-        left.setMinimumWidth(320)
-        left.setMaximumWidth(420)
+        left.setMinimumWidth(340)
+        left.setMaximumWidth(560)
 
         # Right preview panel
         right = self._build_preview_panel()
@@ -682,22 +538,22 @@ class ReportingTab(QWidget):
         blay.setSpacing(0)
 
         # Accordion 1: Report Type
-        self._acc_type = _AccordionSection("\u25A4", "Report Type")
+        self._acc_type = _AccordionSection("fa6s.file-contract", "Report Type")
         self._build_type_section(self._acc_type.body_layout())
         blay.addWidget(self._acc_type)
 
         # Accordion 2: Samples
-        self._acc_samples = _AccordionSection("\u2699", "Samples")
+        self._acc_samples = _AccordionSection("fa6s.vial", "Samples")
         self._build_samples_section(self._acc_samples.body_layout())
         blay.addWidget(self._acc_samples)
 
         # Accordion 3: Sections & Appendices
-        self._acc_sects = _AccordionSection("\u2630", "Sections & Appendices")
+        self._acc_sects = _AccordionSection("fa6s.list-check", "Sections & Appendices")
         self._build_sections_section(self._acc_sects.body_layout())
         blay.addWidget(self._acc_sects)
 
         # Accordion 4: Details & Branding
-        self._acc_details = _AccordionSection("\u270E", "Details & Branding")
+        self._acc_details = _AccordionSection("fa6s.sliders", "Details & Branding")
         self._build_details_section(self._acc_details.body_layout())
         blay.addWidget(self._acc_details)
 
@@ -721,34 +577,32 @@ class ReportingTab(QWidget):
         area = QWidget()
         area.setStyleSheet(f"background: {C.BG_RAISED};")
         alay = QVBoxLayout(area)
-        alay.setContentsMargins(13, 12, 13, 8)
-        alay.setSpacing(8)
-
-        hdr = QLabel("REPORT TYPE")
-        hdr.setStyleSheet(self._uc_header_css())
-        alay.addWidget(hdr)
+        alay.setContentsMargins(13, 10, 13, 8)
+        alay.setSpacing(6)
 
         grid = QGridLayout()
         grid.setContentsMargins(0, 0, 0, 0)
-        grid.setHorizontalSpacing(7)
-        grid.setVerticalSpacing(7)
+        grid.setHorizontalSpacing(6)
+        grid.setVerticalSpacing(6)
 
         cards = [
-            (self.TYPE_INDIVIDUAL, "\u2B22", "Individual Sample",
+            (self.TYPE_INDIVIDUAL, "fa6s.chart-area", "Individual Sample",
              "Full report for one sample \u2014 grain data, plot, K-values, statistics."),
-            (self.TYPE_COMPARISON, "\u2B21", "Cross-Sample Comparison",
+            (self.TYPE_COMPARISON, "fa6s.code-compare", "Cross-Sample Comparison",
              "Side-by-side parameters and K-values for selected samples."),
-            (self.TYPE_FULL, "\u25A4", "Full Project Summary",
+            (self.TYPE_FULL, "fa6s.book", "Full Project Summary",
              "All samples, all methods \u2014 complete project documentation."),
-            (self.TYPE_KFOCUS, "\u2248", "K-Value Focus",
+            (self.TYPE_KFOCUS, "fa6s.bolt", "K-Value Focus",
              "Compact report centred on hydraulic conductivity results."),
         ]
         self._type_cards: list[_TypeCard] = []
-        for i, (cid, icon_ch, label, desc) in enumerate(cards):
-            card = _TypeCard(cid, icon_ch, label, desc)
+        for i, (cid, fa, label, desc) in enumerate(cards):
+            card = _TypeCard(cid, fa, label, desc)
             card.clicked.connect(self._on_type_clicked)
             self._type_cards.append(card)
             grid.addWidget(card, i // 2, i % 2)
+        grid.setColumnStretch(0, 1)
+        grid.setColumnStretch(1, 1)
 
         alay.addLayout(grid)
 
@@ -855,22 +709,6 @@ class ReportingTab(QWidget):
         """)
         self._samp_search.textChanged.connect(self._filter_samples)
 
-        self._samp_groupby = QComboBox()
-        self._samp_groupby.addItems(["By borehole", "By zone", "By depth"])
-        self._samp_groupby.setFixedHeight(26)
-        self._samp_groupby.setStyleSheet(f"""
-            QComboBox {{
-                background: rgba(255,255,255,0.5);
-                border: 1px solid {C.BORDER};
-                border-radius: 4px;
-                padding: 0 6px;
-                font-family: "{F.UI}";
-                font-size: {F.SZ_SM}pt;
-                color: {C.TEXT_MID};
-            }}
-        """)
-        self._samp_groupby.currentIndexChanged.connect(self._rebuild_sample_grid)
-
         self._samp_count_lbl = QLabel("0 / 0")
         self._samp_count_lbl.setStyleSheet(f"""
             QLabel {{
@@ -885,7 +723,6 @@ class ReportingTab(QWidget):
         """)
 
         tlay.addWidget(self._samp_search, 1)
-        tlay.addWidget(self._samp_groupby)
         tlay.addWidget(self._samp_count_lbl)
 
         # Links row
@@ -922,26 +759,68 @@ class ReportingTab(QWidget):
         llay.addWidget(link_btn("Invert", self._samp_invert))
         llay.addStretch()
 
-        # Cards host
-        self._samp_host = QWidget()
-        self._samp_host.setStyleSheet(f"background: {C.BG_RAISED};")
-        self._samp_host_lay = QVBoxLayout(self._samp_host)
-        self._samp_host_lay.setContentsMargins(10, 8, 10, 12)
-        self._samp_host_lay.setSpacing(4)
+        # Sample table
+        self._samp_table = QTableWidget(0, 3)
+        self._samp_table.setHorizontalHeaderLabels(["", "Sample", "d\u2085\u2080"])
+        self._samp_table.verticalHeader().setVisible(False)
+        self._samp_table.setSelectionBehavior(QAbstractItemView.SelectionBehavior.SelectRows)
+        self._samp_table.setSelectionMode(QAbstractItemView.SelectionMode.NoSelection)
+        self._samp_table.setEditTriggers(QAbstractItemView.EditTrigger.NoEditTriggers)
+        self._samp_table.setShowGrid(False)
+        self._samp_table.setAlternatingRowColors(True)
+        self._samp_table.setMinimumHeight(180)
+        self._samp_table.setMaximumHeight(320)
+        self._samp_table.setFocusPolicy(Qt.FocusPolicy.NoFocus)
+
+        hh = self._samp_table.horizontalHeader()
+        hh.setSectionResizeMode(0, QHeaderView.ResizeMode.Fixed)
+        hh.setSectionResizeMode(1, QHeaderView.ResizeMode.Stretch)
+        hh.setSectionResizeMode(2, QHeaderView.ResizeMode.ResizeToContents)
+        self._samp_table.setColumnWidth(0, 28)
+        self._samp_table.verticalHeader().setDefaultSectionSize(24)
+
+        self._samp_table.setStyleSheet(f"""
+            QTableWidget {{
+                background: rgba(255,255,255,0.45);
+                border: none;
+                border-top: 1px solid {C.BORDER};
+                gridline-color: {C.BORDER};
+                font-family: "{F.UI}";
+                font-size: {F.SZ_SM}pt;
+                color: {C.TEXT};
+                alternate-background-color: rgba(255,255,255,0.22);
+            }}
+            QTableWidget::item {{
+                padding: 2px 6px;
+                border: none;
+            }}
+            QTableWidget::item:selected {{
+                background: rgba(107,142,35,0.18);
+                color: {C.TEXT};
+            }}
+            QHeaderView::section {{
+                background: {C.BG_LOW};
+                color: {C.TEXT_MUTED};
+                font-family: "{F.UI}";
+                font-size: {F.SZ_XS}pt;
+                font-weight: 700;
+                padding: 4px 6px;
+                border: none;
+                border-bottom: 1px solid {C.BORDER};
+            }}
+            QTableCornerButton::section {{
+                background: {C.BG_LOW};
+                border: none;
+            }}
+        """)
+        self._samp_table.itemChanged.connect(self._on_table_item_changed)
+        self._table_updating = False
 
         alay.addWidget(tbar)
         alay.addWidget(links)
-        alay.addWidget(self._samp_host)
+        alay.addWidget(self._samp_table)
 
         lay.addWidget(area)
-
-        # Initial empty-state
-        self._empty_samples_label = QLabel("No samples loaded.")
-        self._empty_samples_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        self._empty_samples_label.setStyleSheet(
-            f'color: {C.TEXT_MUTED}; font-family: "{F.UI}"; font-size: {F.SZ_MD}pt; padding: 18px 0;'
-        )
-        self._samp_host_lay.addWidget(self._empty_samples_label)
 
     # ── Section 3: Sections & Appendices ──────────────────────
     def _build_sections_section(self, lay: QVBoxLayout):
@@ -952,25 +831,19 @@ class ReportingTab(QWidget):
         alay.setSpacing(3)
 
         # Main sections
-        mhdr = QLabel("\u25A4   MAIN SECTIONS")
-        mhdr.setStyleSheet(self._uc_header_css(border_bottom=True))
-        mhdr.setContentsMargins(0, 0, 0, 4)
-        alay.addWidget(mhdr)
+        alay.addWidget(self._uc_header_with_icon("fa6s.list-ul", "MAIN SECTIONS"))
 
-        for key, icon_ch, label, required in self.SECTION_KEYS:
-            row = _SectionRow(icon_ch, label, required=required)
+        for key, fa, label, required in self.SECTION_KEYS:
+            row = _SectionRow(fa, label, required=required)
             row.toggled.connect(lambda _v, k=key: self._on_section_toggled(k))
             self._section_rows[key] = row
             alay.addWidget(row)
 
         # Appendices
-        ahdr = QLabel("\u25B8   APPENDICES")
-        ahdr.setStyleSheet(self._uc_header_css(border_bottom=True, top_margin=12))
-        ahdr.setContentsMargins(0, 0, 0, 4)
-        alay.addWidget(ahdr)
+        alay.addWidget(self._uc_header_with_icon("fa6s.paperclip", "APPENDICES", top_margin=12))
 
-        for key, icon_ch, label in self.APPENDIX_KEYS:
-            row = _SectionRow(icon_ch, label)
+        for key, fa, label in self.APPENDIX_KEYS:
+            row = _SectionRow(fa, label)
             row.set_checked(False)  # appendices default off
             row.toggled.connect(lambda _v, k=key: self._on_section_toggled(k))
             self._section_rows[key] = row
@@ -978,9 +851,10 @@ class ReportingTab(QWidget):
 
         # Live outline box
         outline = QFrame()
+        outline.setObjectName("outlineFrame")
         outline.setFrameShape(QFrame.Shape.StyledPanel)
         outline.setStyleSheet(f"""
-            QFrame {{
+            QFrame#outlineFrame {{
                 background: rgba(255,255,255,0.45);
                 border: 1px solid {C.BORDER};
                 border-radius: 6px;
@@ -990,21 +864,29 @@ class ReportingTab(QWidget):
         olay.setContentsMargins(0, 0, 0, 0)
         olay.setSpacing(0)
 
-        ohdr = QLabel("\u2261  DOCUMENT OUTLINE")
-        ohdr.setStyleSheet(f"""
-            QLabel {{
+        ohdr_box = QWidget()
+        ohdr_box.setObjectName("outlineHdr")
+        ohdr_box.setStyleSheet(f"""
+            QWidget#outlineHdr {{
                 background: {C.BG_LOW};
-                color: {C.TEXT_MUTED};
-                font-family: "{F.UI}";
-                font-size: {F.SZ_SM}pt;
-                font-weight: 700;
-                padding: 6px 10px;
                 border-bottom: 1px solid {C.BORDER};
                 border-top-left-radius: 6px;
                 border-top-right-radius: 6px;
             }}
         """)
-        olay.addWidget(ohdr)
+        ohlay = QHBoxLayout(ohdr_box)
+        ohlay.setContentsMargins(10, 6, 10, 6)
+        ohlay.setSpacing(6)
+        ohlay.addWidget(_make_icon_label("fa6s.list-ul", C.TEXT_MUTED, 12))
+        ohdr_lbl = QLabel("DOCUMENT OUTLINE")
+        ohdr_lbl.setStyleSheet(
+            f'color: {C.TEXT_MUTED}; font-family: "{F.UI}"; '
+            f'font-size: {F.SZ_SM}pt; font-weight: 700; '
+            f'letter-spacing: 1.5px; background: transparent; border: none;'
+        )
+        ohlay.addWidget(ohdr_lbl)
+        ohlay.addStretch()
+        olay.addWidget(ohdr_box)
 
         obody = QWidget()
         obody.setStyleSheet("background: transparent;")
@@ -1122,7 +1004,9 @@ class ReportingTab(QWidget):
         lhdr.setContentsMargins(0, 0, 0, 4)
         llay.addWidget(lhdr)
 
-        self._logo_drop = QPushButton("\u2B07   Upload logo (PNG, SVG) \u2014 click to browse")
+        self._logo_drop = QPushButton("  Upload logo (PNG, SVG) \u2014 click to browse")
+        self._logo_drop.setIcon(theme_icon("fa6s.upload", C.TEXT_MUTED, 14))
+        self._logo_drop.setIconSize(QSize(14, 14))
         self._logo_drop.setCursor(Qt.CursorShape.PointingHandCursor)
         self._logo_drop.setFixedHeight(58)
         self._logo_drop.setStyleSheet(f"""
@@ -1213,7 +1097,9 @@ class ReportingTab(QWidget):
         )
         self._gen_summary_lbl.setWordWrap(True)
 
-        self.generate_btn = QPushButton("\u25B6   Generate Report")
+        self.generate_btn = QPushButton("  Generate Report")
+        self.generate_btn.setIcon(theme_icon("fa6s.bolt", "#ffffff", 14))
+        self.generate_btn.setIconSize(QSize(14, 14))
         self.generate_btn.setMinimumHeight(GEN_BTN_H)
         self.generate_btn.setCursor(Qt.CursorShape.PointingHandCursor)
         self.generate_btn.setStyleSheet(f"""
@@ -1271,8 +1157,10 @@ class ReportingTab(QWidget):
         lay.addWidget(self._preview_note)
         lay.addStretch()
 
-        def pbtn(label: str, handler):
+        def pbtn(label: str, fa_name: str, handler):
             b = QPushButton(label)
+            b.setIcon(theme_icon(fa_name, C.TEXT_MID, 13))
+            b.setIconSize(QSize(13, 13))
             b.setCursor(Qt.CursorShape.PointingHandCursor)
             b.setFixedHeight(26)
             b.setStyleSheet(f"""
@@ -1298,9 +1186,9 @@ class ReportingTab(QWidget):
             b.clicked.connect(handler)
             return b
 
-        self.btn_refresh = pbtn("\u21BB  Refresh", self._on_generate)
-        self.btn_print   = pbtn("\u2399  Print",   self._on_print)
-        self.btn_save    = pbtn("\u2913  Save",    self._on_save_primary)
+        self.btn_refresh = pbtn(" Refresh", "fa6s.rotate",       self._on_generate)
+        self.btn_print   = pbtn(" Print",   "fa6s.print",        self._on_print)
+        self.btn_save    = pbtn(" Save",    "fa6s.floppy-disk",  self._on_save_primary)
         lay.addWidget(self.btn_refresh)
         lay.addWidget(self.btn_print)
         lay.addWidget(self.btn_save)
@@ -1345,6 +1233,27 @@ class ReportingTab(QWidget):
     # ══════════════════════════════════════════════════════════
     # Styling helpers
     # ══════════════════════════════════════════════════════════
+    def _uc_header_with_icon(self, fa_name: str, label: str, top_margin: int = 0) -> QWidget:
+        """Uppercase section header with a leading qtawesome icon + bottom border."""
+        box = QWidget()
+        box.setStyleSheet(
+            f"background: transparent; border-bottom: 1px solid {C.BORDER};"
+            f"{'margin-top:' + str(top_margin) + 'px;' if top_margin else ''}"
+        )
+        h = QHBoxLayout(box)
+        h.setContentsMargins(0, top_margin, 0, 4)
+        h.setSpacing(7)
+        h.addWidget(_make_icon_label(fa_name, C.TEXT_MUTED, 12))
+        lbl = QLabel(label)
+        lbl.setStyleSheet(
+            f'color: {C.TEXT_MUTED}; font-family: "{F.UI}"; '
+            f'font-size: {F.SZ_SM}pt; font-weight: 700; '
+            f'letter-spacing: 1.5px; background: transparent; border: none;'
+        )
+        h.addWidget(lbl)
+        h.addStretch()
+        return box
+
     @staticmethod
     def _uc_header_css(border_bottom: bool = False, top_margin: int = 0) -> str:
         bb = f"border-bottom: 1px solid {C.BORDER}; padding-bottom: 4px;" if border_bottom else ""
@@ -1463,11 +1372,13 @@ class ReportingTab(QWidget):
     def _refresh_meta_pills(self) -> None:
         type_name = self._type_short_name(self._selected_type)
         fmt_name = self._format_combo.currentText() if hasattr(self, "_format_combo") else "PDF"
-        self._acc_type.set_meta(f"{type_name} · {fmt_name}")
+        # Compact format label for meta pill
+        fmt_short = {"Word (.docx)": "DOCX"}.get(fmt_name, fmt_name)
+        self._acc_type.set_meta(f"{type_name} \u00B7 {fmt_short}")
 
-        total = len(self._sample_cards)
-        sel   = sum(1 for c in self._sample_cards if c.is_on())
-        self._acc_samples.set_meta(f"{sel} / {total} selected" if total else "No samples")
+        total = len(self._sample_contexts)
+        sel = sum(1 for v in self._sample_selected if v)
+        self._acc_samples.set_meta(f"{sel}/{total}" if total else "none")
         if hasattr(self, "_samp_count_lbl"):
             self._samp_count_lbl.setText(f"{sel} / {total}")
 
@@ -1479,12 +1390,12 @@ class ReportingTab(QWidget):
             1 for k, *_ in self.APPENDIX_KEYS
             if k in self._section_rows and self._section_rows[k].is_checked()
         )
-        parts = [f"{main_on} section{'s' if main_on != 1 else ''}"]
         if app_on:
-            parts.append(f"{app_on} appendix")
-        self._acc_sects.set_meta(" · ".join(parts))
+            self._acc_sects.set_meta(f"{main_on}\u00A0sec \u00B7 {app_on}\u00A0app")
+        else:
+            self._acc_sects.set_meta(f"{main_on}\u00A0sections")
 
-        self._acc_details.set_meta("Project info, logo, notes")
+        self._acc_details.set_meta("Project info")
 
         tmpl = self._template_combo.currentText() if hasattr(self, "_template_combo") else "Standard"
         self._gen_summary_lbl.setText(
@@ -1501,10 +1412,10 @@ class ReportingTab(QWidget):
             return
         fmt = self._format_combo.currentText() if hasattr(self, "_format_combo") else "PDF"
         label = {
-            "PDF":          "\u2913  Save PDF",
-            "HTML":         "\u2913  Save HTML",
-            "Word (.docx)": "\u2913  Save Word",
-        }.get(fmt, "\u2913  Save")
+            "PDF":          " Save PDF",
+            "HTML":         " Save HTML",
+            "Word (.docx)": " Save Word",
+        }.get(fmt, " Save")
         self.btn_save.setText(label)
 
     @staticmethod
@@ -1545,11 +1456,11 @@ class ReportingTab(QWidget):
 
     def _refresh_sample_list(self) -> None:
         self._sample_contexts = []
-        self._sample_cards = []
+        self._sample_selected: list[bool] = []
         self._clear_report_output()
 
         if not self.dataset_tabs:
-            self._rebuild_sample_grid()
+            self._rebuild_sample_table()
             self.generate_btn.setEnabled(False)
             self._refresh_meta_pills()
             return
@@ -1559,32 +1470,15 @@ class ReportingTab(QWidget):
             context = {
                 "label": label,
                 "tab": tab,
-                "group": self._detect_group(label),
-                "depth": self._detect_depth(label),
                 "d50":   self._format_d50(tab),
             }
             self._sample_contexts.append(context)
+            self._sample_selected.append(True)
 
-        self._rebuild_sample_grid()
+        self._rebuild_sample_table()
         self.generate_btn.setEnabled(True)
         self.btn_refresh.setEnabled(True)
         self._refresh_meta_pills()
-
-    @staticmethod
-    def _detect_group(label: str) -> str:
-        """Extract a borehole-like prefix from the sample label for grouping."""
-        m = re.match(r"([A-Za-z]+[-\s]?\d+)", label)
-        if m:
-            return m.group(1).replace(" ", "-").upper()
-        parts = re.split(r"[\s/_\-]", label, maxsplit=1)
-        return parts[0] if parts else label
-
-    @staticmethod
-    def _detect_depth(label: str) -> str:
-        m = re.search(r"(\d+(?:\.\d+)?)\s*m", label)
-        if m:
-            return f"{m.group(1)} m b.g."
-        return "\u2014"
 
     @staticmethod
     def _format_d50(tab) -> str:
@@ -1596,143 +1490,91 @@ class ReportingTab(QWidget):
             return "d\u2085\u2080 —"
         return f"d\u2085\u2080 {d50:.2f} mm"
 
-    def _rebuild_sample_grid(self) -> None:
-        # Clear existing children
-        while self._samp_host_lay.count():
-            item = self._samp_host_lay.takeAt(0)
-            w = item.widget()
-            if w is not None:
-                w.deleteLater()
-        self._sample_cards = []
+    def _rebuild_sample_table(self) -> None:
+        self._table_updating = True
+        try:
+            self._samp_table.clearContents()
+            self._samp_table.setRowCount(len(self._sample_contexts))
 
-        if not self._sample_contexts:
-            self._empty_samples_label = QLabel("No samples loaded.")
-            self._empty_samples_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
-            self._empty_samples_label.setStyleSheet(
-                f'color: {C.TEXT_MUTED}; font-family: "{F.UI}"; '
-                f'font-size: {F.SZ_MD}pt; padding: 18px 0;'
-            )
-            self._samp_host_lay.addWidget(self._empty_samples_label)
-            self._refresh_meta_pills()
-            return
+            for row, ctx in enumerate(self._sample_contexts):
+                # Column 0 — checkbox
+                chk = QTableWidgetItem()
+                chk.setFlags(
+                    Qt.ItemFlag.ItemIsUserCheckable
+                    | Qt.ItemFlag.ItemIsEnabled
+                )
+                chk.setCheckState(
+                    Qt.CheckState.Checked if self._sample_selected[row]
+                    else Qt.CheckState.Unchecked
+                )
+                chk.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
+                self._samp_table.setItem(row, 0, chk)
 
-        # Group samples
-        groups: dict[str, list[tuple[int, dict]]] = {}
-        order: list[str] = []
-        for idx, ctx in enumerate(self._sample_contexts):
-            gkey = ctx["group"]
-            if gkey not in groups:
-                groups[gkey] = []
-                order.append(gkey)
-            groups[gkey].append((idx, ctx))
+                def _make(text: str, *, mono: bool = False, muted: bool = False) -> QTableWidgetItem:
+                    it = QTableWidgetItem(text)
+                    it.setFlags(Qt.ItemFlag.ItemIsEnabled)
+                    if mono:
+                        font = it.font()
+                        font.setFamily(F.MONO)
+                        it.setFont(font)
+                    if muted:
+                        it.setForeground(QColor(C.TEXT_MUTED))
+                    return it
 
-        for gkey in order:
-            items = groups[gkey]
-            # Group header
-            ghdr = QWidget()
-            ghl = QHBoxLayout(ghdr)
-            ghl.setContentsMargins(2, 7, 2, 4)
-            ghl.setSpacing(5)
-            ghdr.setStyleSheet(f"border-bottom: 1px solid {C.BORDER};")
-            gname = QLabel(gkey)
-            gname.setStyleSheet(
-                f'color: {C.TEXT_MUTED}; font-family: "{F.UI}"; '
-                f'font-size: {F.SZ_SM}pt; font-weight: 700; '
-                f'letter-spacing: 1.2px; background: transparent;'
-            )
-            gbadge = QLabel(f"{len(items)}/{len(items)}")
-            gbadge.setStyleSheet(f"""
-                QLabel {{
-                    background: {C.BG_LOW};
-                    border: 1px solid {C.BORDER};
-                    border-radius: 8px;
-                    padding: 0 5px;
-                    font-family: "{F.MONO}";
-                    font-size: 7pt;
-                    color: {C.TEXT_MUTED};
-                }}
-            """)
-            ghl.addWidget(gname)
-            ghl.addWidget(gbadge)
-            ghl.addStretch()
+                self._samp_table.setItem(row, 1, _make(ctx["label"], mono=True))
+                self._samp_table.setItem(row, 2, _make(ctx["d50"]))
 
-            gall = QPushButton("All")
-            gall.setCursor(Qt.CursorShape.PointingHandCursor)
-            gall.setFlat(True)
-            gall.setStyleSheet(f"""
-                QPushButton {{
-                    color: {C.OLIVE};
-                    background: transparent;
-                    border: none;
-                    text-decoration: underline;
-                    font-family: "{F.UI}";
-                    font-size: {F.SZ_SM}pt;
-                    font-weight: 700;
-                    padding: 0;
-                }}
-                QPushButton:hover {{ color: {C.OLIVE_DK}; }}
-            """)
-            gall.clicked.connect(lambda _checked, g=gkey: self._group_toggle_all(g))
-            ghl.addWidget(gall)
-            self._samp_host_lay.addWidget(ghdr)
-
-            # Cards grid (3 columns)
-            grid_host = QWidget()
-            grid_lay = QGridLayout(grid_host)
-            grid_lay.setContentsMargins(0, 0, 0, 6)
-            grid_lay.setHorizontalSpacing(5)
-            grid_lay.setVerticalSpacing(5)
-
-            for i, (idx, ctx) in enumerate(items):
-                r, c = divmod(i, SAMPLE_COLS)
-                card = _SampleCard(idx, ctx["label"], ctx["depth"], ctx["d50"])
-                card.toggled.connect(self._on_sample_toggled)
-                grid_lay.addWidget(card, r, c)
-                self._sample_cards.append(card)
-                ctx["group"] = gkey
-
-            # Ensure last row fills evenly
-            for c in range(SAMPLE_COLS):
-                grid_lay.setColumnStretch(c, 1)
-
-            self._samp_host_lay.addWidget(grid_host)
-
-        # Apply existing search filter
-        if hasattr(self, "_samp_search"):
-            self._filter_samples(self._samp_search.text())
+            # Apply existing search filter
+            if hasattr(self, "_samp_search"):
+                self._filter_samples(self._samp_search.text())
+        finally:
+            self._table_updating = False
         self._refresh_meta_pills()
 
-    def _on_sample_toggled(self, _index: int, _on: bool) -> None:
+    def _on_table_item_changed(self, item: QTableWidgetItem) -> None:
+        if self._table_updating or item.column() != 0:
+            return
+        row = item.row()
+        if 0 <= row < len(self._sample_selected):
+            self._sample_selected[row] = (item.checkState() == Qt.CheckState.Checked)
+            self._refresh_meta_pills()
+            self._save_report_settings()
+
+    def _set_row_checked(self, row: int, value: bool) -> None:
+        item = self._samp_table.item(row, 0)
+        if item is None:
+            return
+        new_state = Qt.CheckState.Checked if value else Qt.CheckState.Unchecked
+        if item.checkState() != new_state:
+            item.setCheckState(new_state)
+        self._sample_selected[row] = value
+
+    def _samp_bulk(self, value: bool) -> None:
+        self._table_updating = True
+        try:
+            for row in range(self._samp_table.rowCount()):
+                if not self._samp_table.isRowHidden(row):
+                    self._set_row_checked(row, value)
+        finally:
+            self._table_updating = False
         self._refresh_meta_pills()
         self._save_report_settings()
 
-    def _samp_bulk(self, value: bool) -> None:
-        for c in self._sample_cards:
-            if c.isVisible():
-                c.set_on(value)
-        self._refresh_meta_pills()
-
     def _samp_invert(self) -> None:
-        for c in self._sample_cards:
-            if c.isVisible():
-                c.set_on(not c.is_on())
+        self._table_updating = True
+        try:
+            for row in range(self._samp_table.rowCount()):
+                if not self._samp_table.isRowHidden(row):
+                    self._set_row_checked(row, not self._sample_selected[row])
+        finally:
+            self._table_updating = False
         self._refresh_meta_pills()
-
-    def _group_toggle_all(self, group_key: str) -> None:
-        cards_in_group = [
-            c for c in self._sample_cards
-            if self._sample_contexts[c.index()]["group"] == group_key
-        ]
-        all_on = all(c.is_on() for c in cards_in_group) if cards_in_group else False
-        for c in cards_in_group:
-            c.set_on(not all_on)
-        self._refresh_meta_pills()
+        self._save_report_settings()
 
     def _filter_samples(self, query: str) -> None:
         q = (query or "").strip().lower()
-        for c in self._sample_cards:
-            show = (not q) or (q in c.sample_id().lower())
-            c.setVisible(show)
+        for row, ctx in enumerate(self._sample_contexts):
+            self._samp_table.setRowHidden(row, bool(q) and q not in ctx["label"].lower())
 
     # ══════════════════════════════════════════════════════════
     # Brand / logo / metadata
@@ -1749,9 +1591,11 @@ class ReportingTab(QWidget):
 
     def _refresh_logo_button(self) -> None:
         if self.brand.logo_path and os.path.exists(self.brand.logo_path):
-            self._logo_drop.setText(f"\u2713  {os.path.basename(self.brand.logo_path)}")
+            self._logo_drop.setIcon(theme_icon("fa6s.check", C.OLIVE, 14))
+            self._logo_drop.setText(f"  {os.path.basename(self.brand.logo_path)}")
         else:
-            self._logo_drop.setText("\u2B07   Upload logo (PNG, SVG) \u2014 click to browse")
+            self._logo_drop.setIcon(theme_icon("fa6s.upload", C.TEXT_MUTED, 14))
+            self._logo_drop.setText("  Upload logo (PNG, SVG) \u2014 click to browse")
 
     def _collect_brand(self) -> ReportBrand:
         # No in-UI editing of org/color — persist current values
@@ -1915,9 +1759,7 @@ class ReportingTab(QWidget):
 
     def _selected_sample_contexts(self) -> list[dict]:
         return [
-            self._sample_contexts[c.index()]
-            for c in self._sample_cards
-            if c.is_on() and c.index() < len(self._sample_contexts)
+            ctx for ctx, on in zip(self._sample_contexts, self._sample_selected) if on
         ]
 
     # ══════════════════════════════════════════════════════════

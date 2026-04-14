@@ -5,6 +5,7 @@ Regression tests for comparison plot widget behavior.
 import os
 import sys
 import unittest
+from types import SimpleNamespace
 
 os.environ.setdefault('QT_QPA_PLATFORM', 'offscreen')
 sys.path.insert(0, 'Program')
@@ -158,6 +159,110 @@ class TestComparisonPlotWidget(unittest.TestCase):
             for ax in self.widget.figure.axes
             for line in ax.yaxis.get_gridlines()
         ))
+
+    def test_zoom_targets_clicked_subplot_in_grid_mode(self):
+        self.widget.on_plot_type_changed('Distribution')
+        self.widget.set_display_mode('grid')
+        self.widget.refresh_plot()
+
+        first_ax, second_ax = self.widget.figure.axes[:2]
+        first_xlim_before = first_ax.get_xlim()
+        second_xlim_before = second_ax.get_xlim()
+
+        self.widget._on_canvas_click(SimpleNamespace(inaxes=second_ax))
+        self.widget.zoom_in()
+
+        self.assertEqual(first_ax.get_xlim(), first_xlim_before)
+        self.assertNotEqual(second_ax.get_xlim(), second_xlim_before)
+        self.assertIs(self.widget.current_ax, second_ax)
+
+    def test_zoom_falls_back_to_first_subplot_when_none_selected(self):
+        self.widget.on_plot_type_changed('Distribution')
+        self.widget.set_display_mode('grid')
+        self.widget.refresh_plot()
+
+        first_ax, second_ax = self.widget.figure.axes[:2]
+        first_xlim_before = first_ax.get_xlim()
+        second_xlim_before = second_ax.get_xlim()
+        self.widget.current_ax = None
+
+        self.widget.zoom_in()
+
+        self.assertNotEqual(first_ax.get_xlim(), first_xlim_before)
+        self.assertEqual(second_ax.get_xlim(), second_xlim_before)
+        self.assertIs(self.widget.current_ax, first_ax)
+
+    def test_toolbar_uses_plot_workspace_style_language(self):
+        toolbar = self.widget.create_toolbar()
+
+        self.assertEqual(toolbar.objectName(), 'pw-toolbar')
+        self.assertEqual(self.widget.plot_selector.objectName(), 'pw-style-sel')
+        self.assertTrue(self.widget.zoom_in_btn.property('pw-btn'))
+        self.assertTrue(self.widget.grid_check.property('pw-chk'))
+
+        toolbar.deleteLater()
+
+    def test_wheel_zoom_targets_hovered_subplot(self):
+        self.widget.on_plot_type_changed('Distribution')
+        self.widget.set_display_mode('grid')
+        self.widget.refresh_plot()
+
+        first_ax, second_ax = self.widget.figure.axes[:2]
+        first_xlim_before = first_ax.get_xlim()
+        second_xlim_before = second_ax.get_xlim()
+
+        self.widget._on_canvas_scroll(SimpleNamespace(inaxes=second_ax, step=1))
+
+        self.assertEqual(first_ax.get_xlim(), first_xlim_before)
+        self.assertNotEqual(second_ax.get_xlim(), second_xlim_before)
+        self.assertIs(self.widget.current_ax, second_ax)
+
+    def test_double_click_resets_only_active_subplot(self):
+        self.widget.on_plot_type_changed('Distribution')
+        self.widget.set_display_mode('grid')
+        self.widget.refresh_plot()
+
+        first_ax, second_ax = self.widget.figure.axes[:2]
+        first_xlim_before = first_ax.get_xlim()
+        second_xlim_before = second_ax.get_xlim()
+        self.widget._on_canvas_scroll(SimpleNamespace(inaxes=second_ax, step=1))
+
+        self.assertNotEqual(second_ax.get_xlim(), second_xlim_before)
+
+        self.widget._on_canvas_click(SimpleNamespace(inaxes=second_ax, dblclick=True, button=1, key=None))
+
+        self.assertEqual(first_ax.get_xlim(), first_xlim_before)
+        self.assertEqual(second_ax.get_xlim(), second_xlim_before)
+
+    def test_shift_drag_pans_only_active_subplot(self):
+        self.widget.on_plot_type_changed('Distribution')
+        self.widget.set_display_mode('grid')
+        self.widget.refresh_plot()
+
+        first_ax, second_ax = self.widget.figure.axes[:2]
+        first_xlim_before = first_ax.get_xlim()
+        second_xlim_before = second_ax.get_xlim()
+
+        self.widget._on_canvas_click(
+            SimpleNamespace(inaxes=second_ax, dblclick=False, button=1, key='shift', xdata=1.0, ydata=50.0)
+        )
+        self.widget._on_canvas_motion(SimpleNamespace(inaxes=second_ax, xdata=2.0, ydata=60.0))
+        self.widget._on_canvas_release(SimpleNamespace(inaxes=second_ax))
+
+        self.assertEqual(first_ax.get_xlim(), first_xlim_before)
+        self.assertNotEqual(second_ax.get_xlim(), second_xlim_before)
+
+    def test_active_subplot_highlight_moves_with_selection(self):
+        self.widget.on_plot_type_changed('Distribution')
+        self.widget.set_display_mode('grid')
+        self.widget.refresh_plot()
+
+        first_ax, second_ax = self.widget.figure.axes[:2]
+        self.assertGreater(first_ax.spines['left'].get_linewidth(), second_ax.spines['left'].get_linewidth())
+
+        self.widget._on_canvas_click(SimpleNamespace(inaxes=second_ax, dblclick=False, button=1, key=None))
+
+        self.assertGreater(second_ax.spines['left'].get_linewidth(), first_ax.spines['left'].get_linewidth())
 
 
 if __name__ == '__main__':

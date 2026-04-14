@@ -9,7 +9,7 @@ import unittest
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 sys.path.insert(0, "Program")
 
-from PyQt6.QtWidgets import QApplication
+from PyQt6.QtWidgets import QApplication, QPushButton
 
 from gui.welcome_widget import WelcomeWidget
 
@@ -18,6 +18,21 @@ APP = QApplication.instance() or QApplication([])
 
 
 class TestWelcomeWidget(unittest.TestCase):
+    def test_load_batch_button_emits_signal_when_clicked(self):
+        widget = WelcomeWidget(recent_files=[], recent_sessions=[])
+        emitted = []
+        widget.load_files_requested.connect(lambda: emitted.append(True))
+
+        load_btn = next(
+            btn for btn in widget.findChildren(QPushButton)
+            if btn.text() == "Load Batch Files"
+        )
+        load_btn.click()
+        APP.processEvents()
+
+        self.assertEqual(emitted, [True])
+        widget.deleteLater()
+
     def test_resume_button_disabled_without_recent_sessions(self):
         widget = WelcomeWidget(recent_files=[], recent_sessions=[])
         self.assertFalse(widget._resume_btn.isEnabled())

@@ -2,11 +2,10 @@
 
 from __future__ import annotations
 
-import csv
 import os
 
 from PyQt6.QtCore import QEasingCurve, QPropertyAnimation, Qt, pyqtSignal
-from PyQt6.QtGui import QColor, QFont
+from PyQt6.QtGui import QFont
 from PyQt6.QtWidgets import (
     QAbstractItemView,
     QDialog,
@@ -403,7 +402,9 @@ class ErrorTab(QWidget):
         self.preview_table.setEditTriggers(QAbstractItemView.EditTrigger.NoEditTriggers)
         self.preview_table.setSelectionMode(QAbstractItemView.SelectionMode.NoSelection)
         self.preview_table.setFocusPolicy(Qt.FocusPolicy.NoFocus)
-        self.preview_table.setShowGrid(True)
+        self.preview_table.setShowGrid(False)
+        self.preview_table.setFrameShape(QFrame.Shape.NoFrame)
+        self.preview_table.setWordWrap(False)
         self.preview_table.verticalHeader().setVisible(False)
         self.preview_table.verticalHeader().setDefaultSectionSize(26)
         header = self.preview_table.horizontalHeader()
@@ -609,7 +610,6 @@ class ErrorTab(QWidget):
     def showEvent(self, event):
         super().showEvent(event)
         if not self._entry_animated:
-            self._play_entry_animation()
             self._entry_animated = True
 
     def _play_entry_animation(self) -> None:
@@ -622,7 +622,11 @@ class ErrorTab(QWidget):
         animation.setStartValue(0.0)
         animation.setEndValue(1.0)
         animation.setEasingCurve(QEasingCurve.Type.OutCubic)
-        animation.finished.connect(lambda eff=effect: self._clear_entry_effect(eff))
+
+        def _handle_finished(*_args) -> None:
+            self._clear_entry_effect(effect)
+
+        animation.finished.connect(_handle_finished)
         animation.start()
 
         self._entry_effect = effect
@@ -657,67 +661,12 @@ class ErrorTab(QWidget):
     def load_file_preview(self):
         """Load the first few rows of the file for preview."""
         try:
-            file_ext = os.path.splitext(self.actual_file_path)[1].lower()
-            rows = []
-
-            if file_ext == ".csv":
-                delimiters = [",", ";", "\t", "|"]
-                best_rows = []
-                max_cols = 0
-
-                for delimiter in delimiters:
-                    try:
-                        with open(self.actual_file_path, "r", encoding="utf-8") as file:
-                            reader = csv.reader(file, delimiter=delimiter)
-                            test_rows = []
-                            for i, row in enumerate(reader):
-                                if i >= 5:
-                                    break
-                                test_rows.append(row)
-
-                            if test_rows:
-                                avg_cols = sum(len(row) for row in test_rows) / len(test_rows)
-                                if avg_cols > max_cols:
-                                    max_cols = avg_cols
-                                    best_rows = test_rows
-                    except Exception:
-                        continue
-
-                rows = best_rows
-
-            elif file_ext in [".xlsx", ".xls"]:
-                try:
-                    import pandas as pd
-
-                    if self.sheet_name:
-                        df = pd.read_excel(self.actual_file_path, sheet_name=self.sheet_name, nrows=5, header=None)
-                    else:
-                        df = pd.read_excel(self.actual_file_path, nrows=5)
-                    rows = [df.columns.tolist()] + df.values.tolist()
-                    rows = [[str(cell) for cell in row] for row in rows]
-                except ImportError:
-                    rows = [["Excel file detected", "pandas required", "to preview"]]
-
-            if not rows:
-                rows = [["No", "preview", "available"]]
-
-            max_cols = max(len(row) for row in rows) if rows else 3
-            self.preview_table.setRowCount(len(rows))
-            self.preview_table.setColumnCount(max_cols)
-            self.preview_table.setHorizontalHeaderLabels([f"Column {i + 1}" for i in range(max_cols)])
-
-            for i, row in enumerate(rows):
-                for j in range(max_cols):
-                    cell_value = str(row[j]) if j < len(row) else ""
-                    item = QTableWidgetItem(cell_value)
-                    try:
-                        float(cell_value)
-                        item.setBackground(QColor(226, 236, 208))
-                    except (ValueError, TypeError):
-                        pass
-                    self.preview_table.setItem(i, j, item)
-
-            self.preview_table.resizeColumnsToContents()
+            rows, _, _ = ColumnMapperDialog.load_preview_rows(
+                self.actual_file_path,
+                sheet_name=self.sheet_name,
+            )
+            headers = ColumnMapperDialog.detect_headers(self, rows)
+            ColumnMapperDialog.populate_preview_table(self.preview_table, rows[:50], headers)
 
         except Exception as exc:
             self.preview_table.setRowCount(1)

@@ -5,7 +5,7 @@
 This section keeps the original numbered notes easy to locate while the rest of the file stays organized by priority and subsystem.
 
 1. Sidebar long filenames and `.xlsx:::` naming
-   Status: partly fixed
+   Status: fixed
    Notes:
    - `1.1)` Long file names were pushing sidebar controls out for other datasets
    - `1.2)` Sheet-qualified Excel restore showed `:::sheet` in the UI
@@ -15,43 +15,43 @@ This section keeps the original numbered notes easy to locate while the rest of 
    - Keep watching for any remaining filename edge cases
 
 2. Welcome screen too large / requires scrolling
-   Status: pending
+   Status: fixed
 
 3. Welcome screen flashes after loading dialog finishes
-   Status: pending investigation
+   Status: fixed
 
 4. Loading dialog says `0 of N files` and later changes to datasets
-   Status: pending investigation
+   Status: fixed
 
 5. Dataset-tab results table improvements
-   Status: pending
+   Status: fixed
    Notes:
    - continuous highlight selection
    - columns should expand to use available space better
 
 6. No smooth transition when switching between dataset tabs
-   Status: pending
+   Status: fixed
 
 7. Report generation sidebar/layout should match the new concept fully
    Status: pending
 
 8. Column mapping dialog needs a stronger redesign
-   Status: pending
+   Status: partly fixed
    Notes:
    - `8.1)` Batch apply with Excel still needs manual audit even after the multi-sheet fix
-   - `8.2)` Error tab also needs a modern redesign
+   - `8.2)` Error tab redesign completed
 
 9. Sidebar porosity method is unclear
-   Status: pending
+   Status: fixed
 
 10. Manage dataset porosity dialog looks bad
-    Status: pending
+    Status: fixed
 
 11. Dataset statistics subtab needs redesign
     Status: pending
 
 12. Zooming comparison plots causes problems
-    Status: pending
+    Status: fixed
 
 13. `QFont::setPointSize: Point size <= 0 (-1)`
     Status: pending investigation

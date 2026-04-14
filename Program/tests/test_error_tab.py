@@ -69,10 +69,12 @@ class TestErrorTabDesign(unittest.TestCase):
         self.assertGreaterEqual(self.tab.preview_table.rowCount(), 2)
         self.assertGreaterEqual(self.tab.preview_table.columnCount(), 2)
         self.assertGreaterEqual(self.tab.preview_table.minimumHeight(), 340)
+        self.assertFalse(self.tab.preview_table.showGrid())
+        self.assertEqual(self.tab.preview_table.frameShape(), self.tab.preview_table.Shape.NoFrame)
 
         numeric_item = self.tab.preview_table.item(1, 0)
         self.assertIsNotNone(numeric_item)
-        self.assertEqual(numeric_item.background().color().name().lower(), "#e2ecd0")
+        self.assertEqual(numeric_item.background().color().name().lower(), "#c8ffc8")
 
     def test_update_error_message_refreshes_fault_line_and_raw_text(self):
         self.tab.update_error_message("Column header mismatch")

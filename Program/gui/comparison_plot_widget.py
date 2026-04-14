@@ -2,19 +2,75 @@
 Enhanced plot widget for comparison tab with multiple display modes
 """
 
+import math
+
 from PyQt6.QtWidgets import (
-    QWidget, QVBoxLayout, QHBoxLayout, QToolBar, QToolButton,
-    QComboBox, QLabel, QCheckBox, QButtonGroup, QRadioButton
+    QWidget, QVBoxLayout, QHBoxLayout, QFrame, QPushButton,
+    QComboBox, QLabel, QButtonGroup, QSizePolicy
 )
-from PyQt6.QtCore import Qt, pyqtSignal
+from PyQt6.QtCore import Qt, pyqtSignal, QSize
 from matplotlib.figure import Figure
 from matplotlib.patches import Patch
-import matplotlib.pyplot as plt
 import numpy as np
-from typing import List, Dict, Optional
+import warnings
+from typing import List, Dict
 from .k_plot_helpers import annotate_log_bars, apply_log_bar_limits, format_method_label
 from .matplotlib_canvas import FigureCanvas
-from .theme import C, apply_matplotlib_style
+from .plot_interactions import AxesInteractionController
+from .theme import C, apply_matplotlib_style, icon
+
+
+def _cmp_sep() -> QFrame:
+    """Vertical separator matching the plot workspace toolbar language."""
+    sep = QFrame()
+    sep.setObjectName("pw-sep")
+    sep.setFrameShape(QFrame.Shape.VLine)
+    sep.setFixedSize(1, 16)
+    return sep
+
+
+def _cmp_btn(text: str = "", tooltip: str = "", icon_name: str = "") -> QPushButton:
+    """Small comparison-toolbar action button."""
+    btn = QPushButton(text)
+    btn.setProperty("pw-btn", True)
+    btn.setToolTip(tooltip)
+    btn.setCursor(Qt.CursorShape.PointingHandCursor)
+    if icon_name:
+        btn.setIcon(icon(icon_name, C.TEXT_MID))
+        btn.setIconSize(QSize(12, 12))
+    return btn
+
+
+def _cmp_chk(text: str, tooltip: str = "", checked: bool = False, icon_name: str = "") -> QPushButton:
+    """Toggle button styled through the shared plot toolbar rules."""
+    btn = QPushButton(text)
+    btn.setProperty("pw-chk", True)
+    btn.setProperty("active", checked)
+    btn.setCheckable(True)
+    btn.setChecked(checked)
+    btn.setToolTip(tooltip)
+    btn.setCursor(Qt.CursorShape.PointingHandCursor)
+    if icon_name:
+        btn._cmp_icon_name = icon_name
+        btn.setIcon(icon(icon_name, C.OLIVE if checked else C.TEXT_MID))
+        btn.setIconSize(QSize(12, 12))
+    btn.toggled.connect(lambda on, b=btn: _sync_cmp_chk(b, on))
+    return btn
+
+
+def _sync_cmp_chk(btn: QPushButton, on: bool) -> None:
+    btn.setProperty("active", on)
+    btn.style().unpolish(btn)
+    btn.style().polish(btn)
+    icon_name = getattr(btn, "_cmp_icon_name", None)
+    if icon_name:
+        btn.setIcon(icon(icon_name, C.OLIVE if on else C.TEXT_MID))
+
+
+def _sync_cmp_seg(btn: QPushButton, on: bool) -> None:
+    btn.setProperty("active", on)
+    btn.style().unpolish(btn)
+    btn.style().polish(btn)
 
 
 class ComparisonPlotWidget(QWidget):
@@ -45,6 +101,9 @@ class ComparisonPlotWidget(QWidget):
         self.datasets = []
         self.k_results_dict = {}  # dataset_name -> k_results
         self.flagged_methods_dict = {}  # dataset_name -> set(method_name)
+        self.current_ax = None
+        self._default_limits = {}
+        self._pan_state = None
         
         # Color scheme for consistency
         self.dataset_colors = [
@@ -90,130 +149,142 @@ class ComparisonPlotWidget(QWidget):
         self.figure = Figure(figsize=(12, 8))
         self.figure.patch.set_facecolor(C.BG)
         self.canvas = FigureCanvas(self.figure)
-        layout.addWidget(self.canvas)
+        self.canvas.setStyleSheet("background: transparent;")
+        self.canvas.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
+        self._interactions = AxesInteractionController(
+            figure=self.figure,
+            canvas=self.canvas,
+            get_current_ax=lambda: self.current_ax,
+            set_current_ax=lambda ax: setattr(self, "current_ax", ax),
+            get_active_axes=lambda: list(self.figure.axes),
+        )
+        self.canvas.mpl_connect("button_press_event", self._on_canvas_click)
+        self.canvas.mpl_connect("scroll_event", self._on_canvas_scroll)
+        self.canvas.mpl_connect("motion_notify_event", self._on_canvas_motion)
+        self.canvas.mpl_connect("button_release_event", self._on_canvas_release)
+        layout.addWidget(self.canvas, 1)
     
     def create_toolbar(self):
-        """Create the toolbar with plot controls"""
-        toolbar = QToolBar()
-        toolbar.setMovable(False)
-        toolbar.setStyleSheet("""
-            QToolBar {
-                background-color: #f5f5f0;
-                border: 1px solid #d4c4a8;
-                padding: 2px;
-                spacing: 2px;
-            }
-            QToolButton, QRadioButton {
-                padding: 2px 4px;
-                font-size: 9px;
-            }
-            QComboBox {
-                padding: 2px 4px;
-                font-size: 9px;
-                max-height: 20px;
-            }
-            QCheckBox {
-                font-size: 9px;
-                spacing: 2px;
-            }
-            QLabel {
-                font-size: 9px;
-                padding: 0 4px;
-            }
-        """)
-        
-        # Plot type selector
-        plot_label = QLabel("Plot:")
-        toolbar.addWidget(plot_label)
-        
+        """Create the toolbar with plot controls."""
+        toolbar = QWidget()
+        toolbar.setObjectName("pw-toolbar")
+        row = QHBoxLayout(toolbar)
+        row.setContentsMargins(8, 0, 8, 0)
+        row.setSpacing(4)
+
+        plot_label = QLabel("Plot")
+        plot_label.setStyleSheet("color: #6a6254;")
+        row.addWidget(plot_label)
+
         self.plot_selector = QComboBox()
+        self.plot_selector.setObjectName("pw-style-sel")
         self.plot_selector.addItems([
             "Distribution",
-            "K-Values", 
+            "K-Values",
             "Combined",
             "Cumulative",
-            "Histogram"
+            "Histogram",
         ])
-        self.plot_selector.setMaximumWidth(100)
+        self.plot_selector.setMaximumWidth(118)
         self.plot_selector.currentTextChanged.connect(self.on_plot_type_changed)
-        toolbar.addWidget(self.plot_selector)
-        
-        toolbar.addSeparator()
-        
-        # Display mode selector
-        mode_label = QLabel("Mode:")
-        toolbar.addWidget(mode_label)
-        
-        # Radio buttons for display mode
-        self.overlay_radio = QRadioButton("Overlay")
+        row.addWidget(self.plot_selector)
+
+        row.addWidget(_cmp_sep())
+
+        mode_label = QLabel("View")
+        mode_label.setStyleSheet("color: #6a6254;")
+        row.addWidget(mode_label)
+
+        mode_frame = QFrame()
+        mode_frame.setObjectName("pw-seg")
+        mode_row = QHBoxLayout(mode_frame)
+        mode_row.setContentsMargins(0, 0, 0, 0)
+        mode_row.setSpacing(0)
+
+        self._mode_group = QButtonGroup(self)
+        self._mode_group.setExclusive(True)
+
+        self.overlay_radio = QPushButton("Overlay")
+        self.overlay_radio.setProperty("pw-seg", True)
+        self.overlay_radio.setProperty("active", True)
+        self.overlay_radio.setCheckable(True)
         self.overlay_radio.setChecked(True)
+        self.overlay_radio.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.overlay_radio.toggled.connect(lambda on: _sync_cmp_seg(self.overlay_radio, on))
         self.overlay_radio.toggled.connect(lambda checked: self._on_mode_toggled(checked, "overlay"))
-        toolbar.addWidget(self.overlay_radio)
-        
-        self.grid_radio = QRadioButton("Grid")
+        self._mode_group.addButton(self.overlay_radio)
+        mode_row.addWidget(self.overlay_radio)
+
+        self.grid_radio = QPushButton("Grid")
+        self.grid_radio.setProperty("pw-seg", True)
+        self.grid_radio.setProperty("active", False)
+        self.grid_radio.setCheckable(True)
+        self.grid_radio.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.grid_radio.toggled.connect(lambda on: _sync_cmp_seg(self.grid_radio, on))
         self.grid_radio.toggled.connect(lambda checked: self._on_mode_toggled(checked, "grid"))
-        toolbar.addWidget(self.grid_radio)
-        
-        self.grouped_radio = QRadioButton("Grouped")
+        self._mode_group.addButton(self.grid_radio)
+        mode_row.addWidget(self.grid_radio)
+
+        self.grouped_radio = QPushButton("Grouped")
+        self.grouped_radio.setProperty("pw-seg", True)
+        self.grouped_radio.setProperty("active", False)
+        self.grouped_radio.setCheckable(True)
+        self.grouped_radio.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.grouped_radio.toggled.connect(lambda on: _sync_cmp_seg(self.grouped_radio, on))
         self.grouped_radio.toggled.connect(lambda checked: self._on_mode_toggled(checked, "grouped"))
-        self.grouped_radio.setVisible(False)  # Only show for bar charts
-        toolbar.addWidget(self.grouped_radio)
-        
-        toolbar.addSeparator()
-        
-        # Grid layout selector (only visible in grid mode)
-        self.grid_label = QLabel("Grid:")
+        self._mode_group.addButton(self.grouped_radio)
+        self.grouped_radio.setVisible(False)
+        mode_row.addWidget(self.grouped_radio)
+
+        row.addWidget(mode_frame)
+        row.addWidget(_cmp_sep())
+
+        self.grid_label = QLabel("Layout")
+        self.grid_label.setStyleSheet("color: #6a6254;")
         self.grid_label.setVisible(False)
-        toolbar.addWidget(self.grid_label)
-        
+        row.addWidget(self.grid_label)
+
         self.grid_selector = QComboBox()
+        self.grid_selector.setObjectName("pw-style-sel")
         self.grid_selector.addItems(["2x2", "3x2", "3x3", "4x3"])
-        self.grid_selector.setMaximumWidth(60)
+        self.grid_selector.setMaximumWidth(68)
         self.grid_selector.setVisible(False)
         self.grid_selector.currentTextChanged.connect(self.on_grid_layout_changed)
-        toolbar.addWidget(self.grid_selector)
-        
-        toolbar.addSeparator()
-        
-        # Display options
-        self.grid_check = QCheckBox("Grid")
-        self.grid_check.setChecked(True)
-        self.grid_check.stateChanged.connect(self.update_display_options)
-        toolbar.addWidget(self.grid_check)
-        
-        self.legend_check = QCheckBox("Legend")
-        self.legend_check.setChecked(True)
-        self.legend_check.stateChanged.connect(self.update_display_options)
-        toolbar.addWidget(self.legend_check)
-        
-        toolbar.addSeparator()
-        
-        # Zoom controls
-        zoom_in_btn = QToolButton()
-        zoom_in_btn.setText("🔍+")
-        zoom_in_btn.setToolTip("Zoom In")
-        zoom_in_btn.clicked.connect(self.zoom_in)
-        toolbar.addWidget(zoom_in_btn)
-        
-        zoom_out_btn = QToolButton()
-        zoom_out_btn.setText("🔍-")
-        zoom_out_btn.setToolTip("Zoom Out")
-        zoom_out_btn.clicked.connect(self.zoom_out)
-        toolbar.addWidget(zoom_out_btn)
-        
-        reset_btn = QToolButton()
-        reset_btn.setText("⟲")
-        reset_btn.setToolTip("Reset View")
-        reset_btn.clicked.connect(self.reset_view)
-        toolbar.addWidget(reset_btn)
-        
-        # Add stretch
-        spacer = QWidget()
-        spacer.setSizePolicy(spacer.sizePolicy().horizontalPolicy(), spacer.sizePolicy().verticalPolicy())
-        toolbar.addWidget(spacer)
-        
+        row.addWidget(self.grid_selector)
+
+        row.addWidget(_cmp_sep())
+
+        self.grid_check = _cmp_chk(" Grid", "Toggle grid", True, "fa6s.hashtag")
+        self.grid_check.toggled.connect(self.update_display_options)
+        row.addWidget(self.grid_check)
+
+        self.legend_check = _cmp_chk(" Legend", "Toggle legend", True, "fa6s.list")
+        self.legend_check.toggled.connect(self.update_display_options)
+        row.addWidget(self.legend_check)
+
+        row.addWidget(_cmp_sep())
+
+        self.zoom_in_btn = _cmp_btn("", "Zoom in", "fa6s.magnifying-glass-plus")
+        self.zoom_in_btn.clicked.connect(self.zoom_in)
+        row.addWidget(self.zoom_in_btn)
+
+        self.zoom_out_btn = _cmp_btn("", "Zoom out", "fa6s.magnifying-glass-minus")
+        self.zoom_out_btn.clicked.connect(self.zoom_out)
+        row.addWidget(self.zoom_out_btn)
+
+        self.reset_btn = _cmp_btn(" Fit", "Reset active plot", "fa6s.arrows-to-circle")
+        self.reset_btn.clicked.connect(self.reset_view)
+        row.addWidget(self.reset_btn)
+
+        row.addWidget(_cmp_sep())
+
+        self._interaction_hint = QLabel("Wheel zoom  |  Shift-drag pan  |  Double-click reset")
+        self._interaction_hint.setStyleSheet("color: #8a816f; font-size: 10px;")
+        row.addWidget(self._interaction_hint)
+
+        row.addStretch(1)
         return toolbar
-    
+
     def on_plot_type_changed(self, text: str):
         """Handle plot type change"""
         plot_map = {
@@ -269,6 +340,7 @@ class ComparisonPlotWidget(QWidget):
             button.blockSignals(True)
             button.setChecked(self.display_mode == mode)
             button.blockSignals(False)
+            _sync_cmp_seg(button, self.display_mode == mode)
 
     def _ordered_methods(self, method_names) -> List[str]:
         """Return K-methods in a stable, domain-specific order."""
@@ -380,9 +452,192 @@ class ComparisonPlotWidget(QWidget):
         elif self.current_plot_type == "histogram":
             self.plot_histogram()
         
-        self.figure.tight_layout()
+        self._prime_current_ax()
+        self._capture_default_limits()
+        self._apply_active_axes_styling()
+        self._apply_figure_layout()
         self.canvas.draw()
         self.plot_updated.emit()
+
+    def _apply_figure_layout(self):
+        """Keep labels visible without letting tight_layout warnings spill into the console."""
+        try:
+            with warnings.catch_warnings():
+                warnings.filterwarnings(
+                    "error",
+                    message="Tight layout not applied.*",
+                    category=UserWarning,
+                )
+                self.figure.tight_layout(pad=0.9)
+        except UserWarning:
+            self.figure.subplots_adjust(
+                left=0.08,
+                right=0.98,
+                top=0.94,
+                bottom=0.16,
+                wspace=0.28,
+                hspace=0.34,
+            )
+
+    def _on_canvas_click(self, event) -> None:
+        """Track the last axes the user interacted with and handle reset/pan starts."""
+        ax = getattr(event, "inaxes", None)
+        self._set_current_ax(ax)
+        if ax is None:
+            return
+        if getattr(event, "dblclick", False):
+            self._reset_axes_view(ax)
+            self.canvas.draw()
+            return
+        if self._event_has_shift(event) and getattr(event, "button", None) == 1:
+            self._start_pan(ax, event)
+
+    def _set_current_ax(self, ax) -> None:
+        """Remember the active axes when it belongs to the current figure."""
+        new_ax = ax if ax in self.figure.axes else None
+        if new_ax is self.current_ax:
+            return
+        self.current_ax = new_ax
+        self._apply_active_axes_styling()
+        self.canvas.draw_idle()
+
+    def _prime_current_ax(self) -> None:
+        """Default the active axes after a plot rebuild."""
+        if self.current_ax not in self.figure.axes:
+            self.current_ax = self.figure.axes[0] if self.figure.axes else None
+
+    @staticmethod
+    def _zoom_axis_limits(limits, scale: str, factor: float) -> tuple[float, float]:
+        """Zoom a linear or log axis around its center by the given factor."""
+        lo, hi = limits
+        reversed_axis = hi < lo
+        if reversed_axis:
+            lo, hi = hi, lo
+
+        if scale == 'log' and lo > 0 and hi > 0:
+            lo_log = math.log10(lo)
+            hi_log = math.log10(hi)
+            center_log = (lo_log + hi_log) / 2
+            half_span = (hi_log - lo_log) * factor / 2
+            new_lo = 10 ** (center_log - half_span)
+            new_hi = 10 ** (center_log + half_span)
+        else:
+            center = (lo + hi) / 2
+            half_range = (hi - lo) * factor / 2
+            new_lo = center - half_range
+            new_hi = center + half_range
+            if lo >= 0 and new_lo < 0:
+                new_lo = 0
+
+        return (new_hi, new_lo) if reversed_axis else (new_lo, new_hi)
+
+    def _zoom_target_axes(self):
+        """Zoom the active subplot when possible, otherwise fall back to the first axes."""
+        if self.current_ax in self.figure.axes:
+            return [self.current_ax]
+        if self.figure.axes:
+            self._set_current_ax(self.figure.axes[0])
+            return [self.current_ax]
+        return []
+
+    @staticmethod
+    def _event_has_shift(event) -> bool:
+        key = getattr(event, "key", None)
+        if isinstance(key, str):
+            return "shift" in key.lower().split("+")
+        return False
+
+    def _capture_default_limits(self) -> None:
+        """Store default limits for per-subplot reset operations."""
+        self._default_limits = {
+            ax: {"xlim": ax.get_xlim(), "ylim": ax.get_ylim()}
+            for ax in self.figure.axes
+        }
+
+    def _apply_active_axes_styling(self) -> None:
+        """Emphasize the active subplot without overwhelming the chart."""
+        for ax in self.figure.axes:
+            is_active = ax is self.current_ax
+            for spine in ax.spines.values():
+                spine.set_visible(True)
+                spine.set_linewidth(1.6 if is_active else 0.8)
+                spine.set_edgecolor(C.OLIVE if is_active else "#cfc5b4")
+            title = ax.title
+            title.set_color(C.TEXT if is_active else C.TEXT_MID)
+
+    def _reset_axes_view(self, ax) -> None:
+        """Reset a single axes to its stored default limits."""
+        defaults = self._default_limits.get(ax)
+        if not defaults:
+            return
+        ax.set_xlim(*defaults["xlim"])
+        ax.set_ylim(*defaults["ylim"])
+        self._set_current_ax(ax)
+
+    def _start_pan(self, ax, event) -> None:
+        """Begin a shift-drag pan operation on the active subplot."""
+        if event.xdata is None or event.ydata is None:
+            return
+        self._pan_state = {
+            "ax": ax,
+            "xdata": event.xdata,
+            "ydata": event.ydata,
+            "xlim": ax.get_xlim(),
+            "ylim": ax.get_ylim(),
+        }
+
+    @staticmethod
+    def _pan_axis_limits(limits, scale: str, start_data: float, current_data: float) -> tuple[float, float]:
+        """Pan a linear or log axis based on pointer movement."""
+        lo, hi = limits
+        reversed_axis = hi < lo
+        if reversed_axis:
+            lo, hi = hi, lo
+
+        if scale == 'log' and lo > 0 and hi > 0 and start_data and current_data and start_data > 0 and current_data > 0:
+            factor = start_data / current_data
+            new_lo = lo * factor
+            new_hi = hi * factor
+        else:
+            delta = start_data - current_data
+            new_lo = lo + delta
+            new_hi = hi + delta
+            if lo >= 0 and new_lo < 0:
+                shift = -new_lo
+                new_lo += shift
+                new_hi += shift
+
+        return (new_hi, new_lo) if reversed_axis else (new_lo, new_hi)
+
+    def _on_canvas_scroll(self, event) -> None:
+        """Zoom the hovered subplot with the mouse wheel."""
+        ax = getattr(event, "inaxes", None)
+        if ax not in self.figure.axes:
+            return
+        self._set_current_ax(ax)
+        step = getattr(event, "step", 0)
+        if not step:
+            step = 1 if getattr(event, "button", "") == "up" else -1
+        factor = 0.88 if step > 0 else 1.14
+        ax.set_xlim(*self._zoom_axis_limits(ax.get_xlim(), ax.get_xscale(), factor))
+        ax.set_ylim(*self._zoom_axis_limits(ax.get_ylim(), ax.get_yscale(), factor))
+        self.canvas.draw()
+
+    def _on_canvas_motion(self, event) -> None:
+        """Pan the active subplot while shift-dragging."""
+        if not self._pan_state or event.xdata is None or event.ydata is None:
+            return
+        ax = self._pan_state["ax"]
+        if ax not in self.figure.axes:
+            self._pan_state = None
+            return
+        ax.set_xlim(*self._pan_axis_limits(self._pan_state["xlim"], ax.get_xscale(), self._pan_state["xdata"], event.xdata))
+        ax.set_ylim(*self._pan_axis_limits(self._pan_state["ylim"], ax.get_yscale(), self._pan_state["ydata"], event.ydata))
+        self.canvas.draw_idle()
+
+    def _on_canvas_release(self, _event) -> None:
+        """End any active pan gesture."""
+        self._pan_state = None
     
     def plot_distribution(self):
         """Plot grain size distribution"""
@@ -697,66 +952,37 @@ class ComparisonPlotWidget(QWidget):
         """Show empty state message"""
         self.figure.clear()
         ax = self.figure.add_subplot(1, 1, 1)
+        self._set_current_ax(ax)
         ax.text(0.5, 0.5, message, transform=ax.transAxes,
                ha='center', va='center', fontsize=12, color='gray')
         ax.set_xticks([])
         ax.set_yticks([])
+        self._capture_default_limits()
+        self._apply_active_axes_styling()
         self.canvas.draw()
     
     def zoom_in(self):
-        """Zoom in on all axes"""
-        for ax in self.figure.axes:
-            xlim = ax.get_xlim()
-            ylim = ax.get_ylim()
-            
-            # Zoom in by 20%
-            if ax.get_xscale() == 'log':
-                x_center = np.sqrt(xlim[0] * xlim[1])
-                x_factor = np.sqrt(0.64)  # 0.8^2 for log scale
-                ax.set_xlim(x_center/x_factor, x_center*x_factor)
-            else:
-                x_center = (xlim[0] + xlim[1]) / 2
-                x_range = (xlim[1] - xlim[0]) * 0.4
-                ax.set_xlim(x_center - x_range, x_center + x_range)
-            
-            if ax.get_yscale() == 'log':
-                y_center = np.sqrt(ylim[0] * ylim[1])
-                y_factor = np.sqrt(0.64)
-                ax.set_ylim(y_center/y_factor, y_center*y_factor)
-            else:
-                y_center = (ylim[0] + ylim[1]) / 2
-                y_range = (ylim[1] - ylim[0]) * 0.4
-                ax.set_ylim(y_center - y_range, y_center + y_range)
+        """Zoom in on the active axes."""
+        for ax in self._zoom_target_axes():
+            ax.set_xlim(*self._zoom_axis_limits(ax.get_xlim(), ax.get_xscale(), 0.8))
+            ax.set_ylim(*self._zoom_axis_limits(ax.get_ylim(), ax.get_yscale(), 0.8))
         
         self.canvas.draw()
     
     def zoom_out(self):
-        """Zoom out on all axes"""
-        for ax in self.figure.axes:
-            xlim = ax.get_xlim()
-            ylim = ax.get_ylim()
-            
-            # Zoom out by 20%
-            if ax.get_xscale() == 'log':
-                x_center = np.sqrt(xlim[0] * xlim[1])
-                x_factor = np.sqrt(1.44)  # 1.2^2 for log scale
-                ax.set_xlim(x_center/x_factor, x_center*x_factor)
-            else:
-                x_center = (xlim[0] + xlim[1]) / 2
-                x_range = (xlim[1] - xlim[0]) * 0.6
-                ax.set_xlim(x_center - x_range, x_center + x_range)
-            
-            if ax.get_yscale() == 'log':
-                y_center = np.sqrt(ylim[0] * ylim[1])
-                y_factor = np.sqrt(1.44)
-                ax.set_ylim(y_center/y_factor, y_center*y_factor)
-            else:
-                y_center = (ylim[0] + ylim[1]) / 2
-                y_range = (ylim[1] - ylim[0]) * 0.6
-                ax.set_ylim(y_center - y_range, y_center + y_range)
+        """Zoom out on the active axes."""
+        for ax in self._zoom_target_axes():
+            ax.set_xlim(*self._zoom_axis_limits(ax.get_xlim(), ax.get_xscale(), 1.2))
+            ax.set_ylim(*self._zoom_axis_limits(ax.get_ylim(), ax.get_yscale(), 1.2))
         
         self.canvas.draw()
     
     def reset_view(self):
-        """Reset view on all axes"""
-        self.refresh_plot()
+        """Reset the active subplot, or rebuild defaults when no subplot is active."""
+        targets = self._zoom_target_axes()
+        if not targets:
+            self.refresh_plot()
+            return
+        for ax in targets:
+            self._reset_axes_view(ax)
+        self.canvas.draw()

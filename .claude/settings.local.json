@@ -36,7 +36,9 @@
       "Bash(python -c \"from gui.classification_dialog import ClassificationDialog; print\\(''Import OK''\\)\")",
       "Bash(python -c \"from gui.classification_dialog import ClassificationDialog; print\\(''OK''\\)\")",
       "Bash(python -m py_compile Program/gui/reporting_tab.py)",
-      "Bash(python -c \"import sys; sys.path.insert\\(0, 'Program'\\); from gui import reporting_tab; print\\('imports OK'\\); print\\(dir\\(reporting_tab.ReportingTab\\)[:5]\\)\")"
+      "Bash(python -c \"import sys; sys.path.insert\\(0, 'Program'\\); from gui import reporting_tab; print\\('imports OK'\\); print\\(dir\\(reporting_tab.ReportingTab\\)[:5]\\)\")",
+      "Bash(python -c \"import sys; sys.path.insert\\(0,'Program'\\); from gui import reporting_tab; print\\('imports OK'\\); print\\('class:', reporting_tab.ReportingTab.__name__\\)\")",
+      "Bash(python -c \"import sys; sys.path.insert\\(0,'Program'\\); from gui import reporting_tab; print\\('OK'\\)\")"
     ],
     "deny": [],
     "ask": []

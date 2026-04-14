@@ -242,6 +242,7 @@ class PlotWorkspace(QWidget):
 
         self.plot_widget = PlotWidget()
         self.plot_widget.set_display_unit(HydraulicConductivityUnit.M_PER_DAY)
+        self.plot_widget.axes_view_changed.connect(self._sync_axis_inputs_from_ax)
         chart_lay.addWidget(self.plot_widget, 1)
 
         # Toggle handle — absolute overlay at left edge, vertically centered
@@ -851,33 +852,16 @@ class PlotWorkspace(QWidget):
         return new_lo, new_hi
 
     def zoom_in(self):
-        target_ax = self.plot_widget.current_ax if self.plot_widget else None
-        if target_ax:
-            target_ax.set_xlim(
-                *self._zoom_axis_limits(target_ax.get_xlim(), target_ax.get_xscale(), 0.8)
-            )
-            target_ax.set_ylim(
-                *self._zoom_axis_limits(target_ax.get_ylim(), target_ax.get_yscale(), 0.8)
-            )
-            self.plot_widget.canvas.draw()
-            self._sync_axis_inputs_from_ax(target_ax)
+        if self.plot_widget:
+            self.plot_widget.interactions.zoom_current(0.8)
 
     def zoom_out(self):
-        target_ax = self.plot_widget.current_ax if self.plot_widget else None
-        if target_ax:
-            target_ax.set_xlim(
-                *self._zoom_axis_limits(target_ax.get_xlim(), target_ax.get_xscale(), 1.2)
-            )
-            target_ax.set_ylim(
-                *self._zoom_axis_limits(target_ax.get_ylim(), target_ax.get_yscale(), 1.2)
-            )
-            self.plot_widget.canvas.draw()
-            self._sync_axis_inputs_from_ax(target_ax)
+        if self.plot_widget:
+            self.plot_widget.interactions.zoom_current(1.2)
 
     def reset_view(self):
         if self.plot_widget:
             self.plot_widget.reset_view()
-            self._sync_axis_inputs_from_ax(self.plot_widget.current_ax)
 
     # ── Public API (unchanged interface) ───────────────────────
 

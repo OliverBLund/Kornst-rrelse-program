@@ -1265,7 +1265,7 @@ class WelcomeWidget(QWidget):
             QPushButton:hover   {{ background: {C.OLIVE_H}; }}
             QPushButton:pressed {{ background: {C.OLIVE_DK}; }}
         """)
-        load_btn.clicked.connect(self.load_files_requested.emit)
+        load_btn.clicked.connect(lambda _checked=False: self.load_files_requested.emit())
         lay.addWidget(load_btn, 0, 0, 1, 2)
 
         resume_btn = QPushButton("Resume Latest Session")
@@ -1320,7 +1320,7 @@ class WelcomeWidget(QWidget):
                 border-color: rgba(107,142,35,132);
             }}
         """)
-        demo_btn.clicked.connect(self.load_sample_data_requested.emit)
+        demo_btn.clicked.connect(lambda _checked=False: self.load_sample_data_requested.emit())
         lay.addWidget(demo_btn, 1, 1)
 
         latest_name = self.recent_sessions[0].get("name", "Latest session") if self.recent_sessions else "No saved session yet"
