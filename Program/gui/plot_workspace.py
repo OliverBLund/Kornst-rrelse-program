@@ -163,8 +163,9 @@ class PlotWorkspace(QWidget):
 
         # ── More plot types dropdown ──
         self._more_plots = QComboBox()
-        self._more_plots.setObjectName("pw-style-sel")
+        self._more_plots.setObjectName("pw-more-plots-sel")
         self._more_plots.addItems(["More Plots…", "Combined", "Cumulative", "Histogram"])
+        self._more_plots.setMaxVisibleItems(6)
         self._more_plots.setToolTip("Additional plot types")
         self._more_plots.currentIndexChanged.connect(self._on_more_plot_changed)
         lay.addWidget(self._more_plots)
@@ -180,6 +181,13 @@ class PlotWorkspace(QWidget):
         self._style_sel.setToolTip("Plot style")
         self._style_sel.currentTextChanged.connect(self._on_style_changed)
         lay.addWidget(self._style_sel)
+
+        lay.addWidget(_pw_sep())
+
+        # ── Sidebar toggle ──
+        self._tb_sidebar_btn = _pw_chk(" Controls", "Toggle controls panel", False, "fa6s.sliders")
+        self._tb_sidebar_btn.clicked.connect(self._toggle_sidebar)
+        lay.addWidget(self._tb_sidebar_btn)
 
         lay.addWidget(_pw_sep())
 
@@ -216,11 +224,6 @@ class PlotWorkspace(QWidget):
         # ── Spacer ──
         lay.addStretch(1)
 
-        # ── Sidebar toggle (far right) ──
-        self._tb_sidebar_btn = _pw_btn("", "Toggle controls panel", "fa6s.sliders")
-        self._tb_sidebar_btn.clicked.connect(self._toggle_sidebar)
-        lay.addWidget(self._tb_sidebar_btn)
-
         return bar
 
     # ── Body (sidebar + chart) ─────────────────────────────────
@@ -237,7 +240,7 @@ class PlotWorkspace(QWidget):
         # Chart area — plot widget fills the space; toggle handle overlays
         self._chart_area = QWidget()
         chart_lay = QVBoxLayout(self._chart_area)
-        chart_lay.setContentsMargins(0, 0, 0, 0)
+        chart_lay.setContentsMargins(10, 0, 0, 0)
         chart_lay.setSpacing(0)
 
         self.plot_widget = PlotWidget()
@@ -262,6 +265,7 @@ class PlotWorkspace(QWidget):
         self._sidebar_anim = QPropertyAnimation(self._sidebar, b"maximumWidth")
         self._sidebar_anim.setDuration(200)
         self._sidebar_anim.setEasingCurve(QEasingCurve.Type.InOutQuad)
+        self._sidebar_anim.valueChanged.connect(lambda _value: self._position_toggle_handle())
 
         return body
 
@@ -271,14 +275,15 @@ class PlotWorkspace(QWidget):
         self._position_toggle_handle()
 
     def _position_toggle_handle(self):
-        """Place the toggle handle at left edge, vertically centered."""
+        """Place the toggle handle at the chart edge, vertically centered."""
         if not hasattr(self, '_toggle_handle') or not hasattr(self, '_chart_area'):
             return
         h = self._chart_area.height()
         handle_h = 40
-        handle_w = 14
+        handle_w = 16
         y = max(0, (h - handle_h) // 2)
-        self._toggle_handle.setGeometry(0, y, handle_w, handle_h)
+        x = 0
+        self._toggle_handle.setGeometry(x, y, handle_w, handle_h)
 
     # ── Sidebar ────────────────────────────────────────────────
 
@@ -447,6 +452,9 @@ class PlotWorkspace(QWidget):
         self._sidebar_anim.setStartValue(self._sidebar.maximumWidth())
         self._sidebar_anim.setEndValue(target)
         self._sidebar_anim.start()
+        self._tb_sidebar_btn.blockSignals(True)
+        self._tb_sidebar_btn.setChecked(self.sidebar_visible)
+        self._tb_sidebar_btn.blockSignals(False)
         # Update handle chevron direction
         chevron = "fa6s.chevron-left" if self.sidebar_visible else "fa6s.chevron-right"
         self._toggle_handle.setIcon(icon(chevron, C.TEXT_MID, 8))

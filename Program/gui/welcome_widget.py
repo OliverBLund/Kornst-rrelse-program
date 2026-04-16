@@ -123,6 +123,7 @@ class WelcomeWidget(QWidget):
         self._main_card = None
         self._footer = None
         self._footer_attr = None
+        self._footer_dtu_pill = None
         self._outer_scroll = None
         self._resume_btn = None
         self._resume_hint = None
@@ -637,14 +638,6 @@ class WelcomeWidget(QWidget):
         meta_lay = QHBoxLayout(meta_row)
         meta_lay.setContentsMargins(0, 0, 0, 0)
         meta_lay.setSpacing(8)
-
-        eyebrow = QLabel("BATCH WORKSPACE")
-        eyebrow.setStyleSheet(
-            f"color: {C.OLIVE_DK}; font-family: '{F.MONO}'; font-size: {F.SZ_XS}pt;"
-            " font-weight: 700; letter-spacing: 0.16em; background: transparent; border: none;"
-        )
-        self._title_eyebrow = eyebrow
-        meta_lay.addWidget(eyebrow)
         meta_lay.addStretch()
 
         ver = QLabel("v0.9.0-beta")
@@ -1203,10 +1196,10 @@ class WelcomeWidget(QWidget):
 
         for (name, file, ico_name), (r, c) in zip(
             [
-                ("Getting Started", "getting_started.html",  "fa6s.circle-play"),
-                ("File Formats",    "file_formats.html",     "fa6s.file-csv"),
-                ("Methods",         "methods_overview.html", "fa6s.flask"),
-                ("Troubleshoot",    "troubleshooting.html",  "fa6s.screwdriver-wrench"),
+                ("Getting Started",    "start_here.html",        "fa6s.circle-play"),
+                ("Data Format",        "data_files.html",        "fa6s.file-lines"),
+                ("Excel Workbooks",    "excel_workbooks.html",   "fa6s.file-excel"),
+                ("Mapping & Recovery", "mapping_recovery.html",  "fa6s.table-columns"),
             ],
             [(0, 0), (0, 1), (1, 0), (1, 1)],
         ):
@@ -1348,6 +1341,17 @@ class WelcomeWidget(QWidget):
         lay = QHBoxLayout(w)
         lay.setContentsMargins(0, 0, 0, 0)
         lay.setSpacing(7)
+
+        dtu_pill = QLabel("DTU")
+        dtu_pill.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        dtu_pill.setStyleSheet(
+            f"background: {C.DTU_RED}; color: #fff;"
+            f" font-family: '{F.UI}'; font-size: 12px; font-weight: 700;"
+            " letter-spacing: 0.04em; padding: 3px 7px 2px; border-radius: 2px;"
+        )
+        dtu_pill.setSizePolicy(QSizePolicy.Policy.Fixed, QSizePolicy.Policy.Fixed)
+        self._footer_dtu_pill = dtu_pill
+        lay.addWidget(dtu_pill, 0, Qt.AlignmentFlag.AlignVCenter)
 
         self.dont_show_checkbox = QCheckBox(
             "Don't show this welcome screen on startup"

@@ -740,6 +740,10 @@ class ErrorTab(QWidget):
         )
 
         if reply == QMessageBox.StandardButton.Yes:
+            host_window = self.window()
+            if host_window and hasattr(host_window, "remove_workspace_file"):
+                if host_window.remove_workspace_file(self.file_path):
+                    return
             parent_tab_widget = self.parent()
             if parent_tab_widget and hasattr(parent_tab_widget, "removeTab"):
                 index = parent_tab_widget.indexOf(self)

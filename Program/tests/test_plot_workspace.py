@@ -5,6 +5,7 @@ Regression tests for plot workspace wiring across plot modes.
 import os
 import sys
 import unittest
+from types import SimpleNamespace
 
 os.environ.setdefault('QT_QPA_PLATFORM', 'offscreen')
 sys.path.insert(0, 'Program')
@@ -31,8 +32,12 @@ def build_dataset(name: str = 'Sample A') -> GrainSizeData:
 class TestPlotWorkspaceWiring(unittest.TestCase):
     def setUp(self):
         self.workspace = PlotWorkspace(build_dataset())
+        self.workspace.resize(1200, 800)
+        self.workspace.show()
+        APP.processEvents()
 
     def tearDown(self):
+        self.workspace.hide()
         self.workspace.deleteLater()
 
     def test_k_value_plot_becomes_active_axis_and_respects_grid_legend_toggles(self):
@@ -104,6 +109,51 @@ class TestPlotWorkspaceWiring(unittest.TestCase):
         self.assertNotEqual(before_xlim, after_xlim)
         self.assertGreater(after_xlim[0], 0.0)
         self.assertGreater(after_xlim[1], after_xlim[0])
+
+    def test_distribution_wheel_zoom_updates_axis_inputs(self):
+        self.workspace.current_plot_type = 'distribution'
+        self.workspace.refresh_plot()
+
+        ax = self.workspace.plot_widget.current_ax
+        before_xlim = ax.get_xlim()
+
+        self.workspace.plot_widget.interactions.on_scroll(SimpleNamespace(inaxes=ax, step=1))
+
+        after_xlim = ax.get_xlim()
+        self.assertNotEqual(before_xlim, after_xlim)
+        self.assertEqual(self.workspace._in_xmin.text(), f"{after_xlim[0]:.6g}")
+        self.assertEqual(self.workspace._in_xmax.text(), f"{after_xlim[1]:.6g}")
+
+    def test_plot_widget_canvas_registers_shared_interaction_callbacks(self):
+        callbacks = self.workspace.plot_widget.canvas.callbacks.callbacks
+
+        self.assertTrue(callbacks.get('button_press_event'))
+        self.assertTrue(callbacks.get('scroll_event'))
+        self.assertTrue(callbacks.get('motion_notify_event'))
+        self.assertTrue(callbacks.get('button_release_event'))
+
+    def test_toolbar_sidebar_toggle_sits_with_left_side_controls(self):
+        self.assertLess(self.workspace._tb_sidebar_btn.x(), self.workspace._chk_grid.x())
+
+    def test_more_plots_dropdown_uses_dedicated_toolbar_style(self):
+        self.assertEqual(self.workspace._more_plots.objectName(), 'pw-more-plots-sel')
+        self.assertEqual(self.workspace._more_plots.maxVisibleItems(), 6)
+        self.assertNotEqual(
+            self.workspace._more_plots.objectName(),
+            self.workspace._style_sel.objectName(),
+        )
+
+    def test_floating_handle_stays_visible_on_chart_edge(self):
+        self.workspace._position_toggle_handle()
+        collapsed_x = self.workspace._toggle_handle.x()
+
+        self.workspace._sidebar_anim.stop()
+        self.workspace._sidebar.setMaximumWidth(220)
+        self.workspace._position_toggle_handle()
+        expanded_x = self.workspace._toggle_handle.x()
+
+        self.assertEqual(collapsed_x, 0)
+        self.assertEqual(expanded_x, 0)
 
     def test_histogram_uses_retained_percentages(self):
         self.workspace.current_plot_type = 'histogram'
@@ -197,6 +247,25 @@ class TestPlotWorkspaceWiring(unittest.TestCase):
 
         self.assertIsNotNone(self.workspace.plot_widget.k_value_ax)
         self.assertIsNotNone(self.workspace.plot_widget.k_value_ax.get_legend())
+
+    def test_combined_plot_click_selects_right_subplot_for_toolbar_zoom(self):
+        self.workspace.add_k_results({'Hazen': 1.0e-4, 'Beyer': 1.5e-4})
+        self.workspace.current_plot_type = 'combined'
+        self.workspace.refresh_plot()
+
+        left_ax = self.workspace.plot_widget.grain_size_ax
+        right_ax = self.workspace.plot_widget.k_value_ax
+        left_xlim_before = left_ax.get_xlim()
+        right_xlim_before = right_ax.get_xlim()
+
+        self.workspace.plot_widget.interactions.on_click(
+            SimpleNamespace(inaxes=right_ax, dblclick=False, button=1, key=None)
+        )
+        self.workspace.zoom_in()
+
+        self.assertEqual(left_ax.get_xlim(), left_xlim_before)
+        self.assertNotEqual(right_ax.get_xlim(), right_xlim_before)
+        self.assertIs(self.workspace.plot_widget.current_ax, right_ax)
 
     def test_distribution_refresh_only_requests_one_canvas_draw(self):
         draw_calls = 0

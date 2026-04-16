@@ -1,0 +1,680 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>Comparison Details Concept</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Playfair+Display:wght@600;700&family=Source+Sans+3:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.2/css/all.min.css">
+  <style>
+    :root{
+      --bg:#f3eee6;
+      --bg-2:#efe7db;
+      --paper:#fbf8f2;
+      --paper-2:#f7f2e9;
+      --line:#d7cbb8;
+      --line-2:#bfae96;
+      --text:#34281d;
+      --text-mid:#695847;
+      --muted:#887763;
+      --olive:#6b8e23;
+      --olive-2:#556f1c;
+      --earth:#9b6a38;
+      --amber:#bb8c2f;
+      --red:#c8002a;
+      --shadow:0 18px 48px rgba(60,42,24,.10);
+      --r:12px;
+      --mono:"IBM Plex Mono", monospace;
+      --ui:"Source Sans 3", sans-serif;
+      --disp:"Playfair Display", Georgia, serif;
+      --c1:#3a7ea0;
+      --c2:#6b8e23;
+      --c3:#b46428;
+      --c4:#2a9d8f;
+      --c5:#8b4513;
+      --c6:#6b5ca5;
+    }
+    *{box-sizing:border-box}
+    html,body{height:100%}
+    body{
+      margin:0;
+      font-family:var(--ui);
+      color:var(--text);
+      background:
+        radial-gradient(circle at top left, rgba(255,255,255,.42), transparent 34%),
+        linear-gradient(180deg, #f7f2ea 0%, var(--bg) 100%);
+    }
+    .page{
+      min-height:100%;
+      padding:20px;
+      display:flex;
+      align-items:center;
+      justify-content:center;
+    }
+    .frame{
+      width:min(1450px, calc(100vw - 40px));
+      min-height:830px;
+      border:1px solid rgba(146,121,92,.18);
+      border-radius:18px;
+      background:rgba(252,249,243,.82);
+      box-shadow:var(--shadow);
+      overflow:hidden;
+      backdrop-filter:blur(8px);
+      display:flex;
+      flex-direction:column;
+    }
+    .topbar{
+      display:flex;
+      align-items:center;
+      gap:16px;
+      padding:14px 18px;
+      border-bottom:1px solid var(--line);
+      background:linear-gradient(180deg, rgba(255,255,255,.65), rgba(247,242,233,.72));
+    }
+    .title{
+      display:flex;
+      flex-direction:column;
+      gap:2px;
+      min-width:0;
+    }
+    .title h1{
+      margin:0;
+      font-size:22px;
+      font-weight:700;
+      letter-spacing:.01em;
+    }
+    .title p{
+      margin:0;
+      color:var(--muted);
+      font-size:12px;
+    }
+    .badge{
+      display:inline-flex;
+      align-items:center;
+      gap:6px;
+      padding:5px 10px;
+      border-radius:999px;
+      border:1px solid rgba(107,142,35,.28);
+      background:rgba(107,142,35,.08);
+      color:var(--olive-2);
+      font-size:11px;
+      font-weight:700;
+      letter-spacing:.08em;
+      text-transform:uppercase;
+      font-family:var(--mono);
+    }
+    .spacer{flex:1}
+    .btn{
+      border:1px solid var(--line);
+      background:var(--paper);
+      color:var(--text-mid);
+      border-radius:9px;
+      min-height:32px;
+      padding:0 12px;
+      font-size:13px;
+      font-weight:600;
+      display:inline-flex;
+      align-items:center;
+      gap:8px;
+    }
+    .btn.primary{
+      background:rgba(107,142,35,.12);
+      border-color:rgba(107,142,35,.32);
+      color:var(--olive-2);
+    }
+    .body{
+      flex:1;
+      display:grid;
+      grid-template-columns: 1fr 286px;
+      min-height:0;
+    }
+    .main{
+      min-width:0;
+      display:flex;
+      flex-direction:column;
+      background:linear-gradient(180deg, rgba(255,255,255,.20), rgba(255,255,255,0));
+    }
+    .toolbar{
+      display:flex;
+      align-items:center;
+      gap:10px;
+      padding:14px 18px 12px;
+      border-bottom:1px solid rgba(215,203,184,.78);
+      background:rgba(252,248,241,.74);
+      flex-wrap:wrap;
+    }
+    .seg{
+      display:inline-flex;
+      align-items:center;
+      background:var(--paper);
+      border:1px solid var(--line);
+      border-radius:11px;
+      overflow:hidden;
+    }
+    .seg button{
+      border:none;
+      background:transparent;
+      min-height:34px;
+      padding:0 14px;
+      color:var(--text-mid);
+      font-size:13px;
+      font-weight:600;
+      display:flex;
+      align-items:center;
+      gap:8px;
+    }
+    .seg button.on{
+      background:rgba(107,142,35,.10);
+      color:var(--olive-2);
+    }
+    .meta{
+      display:flex;
+      align-items:center;
+      gap:8px;
+      color:var(--muted);
+      font-size:12px;
+      font-family:var(--mono);
+      margin-left:auto;
+    }
+    .summary{
+      display:grid;
+      grid-template-columns:repeat(4,minmax(0,1fr));
+      gap:10px;
+      padding:14px 18px;
+      border-bottom:1px solid rgba(215,203,184,.78);
+      background:linear-gradient(180deg, rgba(255,255,255,.24), rgba(255,255,255,.07));
+    }
+    .metric{
+      padding:10px 12px;
+      border-radius:12px;
+      background:rgba(255,255,255,.56);
+      border:1px solid rgba(215,203,184,.84);
+    }
+    .metric .k{
+      color:var(--muted);
+      font-size:11px;
+      font-weight:700;
+      text-transform:uppercase;
+      letter-spacing:.09em;
+      font-family:var(--mono);
+    }
+    .metric .v{
+      margin-top:4px;
+      font-size:18px;
+      font-weight:700;
+      color:var(--text);
+    }
+    .metric .s{
+      margin-top:3px;
+      font-size:12px;
+      color:var(--text-mid);
+    }
+    .dataset-rail{
+      display:flex;
+      align-items:center;
+      gap:8px;
+      padding:12px 18px;
+      border-bottom:1px solid rgba(215,203,184,.78);
+      background:rgba(250,245,237,.78);
+      overflow:auto hidden;
+      scrollbar-width:thin;
+    }
+    .chip{
+      display:inline-flex;
+      align-items:center;
+      gap:8px;
+      flex:0 0 auto;
+      min-height:34px;
+      padding:0 12px;
+      border-radius:999px;
+      border:1px solid rgba(191,174,150,.88);
+      background:var(--paper);
+      color:var(--text-mid);
+      font-size:12px;
+      font-weight:600;
+    }
+    .dot{
+      width:8px;
+      height:8px;
+      border-radius:50%;
+      flex:0 0 auto;
+    }
+    .chip.pin{
+      background:rgba(107,142,35,.08);
+      border-color:rgba(107,142,35,.28);
+      color:var(--olive-2);
+    }
+    .table-wrap{
+      flex:1;
+      min-height:0;
+      overflow:auto;
+      padding:0 0 12px;
+      background:
+        linear-gradient(180deg, rgba(255,255,255,.16), transparent 140px),
+        var(--paper);
+    }
+    table{
+      width:max(980px,100%);
+      border-collapse:separate;
+      border-spacing:0;
+      table-layout:fixed;
+      font-size:13px;
+    }
+    thead th{
+      position:sticky;
+      top:0;
+      z-index:3;
+      background:rgba(247,241,232,.95);
+      backdrop-filter:blur(6px);
+      border-bottom:2px solid var(--line-2);
+      padding:12px 12px;
+      color:var(--text-mid);
+      text-align:right;
+      font-weight:700;
+    }
+    thead th:first-child{
+      text-align:left;
+      left:0;
+      z-index:4;
+    }
+    tbody td{
+      padding:10px 12px;
+      border-bottom:1px solid rgba(215,203,184,.58);
+      text-align:right;
+      color:var(--text);
+      background:transparent;
+    }
+    tbody td:first-child{
+      position:sticky;
+      left:0;
+      z-index:2;
+      text-align:left;
+      background:rgba(251,248,242,.98);
+      border-right:1px solid rgba(215,203,184,.58);
+    }
+    .param{
+      display:flex;
+      flex-direction:column;
+      gap:2px;
+    }
+    .param strong{
+      font-size:13px;
+      color:var(--text);
+    }
+    .param span{
+      font-size:11px;
+      color:var(--muted);
+    }
+    .v-strong{font-weight:700}
+    .heat-low{background:rgba(107,142,35,.08)}
+    .heat-mid{background:rgba(187,140,47,.10)}
+    .heat-high{background:rgba(180,100,40,.10)}
+    .class-badge, .perm-badge{
+      display:inline-flex;
+      align-items:center;
+      justify-content:center;
+      padding:4px 9px;
+      min-width:68px;
+      border-radius:999px;
+      font-size:11px;
+      font-weight:700;
+      letter-spacing:.02em;
+    }
+    .class-badge{
+      background:rgba(58,126,160,.10);
+      color:#245d78;
+      border:1px solid rgba(58,126,160,.18);
+    }
+    .perm-badge{
+      background:rgba(107,142,35,.10);
+      color:var(--olive-2);
+      border:1px solid rgba(107,142,35,.18);
+    }
+    .aside{
+      border-left:1px solid var(--line);
+      background:linear-gradient(180deg, rgba(246,241,232,.98), rgba(239,231,219,.98));
+      display:flex;
+      flex-direction:column;
+      min-width:0;
+    }
+    .aside-sec{
+      padding:16px 16px 14px;
+      border-bottom:1px solid rgba(191,174,150,.72);
+    }
+    .aside-sec h3{
+      margin:0 0 10px;
+      font-size:11px;
+      font-family:var(--mono);
+      letter-spacing:.10em;
+      text-transform:uppercase;
+      color:var(--muted);
+    }
+    .focus-list{
+      display:flex;
+      flex-direction:column;
+      gap:8px;
+    }
+    .focus-item{
+      display:flex;
+      align-items:center;
+      gap:10px;
+      min-height:38px;
+      padding:0 10px;
+      border-radius:10px;
+      border:1px solid rgba(191,174,150,.72);
+      background:rgba(255,255,255,.45);
+      color:var(--text-mid);
+      font-size:12px;
+      font-weight:600;
+    }
+    .focus-item.on{
+      background:rgba(107,142,35,.08);
+      border-color:rgba(107,142,35,.26);
+      color:var(--olive-2);
+    }
+    .insight{
+      display:flex;
+      flex-direction:column;
+      gap:10px;
+    }
+    .insight-card{
+      padding:11px 12px;
+      border-radius:12px;
+      border:1px solid rgba(191,174,150,.72);
+      background:rgba(255,255,255,.48);
+    }
+    .insight-card strong{
+      display:block;
+      font-size:12px;
+      margin-bottom:4px;
+      color:var(--text);
+    }
+    .insight-card p{
+      margin:0;
+      color:var(--text-mid);
+      font-size:12px;
+      line-height:1.35;
+    }
+    .legend{
+      display:grid;
+      gap:8px;
+    }
+    .legend-row{
+      display:flex;
+      align-items:center;
+      justify-content:space-between;
+      gap:10px;
+      font-size:12px;
+      color:var(--text-mid);
+    }
+    .legend-swatch{
+      display:inline-flex;
+      align-items:center;
+      gap:8px;
+    }
+    .band{
+      width:14px;
+      height:14px;
+      border-radius:4px;
+      border:1px solid rgba(120,95,60,.12);
+    }
+    .footnote{
+      margin-top:auto;
+      padding:12px 16px 14px;
+      color:var(--muted);
+      font-size:11px;
+      line-height:1.4;
+      border-top:1px solid rgba(191,174,150,.72);
+      background:rgba(255,255,255,.26);
+    }
+    @media (max-width: 1180px){
+      .body{grid-template-columns:1fr}
+      .aside{border-left:none;border-top:1px solid var(--line)}
+      .summary{grid-template-columns:repeat(2,minmax(0,1fr))}
+    }
+    @media (max-width: 760px){
+      .page{padding:10px}
+      .frame{width:100%;min-height:unset}
+      .summary{grid-template-columns:1fr}
+      .toolbar{gap:8px}
+      .meta{width:100%;margin-left:0}
+    }
+  </style>
+</head>
+<body>
+  <div class="page">
+    <div class="frame">
+      <div class="topbar">
+        <div class="badge"><i class="fa-solid fa-table-columns"></i>Comparison Details Concept</div>
+        <div class="title">
+          <h1>Focused Comparison Surface</h1>
+          <p>One primary matrix, one compact insight rail, and a dataset strip that scales beyond 3-4 samples.</p>
+        </div>
+        <div class="spacer"></div>
+        <button class="btn"><i class="fa-solid fa-code-compare"></i>Current State</button>
+        <button class="btn primary"><i class="fa-solid fa-wand-magic-sparkles"></i>Proposed</button>
+      </div>
+
+      <div class="body">
+        <div class="main">
+          <div class="toolbar">
+            <div class="seg">
+              <button class="on"><i class="fa-solid fa-ruler"></i>Grain Parameters</button>
+              <button><i class="fa-solid fa-water"></i>Hydraulic Conductivity</button>
+            </div>
+            <div class="seg">
+              <button class="on"><i class="fa-solid fa-fire"></i>Heat Map</button>
+              <button><i class="fa-solid fa-thumbtack"></i>Pinned Rows</button>
+            </div>
+            <div class="seg">
+              <button class="on"><i class="fa-solid fa-list"></i>All Rows</button>
+              <button><i class="fa-solid fa-filter"></i>Core Only</button>
+            </div>
+            <div class="meta">
+              <span>6 datasets selected</span>
+              <span>·</span>
+              <span>14 grain metrics</span>
+              <span>·</span>
+              <span>horizontal compare</span>
+            </div>
+          </div>
+
+          <div class="summary">
+            <div class="metric">
+              <div class="k">Current focus</div>
+              <div class="v">Grain Parameters</div>
+              <div class="s">K-values stay available, but no longer fight for width.</div>
+            </div>
+            <div class="metric">
+              <div class="k">Pinned rows</div>
+              <div class="v">D10 · D50 · Cu</div>
+              <div class="s">Critical rows stay visible at the top.</div>
+            </div>
+            <div class="metric">
+              <div class="k">Dataset width</div>
+              <div class="v">Horizontally scalable</div>
+              <div class="s">Sticky parameter column keeps orientation stable.</div>
+            </div>
+            <div class="metric">
+              <div class="k">Secondary context</div>
+              <div class="v">Right-side insight rail</div>
+              <div class="s">Compact summaries replace a competing second table.</div>
+            </div>
+          </div>
+
+          <div class="dataset-rail">
+            <div class="chip pin"><span class="dot" style="background:var(--c1)"></span>DK-07<i class="fa-solid fa-thumbtack"></i></div>
+            <div class="chip pin"><span class="dot" style="background:var(--c2)"></span>GW-2024-A<i class="fa-solid fa-thumbtack"></i></div>
+            <div class="chip"><span class="dot" style="background:var(--c3)"></span>LC-11</div>
+            <div class="chip"><span class="dot" style="background:var(--c4)"></span>BH-03</div>
+            <div class="chip"><span class="dot" style="background:var(--c5)"></span>PT-18</div>
+            <div class="chip"><span class="dot" style="background:var(--c6)"></span>SY-04</div>
+          </div>
+
+          <div class="table-wrap">
+            <table>
+              <thead>
+                <tr>
+                  <th style="width:220px">Parameter</th>
+                  <th><span class="dot" style="background:var(--c1)"></span> DK-07</th>
+                  <th><span class="dot" style="background:var(--c2)"></span> GW-2024-A</th>
+                  <th><span class="dot" style="background:var(--c3)"></span> LC-11</th>
+                  <th><span class="dot" style="background:var(--c4)"></span> BH-03</th>
+                  <th><span class="dot" style="background:var(--c5)"></span> PT-18</th>
+                  <th><span class="dot" style="background:var(--c6)"></span> SY-04</th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr>
+                  <td><div class="param"><strong>D10</strong><span>Effective size (mm)</span></div></td>
+                  <td class="heat-mid v-strong">0.160</td>
+                  <td class="heat-low">0.062</td>
+                  <td class="heat-high">0.420</td>
+                  <td class="heat-mid">0.210</td>
+                  <td class="heat-low">0.084</td>
+                  <td class="heat-high">0.530</td>
+                </tr>
+                <tr>
+                  <td><div class="param"><strong>D30</strong><span>30th percentile (mm)</span></div></td>
+                  <td class="heat-mid">0.300</td>
+                  <td class="heat-low">0.110</td>
+                  <td class="heat-high">0.680</td>
+                  <td class="heat-mid">0.350</td>
+                  <td class="heat-low">0.140</td>
+                  <td class="heat-high">0.790</td>
+                </tr>
+                <tr>
+                  <td><div class="param"><strong>D50</strong><span>Median diameter (mm)</span></div></td>
+                  <td class="heat-mid v-strong">0.420</td>
+                  <td class="heat-low">0.180</td>
+                  <td class="heat-high">0.890</td>
+                  <td class="heat-mid">0.470</td>
+                  <td class="heat-low">0.210</td>
+                  <td class="heat-high">1.060</td>
+                </tr>
+                <tr>
+                  <td><div class="param"><strong>D60</strong><span>60th percentile (mm)</span></div></td>
+                  <td class="heat-mid">0.560</td>
+                  <td class="heat-low">0.220</td>
+                  <td class="heat-high">1.100</td>
+                  <td class="heat-mid">0.610</td>
+                  <td class="heat-low">0.270</td>
+                  <td class="heat-high">1.280</td>
+                </tr>
+                <tr>
+                  <td><div class="param"><strong>Cu</strong><span>Uniformity coefficient</span></div></td>
+                  <td class="heat-mid v-strong">3.50</td>
+                  <td class="heat-mid">3.55</td>
+                  <td class="heat-low">2.62</td>
+                  <td class="heat-mid">2.90</td>
+                  <td class="heat-high">4.15</td>
+                  <td class="heat-high">4.88</td>
+                </tr>
+                <tr>
+                  <td><div class="param"><strong>Cc</strong><span>Curvature coefficient</span></div></td>
+                  <td>1.05</td>
+                  <td>0.98</td>
+                  <td>0.94</td>
+                  <td>1.10</td>
+                  <td>1.22</td>
+                  <td>1.18</td>
+                </tr>
+                <tr>
+                  <td><div class="param"><strong>Fines%</strong><span>% passing 0.063 mm</span></div></td>
+                  <td class="heat-low">2.1%</td>
+                  <td class="heat-mid">8.4%</td>
+                  <td class="heat-low">0.8%</td>
+                  <td class="heat-mid">6.2%</td>
+                  <td class="heat-high">12.9%</td>
+                  <td class="heat-mid">5.4%</td>
+                </tr>
+                <tr>
+                  <td><div class="param"><strong>Dominant class</strong><span>Soil class</span></div></td>
+                  <td><span class="class-badge">Med. Sand</span></td>
+                  <td><span class="class-badge">Fine Sand</span></td>
+                  <td><span class="class-badge">Coarse Sand</span></td>
+                  <td><span class="class-badge">Med. Sand</span></td>
+                  <td><span class="class-badge">Fine Sand</span></td>
+                  <td><span class="class-badge">Coarse Sand</span></td>
+                </tr>
+                <tr>
+                  <td><div class="param"><strong>USCS</strong><span>Classification code</span></div></td>
+                  <td>SP</td>
+                  <td>SP-SM</td>
+                  <td>SP</td>
+                  <td>SW</td>
+                  <td>SM</td>
+                  <td>SW-SP</td>
+                </tr>
+                <tr>
+                  <td><div class="param"><strong>K̄ reference</strong><span>Geom. mean snapshot (m/d)</span></div></td>
+                  <td><span class="perm-badge">12.3</span></td>
+                  <td><span class="perm-badge">3.1</span></td>
+                  <td><span class="perm-badge">48.7</span></td>
+                  <td><span class="perm-badge">16.4</span></td>
+                  <td><span class="perm-badge">2.4</span></td>
+                  <td><span class="perm-badge">57.2</span></td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+        </div>
+
+        <aside class="aside">
+          <section class="aside-sec">
+            <h3>Focus Set</h3>
+            <div class="focus-list">
+              <div class="focus-item on"><i class="fa-solid fa-ruler"></i>Grain parameters matrix</div>
+              <div class="focus-item"><i class="fa-solid fa-water"></i>K-values matrix</div>
+              <div class="focus-item"><i class="fa-solid fa-thumbtack"></i>Pinned critical rows</div>
+              <div class="focus-item"><i class="fa-solid fa-sort"></i>Sort by spread / median</div>
+            </div>
+          </section>
+
+          <section class="aside-sec">
+            <h3>Quick Insights</h3>
+            <div class="insight">
+              <div class="insight-card">
+                <strong>Largest D50 spread</strong>
+                <p>SY-04 and GW-2024-A separate the set most strongly. This row deserves priority in the compact view.</p>
+              </div>
+              <div class="insight-card">
+                <strong>Likely comparison story</strong>
+                <p>Two finer samples cluster together, while LC-11 and SY-04 form the coarse end of the group.</p>
+              </div>
+              <div class="insight-card">
+                <strong>Why this layout</strong>
+                <p>The secondary panel is no longer a second full table. It becomes a compact interpretation rail instead.</p>
+              </div>
+            </div>
+          </section>
+
+          <section class="aside-sec">
+            <h3>Heat Legend</h3>
+            <div class="legend">
+              <div class="legend-row">
+                <span class="legend-swatch"><span class="band" style="background:rgba(107,142,35,.08)"></span>Lower range</span>
+                <span>green bias</span>
+              </div>
+              <div class="legend-row">
+                <span class="legend-swatch"><span class="band" style="background:rgba(187,140,47,.10)"></span>Middle range</span>
+                <span>amber bias</span>
+              </div>
+              <div class="legend-row">
+                <span class="legend-swatch"><span class="band" style="background:rgba(180,100,40,.10)"></span>Higher range</span>
+                <span>earth bias</span>
+              </div>
+            </div>
+          </section>
+
+          <div class="footnote">
+            Concept direction: the comparison tab should feel like a focused analysis surface, not two tables squeezed into the same width budget.
+          </div>
+        </aside>
+      </div>
+    </div>
+  </div>
+</body>
+</html>

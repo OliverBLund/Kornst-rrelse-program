@@ -1,0 +1,53 @@
+<div class="page">
+  <p class="eyebrow">Excel Import</p>
+  <h1>Excel Workbooks</h1>
+  <p class="lead">Excel import is conservative by design. The application prefers a short manual check over guessing the wrong sheet or the wrong columns.</p>
+
+  <h2>What Happens On Import</h2>
+  <ol>
+    <li>If the workbook has one sheet, import continues directly.</li>
+    <li>If it has multiple sheets, the <strong>Sheet Selector</strong> opens first.</li>
+    <li>After sheet selection, the <strong>Column Mapper</strong> opens so you can confirm the data layout.</li>
+    <li>Each selected sheet becomes its own dataset in the workspace.</li>
+  </ol>
+
+  <h2>Multi-Sheet Behavior</h2>
+  <table>
+    <tr>
+      <th>Situation</th>
+      <th>Behavior</th>
+    </tr>
+    <tr>
+      <td>One workbook, many sheets</td>
+      <td>You can check one or more sheets to import before mapping.</td>
+    </tr>
+    <tr>
+      <td>Several workbooks with the same sheet structure</td>
+      <td>The app can apply one sheet selection across the full batch.</td>
+    </tr>
+    <tr>
+      <td>Calculated column mapping</td>
+      <td>The same checked-sheet mapping can be reused across multiple sheets in the workbook.</td>
+    </tr>
+    <tr>
+      <td>Cell range selection</td>
+      <td>This mode works one sheet at a time because the selected cells are sheet-specific.</td>
+    </tr>
+  </table>
+
+  <div class="callout note">
+    <div class="callout-title">Preview rules</div>
+    <p>Inside the mapper, the selected sheet controls the preview table. If you change sheets, re-check that the header row and column choices still match the visible data.</p>
+  </div>
+
+  <h2>Irregular Lab Sheets</h2>
+  <p>Use <strong>Cell Range Selection</strong> when the size and percent values are not stored in clean columns. For repeated layouts, map one representative sheet first and then use <strong>Apply Pattern to Batch</strong>.</p>
+
+  <h2>Raw Sieve Workbooks</h2>
+  <p>When the workbook contains empty-sieve and sieve-plus-sample weights, switch the mapper to <strong>Raw Sieve Weighings</strong>. That path uses column mapping only.</p>
+
+  <p class="link-list">
+    <a href="mapping_recovery.html">Mapping &amp; Recovery</a>
+    <a href="data_files.html">Data Format &amp; Files</a>
+  </p>
+</div>

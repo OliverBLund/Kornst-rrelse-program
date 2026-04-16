@@ -96,9 +96,7 @@ class _AppToolbar(QWidget):
             badge.setAlignment(Qt.AlignmentFlag.AlignCenter)
             badge.setAttribute(Qt.WidgetAttribute.WA_StyledBackground, True)
             badge.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents, True)
-            badge_font = QFont(F.MONO)
-            badge_font.setPixelSize(9)
-            badge_font.setWeight(QFont.Weight.Bold)
+            badge_font = QFont(F.MONO, F.SZ_XS, QFont.Weight.Bold)
             badge.setFont(badge_font)
             badge.setFixedHeight(16)
             badge.setMinimumWidth(16)
@@ -456,6 +454,7 @@ class MainWindow(FramelessMainWindowMixin, QMainWindow):
         self._external_ui_processed = 0
         self._external_load_dialog = None
         self._external_load_context = None
+        self._help_dialog = None
         self._external_load_poll_timer = QTimer(self)
         self._external_load_poll_timer.setInterval(25)
         self._external_load_poll_timer.timeout.connect(self._poll_external_load_process)
@@ -1076,10 +1075,7 @@ class MainWindow(FramelessMainWindowMixin, QMainWindow):
         )
 
     def on_welcome_open_help(self, topic_file: str):
-        from gui.help_dialog import HelpDialog
-        help_dialog = HelpDialog(self)
-        help_dialog.show_help_page(topic_file)
-        help_dialog.exec()
+        self.open_help_dialog(topic_file)
 
     def on_welcome_dont_show_again(self, dont_show: bool):
         settings = QSettings("GrainSizeAnalysis", "MainWindow")
@@ -1984,6 +1980,34 @@ class MainWindow(FramelessMainWindowMixin, QMainWindow):
 
         return removed
 
+    def _tab_file_path(self, widget) -> str | None:
+        tab_file_path = getattr(widget, "file_path", None)
+        dataset = getattr(widget, "dataset", None)
+        if dataset is not None:
+            tab_file_path = getattr(dataset, "file_path", tab_file_path)
+        return tab_file_path
+
+    def _has_open_tabs_for_file(self, file_path: str) -> bool:
+        if not file_path:
+            return False
+        for i in range(self.dataset_tabs_widget.count()):
+            widget = self.dataset_tabs_widget.widget(i)
+            if self._tab_file_path(widget) == file_path:
+                return True
+        return False
+
+    def remove_workspace_file(self, file_path: str) -> bool:
+        removed_tabs = self._remove_tabs_for_file(file_path)
+        removed_sidebar = self.control_panel.remove_file_by_path(
+            file_path,
+            sync_workspace=False,
+            announce=False,
+        )
+        if removed_tabs or removed_sidebar:
+            file_name = self.control_panel._format_file_display_name(file_path)
+            self._show_status_message(f"Removed: {file_name}")
+        return bool(removed_tabs or removed_sidebar)
+
     def _ensure_dataset_list(self, dataset_input) -> List[GrainSizeData]:
         if isinstance(dataset_input, list):
             return dataset_input
@@ -2031,6 +2055,8 @@ class MainWindow(FramelessMainWindowMixin, QMainWindow):
                 break
 
     def close_dataset_tab(self, index: int):
+        widget = self.dataset_tabs_widget.widget(index)
+        file_path = self._tab_file_path(widget)
         dataset_index = index
         if 0 <= dataset_index < len(self.dataset_tabs):
             self.dataset_tabs.pop(dataset_index)
@@ -2042,6 +2068,12 @@ class MainWindow(FramelessMainWindowMixin, QMainWindow):
         self.reporting_tab.set_dataset_tabs(self.dataset_tabs)
         self._update_export_tab()
         self._refresh_dataset_status_segments()
+        if file_path and not self._has_open_tabs_for_file(file_path):
+            self.control_panel.remove_file_by_path(
+                file_path,
+                sync_workspace=False,
+                announce=False,
+            )
         self._show_status_message("Dataset closed")
 
     # ──────────────────────────────────────────────────────────────────
@@ -2128,8 +2160,30 @@ class MainWindow(FramelessMainWindowMixin, QMainWindow):
     # ──────────────────────────────────────────────────────────────────
 
     def show_help(self):
+        self.open_help_dialog()
+
+    def open_help_dialog(self, topic_file: str | None = None):
+        """Open the shared help dialog without blocking the main window."""
         from gui.help_dialog import HelpDialog
-        HelpDialog(self).exec()
+
+        dialog = self._help_dialog
+        if dialog is None:
+            dialog = HelpDialog(self)
+            dialog.setModal(False)
+            dialog.setWindowModality(Qt.WindowModality.NonModal)
+            dialog.destroyed.connect(lambda *_args: setattr(self, "_help_dialog", None))
+            self._help_dialog = dialog
+
+        if topic_file:
+            dialog.show_help_page(topic_file)
+
+        if dialog.isMinimized():
+            dialog.showNormal()
+        else:
+            dialog.show()
+        dialog.raise_()
+        dialog.activateWindow()
+        return dialog
 
     def show_about(self):
         QMessageBox.about(

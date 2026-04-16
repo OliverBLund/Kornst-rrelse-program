@@ -1,0 +1,73 @@
+<div class="page">
+  <p class="eyebrow">Mapper Workflow</p>
+  <h1>Mapping &amp; Recovery</h1>
+  <p class="lead">Use the mapper when the correct data exists in the file but the loader needs you to confirm where it is.</p>
+
+  <h2>When The Mapper Appears</h2>
+  <ul>
+    <li>Excel workbooks are imported through manual mapping by default.</li>
+    <li>CSV or workbook layouts with ambiguous headers may need manual confirmation.</li>
+    <li>Error tabs can reopen the mapper if a file was not loaded correctly the first time.</li>
+  </ul>
+
+  <h2>Choose The Right Path</h2>
+  <table>
+    <tr>
+      <th>Choice</th>
+      <th>Use it when</th>
+    </tr>
+    <tr>
+      <td>Calculated Data</td>
+      <td>Your file already contains particle size and cumulative percent passing.</td>
+    </tr>
+    <tr>
+      <td>Raw Sieve Weighings</td>
+      <td>Your file contains sieve size, empty sieve weight, and sieve plus sample weight.</td>
+    </tr>
+    <tr>
+      <td>Column Mapping</td>
+      <td>The data is arranged in consistent columns and the same mapping can be reused across checked sheets.</td>
+    </tr>
+    <tr>
+      <td>Cell Range Selection</td>
+      <td>The sheet is irregular and you need to mark the exact size cells and percent cells directly in the preview.</td>
+    </tr>
+  </table>
+
+  <div class="callout warning">
+    <div class="callout-title">Range mode limit</div>
+    <p><strong>Cell Range Selection</strong> works one sheet at a time. If several sheets share the same irregular layout, map one sheet first and then use <strong>Apply Pattern to Batch</strong>.</p>
+  </div>
+
+  <h2>Basic Column Mapping Steps</h2>
+  <ol>
+    <li>Pick the correct sheet in the preview area.</li>
+    <li>Set the header row if the detected headers are wrong.</li>
+    <li>Choose the size and percent columns, or the raw sieve weight columns.</li>
+    <li>Check the sample name, temperature, and porosity fields.</li>
+    <li>Accept the dialog to create dataset tabs from the selected sheet or sheets.</li>
+  </ol>
+
+  <h2>Error Recovery Workflow</h2>
+  <ol>
+    <li>Open the error tab for the failed file.</li>
+    <li>Review the preview and the raw loader message.</li>
+    <li>Use <strong>Open Mapper</strong> to correct the sheet or column choices.</li>
+    <li>Accept the mapper to replace the error tab with one or more datasets.</li>
+  </ol>
+
+  <div class="callout tip">
+    <div class="callout-title">What to verify before accepting</div>
+    <ul>
+      <li>Particle sizes look like millimeter values.</li>
+      <li>The percent column is cumulative passing, not retained.</li>
+      <li>The preview rows stay aligned after the header row.</li>
+      <li>Checked sheets really share the same layout.</li>
+    </ul>
+  </div>
+
+  <p class="link-list">
+    <a href="excel_workbooks.html">Excel Workbooks</a>
+    <a href="common_issues.html">Common Issues</a>
+  </p>
+</div>

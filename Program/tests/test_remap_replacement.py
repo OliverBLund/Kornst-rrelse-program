@@ -47,15 +47,53 @@ class _Label:
 class _FileList:
     def __init__(self):
         self.meta = {}
+        self.removed = []
 
     def update_card_meta(self, file_path, d50="", k_val=""):
         self.meta[file_path] = (d50, k_val)
+
+    def remove_card(self, file_path):
+        self.removed.append(file_path)
+
+
+class _FakeTableItem:
+    def __init__(self, value):
+        self.value = value
+
+    def data(self, _role):
+        return self.value
+
+
+class _FakeTable:
+    def __init__(self, file_paths):
+        self.rows = list(file_paths)
+        self.current = 0 if self.rows else -1
+
+    def rowCount(self):
+        return len(self.rows)
+
+    def item(self, row, column):
+        if column != 0 or not (0 <= row < len(self.rows)):
+            return None
+        return _FakeTableItem(self.rows[row])
+
+    def removeRow(self, row):
+        self.rows.pop(row)
+        if not self.rows:
+            self.current = -1
+        elif self.current >= len(self.rows):
+            self.current = len(self.rows) - 1
+
+    def currentRow(self):
+        return self.current
 
 
 class _ControlPanelHarness:
     _remove_loaded_entries_for_file = ControlPanel._remove_loaded_entries_for_file
     _split_sheet_key = ControlPanel._split_sheet_key
     _format_file_display_name = ControlPanel._format_file_display_name
+    _find_table_row_for_file = ControlPanel._find_table_row_for_file
+    remove_file_by_path = ControlPanel.remove_file_by_path
     register_external_file = ControlPanel.register_external_file
 
     def __init__(self):
@@ -65,7 +103,10 @@ class _ControlPanelHarness:
         self.dataset_loaded_successfully = _SignalRecorder()
         self.sample_info_label = _Label()
         self._file_list = _FileList()
+        self.samples_table = _FakeTable([])
         self.added_rows = []
+        self.update_calls = 0
+        self._window = self
 
     def update_file_in_table(self, file_path, status):
         self.last_table_update = (file_path, status)
@@ -78,6 +119,12 @@ class _ControlPanelHarness:
 
     def _update_inventory_bar(self):
         self.inventory_updated = True
+
+    def update_ui_state(self):
+        self.update_calls += 1
+
+    def window(self):
+        return self._window
 
 
 class _BatchExcelHarness:
@@ -125,6 +172,48 @@ class _MainWindowHarness:
 
     def _show_welcome(self):
         self.welcome_shown = True
+
+
+class _SidebarRemovalRecorder:
+    def __init__(self):
+        self.calls = []
+
+    def remove_file_by_path(self, file_path, *, sync_workspace=True, announce=True):
+        self.calls.append((file_path, sync_workspace, announce))
+        return True
+
+
+class _CloseDatasetHarness:
+    _tab_file_path = MainWindow._tab_file_path
+    _has_open_tabs_for_file = MainWindow._has_open_tabs_for_file
+    close_dataset_tab = MainWindow.close_dataset_tab
+
+    def __init__(self, widgets, dataset_tabs):
+        self.dataset_tabs_widget = _FakeTabWidget(widgets)
+        self.dataset_tabs = list(dataset_tabs)
+        self.control_panel = _SidebarRemovalRecorder()
+        self.reporting_tab = SimpleNamespace(set_dataset_tabs=lambda tabs: setattr(self, "reported_tabs", list(tabs)))
+        self.refreshes = []
+        self.messages = []
+        self.welcome_shown = False
+
+    def _refresh_dataset_tab_icons(self):
+        self.refreshes.append("icons")
+
+    def _sync_comparison_dataset_state(self):
+        self.refreshes.append("comparison")
+
+    def _update_export_tab(self):
+        self.refreshes.append("export")
+
+    def _refresh_dataset_status_segments(self, sample_name=None):
+        self.refreshes.append("status")
+
+    def _show_welcome(self):
+        self.welcome_shown = True
+
+    def _show_status_message(self, message, ok=True):
+        self.messages.append((message, ok))
 
 
 class _SessionHarness:
@@ -396,6 +485,58 @@ class TestRemapReplacement(unittest.TestCase):
         self.assertEqual(harness.dataset_tabs_widget.widgets, [other_dataset])
         self.assertEqual(harness.reported_tabs, [other_dataset])
         self.assertFalse(harness.welcome_shown)
+
+    def test_sidebar_removal_requests_main_window_tab_cleanup(self):
+        file_path = "remove-me.xlsx:::Sheet1"
+        host = SimpleNamespace(removed_files=[])
+
+        def _remove_tabs_for_file(target):
+            host.removed_files.append(target)
+            return 1
+
+        host._remove_tabs_for_file = _remove_tabs_for_file
+
+        panel = _ControlPanelHarness()
+        panel._window = host
+        panel.samples_table = _FakeTable([file_path])
+        panel.file_statuses[file_path] = "loaded"
+        panel.file_mapping_states[file_path] = {"raw_sieve_mode": False}
+        panel.loaded_samples["Remove Me [Sheet1]"] = {"file_path": file_path}
+
+        removed = ControlPanel.remove_file_by_path(panel, file_path)
+
+        self.assertTrue(removed)
+        self.assertEqual(host.removed_files, [file_path])
+        self.assertEqual(panel.samples_table.rows, [])
+        self.assertNotIn(file_path, panel.file_statuses)
+        self.assertNotIn(file_path, panel.file_mapping_states)
+        self.assertEqual(panel._file_list.removed, [file_path])
+        self.assertEqual(panel.sample_info_label.text, "Removed: remove-me.xlsx [Sheet1]")
+
+    def test_closing_last_dataset_tab_removes_sidebar_entry(self):
+        file_path = "solo.xlsx:::A"
+        only_tab = _Tab(dataset=SimpleNamespace(file_path=file_path))
+        harness = _CloseDatasetHarness([only_tab], [only_tab])
+
+        MainWindow.close_dataset_tab(harness, 0)
+
+        self.assertEqual(
+            harness.control_panel.calls,
+            [(file_path, False, False)],
+        )
+        self.assertTrue(harness.welcome_shown)
+        self.assertEqual(harness.messages[-1][0], "Dataset closed")
+
+    def test_closing_one_of_multiple_tabs_keeps_sidebar_entry(self):
+        file_path = "shared.xlsx:::A"
+        first_tab = _Tab(dataset=SimpleNamespace(file_path=file_path))
+        second_tab = _Tab(dataset=SimpleNamespace(file_path=file_path))
+        harness = _CloseDatasetHarness([first_tab, second_tab], [first_tab, second_tab])
+
+        MainWindow.close_dataset_tab(harness, 0)
+
+        self.assertEqual(harness.control_panel.calls, [])
+        self.assertEqual(harness.dataset_tabs_widget.widgets, [second_tab])
 
     def test_error_tab_fix_routes_through_control_panel(self):
         control_panel = _ApplyRecorder()

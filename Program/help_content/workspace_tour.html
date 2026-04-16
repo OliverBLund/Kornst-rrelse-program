@@ -1,0 +1,79 @@
+<div class="page">
+  <p class="eyebrow">Orientation</p>
+  <h1>Workspace Tour</h1>
+  <p class="lead">This page explains where to work in the app and what each selection changes.</p>
+
+  <h2>Top-Level Tabs</h2>
+  <table>
+    <tr>
+      <th>Tab</th>
+      <th>Use it for</th>
+    </tr>
+    <tr>
+      <td>Individual Samples</td>
+      <td>Open dataset tabs, inspect one sample at a time, and recover files that need remapping.</td>
+    </tr>
+    <tr>
+      <td>Comparison</td>
+      <td>Compare a selected subset of loaded datasets in shared Plot, Details, and Statistics views.</td>
+    </tr>
+    <tr>
+      <td>Reports</td>
+      <td>Build report outputs using the report type and sample-selection rules shown inside that tab.</td>
+    </tr>
+    <tr>
+      <td>Export</td>
+      <td>Export all datasets or the current dataset in the formats selected in the export panel.</td>
+    </tr>
+  </table>
+
+  <h2>Dataset Tabs And Subtabs</h2>
+  <ul>
+    <li>Each loaded dataset gets its own tab inside <strong>Individual Samples</strong>.</li>
+    <li>Files that failed to load can appear as <strong>error tabs</strong> until they are fixed.</li>
+    <li>Inside a dataset tab you work across <strong>Plot</strong>, <strong>Results</strong>, and <strong>Statistics</strong>.</li>
+  </ul>
+
+  <h2>Sidebar Behavior</h2>
+  <ul>
+    <li>The sidebar is hidden while the welcome screen is shown.</li>
+    <li>Once datasets load, the sidebar shows file cards, status filters, and global analysis controls.</li>
+    <li>Clicking a card opens the matching dataset tab.</li>
+    <li>Expanding a card reveals quick actions such as inspect, log, properties, and remove.</li>
+    <li>The selection toggle on each card marks that dataset as part of the current comparison subset.</li>
+  </ul>
+
+  <h2>What Selection Changes</h2>
+  <table>
+    <tr>
+      <th>Selection source</th>
+      <th>Affects</th>
+      <th>Does not affect</th>
+    </tr>
+    <tr>
+      <td>Sidebar-selected cards</td>
+      <td>The active dataset subset used by the <strong>Comparison</strong> tab.</td>
+      <td>The main <strong>Export</strong> tab scope.</td>
+    </tr>
+    <tr>
+      <td>No sidebar cards selected</td>
+      <td>Comparison falls back to all loaded datasets.</td>
+      <td>Nothing is excluded from export automatically.</td>
+    </tr>
+    <tr>
+      <td>Export scope selector</td>
+      <td>Whether export runs for <strong>All</strong> datasets or the <strong>Current</strong> dataset.</td>
+      <td>The comparison subset in the sidebar.</td>
+    </tr>
+  </table>
+
+  <div class="callout note">
+    <div class="callout-title">Practical rule</div>
+    <p>If comparison results look incomplete, check the sidebar selection first. If export results look incomplete, check the <strong>Export</strong> tab scope selector instead.</p>
+  </div>
+
+  <p class="link-list">
+    <a href="workflow_results.html">Results, Comparison &amp; Export</a>
+    <a href="analysis_parameters.html">Analysis Parameters</a>
+  </p>
+</div>

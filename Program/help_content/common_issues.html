@@ -1,0 +1,51 @@
+<div class="page">
+  <p class="eyebrow">Troubleshooting</p>
+  <h1>Common Issues</h1>
+  <p class="lead">Use this page for short checks. For full mapping or recovery steps, open the dedicated mapping page.</p>
+
+  <h2>Curve Or Data Looks Wrong</h2>
+  <table>
+    <tr>
+      <th>Problem</th>
+      <th>Check first</th>
+    </tr>
+    <tr>
+      <td>Curve looks inverted</td>
+      <td>The mapped column may be <strong>percent retained</strong> instead of <strong>percent passing</strong>.</td>
+    </tr>
+    <tr>
+      <td>No D10, D50, or D60</td>
+      <td>The imported sieve range may not bracket the percentile needed for interpolation.</td>
+    </tr>
+    <tr>
+      <td>Many methods show warnings or errors</td>
+      <td>Review the percentiles, gradation values, and method status in the dataset Results tab.</td>
+    </tr>
+  </table>
+
+  <h2>Comparison Is Empty Or Incomplete</h2>
+  <ul>
+    <li>You need at least <strong>2 datasets</strong>.</li>
+    <li>Check the sidebar selection state. Comparison uses the selected subset.</li>
+    <li>If needed, clear the selection so comparison falls back to all loaded datasets.</li>
+  </ul>
+
+  <h2>Export Does Not Match What You Expected</h2>
+  <ul>
+    <li>The <strong>Export</strong> tab uses its own scope selector: <strong>All</strong> or <strong>Current</strong>.</li>
+    <li>Sidebar selection does <strong>not</strong> limit export.</li>
+    <li>If K-values are missing, rerun calculations before exporting.</li>
+  </ul>
+
+  <h2>Excel Imported The Wrong Sheet Or Layout</h2>
+  <ul>
+    <li>Reopen the mapper from the error tab or reimport the workbook.</li>
+    <li>Check the selected sheet, header row, and column choices.</li>
+    <li>Use range selection only for irregular single-sheet mapping.</li>
+  </ul>
+
+  <p class="link-list">
+    <a href="mapping_recovery.html">Mapping &amp; Recovery</a>
+    <a href="excel_workbooks.html">Excel Workbooks</a>
+  </p>
+</div>

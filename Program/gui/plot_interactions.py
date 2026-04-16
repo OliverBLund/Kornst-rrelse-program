@@ -141,13 +141,16 @@ class AxesInteractionController:
         }
 
     def apply_active_axes_styling(self) -> None:
+        axes = self._axes_pool()
         current_ax = self._get_current_ax()
-        for ax in self._axes_pool():
-            is_active = ax is current_ax
+        multi_axes = len(axes) > 1
+
+        for ax in axes:
+            is_active = multi_axes and ax is current_ax
             for spine in ax.spines.values():
                 spine.set_visible(True)
-                spine.set_linewidth(1.6 if is_active else 0.8)
-                spine.set_edgecolor(C.OLIVE if is_active else "#cfc5b4")
+                spine.set_linewidth(1.15 if is_active else 0.8)
+                spine.set_edgecolor(C.BORDER_DK if is_active else "#cfc5b4")
             ax.title.set_color(C.TEXT if is_active else C.TEXT_MID)
 
     def reset_axes_view(self, ax) -> None:

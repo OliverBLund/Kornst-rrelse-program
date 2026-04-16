@@ -389,8 +389,7 @@ def app_icon() -> QIcon:
             gy = int((size - glyph.height()) / 2 - size * 0.04)
             painter.drawPixmap(gx, gy, glyph)
         else:
-            font = QFont(F.UI, max(7, int(size * 0.22)), QFont.Weight.Bold)
-            font.setPixelSize(max(7, int(size * 0.30)))
+            font = QFont(F.UI, max(7, int(size * 0.24)), QFont.Weight.Bold)
             painter.setFont(font)
             painter.setPen(QColor(C.LOGO_TEXT))
             painter.drawText(rect, Qt.AlignmentFlag.AlignCenter, "GS")
@@ -1242,7 +1241,8 @@ QPushButton[pw-btn="true"]:pressed {{
 }}
 
 /* Style / unit dropdowns inside plot toolbar and sidebar */
-QComboBox#pw-style-sel {{
+QComboBox#pw-style-sel,
+QComboBox#pw-more-plots-sel {{
     min-height: 22px;
     max-height: 22px;
     padding: 0 20px 0 6px;
@@ -1252,11 +1252,43 @@ QComboBox#pw-style-sel {{
     border-radius: {r}px;
     color: {C.TEXT_MID};
 }}
-QComboBox#pw-style-sel:hover {{
+QComboBox#pw-style-sel:hover,
+QComboBox#pw-more-plots-sel:hover {{
     background: #F8F6F1;
     border-color: {C.BORDER_DK};
 }}
-
+QComboBox#pw-more-plots-sel {{
+    min-width: 118px;
+    background: #F7F3EB;
+}}
+QComboBox#pw-style-sel::drop-down,
+QComboBox#pw-more-plots-sel::drop-down {{
+    width: 20px;
+    border: none;
+    background: transparent;
+}}
+QComboBox#pw-style-sel QAbstractItemView,
+QComboBox#pw-more-plots-sel QAbstractItemView {{
+    background: #FBF8F2;
+    border: 1px solid {C.BORDER};
+    border-radius: {r}px;
+    color: {C.TEXT};
+    outline: none;
+    padding: 4px;
+    selection-background-color: rgba(107,142,35,0.12);
+    selection-color: {C.TEXT};
+}}
+QComboBox#pw-style-sel QAbstractItemView::item,
+QComboBox#pw-more-plots-sel QAbstractItemView::item {{
+    min-height: 22px;
+    padding: 4px 8px;
+    border-radius: {r - 1}px;
+    background: transparent;
+}}
+QComboBox#pw-style-sel QAbstractItemView::item:hover,
+QComboBox#pw-more-plots-sel QAbstractItemView::item:hover {{
+    background: rgba(107,142,35,0.08);
+}}
 /* Separator line in plot toolbar */
 QFrame#pw-sep {{
     background: {C.BORDER};
@@ -1330,12 +1362,9 @@ QFrame#pw-sidebar QLineEdit[pws-in="true"]:focus {{
 QPushButton#pw-toggle-handle {{
     background: {C.BORDER};
     border: 1px solid {C.BORDER_DK};
-    border-left: none;
-    border-radius: 0;
-    border-top-right-radius: 3px;
-    border-bottom-right-radius: 3px;
-    min-width: 14px;
-    max-width: 14px;
+    border-radius: 7px;
+    min-width: 16px;
+    max-width: 16px;
     min-height: 40px;
     max-height: 40px;
     padding: 0;

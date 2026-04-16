@@ -107,6 +107,10 @@ class PlotWidget(QWidget):
             get_active_axes=lambda: self.active_axes,
             on_view_changed=lambda ax: self.axes_view_changed.emit(ax),
         )
+        self.canvas.mpl_connect("button_press_event", self.interactions.on_click)
+        self.canvas.mpl_connect("scroll_event", self.interactions.on_scroll)
+        self.canvas.mpl_connect("motion_notify_event", self.interactions.on_motion)
+        self.canvas.mpl_connect("button_release_event", self.interactions.on_release)
 
         layout.addWidget(self.canvas)
 

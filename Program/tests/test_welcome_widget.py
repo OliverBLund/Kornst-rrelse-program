@@ -53,6 +53,21 @@ class TestWelcomeWidget(unittest.TestCase):
         self.assertEqual(opened[0]["name"], "North Core Batch")
         widget.deleteLater()
 
+    def test_quick_help_button_emits_new_onboarding_topic(self):
+        widget = WelcomeWidget(recent_files=[], recent_sessions=[])
+        emitted = []
+        widget.open_help_topic_requested.connect(emitted.append)
+
+        help_btn = next(
+            btn for btn in widget.findChildren(QPushButton)
+            if btn.text() == "Excel Workbooks"
+        )
+        help_btn.click()
+        APP.processEvents()
+
+        self.assertEqual(emitted, ["excel_workbooks.html"])
+        widget.deleteLater()
+
     def test_welcome_screen_fits_720p_without_outer_scroll(self):
         sessions = [
             {"name": "North Core Batch", "date": "2026-04-09", "files": ["a.csv", "b.csv"]},
@@ -69,6 +84,17 @@ class TestWelcomeWidget(unittest.TestCase):
         self.assertFalse(widget._title_desc.isVisible())
         self.assertFalse(widget._title_attr.isVisible())
         self.assertFalse(widget._footer_attr.isVisible())
+
+        widget.deleteLater()
+
+    def test_welcome_header_drops_batch_workspace_eyebrow_and_footer_shows_dtu(self):
+        widget = WelcomeWidget(recent_files=[], recent_sessions=[])
+
+        labels = [label.text() for label in widget.findChildren(type(widget._footer_dtu_pill))]
+
+        self.assertNotIn("BATCH WORKSPACE", labels)
+        self.assertIsNotNone(widget._footer_dtu_pill)
+        self.assertEqual(widget._footer_dtu_pill.text(), "DTU")
 
         widget.deleteLater()
 

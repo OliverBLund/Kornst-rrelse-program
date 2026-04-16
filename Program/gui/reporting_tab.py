@@ -446,6 +446,48 @@ class ReportingTab(QWidget):
     # Output format options
     FORMATS = ["PDF", "HTML", "Word (.docx)"]
 
+    # Canonical presets per report type — defines the default section/appendix
+    # state and the sample-table selection mode for each of the four built-in
+    # report types. Clicking a type card re-applies this preset.
+    TYPE_PRESETS = {
+        TYPE_INDIVIDUAL: {
+            "selection_mode": "single",
+            "hint": "Pick one sample for the report.",
+            "sections": {
+                "cover": False, "executive": True, "results": True, "plots": True,
+                "k_stats": True, "gradation": True, "methodology": True,
+            },
+            "appendices": {"raw": False, "interp": False, "quality": False},
+        },
+        TYPE_COMPARISON: {
+            "selection_mode": "multi",
+            "hint": "Pick two or more samples to compare.",
+            "sections": {
+                "cover": False, "executive": True, "results": True, "plots": True,
+                "k_stats": True, "gradation": True, "methodology": True,
+            },
+            "appendices": {"raw": False, "interp": False, "quality": False},
+        },
+        TYPE_FULL: {
+            "selection_mode": "all",
+            "hint": "All loaded samples are included.",
+            "sections": {
+                "cover": True, "executive": True, "results": True, "plots": True,
+                "k_stats": True, "gradation": True, "methodology": True,
+            },
+            "appendices": {"raw": True, "interp": True, "quality": True},
+        },
+        TYPE_KFOCUS: {
+            "selection_mode": "multi",
+            "hint": "Pick one or more samples for the K-value comparison.",
+            "sections": {
+                "cover": False, "executive": True, "results": False, "plots": False,
+                "k_stats": True, "gradation": True, "methodology": True,
+            },
+            "appendices": {"raw": False, "interp": False, "quality": False},
+        },
+    }
+
     def __init__(self, parent=None):
         super().__init__(parent)
         self.report_generator = ReportGenerator()
@@ -460,6 +502,7 @@ class ReportingTab(QWidget):
         self._settings = QSettings("GrainSizeAnalysis", "ReportingTab")
         self._restoring_settings = False
         self._selected_type = self.TYPE_COMPARISON
+        self._selection_mode = "multi"  # "single" / "multi" / "all"
 
         self._init_ui()
         self._connect_signals()
@@ -622,10 +665,6 @@ class ReportingTab(QWidget):
         fhdr.setStyleSheet(self._uc_header_css())
         flay.addWidget(fhdr)
 
-        self._template_combo = self._make_form_combo()
-        self._template_combo.addItems(["Standard", "Detailed", "Minimal", "DTU Official"])
-        flay.addLayout(self._form_row("Template", self._template_combo))
-
         self._format_combo = self._make_form_combo()
         self._format_combo.addItems(self.FORMATS)
         flay.addLayout(self._form_row("Output format", self._format_combo))
@@ -725,9 +764,26 @@ class ReportingTab(QWidget):
         tlay.addWidget(self._samp_search, 1)
         tlay.addWidget(self._samp_count_lbl)
 
+        # Hint strip — shows the preset's sample-selection hint text
+        hint_box = QWidget()
+        hint_box.setStyleSheet(
+            f"background: rgba(255,255,255,0.12); border-bottom: 1px solid {C.BORDER};"
+        )
+        hlay = QHBoxLayout(hint_box)
+        hlay.setContentsMargins(12, 5, 12, 5)
+        hlay.setSpacing(6)
+        hlay.addWidget(_make_icon_label("fa6s.circle-info", C.TEXT_MUTED, 11))
+        self._samp_hint_lbl = QLabel("Pick two or more samples to compare.")
+        self._samp_hint_lbl.setStyleSheet(
+            f'color: {C.TEXT_MUTED}; font-family: "{F.UI}"; '
+            f'font-size: {F.SZ_XS}pt; background: transparent; border: none;'
+        )
+        hlay.addWidget(self._samp_hint_lbl, 1)
+
         # Links row
         links = QWidget()
         links.setStyleSheet(f"background: rgba(255,255,255,0.12); border-bottom: 1px solid {C.BORDER};")
+        self._samp_links_box = links
         llay = QHBoxLayout(links)
         llay.setContentsMargins(12, 5, 12, 5)
         llay.setSpacing(8)
@@ -817,6 +873,7 @@ class ReportingTab(QWidget):
         self._table_updating = False
 
         alay.addWidget(tbar)
+        alay.addWidget(hint_box)
         alay.addWidget(links)
         alay.addWidget(self._samp_table)
 
@@ -1276,7 +1333,6 @@ class ReportingTab(QWidget):
     # ══════════════════════════════════════════════════════════
 
     def _connect_signals(self) -> None:
-        self._template_combo.currentTextChanged.connect(self._on_template_changed)
         self._format_combo.currentIndexChanged.connect(
             lambda *_: (self._refresh_meta_pills(), self._refresh_save_btn_label(),
                         self._save_report_settings())
@@ -1295,45 +1351,67 @@ class ReportingTab(QWidget):
 
     def _on_type_clicked(self, card_id: int) -> None:
         self._set_type_selection(card_id)
+        self._apply_type_preset(card_id)
         self._save_report_settings()
         self._refresh_meta_pills()
+        self._update_outline()
 
     def _set_type_selection(self, card_id: int) -> None:
         self._selected_type = card_id
         for card in getattr(self, "_type_cards", []):
             card.set_on(card._id == card_id)
 
-    def _on_template_changed(self, name: str) -> None:
-        templates = {
-            "Standard": {
-                "cover": False, "executive": True, "methodology": True, "results": True,
-                "plots": True,  "interp": False, "percentiles": True, "gradation": True,
-                "k_stats": True, "quality": False, "raw": False,
-            },
-            "Detailed": {
-                "cover": True,  "executive": True, "methodology": True, "results": True,
-                "plots": True,  "interp": True, "percentiles": True, "gradation": True,
-                "k_stats": True, "quality": True, "raw": True,
-            },
-            "Minimal": {
-                "cover": False, "executive": True, "methodology": False, "results": True,
-                "plots": True,  "interp": False, "percentiles": False, "gradation": True,
-                "k_stats": True, "quality": False, "raw": False,
-            },
-            "DTU Official": {
-                "cover": True,  "executive": True, "methodology": True, "results": True,
-                "plots": True,  "interp": True, "percentiles": True, "gradation": True,
-                "k_stats": True, "quality": False, "raw": False,
-            },
-        }
-        cfg = templates.get(name)
-        if not cfg:
+    def _apply_type_preset(self, type_id: int) -> None:
+        """Apply the canonical section/appendix state + selection mode for a type."""
+        preset = self.TYPE_PRESETS.get(type_id)
+        if not preset:
             return
-        for key, val in cfg.items():
-            if key in self._section_rows:
-                self._section_rows[key].set_checked(val)
-        self._save_report_settings()
-        self._refresh_meta_pills()
+
+        # Apply sections without triggering save-on-toggle cascade
+        self._restoring_settings = True
+        try:
+            for key, val in preset["sections"].items():
+                row = self._section_rows.get(key)
+                if row is not None:
+                    row.set_checked(val)
+            for key, val in preset["appendices"].items():
+                row = self._section_rows.get(key)
+                if row is not None:
+                    row.set_checked(val)
+        finally:
+            self._restoring_settings = False
+
+        self._apply_selection_mode(preset["selection_mode"])
+        if hasattr(self, "_samp_hint_lbl"):
+            self._samp_hint_lbl.setText(preset["hint"])
+
+    def _apply_selection_mode(self, mode: str) -> None:
+        """Enforce the sample-table behavior for a given selection mode."""
+        self._selection_mode = mode
+        total = len(self._sample_contexts)
+
+        if mode == "all":
+            # Lock every row to checked
+            self._sample_selected = [True] * total
+        elif mode == "single":
+            # Keep first currently-checked row, uncheck the rest
+            kept = False
+            for i in range(total):
+                if self._sample_selected[i] and not kept:
+                    kept = True
+                else:
+                    self._sample_selected[i] = False
+            if not kept and total > 0:
+                self._sample_selected[0] = True
+        # multi: leave as-is
+
+        # Toggle visibility of bulk-action links
+        show_links = (mode == "multi")
+        if hasattr(self, "_samp_links_box"):
+            self._samp_links_box.setVisible(show_links)
+
+        if hasattr(self, "_samp_table"):
+            self._rebuild_sample_table()
 
     def _on_section_toggled(self, _key: str) -> None:
         self._update_outline()
@@ -1369,12 +1447,30 @@ class ReportingTab(QWidget):
                     f'font-size: {F.SZ_XS}pt; background: transparent;'
                 )
 
+    def _is_modified_from_preset(self) -> bool:
+        """True when the current section/appendix state diverges from the
+        preset for the currently selected report type."""
+        preset = self.TYPE_PRESETS.get(self._selected_type)
+        if not preset:
+            return False
+        for key, expected in preset["sections"].items():
+            row = self._section_rows.get(key)
+            if row is not None and row.is_checked() != expected:
+                return True
+        for key, expected in preset["appendices"].items():
+            row = self._section_rows.get(key)
+            if row is not None and row.is_checked() != expected:
+                return True
+        return False
+
     def _refresh_meta_pills(self) -> None:
         type_name = self._type_short_name(self._selected_type)
         fmt_name = self._format_combo.currentText() if hasattr(self, "_format_combo") else "PDF"
         # Compact format label for meta pill
         fmt_short = {"Word (.docx)": "DOCX"}.get(fmt_name, fmt_name)
-        self._acc_type.set_meta(f"{type_name} \u00B7 {fmt_short}")
+        is_mod = self._is_modified_from_preset()
+        type_pill = f"{type_name}*" if is_mod else type_name
+        self._acc_type.set_meta(f"{type_pill} \u00B7 {fmt_short}")
 
         total = len(self._sample_contexts)
         sel = sum(1 for v in self._sample_selected if v)
@@ -1397,9 +1493,9 @@ class ReportingTab(QWidget):
 
         self._acc_details.set_meta("Project info")
 
-        tmpl = self._template_combo.currentText() if hasattr(self, "_template_combo") else "Standard"
+        modified = " · Modified" if self._is_modified_from_preset() else ""
         self._gen_summary_lbl.setText(
-            f"{type_name} · {sel} sample{'s' if sel != 1 else ''} · {fmt_name} · {tmpl}"
+            f"{type_name} · {sel} sample{'s' if sel != 1 else ''} · {fmt_name}{modified}"
         )
         if hasattr(self, "_preview_note"):
             self._preview_note.setText(
@@ -1475,7 +1571,8 @@ class ReportingTab(QWidget):
             self._sample_contexts.append(context)
             self._sample_selected.append(True)
 
-        self._rebuild_sample_table()
+        # Honour the active selection-mode for the freshly loaded samples
+        self._apply_selection_mode(self._selection_mode)
         self.generate_btn.setEnabled(True)
         self.btn_refresh.setEnabled(True)
         self._refresh_meta_pills()
@@ -1496,17 +1593,24 @@ class ReportingTab(QWidget):
             self._samp_table.clearContents()
             self._samp_table.setRowCount(len(self._sample_contexts))
 
+            locked = (self._selection_mode == "all")
+
             for row, ctx in enumerate(self._sample_contexts):
                 # Column 0 — checkbox
                 chk = QTableWidgetItem()
-                chk.setFlags(
-                    Qt.ItemFlag.ItemIsUserCheckable
-                    | Qt.ItemFlag.ItemIsEnabled
-                )
-                chk.setCheckState(
-                    Qt.CheckState.Checked if self._sample_selected[row]
-                    else Qt.CheckState.Unchecked
-                )
+                if locked:
+                    # Show as checked but not user-toggleable
+                    chk.setFlags(Qt.ItemFlag.ItemIsEnabled)
+                    chk.setCheckState(Qt.CheckState.Checked)
+                else:
+                    chk.setFlags(
+                        Qt.ItemFlag.ItemIsUserCheckable
+                        | Qt.ItemFlag.ItemIsEnabled
+                    )
+                    chk.setCheckState(
+                        Qt.CheckState.Checked if self._sample_selected[row]
+                        else Qt.CheckState.Unchecked
+                    )
                 chk.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
                 self._samp_table.setItem(row, 0, chk)
 
@@ -1535,10 +1639,38 @@ class ReportingTab(QWidget):
         if self._table_updating or item.column() != 0:
             return
         row = item.row()
-        if 0 <= row < len(self._sample_selected):
-            self._sample_selected[row] = (item.checkState() == Qt.CheckState.Checked)
-            self._refresh_meta_pills()
-            self._save_report_settings()
+        if not (0 <= row < len(self._sample_selected)):
+            return
+        now_checked = (item.checkState() == Qt.CheckState.Checked)
+
+        if self._selection_mode == "single" and now_checked:
+            # Radio-like: unchecking all other rows
+            self._table_updating = True
+            try:
+                for other in range(len(self._sample_selected)):
+                    if other == row:
+                        self._sample_selected[other] = True
+                    else:
+                        self._sample_selected[other] = False
+                        other_item = self._samp_table.item(other, 0)
+                        if other_item is not None and other_item.checkState() != Qt.CheckState.Unchecked:
+                            other_item.setCheckState(Qt.CheckState.Unchecked)
+            finally:
+                self._table_updating = False
+        elif self._selection_mode == "single" and not now_checked:
+            # In single mode the user cannot deselect the only choice —
+            # force the row back on.
+            self._table_updating = True
+            try:
+                item.setCheckState(Qt.CheckState.Checked)
+                self._sample_selected[row] = True
+            finally:
+                self._table_updating = False
+        else:
+            self._sample_selected[row] = now_checked
+
+        self._refresh_meta_pills()
+        self._save_report_settings()
 
     def _set_row_checked(self, row: int, value: bool) -> None:
         item = self._samp_table.item(row, 0)
@@ -1674,7 +1806,6 @@ class ReportingTab(QWidget):
             return
         s = self._settings
         s.setValue("report/type_id", self._selected_type)
-        s.setValue("report/template", self._template_combo.currentText())
         s.setValue("report/format", self._format_combo.currentText())
         s.setValue("report/language", self._language_combo.currentText())
         for key in self._section_rows:
@@ -1692,11 +1823,6 @@ class ReportingTab(QWidget):
             s = self._settings
             type_id = int(s.value("report/type_id", self.TYPE_COMPARISON))
             self._set_type_selection(type_id)
-
-            template = s.value("report/template", "Standard")
-            idx = self._template_combo.findText(template)
-            if idx >= 0:
-                self._template_combo.setCurrentIndex(idx)
 
             fmt = s.value("report/format", "PDF")
             idx = self._format_combo.findText(fmt)
@@ -1728,6 +1854,12 @@ class ReportingTab(QWidget):
             self._refresh_logo_button()
         finally:
             self._restoring_settings = False
+        # Put the sample table into the mode that matches the loaded type
+        preset = self.TYPE_PRESETS.get(self._selected_type)
+        if preset is not None:
+            self._apply_selection_mode(preset["selection_mode"])
+            if hasattr(self, "_samp_hint_lbl"):
+                self._samp_hint_lbl.setText(preset["hint"])
         self._refresh_meta_pills()
         self._update_outline()
 
@@ -1771,17 +1903,40 @@ class ReportingTab(QWidget):
             QMessageBox.warning(self, "No Data", "Please load datasets first.")
             return
 
+        # Per-type selection validation
+        sel_count = sum(1 for v in self._sample_selected if v)
+        type_id = self._selected_type
+        if type_id == self.TYPE_INDIVIDUAL and sel_count != 1:
+            QMessageBox.warning(
+                self, "Select One Sample",
+                "Individual Sample reports require exactly one selected sample.",
+            )
+            return
+        if type_id == self.TYPE_COMPARISON and sel_count < 2:
+            QMessageBox.warning(
+                self, "Select At Least Two Samples",
+                "Cross-Sample Comparison reports need two or more samples selected.",
+            )
+            return
+        if type_id == self.TYPE_KFOCUS and sel_count < 1:
+            QMessageBox.warning(
+                self, "Select A Sample",
+                "K-Value Focus reports need at least one sample selected.",
+            )
+            return
+
         brand = self._collect_brand()
         metadata = self._collect_metadata()
         sections = self._collect_sections()
         appendix_cfg = self._collect_appendix_label_config()
 
         try:
-            if self._selected_type == self.TYPE_INDIVIDUAL:
+            if type_id == self.TYPE_INDIVIDUAL:
                 html = self._gen_individual("Grain Size", brand, metadata, sections, appendix_cfg)
-            elif self._selected_type == self.TYPE_KFOCUS:
-                html = self._gen_individual("K-Values", brand, metadata, sections, appendix_cfg)
-            elif self._selected_type == self.TYPE_FULL:
+            elif type_id == self.TYPE_KFOCUS:
+                # K-Focus is multi-sample → route through the comparison generator
+                html = self._gen_comparison(brand, metadata, sections)
+            elif type_id == self.TYPE_FULL:
                 html = self._gen_full(brand, metadata, sections)
             else:
                 html = self._gen_comparison(brand, metadata, sections)

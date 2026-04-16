@@ -1,0 +1,85 @@
+<div class="page">
+  <p class="eyebrow">Data Input</p>
+  <h1>Data Format &amp; Files</h1>
+  <p class="lead">The program accepts CSV and Excel workbooks that contain grain-size data in millimeters. It can import either pre-calculated percent-passing data or raw sieve weighings.</p>
+
+  <h2>Supported File Types</h2>
+  <table>
+    <tr>
+      <th>Type</th>
+      <th>Extensions</th>
+      <th>Notes</th>
+    </tr>
+    <tr>
+      <td>CSV</td>
+      <td><code>.csv</code></td>
+      <td>Best for simple two-column or clean multi-column tables.</td>
+    </tr>
+    <tr>
+      <td>Excel workbook</td>
+      <td><code>.xlsx</code>, <code>.xls</code></td>
+      <td>Useful when data is split across sheets or needs manual mapping.</td>
+    </tr>
+  </table>
+
+  <h2>Accepted Input Styles</h2>
+  <table>
+    <tr>
+      <th>Style</th>
+      <th>Required columns</th>
+      <th>Used when</th>
+    </tr>
+    <tr>
+      <td>Calculated data</td>
+      <td>Particle size in mm and cumulative percent passing</td>
+      <td>Your spreadsheet already contains the sieve curve values you want to analyse.</td>
+    </tr>
+    <tr>
+      <td>Raw sieve weighings</td>
+      <td>Sieve size, empty sieve weight, and sieve plus sample weight</td>
+      <td>You want the app to calculate cumulative percent passing from measured sieve weights.</td>
+    </tr>
+  </table>
+
+  <div class="callout warning">
+    <div class="callout-title">Important</div>
+    <p>The main analysis expects <strong>percent passing</strong>, not <strong>percent retained</strong>. If your file contains retained values, convert them before analysis or remap the correct column.</p>
+  </div>
+
+  <h2>Expected Values</h2>
+  <ul>
+    <li>Particle sizes must be numeric and positive.</li>
+    <li>Units should be <strong>millimeters</strong>.</li>
+    <li>Percent passing should stay between <strong>0 and 100</strong>.</li>
+    <li>You need at least <strong>3 valid rows</strong> to create a dataset.</li>
+    <li>The app sorts particle sizes automatically, so the source rows do not need to be pre-sorted.</li>
+  </ul>
+
+  <h2>Column Names The App Can Recognize</h2>
+  <table>
+    <tr>
+      <th>Target</th>
+      <th>Common header words</th>
+    </tr>
+    <tr>
+      <td>Particle size</td>
+      <td><code>size</code>, <code>sieve</code>, <code>diameter</code>, <code>grain</code>, <code>particle</code>, <code>mm</code></td>
+    </tr>
+    <tr>
+      <td>Percent passing</td>
+      <td><code>passing</code>, <code>finer</code>, <code>cumulative</code>, <code>percent</code>, <code>%</code></td>
+    </tr>
+    <tr>
+      <td>Raw sieve weights</td>
+      <td><code>empty</code>, <code>sieve</code>, <code>sample</code>, <code>weight</code>, <code>mass</code></td>
+    </tr>
+  </table>
+
+  <h2>When To Use The Mapper</h2>
+  <p>Open the mapper when the correct columns are present but the loader cannot safely detect them. This is common for Excel workbooks, irregular lab sheets, and files that include several unrelated columns.</p>
+
+  <p class="link-list">
+    <a href="excel_workbooks.html">Excel Workbooks</a>
+    <a href="mapping_recovery.html">Mapping &amp; Recovery</a>
+  </p>
+</div>

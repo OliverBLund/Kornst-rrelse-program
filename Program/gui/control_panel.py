@@ -1944,11 +1944,7 @@ class ControlPanel(QFrame):
 
     def _remove_card_by_path(self, file_path: str):
         """Remove a file by path — called from card context menu."""
-        for row in range(self.samples_table.rowCount()):
-            item = self.samples_table.item(row, 0)
-            if item and item.data(Qt.ItemDataRole.UserRole) == file_path:
-                self.remove_file_at_row(row)
-                return
+        self.remove_file_by_path(file_path)
 
     def _set_filter(self, filter_type: str):
         """Toggle filter pills (exclusive) and apply to file list."""
@@ -2364,26 +2360,9 @@ class ControlPanel(QFrame):
     def remove_file_at_row(self, row: int):
         """Remove a file at a specific row"""
         if row >= 0:
-            # Get file path
             file_item = self.samples_table.item(row, 0)
-            file_path = file_item.data(Qt.ItemDataRole.UserRole)
-
-            # Remove from tracking
-            if file_path in self.file_statuses:
-                del self.file_statuses[file_path]
-            self.file_mapping_states.pop(file_path, None)
-
-            # Remove from loaded samples
-            self._remove_loaded_entries_for_file(file_path)
-
-            # Remove from card list
-            self._file_list.remove_card(file_path)
-
-            # Remove from table
-            self.samples_table.removeRow(row)
-
-            self.update_ui_state()
-            self.sample_info_label.setText(f"Removed: {os.path.basename(file_path)}")
+            if file_item is not None:
+                self.remove_file_by_path(file_item.data(Qt.ItemDataRole.UserRole))
 
     def edit_file_mapping(self, file_path: str):
         """Open column mapping dialog for a specific file"""
@@ -2728,28 +2707,54 @@ class ControlPanel(QFrame):
         """Remove selected file from the table"""
         current_row = self.samples_table.currentRow()
         if current_row >= 0:
-            # Get file path
             file_item = self.samples_table.item(current_row, 0)
-            file_path = file_item.data(Qt.ItemDataRole.UserRole)
-
-            # Remove from tracking
-            if file_path in self.file_statuses:
-                del self.file_statuses[file_path]
-            self.file_mapping_states.pop(file_path, None)
-
-            # Remove from loaded samples
-            self._remove_loaded_entries_for_file(file_path)
-
-            # Remove from card list
-            self._file_list.remove_card(file_path)
-
-            # Remove from table
-            self.samples_table.removeRow(current_row)
-
-            self.update_ui_state()
-            self.sample_info_label.setText(f"Removed: {os.path.basename(file_path)}")
+            if file_item is not None:
+                self.remove_file_by_path(file_item.data(Qt.ItemDataRole.UserRole))
         else:
             self.remove_file_btn.setEnabled(False)
+
+    def _find_table_row_for_file(self, file_path: str) -> int:
+        for row in range(self.samples_table.rowCount()):
+            item = self.samples_table.item(row, 0)
+            if item and item.data(Qt.ItemDataRole.UserRole) == file_path:
+                return row
+        return -1
+
+    def remove_file_by_path(
+        self,
+        file_path: str,
+        *,
+        sync_workspace: bool = True,
+        announce: bool = True,
+    ) -> bool:
+        """Remove a file from the sidebar inventory and optionally its open tabs."""
+        if not file_path:
+            return False
+
+        if sync_workspace:
+            host_window = self.window()
+            if host_window and host_window is not self and hasattr(host_window, "_remove_tabs_for_file"):
+                host_window._remove_tabs_for_file(file_path)
+
+        row = self._find_table_row_for_file(file_path)
+        had_tracking = file_path in self.file_statuses
+        had_mapping = file_path in self.file_mapping_states
+        removed_entries = self._remove_loaded_entries_for_file(file_path)
+
+        self.file_statuses.pop(file_path, None)
+        self.file_mapping_states.pop(file_path, None)
+        self._file_list.remove_card(file_path)
+
+        if row >= 0:
+            self.samples_table.removeRow(row)
+
+        removed = row >= 0 or had_tracking or had_mapping or bool(removed_entries)
+        if removed:
+            self.update_ui_state()
+            if announce:
+                self.sample_info_label.setText(f"Removed: {self._format_file_display_name(file_path)}")
+
+        return removed
 
     def clear_all_files(self):
         """Clear all loaded files"""
@@ -3493,9 +3498,27 @@ class ControlPanel(QFrame):
 
     def show_help(self):
         """Show comprehensive help dialog"""
+        host_window = self.window()
+        if host_window is not None and hasattr(host_window, "open_help_dialog"):
+            host_window.open_help_dialog()
+            return
+
         from gui.help_dialog import HelpDialog
-        help_dialog = HelpDialog(self.parent())
-        help_dialog.exec()
+
+        help_dialog = getattr(self, "_help_dialog", None)
+        if help_dialog is None:
+            help_dialog = HelpDialog(self.parent())
+            help_dialog.setModal(False)
+            help_dialog.setWindowModality(Qt.WindowModality.NonModal)
+            help_dialog.destroyed.connect(lambda *_args: setattr(self, "_help_dialog", None))
+            self._help_dialog = help_dialog
+
+        if help_dialog.isMinimized():
+            help_dialog.showNormal()
+        else:
+            help_dialog.show()
+        help_dialog.raise_()
+        help_dialog.activateWindow()
 
     def show_about(self):
         """Show about dialog"""

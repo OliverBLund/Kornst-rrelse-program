@@ -480,164 +480,49 @@ class ComparisonPlotWidget(QWidget):
             )
 
     def _on_canvas_click(self, event) -> None:
-        """Track the last axes the user interacted with and handle reset/pan starts."""
-        ax = getattr(event, "inaxes", None)
-        self._set_current_ax(ax)
-        if ax is None:
-            return
-        if getattr(event, "dblclick", False):
-            self._reset_axes_view(ax)
-            self.canvas.draw()
-            return
-        if self._event_has_shift(event) and getattr(event, "button", None) == 1:
-            self._start_pan(ax, event)
+        self._interactions.on_click(event)
 
     def _set_current_ax(self, ax) -> None:
-        """Remember the active axes when it belongs to the current figure."""
-        new_ax = ax if ax in self.figure.axes else None
-        if new_ax is self.current_ax:
-            return
-        self.current_ax = new_ax
-        self._apply_active_axes_styling()
-        self.canvas.draw_idle()
+        self._interactions.set_current_ax(ax)
 
     def _prime_current_ax(self) -> None:
-        """Default the active axes after a plot rebuild."""
-        if self.current_ax not in self.figure.axes:
-            self.current_ax = self.figure.axes[0] if self.figure.axes else None
+        self._interactions.prime_current_ax()
 
     @staticmethod
     def _zoom_axis_limits(limits, scale: str, factor: float) -> tuple[float, float]:
-        """Zoom a linear or log axis around its center by the given factor."""
-        lo, hi = limits
-        reversed_axis = hi < lo
-        if reversed_axis:
-            lo, hi = hi, lo
-
-        if scale == 'log' and lo > 0 and hi > 0:
-            lo_log = math.log10(lo)
-            hi_log = math.log10(hi)
-            center_log = (lo_log + hi_log) / 2
-            half_span = (hi_log - lo_log) * factor / 2
-            new_lo = 10 ** (center_log - half_span)
-            new_hi = 10 ** (center_log + half_span)
-        else:
-            center = (lo + hi) / 2
-            half_range = (hi - lo) * factor / 2
-            new_lo = center - half_range
-            new_hi = center + half_range
-            if lo >= 0 and new_lo < 0:
-                new_lo = 0
-
-        return (new_hi, new_lo) if reversed_axis else (new_lo, new_hi)
+        return AxesInteractionController.zoom_axis_limits(limits, scale, factor)
 
     def _zoom_target_axes(self):
-        """Zoom the active subplot when possible, otherwise fall back to the first axes."""
-        if self.current_ax in self.figure.axes:
-            return [self.current_ax]
-        if self.figure.axes:
-            self._set_current_ax(self.figure.axes[0])
-            return [self.current_ax]
-        return []
+        return self._interactions.zoom_target_axes()
 
     @staticmethod
     def _event_has_shift(event) -> bool:
-        key = getattr(event, "key", None)
-        if isinstance(key, str):
-            return "shift" in key.lower().split("+")
-        return False
+        return AxesInteractionController._event_has_shift(event)
 
     def _capture_default_limits(self) -> None:
-        """Store default limits for per-subplot reset operations."""
-        self._default_limits = {
-            ax: {"xlim": ax.get_xlim(), "ylim": ax.get_ylim()}
-            for ax in self.figure.axes
-        }
+        self._interactions.capture_default_limits()
 
     def _apply_active_axes_styling(self) -> None:
-        """Emphasize the active subplot without overwhelming the chart."""
-        for ax in self.figure.axes:
-            is_active = ax is self.current_ax
-            for spine in ax.spines.values():
-                spine.set_visible(True)
-                spine.set_linewidth(1.6 if is_active else 0.8)
-                spine.set_edgecolor(C.OLIVE if is_active else "#cfc5b4")
-            title = ax.title
-            title.set_color(C.TEXT if is_active else C.TEXT_MID)
+        self._interactions.apply_active_axes_styling()
 
     def _reset_axes_view(self, ax) -> None:
-        """Reset a single axes to its stored default limits."""
-        defaults = self._default_limits.get(ax)
-        if not defaults:
-            return
-        ax.set_xlim(*defaults["xlim"])
-        ax.set_ylim(*defaults["ylim"])
-        self._set_current_ax(ax)
+        self._interactions.reset_axes_view(ax)
 
     def _start_pan(self, ax, event) -> None:
-        """Begin a shift-drag pan operation on the active subplot."""
-        if event.xdata is None or event.ydata is None:
-            return
-        self._pan_state = {
-            "ax": ax,
-            "xdata": event.xdata,
-            "ydata": event.ydata,
-            "xlim": ax.get_xlim(),
-            "ylim": ax.get_ylim(),
-        }
+        self._interactions.on_click(event)
 
     @staticmethod
     def _pan_axis_limits(limits, scale: str, start_data: float, current_data: float) -> tuple[float, float]:
-        """Pan a linear or log axis based on pointer movement."""
-        lo, hi = limits
-        reversed_axis = hi < lo
-        if reversed_axis:
-            lo, hi = hi, lo
-
-        if scale == 'log' and lo > 0 and hi > 0 and start_data and current_data and start_data > 0 and current_data > 0:
-            factor = start_data / current_data
-            new_lo = lo * factor
-            new_hi = hi * factor
-        else:
-            delta = start_data - current_data
-            new_lo = lo + delta
-            new_hi = hi + delta
-            if lo >= 0 and new_lo < 0:
-                shift = -new_lo
-                new_lo += shift
-                new_hi += shift
-
-        return (new_hi, new_lo) if reversed_axis else (new_lo, new_hi)
+        return AxesInteractionController.pan_axis_limits(limits, scale, start_data, current_data)
 
     def _on_canvas_scroll(self, event) -> None:
-        """Zoom the hovered subplot with the mouse wheel."""
-        ax = getattr(event, "inaxes", None)
-        if ax not in self.figure.axes:
-            return
-        self._set_current_ax(ax)
-        step = getattr(event, "step", 0)
-        if not step:
-            step = 1 if getattr(event, "button", "") == "up" else -1
-        factor = 0.88 if step > 0 else 1.14
-        ax.set_xlim(*self._zoom_axis_limits(ax.get_xlim(), ax.get_xscale(), factor))
-        ax.set_ylim(*self._zoom_axis_limits(ax.get_ylim(), ax.get_yscale(), factor))
-        self.canvas.draw()
+        self._interactions.on_scroll(event)
 
     def _on_canvas_motion(self, event) -> None:
-        """Pan the active subplot while shift-dragging."""
-        if not self._pan_state or event.xdata is None or event.ydata is None:
-            return
-        ax = self._pan_state["ax"]
-        if ax not in self.figure.axes:
-            self._pan_state = None
-            return
-        ax.set_xlim(*self._pan_axis_limits(self._pan_state["xlim"], ax.get_xscale(), self._pan_state["xdata"], event.xdata))
-        ax.set_ylim(*self._pan_axis_limits(self._pan_state["ylim"], ax.get_yscale(), self._pan_state["ydata"], event.ydata))
-        self.canvas.draw_idle()
+        self._interactions.on_motion(event)
 
     def _on_canvas_release(self, _event) -> None:
-        """End any active pan gesture."""
-        self._pan_state = None
+        self._interactions.on_release(_event)
     
     def plot_distribution(self):
         """Plot grain size distribution"""

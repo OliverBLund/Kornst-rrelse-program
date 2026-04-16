@@ -116,8 +116,7 @@ def _startup_app_icon() -> QIcon:
             radius * 0.55,
         )
 
-        font = QFont("Source Sans 3", max(7, int(size * 0.24)), QFont.Weight.Bold)
-        font.setPixelSize(max(7, int(size * 0.28)))
+        font = QFont("Source Sans 3", max(7, int(size * 0.26)), QFont.Weight.Bold)
         painter.setFont(font)
         painter.setPen(QColor("#f4ece0"))
         painter.drawText(rect.adjusted(0, -size * 0.04, 0, 0), Qt.AlignmentFlag.AlignCenter, "GS")

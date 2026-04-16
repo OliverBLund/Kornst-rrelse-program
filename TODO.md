@@ -54,16 +54,16 @@ This section keeps the original numbered notes easy to locate while the rest of 
     Status: fixed
 
 13. `QFont::setPointSize: Point size <= 0 (-1)`
-    Status: pending investigation
+    Status: fixed
 
 14. Comparison plot toolbar active-state behavior is odd
     Status: pending
 
 15. Individual-plot sidebar-open controls are inconsistent / overlapping
-    Status: pending
+    Status: fixed
 
 16. Removing a dataset from the sidebar does not remove its dataset tab
-    Status: pending
+    Status: fixed
 
 17. Export tab still needs a proper audit
     Status: pending
@@ -72,13 +72,13 @@ This section keeps the original numbered notes easy to locate while the rest of 
     Status: pending investigation
 
 19. Welcome screen content issues
-    Status: pending
+    Status: fixed
 
 20. Help/documentation audit and rewrite
     Status: pending
 
 21. "More plots" dropdown in individual plot subtab looks transparent/weird
-    Status: pending
+    Status: fixed
 
 22. Comparison tab "Details" area needs better focus/space management
     Status: pending

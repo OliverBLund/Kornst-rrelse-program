@@ -45,6 +45,12 @@ class TestAppToolbar(unittest.TestCase):
         self.assertEqual(self.toolbar._help_btn.iconSize().width(), 13)
         self.assertEqual(self.toolbar._nav_btns[0].iconSize().width(), 13)
 
+    def test_badge_font_uses_valid_point_size(self):
+        badge = self.toolbar._badge_lbls[0]
+
+        self.assertGreater(badge.font().pointSize(), 0)
+        self.assertEqual(badge.font().pixelSize(), -1)
+
 
 if __name__ == '__main__':
     unittest.main(verbosity=2)
