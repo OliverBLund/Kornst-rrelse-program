@@ -1,0 +1,661 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>Comparison Statistics Concept</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Playfair+Display:wght@600;700&family=Source+Sans+3:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.2/css/all.min.css">
+  <style>
+    :root{
+      --bg:#f3eee6;
+      --bg2:#ece4d6;
+      --paper:#fbf8f2;
+      --paper2:#f6f0e7;
+      --line:#d7cbb8;
+      --line2:#bca98e;
+      --text:#34281d;
+      --mid:#665544;
+      --muted:#8a7863;
+      --olive:#6b8e23;
+      --olive2:#556f1c;
+      --earth:#9b6a38;
+      --amber:#bb8c2f;
+      --sand:#d8c6a4;
+      --shadow:0 18px 44px rgba(58,42,26,.08);
+      --r:12px;
+      --ui:"Source Sans 3", sans-serif;
+      --mono:"IBM Plex Mono", monospace;
+      --disp:"Playfair Display", Georgia, serif;
+      --c1:#3a7ea0;
+      --c2:#6b8e23;
+      --c3:#b46428;
+      --c4:#2a9d8f;
+      --c5:#8b4513;
+      --c6:#6b5ca5;
+    }
+    *{box-sizing:border-box}
+    html,body{height:100%}
+    body{
+      margin:0;
+      font-family:var(--ui);
+      color:var(--text);
+      background:
+        radial-gradient(circle at top left, rgba(255,255,255,.42), transparent 32%),
+        linear-gradient(180deg, #f8f4ed 0%, var(--bg) 100%);
+    }
+    .page{
+      min-height:100%;
+      padding:18px;
+      display:flex;
+      align-items:center;
+      justify-content:center;
+    }
+    .app{
+      width:min(1460px, calc(100vw - 36px));
+      min-height:840px;
+      background:rgba(252,249,243,.88);
+      border:1px solid rgba(154,126,95,.14);
+      border-radius:18px;
+      box-shadow:var(--shadow);
+      overflow:hidden;
+      display:flex;
+      flex-direction:column;
+      backdrop-filter:blur(8px);
+    }
+    .top{
+      display:flex;
+      align-items:flex-end;
+      gap:16px;
+      padding:18px 20px 14px;
+      border-bottom:1px solid var(--line);
+      background:linear-gradient(180deg, rgba(255,255,255,.72), rgba(246,239,228,.78));
+    }
+    .eyebrow{
+      display:inline-flex;
+      align-items:center;
+      gap:7px;
+      min-height:26px;
+      padding:0 10px;
+      border-radius:999px;
+      border:1px solid rgba(107,142,35,.22);
+      background:rgba(107,142,35,.08);
+      color:var(--olive2);
+      font-family:var(--mono);
+      font-size:10px;
+      font-weight:700;
+      letter-spacing:.08em;
+      text-transform:uppercase;
+      flex:0 0 auto;
+    }
+    .title{min-width:0}
+    .title h1{
+      margin:0;
+      font-family:var(--disp);
+      font-size:27px;
+      line-height:1.04;
+      font-weight:700;
+      letter-spacing:.01em;
+    }
+    .title p{
+      margin:4px 0 0;
+      font-size:12px;
+      color:var(--muted);
+    }
+    .top .spacer{flex:1}
+    .state{
+      display:flex;
+      gap:8px;
+      flex-wrap:wrap;
+      justify-content:flex-end;
+    }
+    .state .pill{
+      display:inline-flex;
+      align-items:center;
+      gap:6px;
+      min-height:28px;
+      padding:0 10px;
+      border-radius:999px;
+      border:1px solid rgba(154,126,95,.18);
+      background:rgba(255,255,255,.62);
+      color:var(--mid);
+      font-size:11px;
+      font-weight:600;
+    }
+    .state .pill.on{
+      color:var(--olive2);
+      border-color:rgba(107,142,35,.24);
+      background:rgba(107,142,35,.08);
+    }
+    .toolbar{
+      display:flex;
+      align-items:center;
+      gap:10px;
+      padding:12px 20px;
+      border-bottom:1px solid var(--line);
+      background:rgba(246,239,228,.58);
+      flex-wrap:wrap;
+    }
+    .seg{
+      display:inline-flex;
+      align-items:center;
+      gap:6px;
+      padding:4px;
+      border-radius:999px;
+      border:1px solid rgba(154,126,95,.18);
+      background:rgba(255,255,255,.56);
+    }
+    .seg button{
+      border:none;
+      background:transparent;
+      color:var(--mid);
+      min-height:28px;
+      padding:0 12px;
+      border-radius:999px;
+      font:600 12px var(--ui);
+    }
+    .seg button.on{
+      background:rgba(107,142,35,.12);
+      color:var(--olive2);
+    }
+    .meta{
+      margin-left:auto;
+      display:flex;
+      gap:14px;
+      align-items:center;
+      font:500 11px var(--mono);
+      color:var(--muted);
+      flex-wrap:wrap;
+      justify-content:flex-end;
+    }
+    .meta strong{color:var(--mid)}
+    .dataset-strip{
+      display:flex;
+      align-items:center;
+      gap:14px;
+      padding:10px 20px 11px;
+      border-bottom:1px solid var(--line);
+      background:rgba(255,255,255,.34);
+      overflow:hidden;
+      white-space:nowrap;
+    }
+    .dataset{
+      display:inline-flex;
+      align-items:center;
+      gap:8px;
+      color:var(--mid);
+      font:600 12px var(--ui);
+    }
+    .dot{
+      width:8px;
+      height:8px;
+      border-radius:50%;
+      flex:0 0 auto;
+    }
+    .body{
+      display:grid;
+      grid-template-columns:minmax(0,1fr) 300px;
+      min-height:0;
+      flex:1;
+    }
+    .main{
+      min-width:0;
+      min-height:0;
+      display:grid;
+      grid-template-rows:minmax(0,1fr) 250px;
+      border-right:1px solid var(--line);
+      background:var(--paper);
+    }
+    .dist{
+      min-height:0;
+      padding:16px 18px 14px;
+      display:flex;
+      flex-direction:column;
+      gap:12px;
+    }
+    .panel-hd{
+      display:flex;
+      align-items:flex-end;
+      gap:12px;
+    }
+    .panel-hd .copy{
+      min-width:0;
+      flex:1;
+    }
+    .kicker{
+      font:700 10px var(--mono);
+      color:var(--muted);
+      letter-spacing:.08em;
+      text-transform:uppercase;
+      margin-bottom:4px;
+    }
+    .panel-hd h2{
+      margin:0;
+      font-size:18px;
+      line-height:1.1;
+      font-weight:700;
+    }
+    .panel-hd p{
+      margin:4px 0 0;
+      font-size:12px;
+      color:var(--muted);
+    }
+    .micro{
+      display:flex;
+      gap:8px;
+      flex-wrap:wrap;
+      font:600 10px var(--mono);
+      color:var(--muted);
+    }
+    .micro span{
+      display:inline-flex;
+      align-items:center;
+      gap:6px;
+      padding:4px 8px;
+      border-radius:999px;
+      background:rgba(246,240,231,.9);
+      border:1px solid rgba(154,126,95,.14);
+    }
+    .chart{
+      flex:1;
+      min-height:0;
+      position:relative;
+      border-top:1px solid rgba(154,126,95,.14);
+      background:
+        linear-gradient(180deg, rgba(255,255,255,.18), transparent 38%),
+        linear-gradient(90deg, rgba(215,203,184,.22) 1px, transparent 1px) 0 0/12.5% 100%,
+        linear-gradient(180deg, rgba(215,203,184,.22) 1px, transparent 1px) 0 0/100% 16.66%,
+        linear-gradient(180deg, #faf7f1 0%, #f6f0e7 100%);
+      overflow:hidden;
+    }
+    .y-axis, .x-axis{
+      position:absolute;
+      font:600 10px var(--mono);
+      color:var(--muted);
+    }
+    .y-axis{
+      left:10px;
+      top:16px;
+      bottom:26px;
+      display:flex;
+      flex-direction:column;
+      justify-content:space-between;
+      align-items:flex-start;
+    }
+    .x-axis{
+      left:62px;
+      right:14px;
+      bottom:8px;
+      display:flex;
+      justify-content:space-between;
+    }
+    .plot-zone{
+      position:absolute;
+      left:62px;
+      right:14px;
+      top:18px;
+      bottom:34px;
+      display:grid;
+      grid-template-columns:repeat(6,1fr);
+      align-items:end;
+      gap:18px;
+    }
+    .box{
+      position:relative;
+      display:flex;
+      align-items:flex-end;
+      justify-content:center;
+    }
+    .box .stem{
+      position:absolute;
+      bottom:0;
+      width:2px;
+      background:rgba(92,78,61,.42);
+      border-radius:2px;
+    }
+    .box .rect{
+      position:absolute;
+      width:50px;
+      border-radius:10px;
+      border:1px solid rgba(92,78,61,.28);
+      box-shadow:inset 0 1px 0 rgba(255,255,255,.35);
+    }
+    .box .median{
+      position:absolute;
+      width:54px;
+      height:2px;
+      background:#433528;
+      border-radius:2px;
+    }
+    .box .cap{
+      position:absolute;
+      width:26px;
+      height:2px;
+      background:rgba(92,78,61,.42);
+      border-radius:2px;
+    }
+    .box .pt{
+      position:absolute;
+      width:6px;
+      height:6px;
+      border-radius:50%;
+      background:#433528;
+      opacity:.45;
+    }
+    .b1 .rect{height:94px;bottom:92px;background:rgba(58,126,160,.28)}
+    .b1 .stem{height:226px}.b1 .median{bottom:141px}.b1 .cap.top{bottom:225px}.b1 .cap.bot{bottom:0}.b1 .pt{bottom:210px}
+    .b2 .rect{height:66px;bottom:60px;background:rgba(107,142,35,.24)}
+    .b2 .stem{height:180px}.b2 .median{bottom:96px}.b2 .cap.top{bottom:179px}.b2 .cap.bot{bottom:0}.b2 .pt{bottom:165px}
+    .b3 .rect{height:108px;bottom:84px;background:rgba(180,100,40,.24)}
+    .b3 .stem{height:240px}.b3 .median{bottom:132px}.b3 .cap.top{bottom:239px}.b3 .cap.bot{bottom:0}.b3 .pt{bottom:216px}
+    .b4 .rect{height:84px;bottom:76px;background:rgba(42,157,143,.22)}
+    .b4 .stem{height:196px}.b4 .median{bottom:113px}.b4 .cap.top{bottom:195px}.b4 .cap.bot{bottom:0}.b4 .pt{bottom:182px}
+    .b5 .rect{height:58px;bottom:44px;background:rgba(139,69,19,.20)}
+    .b5 .stem{height:156px}.b5 .median{bottom:78px}.b5 .cap.top{bottom:155px}.b5 .cap.bot{bottom:0}.b5 .pt{bottom:145px}
+    .b6 .rect{height:122px;bottom:96px;background:rgba(107,92,165,.22)}
+    .b6 .stem{height:252px}.b6 .median{bottom:146px}.b6 .cap.top{bottom:251px}.b6 .cap.bot{bottom:0}.b6 .pt{bottom:232px}
+    .agreement{
+      padding:14px 18px 16px;
+      border-top:1px solid var(--line);
+      background:linear-gradient(180deg, rgba(255,255,255,.34), rgba(246,240,231,.84));
+      display:flex;
+      flex-direction:column;
+      gap:10px;
+      min-height:0;
+    }
+    .agreement-grid{
+      display:grid;
+      grid-template-columns:170px repeat(6, 1fr);
+      border-top:1px solid rgba(154,126,95,.14);
+      border-left:1px solid rgba(154,126,95,.14);
+      min-height:0;
+      flex:1;
+      overflow:hidden;
+    }
+    .cell{
+      min-height:34px;
+      border-right:1px solid rgba(154,126,95,.14);
+      border-bottom:1px solid rgba(154,126,95,.14);
+      display:flex;
+      align-items:center;
+      justify-content:center;
+      font-size:11px;
+      color:var(--mid);
+      background:rgba(255,255,255,.52);
+    }
+    .cell.h{
+      justify-content:flex-start;
+      padding:0 10px;
+      font-weight:700;
+      background:rgba(244,236,225,.94);
+    }
+    .cell.ds{
+      font:600 10px var(--mono);
+      color:var(--muted);
+      background:rgba(244,236,225,.94);
+    }
+    .ok{background:rgba(107,142,35,.16); color:var(--olive2); font-weight:700}
+    .warn{background:rgba(196,165,116,.22); color:#7a5a1a; font-weight:700}
+    .na{background:rgba(229,223,213,.74); color:var(--muted)}
+    .rail{
+      padding:14px 16px;
+      background:linear-gradient(180deg, rgba(249,245,238,.95), rgba(241,233,222,.88));
+      display:flex;
+      flex-direction:column;
+      gap:16px;
+    }
+    .rail-sec{
+      border-bottom:1px solid rgba(154,126,95,.16);
+      padding-bottom:14px;
+    }
+    .rail-sec:last-child{
+      border-bottom:none;
+      padding-bottom:0;
+    }
+    .rail-h{
+      margin:0 0 8px;
+      font:700 10px var(--mono);
+      letter-spacing:.08em;
+      text-transform:uppercase;
+      color:var(--muted);
+    }
+    .rail-list{
+      display:flex;
+      flex-direction:column;
+      gap:8px;
+    }
+    .insight{
+      background:rgba(255,255,255,.42);
+      border:1px solid rgba(212,196,168,.6);
+      border-radius:10px;
+      padding:9px 10px;
+    }
+    .insight strong{
+      display:block;
+      font-size:12px;
+      margin-bottom:2px;
+    }
+    .insight span{
+      display:block;
+      font-size:11px;
+      line-height:1.35;
+      color:var(--mid);
+    }
+    .mini{
+      display:grid;
+      grid-template-columns:1fr auto;
+      gap:4px 10px;
+      font-size:11px;
+      color:var(--mid);
+      align-items:baseline;
+    }
+    .mini .k{color:var(--muted); font-weight:600}
+    .mini .v{font-family:var(--mono); font-weight:600}
+    .legend{
+      display:flex;
+      flex-direction:column;
+      gap:6px;
+      font-size:11px;
+      color:var(--mid);
+    }
+    .legend .row{
+      display:flex;
+      align-items:center;
+      gap:8px;
+    }
+    .sw{
+      width:12px;
+      height:12px;
+      border-radius:3px;
+      border:1px solid rgba(92,78,61,.18);
+    }
+    .sw.ok{background:rgba(107,142,35,.16)}
+    .sw.warn{background:rgba(196,165,116,.22)}
+    .sw.na{background:rgba(229,223,213,.74)}
+    @media (max-width: 1180px){
+      .body{grid-template-columns:1fr}
+      .main{border-right:none;border-bottom:1px solid var(--line)}
+      .rail{border-top:1px solid var(--line)}
+    }
+  </style>
+</head>
+<body>
+  <div class="page">
+    <div class="app">
+      <div class="top">
+        <div class="eyebrow"><i class="fa-solid fa-chart-column"></i> comparison statistics concept</div>
+        <div class="title">
+          <h1>Distribution First, Agreement Second</h1>
+          <p>One primary K-distribution surface, one compact method-agreement matrix, and a quiet interpretation rail.</p>
+        </div>
+        <div class="spacer"></div>
+        <div class="state">
+          <div class="pill"><i class="fa-solid fa-eye"></i> Current State</div>
+          <div class="pill on"><i class="fa-solid fa-wand-magic-sparkles"></i> Proposed</div>
+        </div>
+      </div>
+
+      <div class="toolbar">
+        <div class="seg">
+          <button class="on">Distribution</button>
+          <button>Agreement</button>
+        </div>
+        <div class="seg">
+          <button class="on">m/d</button>
+          <button>m/s</button>
+          <button>cm/s</button>
+        </div>
+        <div class="seg">
+          <button class="on">Geo. mean</button>
+          <button>Median</button>
+        </div>
+        <div class="meta">
+          <span><strong>6 datasets</strong></span>
+          <span>ISO 14688 active</span>
+          <span>16 methods available</span>
+        </div>
+      </div>
+
+      <div class="dataset-strip">
+        <div class="dataset"><span class="dot" style="background:var(--c1)"></span>DK-07</div>
+        <div class="dataset"><span class="dot" style="background:var(--c2)"></span>GW-2024-A</div>
+        <div class="dataset"><span class="dot" style="background:var(--c3)"></span>LC-11</div>
+        <div class="dataset"><span class="dot" style="background:var(--c4)"></span>BH-03</div>
+        <div class="dataset"><span class="dot" style="background:var(--c5)"></span>PT-18</div>
+        <div class="dataset"><span class="dot" style="background:var(--c6)"></span>SY-04</div>
+      </div>
+
+      <div class="body">
+        <div class="main">
+          <section class="dist">
+            <div class="panel-hd">
+              <div class="copy">
+                <div class="kicker">Primary Surface</div>
+                <h2>K-value spread across selected datasets</h2>
+                <p>Use the statistics tab to understand variation and overlap, not to re-read the full details matrix.</p>
+              </div>
+              <div class="micro">
+                <span><i class="fa-solid fa-ruler-combined"></i> log scale</span>
+                <span><i class="fa-solid fa-circle-half-stroke"></i> geometric mean emphasis</span>
+                <span><i class="fa-solid fa-filter-circle-xmark"></i> invalid methods excluded</span>
+              </div>
+            </div>
+
+            <div class="chart">
+              <div class="y-axis">
+                <span>1000</span>
+                <span>100</span>
+                <span>10</span>
+                <span>1</span>
+                <span>0.1</span>
+                <span>0.01</span>
+              </div>
+              <div class="plot-zone">
+                <div class="box b1">
+                  <div class="stem"></div><div class="cap top"></div><div class="cap bot"></div><div class="rect"></div><div class="median"></div><div class="pt"></div>
+                </div>
+                <div class="box b2">
+                  <div class="stem"></div><div class="cap top"></div><div class="cap bot"></div><div class="rect"></div><div class="median"></div><div class="pt"></div>
+                </div>
+                <div class="box b3">
+                  <div class="stem"></div><div class="cap top"></div><div class="cap bot"></div><div class="rect"></div><div class="median"></div><div class="pt"></div>
+                </div>
+                <div class="box b4">
+                  <div class="stem"></div><div class="cap top"></div><div class="cap bot"></div><div class="rect"></div><div class="median"></div><div class="pt"></div>
+                </div>
+                <div class="box b5">
+                  <div class="stem"></div><div class="cap top"></div><div class="cap bot"></div><div class="rect"></div><div class="median"></div><div class="pt"></div>
+                </div>
+                <div class="box b6">
+                  <div class="stem"></div><div class="cap top"></div><div class="cap bot"></div><div class="rect"></div><div class="median"></div><div class="pt"></div>
+                </div>
+              </div>
+              <div class="x-axis">
+                <span>DK-07</span>
+                <span>GW-2024-A</span>
+                <span>LC-11</span>
+                <span>BH-03</span>
+                <span>PT-18</span>
+                <span>SY-04</span>
+              </div>
+            </div>
+          </section>
+
+          <section class="agreement">
+            <div class="panel-hd">
+              <div class="copy">
+                <div class="kicker">Secondary Surface</div>
+                <h2>Method agreement and applicability</h2>
+                <p>Compact enough to scan quickly, strong enough to show which methods are missing, warned, or consistently valid.</p>
+              </div>
+            </div>
+
+            <div class="agreement-grid">
+              <div class="cell h">Method</div>
+              <div class="cell ds">DK-07</div>
+              <div class="cell ds">GW-2024-A</div>
+              <div class="cell ds">LC-11</div>
+              <div class="cell ds">BH-03</div>
+              <div class="cell ds">PT-18</div>
+              <div class="cell ds">SY-04</div>
+
+              <div class="cell h">Hazen</div>
+              <div class="cell ok">OK</div><div class="cell ok">OK</div><div class="cell ok">OK</div><div class="cell ok">OK</div><div class="cell warn">WARN</div><div class="cell ok">OK</div>
+              <div class="cell h">Beyer</div>
+              <div class="cell ok">OK</div><div class="cell ok">OK</div><div class="cell warn">WARN</div><div class="cell ok">OK</div><div class="cell ok">OK</div><div class="cell ok">OK</div>
+              <div class="cell h">Kozeny-Carman</div>
+              <div class="cell ok">OK</div><div class="cell ok">OK</div><div class="cell ok">OK</div><div class="cell ok">OK</div><div class="cell ok">OK</div><div class="cell ok">OK</div>
+              <div class="cell h">USBR</div>
+              <div class="cell ok">OK</div><div class="cell ok">OK</div><div class="cell na">N/A</div><div class="cell ok">OK</div><div class="cell na">N/A</div><div class="cell ok">OK</div>
+              <div class="cell h">Krumbein-Monk</div>
+              <div class="cell na">N/A</div><div class="cell ok">OK</div><div class="cell ok">OK</div><div class="cell na">N/A</div><div class="cell na">N/A</div><div class="cell ok">OK</div>
+            </div>
+          </section>
+        </div>
+
+        <aside class="rail">
+          <section class="rail-sec">
+            <h3 class="rail-h">Quick Read</h3>
+            <div class="rail-list">
+              <div class="insight">
+                <strong>Largest spread</strong>
+                <span>SY-04 has the widest K-range and should anchor interpretation of overall dispersion.</span>
+              </div>
+              <div class="insight">
+                <strong>Tightest cluster</strong>
+                <span>DK-07 and BH-03 overlap closely, suggesting similar hydraulic response across valid methods.</span>
+              </div>
+              <div class="insight">
+                <strong>Method caution</strong>
+                <span>USBR and Krumbein-Monk show sparse coverage in this selection and should not dominate the summary narrative.</span>
+              </div>
+            </div>
+          </section>
+
+          <section class="rail-sec">
+            <h3 class="rail-h">Summary</h3>
+            <div class="mini">
+              <div class="k">Primary metric</div><div class="v">Geometric mean</div>
+              <div class="k">Unit</div><div class="v">m/d</div>
+              <div class="k">Valid coverage</div><div class="v">79 / 96</div>
+              <div class="k">Warned cells</div><div class="v">8</div>
+              <div class="k">Missing cells</div><div class="v">9</div>
+            </div>
+          </section>
+
+          <section class="rail-sec">
+            <h3 class="rail-h">Agreement Legend</h3>
+            <div class="legend">
+              <div class="row"><span class="sw ok"></span><span>Method valid and included in summary</span></div>
+              <div class="row"><span class="sw warn"></span><span>Method available, but outside preferred applicability range</span></div>
+              <div class="row"><span class="sw na"></span><span>Method unavailable or not meaningful for that dataset</span></div>
+            </div>
+          </section>
+        </aside>
+      </div>
+    </div>
+  </div>
+</body>
+</html>

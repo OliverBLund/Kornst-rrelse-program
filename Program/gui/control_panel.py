@@ -16,7 +16,7 @@ import queue
 from PyQt6.QtCore import QTimer
 from data_loader import DataLoader
 from gui.column_mapper import ColumnMapperDialog
-from gui.data_inspector_dialog import DataInspectorDialog
+from gui.dataset_inspector_dialog import DataInspectorDialog
 import os
 from PyQt6.QtCore import Qt, pyqtSignal, QSize, QRectF, QPoint
 from PyQt6.QtGui import (QIcon, QFont, QAction, QPainter, QColor,
@@ -2481,10 +2481,18 @@ class ControlPanel(QFrame):
             return
 
         dataset = entry['data']
+        ds_tab = self._find_dataset_tab_for_dataset(dataset)
+        mapping_state = (
+            entry.get('mapping_state')
+            or getattr(dataset, '_source_mapping_state', None)
+            or self.file_mapping_states.get(file_path)
+        )
         dlg = DataInspectorDialog(
             dataset=dataset,
             scheme=self._active_scheme,
             file_path=file_path,
+            dataset_tab=ds_tab,
+            mapping_state=mapping_state,
             parent=self,
         )
         dlg.exec()
@@ -2542,13 +2550,7 @@ class ControlPanel(QFrame):
         dataset = entry['data']
 
         # Find the dataset tab so we can push recalculation
-        ds_tab = None
-        if hasattr(self, 'main_window') and hasattr(self.main_window, 'dataset_tabs_widget'):
-            for i in range(self.main_window.dataset_tabs_widget.count()):
-                tab = self.main_window.dataset_tabs_widget.widget(i)
-                if hasattr(tab, 'dataset') and tab.dataset is dataset:
-                    ds_tab = tab
-                    break
+        ds_tab = self._find_dataset_tab_for_dataset(dataset)
 
         dlg = QDialog(self)
         dlg.setWindowTitle(f"Properties — {dataset.sample_name}")
@@ -2668,6 +2670,26 @@ class ControlPanel(QFrame):
         self._update_inventory_bar()
         self.update_ui_state()
         self.sample_info_label.setText(f"{len(self.loaded_samples)} sample(s) loaded")
+
+    def register_external_issue(self, file_path: str, detail: str, *, status: str = 'review'):
+        """Track a file opened outside the sidebar import flow that still needs user attention."""
+        self._remove_loaded_entries_for_file(file_path)
+        self.file_statuses[file_path] = status
+
+        if self._find_table_row_for_file(file_path) >= 0:
+            self.update_file_in_table(file_path, status)
+        else:
+            self.add_file_to_table(file_path, status)
+
+        self._file_list.update_card_meta(file_path, "", "")
+        self._update_inventory_bar()
+        self.update_ui_state()
+
+        file_name = self._format_file_display_name(file_path)
+        if status == 'failed':
+            self.sample_info_label.setText(f"Needs fixing: {file_name}")
+        else:
+            self.sample_info_label.setText(f"Needs review: {file_name}")
 
     def review_failed_files(self):
         """Open manual column mapping for files that need review"""
@@ -2833,6 +2855,16 @@ class ControlPanel(QFrame):
             if entry.get('file_path') == file_path:
                 return sample_name, entry
         return None, None
+
+    def _find_dataset_tab_for_dataset(self, dataset):
+        if not hasattr(self, 'main_window') or not hasattr(self.main_window, 'dataset_tabs_widget'):
+            return None
+
+        for i in range(self.main_window.dataset_tabs_widget.count()):
+            tab = self.main_window.dataset_tabs_widget.widget(i)
+            if hasattr(tab, 'dataset') and tab.dataset is dataset:
+                return tab
+        return None
 
     def _remove_loaded_entries_for_file(self, file_path: str):
         removed = []

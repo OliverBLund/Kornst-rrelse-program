@@ -178,6 +178,10 @@
       font-family:var(--mono);
       margin-left:auto;
     }
+    .meta strong{
+      color:var(--text-mid);
+      font-weight:700;
+    }
     .summary{
       display:grid;
       grid-template-columns:repeat(4,minmax(0,1fr));
@@ -210,6 +214,30 @@
       margin-top:3px;
       font-size:12px;
       color:var(--text-mid);
+    }
+    .mini-strip{
+      display:flex;
+      align-items:center;
+      gap:8px;
+      padding:10px 18px;
+      border-bottom:1px solid rgba(215,203,184,.78);
+      background:rgba(249,244,235,.76);
+      flex-wrap:wrap;
+    }
+    .mini-pill{
+      display:inline-flex;
+      align-items:center;
+      gap:7px;
+      min-height:28px;
+      padding:0 10px;
+      border-radius:999px;
+      border:1px solid rgba(191,174,150,.88);
+      background:rgba(255,255,255,.58);
+      color:var(--text-mid);
+      font-size:11px;
+      font-weight:700;
+      font-family:var(--mono);
+      letter-spacing:.03em;
     }
     .dataset-rail{
       display:flex;
@@ -299,6 +327,11 @@
       flex-direction:column;
       gap:2px;
     }
+    .param-top{
+      display:flex;
+      align-items:center;
+      gap:7px;
+    }
     .param strong{
       font-size:13px;
       color:var(--text);
@@ -306,6 +339,24 @@
     .param span{
       font-size:11px;
       color:var(--muted);
+    }
+    .row-pin{
+      width:18px;
+      height:18px;
+      border-radius:50%;
+      display:inline-flex;
+      align-items:center;
+      justify-content:center;
+      font-size:10px;
+      color:var(--olive-2);
+      background:rgba(107,142,35,.10);
+      border:1px solid rgba(107,142,35,.18);
+      flex:0 0 auto;
+    }
+    .row-pin.off{
+      color:var(--muted);
+      background:rgba(255,255,255,.38);
+      border-color:rgba(191,174,150,.78);
     }
     .v-strong{font-weight:700}
     .heat-low{background:rgba(107,142,35,.08)}
@@ -397,6 +448,60 @@
       font-size:12px;
       line-height:1.35;
     }
+    .status-list{
+      display:flex;
+      flex-direction:column;
+      gap:8px;
+    }
+    .status-row{
+      display:grid;
+      grid-template-columns:1fr auto;
+      align-items:center;
+      gap:10px;
+      padding:9px 10px;
+      border-radius:10px;
+      border:1px solid rgba(191,174,150,.72);
+      background:rgba(255,255,255,.42);
+    }
+    .status-row strong{
+      display:block;
+      font-size:12px;
+      color:var(--text);
+      margin-bottom:2px;
+    }
+    .status-row span{
+      font-size:11px;
+      color:var(--muted);
+    }
+    .status-badge{
+      display:inline-flex;
+      align-items:center;
+      justify-content:center;
+      min-width:56px;
+      min-height:22px;
+      padding:0 8px;
+      border-radius:999px;
+      font-size:10px;
+      font-weight:800;
+      letter-spacing:.05em;
+      text-transform:uppercase;
+      font-family:var(--mono);
+    }
+    .ok{
+      background:rgba(107,142,35,.10);
+      color:var(--olive-2);
+      border:1px solid rgba(107,142,35,.22);
+    }
+    .warn{
+      background:rgba(187,140,47,.12);
+      color:#8b6418;
+      border:1px solid rgba(187,140,47,.22);
+    }
+    .na{
+      background:rgba(191,174,150,.18);
+      color:var(--muted);
+      border:1px solid rgba(191,174,150,.42);
+    }
     .legend{
       display:grid;
       gap:8px;
@@ -472,10 +577,18 @@
               <button class="on"><i class="fa-solid fa-list"></i>All Rows</button>
               <button><i class="fa-solid fa-filter"></i>Core Only</button>
             </div>
+            <div class="seg">
+              <button class="on"><i class="fa-solid fa-ruler-combined"></i>Core</button>
+              <button><i class="fa-solid fa-layer-group"></i>All</button>
+              <button><i class="fa-solid fa-tags"></i>Classification</button>
+              <button><i class="fa-solid fa-droplet"></i>K Summary</button>
+            </div>
             <div class="meta">
               <span>6 datasets selected</span>
               <span>·</span>
-              <span>14 grain metrics</span>
+              <span><strong>ISO 14688</strong> active</span>
+              <span>·</span>
+              <span><strong>m/d</strong> for K rows</span>
               <span>·</span>
               <span>horizontal compare</span>
             </div>
@@ -504,6 +617,13 @@
             </div>
           </div>
 
+          <div class="mini-strip">
+            <div class="mini-pill"><i class="fa-solid fa-thumbtack"></i>3 pinned rows</div>
+            <div class="mini-pill"><i class="fa-solid fa-swatchbook"></i>Classification labels follow active scheme</div>
+            <div class="mini-pill"><i class="fa-solid fa-arrows-left-right"></i>Delta mode available later</div>
+            <div class="mini-pill"><i class="fa-solid fa-triangle-exclamation"></i>Method warnings shown in K view</div>
+          </div>
+
           <div class="dataset-rail">
             <div class="chip pin"><span class="dot" style="background:var(--c1)"></span>DK-07<i class="fa-solid fa-thumbtack"></i></div>
             <div class="chip pin"><span class="dot" style="background:var(--c2)"></span>GW-2024-A<i class="fa-solid fa-thumbtack"></i></div>
@@ -528,7 +648,7 @@
               </thead>
               <tbody>
                 <tr>
-                  <td><div class="param"><strong>D10</strong><span>Effective size (mm)</span></div></td>
+                  <td><div class="param"><div class="param-top"><span class="row-pin"><i class="fa-solid fa-thumbtack"></i></span><strong>D10</strong></div><span>Effective size (mm)</span></div></td>
                   <td class="heat-mid v-strong">0.160</td>
                   <td class="heat-low">0.062</td>
                   <td class="heat-high">0.420</td>
@@ -537,7 +657,7 @@
                   <td class="heat-high">0.530</td>
                 </tr>
                 <tr>
-                  <td><div class="param"><strong>D30</strong><span>30th percentile (mm)</span></div></td>
+                  <td><div class="param"><div class="param-top"><span class="row-pin off"><i class="fa-solid fa-thumbtack"></i></span><strong>D30</strong></div><span>30th percentile (mm)</span></div></td>
                   <td class="heat-mid">0.300</td>
                   <td class="heat-low">0.110</td>
                   <td class="heat-high">0.680</td>
@@ -546,7 +666,7 @@
                   <td class="heat-high">0.790</td>
                 </tr>
                 <tr>
-                  <td><div class="param"><strong>D50</strong><span>Median diameter (mm)</span></div></td>
+                  <td><div class="param"><div class="param-top"><span class="row-pin"><i class="fa-solid fa-thumbtack"></i></span><strong>D50</strong></div><span>Median diameter (mm)</span></div></td>
                   <td class="heat-mid v-strong">0.420</td>
                   <td class="heat-low">0.180</td>
                   <td class="heat-high">0.890</td>
@@ -555,7 +675,7 @@
                   <td class="heat-high">1.060</td>
                 </tr>
                 <tr>
-                  <td><div class="param"><strong>D60</strong><span>60th percentile (mm)</span></div></td>
+                  <td><div class="param"><div class="param-top"><span class="row-pin off"><i class="fa-solid fa-thumbtack"></i></span><strong>D60</strong></div><span>60th percentile (mm)</span></div></td>
                   <td class="heat-mid">0.560</td>
                   <td class="heat-low">0.220</td>
                   <td class="heat-high">1.100</td>
@@ -564,7 +684,7 @@
                   <td class="heat-high">1.280</td>
                 </tr>
                 <tr>
-                  <td><div class="param"><strong>Cu</strong><span>Uniformity coefficient</span></div></td>
+                  <td><div class="param"><div class="param-top"><span class="row-pin"><i class="fa-solid fa-thumbtack"></i></span><strong>Cu</strong></div><span>Uniformity coefficient</span></div></td>
                   <td class="heat-mid v-strong">3.50</td>
                   <td class="heat-mid">3.55</td>
                   <td class="heat-low">2.62</td>
@@ -648,6 +768,28 @@
                 <strong>Why this layout</strong>
                 <p>The secondary panel is no longer a second full table. It becomes a compact interpretation rail instead.</p>
               </div>
+              <div class="insight-card">
+                <strong>Reference comparison mode</strong>
+                <p>A later refinement could let one pinned dataset act as the baseline, with the matrix switching from raw values to deltas.</p>
+              </div>
+            </div>
+          </section>
+
+          <section class="aside-sec">
+            <h3>K Method Status</h3>
+            <div class="status-list">
+              <div class="status-row">
+                <div><strong>Hazen</strong><span>Valid for 5 / 6 datasets</span></div>
+                <div class="status-badge ok">OK</div>
+              </div>
+              <div class="status-row">
+                <div><strong>Beyer</strong><span>One dataset outside range</span></div>
+                <div class="status-badge warn">Warn</div>
+              </div>
+              <div class="status-row">
+                <div><strong>Pavchich</strong><span>Unavailable on finer samples</span></div>
+                <div class="status-badge na">N/A</div>
+              </div>
             </div>
           </section>
 
@@ -670,7 +812,7 @@
           </section>
 
           <div class="footnote">
-            Concept direction: the comparison tab should feel like a focused analysis surface, not two tables squeezed into the same width budget.
+            Concept direction: the comparison tab should feel like a focused analysis surface, not two tables squeezed into the same width budget. The right rail should carry interpretation, warnings, and mode context.
           </div>
         </aside>
       </div>

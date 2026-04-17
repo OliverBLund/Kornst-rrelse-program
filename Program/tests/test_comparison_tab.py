@@ -13,8 +13,10 @@ from PyQt6.QtWidgets import QApplication
 
 import gui.comparison_tab as comparison_tab_module
 from data_loader import GrainSizeData
+from grain_classification import USCS
 from gui.comparison_tab import ComparisonTab
 from k_calculations_v2 import CalculationStatus, KCalculationResult
+from unit_conversions import HydraulicConductivityUnit
 
 
 APP = QApplication.instance() or QApplication([])
@@ -126,6 +128,210 @@ class TestComparisonTabSelectionState(unittest.TestCase):
             [tab.get_dataset_name() for tab in self.widget.selected_datasets],
             ['Sample B', 'Sample C'],
         )
+
+    def test_details_defaults_to_grain_core_and_elides_long_headers(self):
+        long_tabs = [
+            DummyDatasetTab('Very Long Borehole Sample Name Alpha', 'A.csv', 1.0),
+            DummyDatasetTab('Very Long Borehole Sample Name Beta', 'B.csv', 1.5),
+            DummyDatasetTab('Very Long Borehole Sample Name Gamma', 'C.csv', 2.0),
+        ]
+
+        self.widget.set_dataset_state(long_tabs, selected_tabs=long_tabs)
+
+        self.assertEqual(self.widget._details_mode, 'grain')
+        self.assertEqual(self.widget._details_preset, 'core')
+        self.assertIs(self.widget._details_stack.currentWidget(), self.widget._grain_table)
+        self.assertEqual(self.widget._details_preset_context_btn.text(), 'Classification')
+
+        header = self.widget._grain_table.horizontalHeaderItem(1)
+        self.assertEqual(header.toolTip(), 'Very Long Borehole Sample Name Alpha')
+        self.assertNotEqual(header.text(), header.toolTip())
+
+    def test_details_mode_switch_updates_context_and_status_visibility(self):
+        self.widget.set_dataset_state(self.tabs, selected_tabs=self.tabs)
+
+        self.widget._set_details_mode('k')
+
+        self.assertIs(self.widget._details_stack.currentWidget(), self.widget._k_table)
+        self.assertEqual(self.widget._details_preset, 'all')
+        self.assertEqual(self.widget._details_preset_context_btn.text(), 'Summary')
+        self.assertFalse(self.widget._details_status_section.isHidden())
+        self.assertFalse(self.widget._details_unit_lbl.isHidden())
+        self.assertFalse(self.widget._details_unit_combo.isHidden())
+
+    def test_grain_core_preset_hides_non_core_rows(self):
+        self.widget.set_dataset_state(self.tabs, selected_tabs=self.tabs)
+
+        d84_row = next(
+            row for row, row_def in enumerate(self.widget._GRAIN_ROWS)
+            if row_def[0] == 'D84'
+        )
+        d50_row = next(
+            row for row, row_def in enumerate(self.widget._GRAIN_ROWS)
+            if row_def[0] == 'D50'
+        )
+
+        self.assertTrue(self.widget._grain_table.isRowHidden(d84_row))
+        self.assertFalse(self.widget._grain_table.isRowHidden(d50_row))
+
+    def test_k_summary_preset_hides_method_rows(self):
+        self.widget.set_dataset_state(self.tabs, selected_tabs=self.tabs)
+        self.widget._set_details_mode('k')
+        self.widget._set_details_preset('context')
+
+        labels = []
+        for row in range(self.widget._k_table.rowCount()):
+            cell_widget = self.widget._k_table.cellWidget(row, 0)
+            name = cell_widget.layout().itemAt(0).widget().text()
+            labels.append((name, self.widget._k_table.isRowHidden(row)))
+
+        hazen_hidden = dict(labels)['Hazen']
+        summary_visible = dict(labels)['K\u0304 geometric']
+
+        self.assertTrue(hazen_hidden)
+        self.assertFalse(summary_visible)
+
+    def test_mode_specific_presets_are_preserved_between_grain_and_k_views(self):
+        self.widget.set_dataset_state(self.tabs, selected_tabs=self.tabs)
+
+        self.widget._set_details_preset('all')
+        self.widget._set_details_mode('k')
+        self.widget._set_details_preset('context')
+        self.widget._set_details_mode('grain')
+
+        self.assertEqual(self.widget._details_preset, 'all')
+
+        self.widget._set_details_mode('k')
+        self.assertEqual(self.widget._details_preset, 'context')
+
+    def test_details_k_unit_switch_reformats_values_and_context(self):
+        self.widget.set_dataset_state(self.tabs, selected_tabs=self.tabs)
+        self.widget._set_details_mode('k')
+
+        source_index = self.widget._details_unit_combo.findData(HydraulicConductivityUnit.M_PER_S)
+        self.widget._details_unit_combo.setCurrentIndex(source_index)
+        mps_value = self.widget._k_table.item(0, 1).text()
+
+        target_index = self.widget._details_unit_combo.findData(HydraulicConductivityUnit.M_PER_DAY)
+        self.widget._details_unit_combo.setCurrentIndex(target_index)
+        md_value = self.widget._k_table.item(0, 1).text()
+
+        self.assertNotEqual(mps_value, md_value)
+        self.assertIn('m/d', self.widget._details_context.text())
+        self.assertIn('m/d', self.widget._details_focus_strip.text())
+
+    def test_details_dataset_strip_uses_widget_chips_with_dataset_colors(self):
+        self.widget.set_dataset_state(self.tabs, selected_tabs=self.tabs)
+
+        first_chip = self.widget._details_dataset_chips_layout.itemAt(0).widget()
+        dot_label = first_chip.layout().itemAt(0).widget()
+        name_label = first_chip.layout().itemAt(1).widget()
+
+        self.assertEqual(dot_label.text(), '●')
+        self.assertIn(comparison_tab_module.DATASET_COLORS[0], dot_label.styleSheet())
+        self.assertIn('Sample A', first_chip.toolTip())
+        self.assertEqual(name_label.text(), 'Sample A')
+
+    def test_grain_heat_toggle_applies_visible_background_role(self):
+        self.widget.set_dataset_state(self.tabs, selected_tabs=self.tabs)
+
+        d50_row = next(
+            row for row, row_def in enumerate(self.widget._GRAIN_ROWS)
+            if row_def[0] == 'D50'
+        )
+        heated_item = self.widget._grain_table.item(d50_row, 1)
+        heated_color = heated_item.data(comparison_tab_module.Qt.ItemDataRole.BackgroundRole)
+
+        self.assertIsNotNone(heated_color)
+        self.assertGreater(heated_color.alpha(), 0)
+
+    def test_grain_table_header_sort_reorders_rows_by_dataset_values(self):
+        self.widget.set_dataset_state(self.tabs, selected_tabs=self.tabs)
+        self.widget._set_details_preset('all')
+
+        self.widget._grain_table.sortItems(1, comparison_tab_module.Qt.SortOrder.DescendingOrder)
+
+        values = []
+        for row in range(self.widget._grain_table.rowCount()):
+            if self.widget._grain_table.isRowHidden(row):
+                continue
+            sort_value = self.widget._grain_table.item(row, 1).data(
+                comparison_tab_module.Qt.ItemDataRole.UserRole
+            )
+            if isinstance(sort_value, (int, float)) and sort_value != float('inf'):
+                values.append(sort_value)
+
+        self.assertGreater(len(values), 3)
+        self.assertEqual(values, sorted(values, reverse=True))
+
+    def test_details_heat_legend_uses_real_palette_swatch_widgets(self):
+        self.widget.set_dataset_state(self.tabs, selected_tabs=self.tabs)
+
+        legend_frames = self.widget._details_legend_section.findChildren(comparison_tab_module.QFrame)
+        swatches = [
+            frame for frame in legend_frames
+            if frame.width() == 16 and frame.height() == 16 and 'background:' in frame.styleSheet()
+        ]
+
+        self.assertEqual(len(swatches), 3)
+        self.assertIn(comparison_tab_module._heat_color(0.0).name(), swatches[0].styleSheet())
+        self.assertIn(comparison_tab_module._heat_color(0.5).name(), swatches[1].styleSheet())
+        self.assertIn(comparison_tab_module._heat_color(1.0).name(), swatches[2].styleSheet())
+
+        self.widget._heat_btn.setChecked(False)
+        self.assertTrue(self.widget._details_legend_section.isHidden())
+
+    def test_k_table_header_sort_reorders_rows_by_dataset_values(self):
+        self.widget.set_dataset_state(self.tabs, selected_tabs=self.tabs)
+        self.widget._set_details_mode('k')
+
+        self.widget._k_table.sortItems(1, comparison_tab_module.Qt.SortOrder.DescendingOrder)
+
+        values = []
+        for row in range(self.widget._k_table.rowCount()):
+            if self.widget._k_table.isRowHidden(row):
+                continue
+            sort_value = self.widget._k_table.item(row, 1).data(
+                comparison_tab_module.Qt.ItemDataRole.UserRole
+            )
+            if isinstance(sort_value, (int, float)) and sort_value != float('inf'):
+                values.append(sort_value)
+
+        self.assertGreater(len(values), 3)
+        self.assertEqual(values, sorted(values, reverse=True))
+
+    def test_scheme_change_updates_scheme_sensitive_grain_rows(self):
+        self.widget.set_dataset_state(self.tabs, selected_tabs=self.tabs)
+
+        fines_row = next(
+            row for row, row_def in enumerate(self.widget._GRAIN_ROWS)
+            if row_def[0] == 'Fines%'
+        )
+        iso_value = self.widget._grain_table.item(fines_row, 1).text()
+
+        self.widget.set_scheme(USCS)
+        uscs_value = self.widget._grain_table.item(fines_row, 1).text()
+
+        self.assertNotEqual(iso_value, uscs_value)
+        self.assertIn('USCS', self.widget._details_context.text())
+
+    def test_statistics_unit_switch_updates_boxplot_axis_label(self):
+        self.widget.set_dataset_state(self.tabs, selected_tabs=self.tabs)
+
+        self.assertIn('m/d', self.widget._stats_context.text())
+        self.assertIn('m/d', self.widget._box_fig.axes[0].get_ylabel())
+
+        source_index = self.widget._stats_unit_combo.findData(HydraulicConductivityUnit.M_PER_S)
+        self.widget._stats_unit_combo.setCurrentIndex(source_index)
+
+        self.assertIn('m/s', self.widget._stats_context.text())
+        self.assertIn('m/s', self.widget._box_fig.axes[0].get_ylabel())
+
+    def test_statistics_heatmap_uses_stable_domain_method_order(self):
+        self.widget.set_dataset_state(self.tabs, selected_tabs=self.tabs)
+
+        method_labels = [tick.get_text() for tick in self.widget._heat_fig.axes[0].get_yticklabels()]
+        self.assertEqual(method_labels[:2], ['Hazen', 'Beyer'])
 
 
 if __name__ == '__main__':

@@ -81,9 +81,9 @@ This section keeps the original numbered notes easy to locate while the rest of 
     Status: fixed
 
 22. Comparison tab "Details" area needs better focus/space management
-    Status: pending
+    Status: fixed
 
-23. Comparison statistics subtab needs a proper finish
+23. Comparison statistics subtab needs a proper finish [FIXED]
     Status: pending
 
 24. Comparison plots should use the broader plot-style system

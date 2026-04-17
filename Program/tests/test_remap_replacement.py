@@ -14,9 +14,10 @@ import pandas as pd
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 sys.path.insert(0, "Program")
 
-from PyQt6.QtWidgets import QApplication, QDialog, QStackedWidget, QWidget
+from PyQt6.QtWidgets import QApplication, QDialog, QStackedWidget, QTabWidget, QWidget
 
 from gui import column_mapper as column_mapper_module
+from gui import control_panel as control_panel_module
 from gui import error_tab as error_tab_module
 from gui import sheet_selector as sheet_selector_module
 from gui.column_mapper import ColumnMapperDialog
@@ -89,12 +90,15 @@ class _FakeTable:
 
 
 class _ControlPanelHarness:
+    _find_loaded_entry_by_file = ControlPanel._find_loaded_entry_by_file
+    _find_dataset_tab_for_dataset = ControlPanel._find_dataset_tab_for_dataset
     _remove_loaded_entries_for_file = ControlPanel._remove_loaded_entries_for_file
     _split_sheet_key = ControlPanel._split_sheet_key
     _format_file_display_name = ControlPanel._format_file_display_name
     _find_table_row_for_file = ControlPanel._find_table_row_for_file
     remove_file_by_path = ControlPanel.remove_file_by_path
     register_external_file = ControlPanel.register_external_file
+    register_external_issue = ControlPanel.register_external_issue
 
     def __init__(self):
         self.loaded_samples = {}
@@ -172,6 +176,46 @@ class _MainWindowHarness:
 
     def _show_welcome(self):
         self.welcome_shown = True
+
+
+class _ExternalIssueRecorder:
+    def __init__(self):
+        self.calls = []
+
+    def register_external_issue(self, *args, **kwargs):
+        self.calls.append((args, kwargs))
+
+
+class _ErrorTabHost(QWidget):
+    add_error_tab = MainWindow.add_error_tab
+    update_error_tab_message = MainWindow.update_error_tab_message
+    _on_external_load_file_failed = MainWindow._on_external_load_file_failed
+
+    def __init__(self, control_panel=None):
+        super().__init__()
+        self.dataset_tabs_widget = QTabWidget(self)
+        self.dataset_tabs = []
+        self.control_panel = control_panel or _ExternalIssueRecorder()
+        self._bulk_dataset_add_depth = 0
+        self._bulk_dataset_add_dirty = False
+        self._bulk_dataset_add_last_index = None
+        self._bulk_dataset_add_last_label = ""
+        self._external_load_context = {"failed_files": []}
+        self.hide_welcome_calls = 0
+        self.icon_refreshes = 0
+        self.messages = []
+
+    def _hide_welcome(self):
+        self.hide_welcome_calls += 1
+
+    def _refresh_dataset_tab_icons(self):
+        self.icon_refreshes += 1
+
+    def _show_status_message(self, message, ok=True):
+        self.messages.append((message, ok))
+
+    def on_dataset_fixed(self, dataset_input, original_file_path):
+        self.fixed = (dataset_input, original_file_path)
 
 
 class _SidebarRemovalRecorder:
@@ -466,6 +510,63 @@ class TestRemapReplacement(unittest.TestCase):
             panel.deleteLater()
             APP.processEvents()
 
+    def test_register_external_issue_tracks_review_file_for_sidebar_recovery(self):
+        file_key = os.path.normpath(r"C:\temp\review.xlsx:::Sheet A")
+        panel = _ControlPanelHarness()
+
+        panel.register_external_issue(file_key, "Needs manual mapping", status="review")
+
+        self.assertEqual(panel.file_statuses[file_key], "review")
+        self.assertEqual(panel.added_rows, [(file_key, "review", None)])
+        self.assertEqual(panel.sample_info_label.text, "Needs review: review.xlsx [Sheet A]")
+        self.assertTrue(panel.inventory_updated)
+        self.assertEqual(panel.update_calls, 1)
+
+    def test_sidebar_inspect_uses_live_dataset_tab_and_mapping_state(self):
+        file_key = "mapped.xlsx:::Sheet1"
+        dataset = SimpleNamespace(sample_name="Mapped sample", file_path=file_key)
+        mapping_state = {
+            "raw_sieve_mode": False,
+            "column_indices": {"size": 1, "passing": 2},
+        }
+        dataset_tab = _Tab(dataset=dataset)
+        panel = _ControlPanelHarness()
+        panel._active_scheme = object()
+        panel.main_window = SimpleNamespace(
+            dataset_tabs_widget=_FakeTabWidget([dataset_tab]),
+        )
+        panel.loaded_samples["Mapped sample"] = {
+            "file_path": file_key,
+            "data": dataset,
+            "mapping_state": mapping_state,
+        }
+
+        class _FakeInspectorDialog:
+            created = None
+
+            def __init__(self, **kwargs):
+                self.kwargs = kwargs
+                self.exec_called = False
+                _FakeInspectorDialog.created = self
+
+            def exec(self):
+                self.exec_called = True
+                return QDialog.DialogCode.Accepted
+
+        original_dialog = control_panel_module.DataInspectorDialog
+        control_panel_module.DataInspectorDialog = _FakeInspectorDialog
+        try:
+            ControlPanel.show_file_info(panel, file_key)
+        finally:
+            control_panel_module.DataInspectorDialog = original_dialog
+
+        self.assertIsNotNone(_FakeInspectorDialog.created)
+        self.assertTrue(_FakeInspectorDialog.created.exec_called)
+        self.assertIs(_FakeInspectorDialog.created.kwargs["dataset"], dataset)
+        self.assertIs(_FakeInspectorDialog.created.kwargs["dataset_tab"], dataset_tab)
+        self.assertEqual(_FakeInspectorDialog.created.kwargs["mapping_state"], mapping_state)
+        self.assertIs(_FakeInspectorDialog.created.kwargs["scheme"], panel._active_scheme)
+
     def test_main_window_removes_error_and_dataset_tabs_for_file(self):
         file_path = "remapped.xlsx:::Sheet1"
         stale_error = _Tab(file_path=file_path)
@@ -671,6 +772,64 @@ class TestRemapReplacement(unittest.TestCase):
         self.assertEqual(args[2], "Integrating workspace")
         self.assertEqual(kwargs["count_label"], "5 items processed")
         self.assertEqual(kwargs["activity_label"], "Integrating item 2 of 5.")
+
+    def test_update_error_tab_message_creates_missing_error_tab(self):
+        with tempfile.TemporaryDirectory() as tempdir:
+            csv_path = os.path.join(tempdir, "bad.csv")
+            with open(csv_path, "w", newline="", encoding="utf-8") as handle:
+                writer = csv.writer(handle)
+                writer.writerow(["size", "passing"])
+                writer.writerow([1.0, 80.0])
+
+            host = _ErrorTabHost()
+            try:
+                host.update_error_tab_message(csv_path, "Needs manual mapping")
+                APP.processEvents()
+
+                self.assertEqual(host.dataset_tabs_widget.count(), 1)
+                tab = host.dataset_tabs_widget.widget(0)
+                self.assertIsInstance(tab, ErrorTab)
+                self.assertEqual(tab.file_path, csv_path)
+                self.assertEqual(tab.error_message, "Needs manual mapping")
+                self.assertEqual(host.hide_welcome_calls, 1)
+            finally:
+                host.close()
+                host.deleteLater()
+                APP.processEvents()
+
+    def test_external_load_failure_opens_error_tab_and_registers_review_state(self):
+        with tempfile.TemporaryDirectory() as tempdir:
+            csv_path = os.path.join(tempdir, "bad.csv")
+            with open(csv_path, "w", newline="", encoding="utf-8") as handle:
+                writer = csv.writer(handle)
+                writer.writerow(["size", "passing"])
+                writer.writerow([1.0, 80.0])
+
+            recorder = _ExternalIssueRecorder()
+            host = _ErrorTabHost(control_panel=recorder)
+            try:
+                host._on_external_load_file_failed(
+                    csv_path,
+                    "Excel sheet requires manual column mapping",
+                )
+                APP.processEvents()
+
+                self.assertEqual(len(recorder.calls), 1)
+                args, kwargs = recorder.calls[0]
+                self.assertEqual(
+                    args,
+                    (csv_path, "Excel sheet requires manual column mapping"),
+                )
+                self.assertEqual(kwargs["status"], "review")
+                self.assertEqual(host.dataset_tabs_widget.count(), 1)
+                self.assertEqual(
+                    host._external_load_context["failed_files"],
+                    ["bad.csv: Excel sheet requires manual column mapping"],
+                )
+            finally:
+                host.close()
+                host.deleteLater()
+                APP.processEvents()
 
     def test_batch_multisheet_selection_applies_once_across_sheet_order_variants(self):
         with tempfile.TemporaryDirectory() as tempdir:

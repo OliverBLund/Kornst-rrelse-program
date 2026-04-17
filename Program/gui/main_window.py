@@ -1666,8 +1666,12 @@ class MainWindow(FramelessMainWindowMixin, QMainWindow):
             self._save_recent_file(file_path)
 
     def _on_external_load_file_failed(self, file_path: str, detail: str):
+        self.control_panel.register_external_issue(file_path, detail, status="review")
+        self.update_error_tab_message(file_path, detail)
+
         if self._external_load_context is None:
             return
+
         self._external_load_context.setdefault("failed_files", []).append(
             f"{os.path.basename(file_path)}: {detail}"
         )
@@ -1824,6 +1828,8 @@ class MainWindow(FramelessMainWindowMixin, QMainWindow):
         for tab in self.dataset_tabs:
             if hasattr(tab, 'set_scheme'):
                 tab.set_scheme(scheme)
+        if hasattr(self, 'comparison_tab'):
+            self.comparison_tab.set_scheme(scheme)
         self.export_tab.set_scheme(scheme)
         if hasattr(self, 'reporting_tab'):
             self.reporting_tab.set_scheme(scheme)
@@ -1887,6 +1893,7 @@ class MainWindow(FramelessMainWindowMixin, QMainWindow):
         temperature = self.control_panel.temp_spinbox.value()
         dataset_tab.set_parameters(temperature)
         dataset_tab.calculation_complete.connect(self._on_calculation_complete)
+        dataset_tab.data_updated.connect(self._on_dataset_data_updated)
 
         tab_label = dataset.sample_name
         tab_index = self.dataset_tabs_widget.addTab(dataset_tab, tab_label)
@@ -2052,7 +2059,9 @@ class MainWindow(FramelessMainWindowMixin, QMainWindow):
                 self.dataset_tabs_widget.setTabToolTip(i, file_name)
                 self.dataset_tabs_widget.tabBar().setTabTextColor(i, QColor(211, 47, 47))
                 self._refresh_dataset_tab_icons()
-                break
+                return
+
+        self.add_error_tab(file_path, error_message)
 
     def close_dataset_tab(self, index: int):
         widget = self.dataset_tabs_widget.widget(index)
@@ -2228,6 +2237,18 @@ class MainWindow(FramelessMainWindowMixin, QMainWindow):
                     self.rich_status_bar.set_segment("K\u0304", f"{gmean:.2f} m/d")
             except Exception:
                 pass
+
+    def _on_dataset_data_updated(self, sample_name: str) -> None:
+        self._update_export_tab()
+        sender = self.sender()
+        file_path = getattr(getattr(sender, "dataset", None), "file_path", None)
+        if file_path:
+            try:
+                self.control_panel._push_card_meta(file_path)
+            except Exception:
+                pass
+        self._refresh_dataset_status_segments(sample_name)
+        self._show_status_message(f"Updated data: {sample_name}")
 
     def _update_export_tab(self):
         datasets = []

@@ -210,6 +210,7 @@ class DatasetTab(QWidget):
         # Statistics tab
         self.statistics_widget = self.create_statistics_tab()
         self.nested_tabs.addTab(self.statistics_widget, icon("fa6s.chart-column", C.TEXT_MID), "Statistics")
+
         self._nested_tab_fader = TabFadeInController(
             self.nested_tabs,
             self,
@@ -714,6 +715,79 @@ class DatasetTab(QWidget):
         self.statistics_tab = StatisticsTab(self.dataset, parent=self)
 
         return self.statistics_tab
+    def apply_distribution_rows(self, rows: List[tuple[float, float]]) -> None:
+        particle_sizes = [size for size, _ in rows]
+        percent_passing = [percent for _, percent in rows]
+
+        replacement = GrainSizeData(
+            sample_name=self.dataset.sample_name,
+            temperature=self.temperature,
+            porosity=self.dataset.porosity,
+            particle_sizes=particle_sizes,
+            percent_passing=percent_passing,
+            comments=self.dataset.comments,
+            file_path=self.dataset.file_path,
+        )
+
+        manual_porosity_override = self._has_manual_porosity_override()
+        preserved_porosity = self.porosity
+
+        self.dataset.particle_sizes = list(replacement.particle_sizes)
+        self.dataset.percent_passing = list(replacement.percent_passing)
+        self.dataset.validation_messages = list(replacement.validation_messages)
+        self.dataset.calculated_porosity = replacement.calculated_porosity
+
+        if manual_porosity_override:
+            self.dataset.current_porosity = preserved_porosity
+            self.dataset.porosity = preserved_porosity
+            self.porosity = preserved_porosity
+        else:
+            effective_porosity = (
+                replacement.current_porosity
+                if replacement.current_porosity is not None
+                else replacement.porosity
+            )
+            self.dataset.current_porosity = effective_porosity
+            self.dataset.porosity = effective_porosity
+            self.porosity = effective_porosity
+
+        self._clear_stale_mass_data()
+        self.load_dataset_data()
+
+        if self.current_results:
+            selected_methods = [result.method_name for result in self.current_results]
+            self.calculate_k_values(selected_methods)
+
+        self.data_updated.emit(self.dataset.sample_name)
+
+    def _has_manual_porosity_override(self) -> bool:
+        calculated = getattr(self.dataset, "calculated_porosity", None)
+        if calculated is None:
+            return False
+        return abs(float(self.porosity) - float(calculated)) > 1e-9
+
+    def _clear_stale_mass_data(self) -> None:
+        for attr in (
+            "mass_values",
+            "mass_grams",
+            "fraction_masses",
+            "retained_masses",
+            "retained_mass_grams",
+            "retained_weights",
+            "weights_g",
+        ):
+            if hasattr(self.dataset, attr):
+                setattr(self.dataset, attr, None)
+
+    @staticmethod
+    def _format_data_value(value: float) -> str:
+        if value >= 10:
+            return f"{value:.1f}"
+        if value >= 1:
+            return f"{value:.2f}"
+        if value >= 0.1:
+            return f"{value:.3f}"
+        return f"{value:.4f}"
 
     def load_dataset_data(self):
         """Load and display the dataset data"""

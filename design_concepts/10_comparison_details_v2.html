@@ -1,0 +1,706 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>Comparison Details Concept V2</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Playfair+Display:wght@600;700&family=Source+Sans+3:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.2/css/all.min.css">
+  <style>
+    :root{
+      --bg:#f3eee6;
+      --bg2:#ece4d6;
+      --paper:#fbf8f2;
+      --paper2:#f6f0e7;
+      --line:#d7cbb8;
+      --line2:#bca98e;
+      --text:#34281d;
+      --mid:#665544;
+      --muted:#8a7863;
+      --olive:#6b8e23;
+      --olive2:#556f1c;
+      --earth:#9b6a38;
+      --amber:#bb8c2f;
+      --shadow:0 18px 44px rgba(58,42,26,.08);
+      --r:12px;
+      --ui:"Source Sans 3", sans-serif;
+      --mono:"IBM Plex Mono", monospace;
+      --disp:"Playfair Display", Georgia, serif;
+      --c1:#3a7ea0;
+      --c2:#6b8e23;
+      --c3:#b46428;
+      --c4:#2a9d8f;
+      --c5:#8b4513;
+      --c6:#6b5ca5;
+    }
+    *{box-sizing:border-box}
+    html,body{height:100%}
+    body{
+      margin:0;
+      font-family:var(--ui);
+      color:var(--text);
+      background:
+        radial-gradient(circle at top left, rgba(255,255,255,.42), transparent 32%),
+        linear-gradient(180deg, #f8f4ed 0%, var(--bg) 100%);
+    }
+    .page{
+      min-height:100%;
+      padding:18px;
+      display:flex;
+      align-items:center;
+      justify-content:center;
+    }
+    .app{
+      width:min(1460px, calc(100vw - 36px));
+      min-height:840px;
+      background:rgba(252,249,243,.86);
+      border:1px solid rgba(154,126,95,.14);
+      border-radius:18px;
+      box-shadow:var(--shadow);
+      overflow:hidden;
+      display:flex;
+      flex-direction:column;
+      backdrop-filter:blur(8px);
+    }
+    .top{
+      display:flex;
+      align-items:flex-end;
+      gap:16px;
+      padding:18px 20px 14px;
+      border-bottom:1px solid var(--line);
+      background:linear-gradient(180deg, rgba(255,255,255,.72), rgba(246,239,228,.78));
+    }
+    .eyebrow{
+      display:inline-flex;
+      align-items:center;
+      gap:7px;
+      min-height:26px;
+      padding:0 10px;
+      border-radius:999px;
+      border:1px solid rgba(107,142,35,.22);
+      background:rgba(107,142,35,.08);
+      color:var(--olive2);
+      font-family:var(--mono);
+      font-size:10px;
+      font-weight:700;
+      letter-spacing:.08em;
+      text-transform:uppercase;
+      flex:0 0 auto;
+    }
+    .title{
+      min-width:0;
+    }
+    .title h1{
+      margin:0;
+      font-family:var(--disp);
+      font-size:27px;
+      line-height:1.04;
+      font-weight:700;
+      letter-spacing:.01em;
+    }
+    .title p{
+      margin:4px 0 0;
+      font-size:12px;
+      color:var(--muted);
+    }
+    .top .spacer{flex:1}
+    .btn{
+      min-height:32px;
+      padding:0 12px;
+      border-radius:10px;
+      border:1px solid var(--line);
+      background:var(--paper);
+      color:var(--mid);
+      font-size:13px;
+      font-weight:600;
+      display:inline-flex;
+      align-items:center;
+      gap:8px;
+    }
+    .btn.on{
+      background:rgba(107,142,35,.10);
+      border-color:rgba(107,142,35,.28);
+      color:var(--olive2);
+    }
+    .main{
+      flex:1;
+      display:grid;
+      grid-template-columns:minmax(0,1fr) 272px;
+      min-height:0;
+    }
+    .workspace{
+      min-width:0;
+      display:flex;
+      flex-direction:column;
+      background:linear-gradient(180deg, rgba(255,255,255,.18), rgba(255,255,255,0));
+    }
+    .toolbar{
+      display:flex;
+      align-items:center;
+      gap:8px;
+      flex-wrap:wrap;
+      padding:12px 18px 10px;
+      border-bottom:1px solid rgba(215,203,184,.76);
+      background:rgba(250,245,237,.68);
+    }
+    .seg{
+      display:inline-flex;
+      align-items:center;
+      border:1px solid var(--line);
+      border-radius:11px;
+      overflow:hidden;
+      background:var(--paper);
+    }
+    .seg button{
+      border:none;
+      background:transparent;
+      min-height:34px;
+      padding:0 13px;
+      color:var(--mid);
+      font-size:13px;
+      font-weight:600;
+      display:flex;
+      align-items:center;
+      gap:7px;
+    }
+    .seg button.on{
+      background:rgba(107,142,35,.09);
+      color:var(--olive2);
+    }
+    .context{
+      margin-left:auto;
+      display:flex;
+      align-items:center;
+      gap:10px;
+      color:var(--muted);
+      font-size:11px;
+      font-family:var(--mono);
+      letter-spacing:.02em;
+    }
+    .context strong{color:var(--mid)}
+    .dataset-strip{
+      display:flex;
+      align-items:center;
+      gap:8px;
+      padding:10px 18px;
+      border-bottom:1px solid rgba(215,203,184,.76);
+      background:rgba(247,241,231,.72);
+      overflow:auto hidden;
+      scrollbar-width:thin;
+    }
+    .chip{
+      display:inline-flex;
+      align-items:center;
+      gap:8px;
+      flex:0 0 auto;
+      min-height:32px;
+      padding:0 11px;
+      border-radius:999px;
+      border:1px solid rgba(188,169,142,.84);
+      background:var(--paper);
+      color:var(--mid);
+      font-size:12px;
+      font-weight:600;
+    }
+    .chip.pin{
+      background:rgba(107,142,35,.08);
+      border-color:rgba(107,142,35,.22);
+      color:var(--olive2);
+    }
+    .dot{
+      width:8px;
+      height:8px;
+      border-radius:50%;
+      flex:0 0 auto;
+    }
+    .focus-bar{
+      display:flex;
+      align-items:center;
+      gap:10px;
+      padding:8px 18px;
+      border-bottom:1px solid rgba(215,203,184,.76);
+      background:rgba(250,247,241,.74);
+      color:var(--muted);
+      font-size:11px;
+      font-family:var(--mono);
+      flex-wrap:wrap;
+    }
+    .focus-bar .flag{
+      display:inline-flex;
+      align-items:center;
+      gap:7px;
+      color:var(--mid);
+    }
+    .table-wrap{
+      flex:1;
+      min-height:0;
+      overflow:auto;
+      background:var(--paper);
+    }
+    table{
+      width:max(980px,100%);
+      border-collapse:separate;
+      border-spacing:0;
+      table-layout:fixed;
+      font-size:13px;
+    }
+    thead th{
+      position:sticky;
+      top:0;
+      z-index:3;
+      background:rgba(246,240,231,.96);
+      backdrop-filter:blur(6px);
+      border-bottom:2px solid var(--line2);
+      padding:10px 12px;
+      color:var(--mid);
+      font-weight:700;
+      text-align:right;
+    }
+    thead th:first-child{
+      left:0;
+      z-index:4;
+      text-align:left;
+    }
+    tbody td{
+      padding:10px 12px;
+      border-bottom:1px solid rgba(215,203,184,.54);
+      text-align:right;
+      color:var(--text);
+    }
+    tbody td:first-child{
+      position:sticky;
+      left:0;
+      z-index:2;
+      text-align:left;
+      background:rgba(251,248,242,.98);
+      border-right:1px solid rgba(215,203,184,.54);
+    }
+    .param{
+      display:flex;
+      flex-direction:column;
+      gap:2px;
+    }
+    .param-head{
+      display:flex;
+      align-items:center;
+      gap:8px;
+    }
+    .pin{
+      width:18px;
+      height:18px;
+      display:inline-flex;
+      align-items:center;
+      justify-content:center;
+      border-radius:50%;
+      font-size:10px;
+      flex:0 0 auto;
+      background:rgba(107,142,35,.09);
+      border:1px solid rgba(107,142,35,.18);
+      color:var(--olive2);
+    }
+    .pin.off{
+      background:rgba(255,255,255,.45);
+      border-color:rgba(188,169,142,.82);
+      color:var(--muted);
+    }
+    .param strong{
+      font-size:13px;
+      color:var(--text);
+    }
+    .param span{
+      font-size:11px;
+      color:var(--muted);
+    }
+    .em{font-weight:700}
+    .heat-low{background:rgba(107,142,35,.07)}
+    .heat-mid{background:rgba(187,140,47,.08)}
+    .heat-high{background:rgba(180,100,40,.09)}
+    .soft{
+      display:inline-flex;
+      align-items:center;
+      justify-content:center;
+      min-width:58px;
+      padding:4px 9px;
+      border-radius:999px;
+      border:1px solid rgba(188,169,142,.48);
+      background:rgba(255,255,255,.54);
+      font-size:11px;
+      font-weight:700;
+      color:var(--mid);
+    }
+    .rail{
+      border-left:1px solid var(--line);
+      background:linear-gradient(180deg, rgba(244,238,228,.98), rgba(236,228,214,.98));
+      display:flex;
+      flex-direction:column;
+      min-width:0;
+    }
+    .rail-sec{
+      padding:15px 16px 14px;
+      border-bottom:1px solid rgba(188,169,142,.72);
+    }
+    .rail-sec h3{
+      margin:0 0 10px;
+      font-family:var(--mono);
+      font-size:10px;
+      font-weight:700;
+      letter-spacing:.10em;
+      text-transform:uppercase;
+      color:var(--muted);
+    }
+    .focus-list,.insight-list,.status-list{display:flex;flex-direction:column;gap:8px}
+    .focus-item,.status-item{
+      display:flex;
+      align-items:center;
+      gap:10px;
+      min-height:36px;
+      padding:0 10px;
+      border:1px solid rgba(188,169,142,.76);
+      border-radius:10px;
+      background:rgba(255,255,255,.35);
+      color:var(--mid);
+      font-size:12px;
+      font-weight:600;
+    }
+    .focus-item.on{
+      background:rgba(107,142,35,.08);
+      border-color:rgba(107,142,35,.2);
+      color:var(--olive2);
+    }
+    .insight{
+      padding:0 0 8px;
+      border-bottom:1px dashed rgba(188,169,142,.66);
+    }
+    .insight:last-child{
+      padding-bottom:0;
+      border-bottom:none;
+    }
+    .insight strong{
+      display:block;
+      margin-bottom:3px;
+      font-size:12px;
+      color:var(--text);
+    }
+    .insight p{
+      margin:0;
+      font-size:12px;
+      color:var(--mid);
+      line-height:1.35;
+    }
+    .status-item{
+      justify-content:space-between;
+      min-height:unset;
+      padding:9px 10px;
+      align-items:flex-start;
+    }
+    .status-copy strong{
+      display:block;
+      margin-bottom:2px;
+      font-size:12px;
+      color:var(--text);
+    }
+    .status-copy span{
+      font-size:11px;
+      color:var(--muted);
+    }
+    .badge{
+      display:inline-flex;
+      align-items:center;
+      justify-content:center;
+      min-width:50px;
+      min-height:22px;
+      padding:0 8px;
+      border-radius:999px;
+      font-family:var(--mono);
+      font-size:10px;
+      font-weight:800;
+      letter-spacing:.04em;
+      text-transform:uppercase;
+    }
+    .ok{background:rgba(107,142,35,.09); color:var(--olive2); border:1px solid rgba(107,142,35,.18)}
+    .warn{background:rgba(187,140,47,.11); color:#8b6418; border:1px solid rgba(187,140,47,.2)}
+    .na{background:rgba(188,169,142,.16); color:var(--muted); border:1px solid rgba(188,169,142,.32)}
+    .legend{
+      display:grid;
+      gap:8px;
+      font-size:12px;
+      color:var(--mid);
+    }
+    .legend-row{
+      display:flex;
+      align-items:center;
+      justify-content:space-between;
+      gap:10px;
+    }
+    .legend-left{
+      display:inline-flex;
+      align-items:center;
+      gap:8px;
+    }
+    .band{
+      width:13px;
+      height:13px;
+      border-radius:4px;
+      border:1px solid rgba(124,99,72,.12);
+    }
+    .foot{
+      margin-top:auto;
+      padding:12px 16px 14px;
+      border-top:1px solid rgba(188,169,142,.72);
+      background:rgba(255,255,255,.2);
+      color:var(--muted);
+      font-size:11px;
+      line-height:1.4;
+    }
+    @media (max-width:1180px){
+      .main{grid-template-columns:1fr}
+      .rail{border-left:none;border-top:1px solid var(--line)}
+      .context{width:100%;margin-left:0}
+    }
+    @media (max-width:760px){
+      .page{padding:10px}
+      .app{width:100%;min-height:unset}
+      .top{align-items:flex-start;flex-wrap:wrap}
+      .toolbar{gap:7px}
+      .context{font-size:10px}
+    }
+  </style>
+</head>
+<body>
+  <div class="page">
+    <div class="app">
+      <div class="top">
+        <div class="eyebrow"><i class="fa-solid fa-code-compare"></i>Comparison Details V2</div>
+        <div class="title">
+          <h1>Focused Comparison Surface</h1>
+          <p>The matrix leads. Everything else supports orientation, filtering, or judgment.</p>
+        </div>
+        <div class="spacer"></div>
+        <button class="btn"><i class="fa-solid fa-arrow-rotate-left"></i>Current</button>
+        <button class="btn on"><i class="fa-solid fa-wand-magic-sparkles"></i>Refined</button>
+      </div>
+
+      <div class="main">
+        <div class="workspace">
+          <div class="toolbar">
+            <div class="seg">
+              <button class="on"><i class="fa-solid fa-ruler"></i>Grain</button>
+              <button><i class="fa-solid fa-water"></i>K-Values</button>
+            </div>
+            <div class="seg">
+              <button class="on"><i class="fa-solid fa-ruler-combined"></i>Core</button>
+              <button><i class="fa-solid fa-layer-group"></i>All</button>
+              <button><i class="fa-solid fa-tags"></i>Class</button>
+            </div>
+            <div class="seg">
+              <button class="on"><i class="fa-solid fa-fire"></i>Heat</button>
+              <button><i class="fa-solid fa-thumbtack"></i>Pinned</button>
+            </div>
+            <div class="context">
+              <span>6 datasets</span>
+              <span>·</span>
+              <span><strong>ISO 14688</strong></span>
+              <span>·</span>
+              <span><strong>m/d</strong> in K mode</span>
+            </div>
+          </div>
+
+          <div class="dataset-strip">
+            <div class="chip pin"><span class="dot" style="background:var(--c1)"></span>DK-07<i class="fa-solid fa-thumbtack"></i></div>
+            <div class="chip pin"><span class="dot" style="background:var(--c2)"></span>GW-2024-A<i class="fa-solid fa-thumbtack"></i></div>
+            <div class="chip"><span class="dot" style="background:var(--c3)"></span>LC-11</div>
+            <div class="chip"><span class="dot" style="background:var(--c4)"></span>BH-03</div>
+            <div class="chip"><span class="dot" style="background:var(--c5)"></span>PT-18</div>
+            <div class="chip"><span class="dot" style="background:var(--c6)"></span>SY-04</div>
+          </div>
+
+          <div class="focus-bar">
+            <span class="flag"><i class="fa-solid fa-thumbtack"></i>3 pinned rows stay at the top</span>
+            <span class="flag"><i class="fa-solid fa-swatchbook"></i>classification labels follow active scheme</span>
+            <span class="flag"><i class="fa-solid fa-triangle-exclamation"></i>K warnings surface in the inspector rail</span>
+          </div>
+
+          <div class="table-wrap">
+            <table>
+              <thead>
+                <tr>
+                  <th style="width:220px">Parameter</th>
+                  <th><span class="dot" style="background:var(--c1)"></span> DK-07</th>
+                  <th><span class="dot" style="background:var(--c2)"></span> GW-2024-A</th>
+                  <th><span class="dot" style="background:var(--c3)"></span> LC-11</th>
+                  <th><span class="dot" style="background:var(--c4)"></span> BH-03</th>
+                  <th><span class="dot" style="background:var(--c5)"></span> PT-18</th>
+                  <th><span class="dot" style="background:var(--c6)"></span> SY-04</th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr>
+                  <td><div class="param"><div class="param-head"><span class="pin"><i class="fa-solid fa-thumbtack"></i></span><strong>D10</strong></div><span>Effective size (mm)</span></div></td>
+                  <td class="heat-mid em">0.160</td>
+                  <td class="heat-low">0.062</td>
+                  <td class="heat-high">0.420</td>
+                  <td class="heat-mid">0.210</td>
+                  <td class="heat-low">0.084</td>
+                  <td class="heat-high">0.530</td>
+                </tr>
+                <tr>
+                  <td><div class="param"><div class="param-head"><span class="pin off"><i class="fa-solid fa-thumbtack"></i></span><strong>D30</strong></div><span>30th percentile (mm)</span></div></td>
+                  <td class="heat-mid">0.300</td>
+                  <td class="heat-low">0.110</td>
+                  <td class="heat-high">0.680</td>
+                  <td class="heat-mid">0.350</td>
+                  <td class="heat-low">0.140</td>
+                  <td class="heat-high">0.790</td>
+                </tr>
+                <tr>
+                  <td><div class="param"><div class="param-head"><span class="pin"><i class="fa-solid fa-thumbtack"></i></span><strong>D50</strong></div><span>Median diameter (mm)</span></div></td>
+                  <td class="heat-mid em">0.420</td>
+                  <td class="heat-low">0.180</td>
+                  <td class="heat-high">0.890</td>
+                  <td class="heat-mid">0.470</td>
+                  <td class="heat-low">0.210</td>
+                  <td class="heat-high">1.060</td>
+                </tr>
+                <tr>
+                  <td><div class="param"><div class="param-head"><span class="pin off"><i class="fa-solid fa-thumbtack"></i></span><strong>D60</strong></div><span>60th percentile (mm)</span></div></td>
+                  <td class="heat-mid">0.560</td>
+                  <td class="heat-low">0.220</td>
+                  <td class="heat-high">1.100</td>
+                  <td class="heat-mid">0.610</td>
+                  <td class="heat-low">0.270</td>
+                  <td class="heat-high">1.280</td>
+                </tr>
+                <tr>
+                  <td><div class="param"><div class="param-head"><span class="pin"><i class="fa-solid fa-thumbtack"></i></span><strong>Cu</strong></div><span>Uniformity coefficient</span></div></td>
+                  <td class="heat-mid em">3.50</td>
+                  <td class="heat-mid">3.55</td>
+                  <td class="heat-low">2.62</td>
+                  <td class="heat-mid">2.90</td>
+                  <td class="heat-high">4.15</td>
+                  <td class="heat-high">4.88</td>
+                </tr>
+                <tr>
+                  <td><div class="param"><div class="param-head"><span class="pin off"><i class="fa-solid fa-thumbtack"></i></span><strong>Cc</strong></div><span>Curvature coefficient</span></div></td>
+                  <td>1.05</td>
+                  <td>0.98</td>
+                  <td>0.94</td>
+                  <td>1.10</td>
+                  <td>1.22</td>
+                  <td>1.18</td>
+                </tr>
+                <tr>
+                  <td><div class="param"><div class="param-head"><span class="pin off"><i class="fa-solid fa-thumbtack"></i></span><strong>Fines%</strong></div><span>% passing 0.063 mm</span></div></td>
+                  <td class="heat-low">2.1%</td>
+                  <td class="heat-mid">8.4%</td>
+                  <td class="heat-low">0.8%</td>
+                  <td class="heat-mid">6.2%</td>
+                  <td class="heat-high">12.9%</td>
+                  <td class="heat-mid">5.4%</td>
+                </tr>
+                <tr>
+                  <td><div class="param"><div class="param-head"><span class="pin off"><i class="fa-solid fa-thumbtack"></i></span><strong>Dominant class</strong></div><span>Soil class</span></div></td>
+                  <td><span class="soft">Med. Sand</span></td>
+                  <td><span class="soft">Fine Sand</span></td>
+                  <td><span class="soft">Coarse Sand</span></td>
+                  <td><span class="soft">Med. Sand</span></td>
+                  <td><span class="soft">Fine Sand</span></td>
+                  <td><span class="soft">Coarse Sand</span></td>
+                </tr>
+                <tr>
+                  <td><div class="param"><div class="param-head"><span class="pin off"><i class="fa-solid fa-thumbtack"></i></span><strong>USCS</strong></div><span>Classification code</span></div></td>
+                  <td>SP</td>
+                  <td>SP-SM</td>
+                  <td>SP</td>
+                  <td>SW</td>
+                  <td>SM</td>
+                  <td>SW-SP</td>
+                </tr>
+                <tr>
+                  <td><div class="param"><div class="param-head"><span class="pin off"><i class="fa-solid fa-thumbtack"></i></span><strong>K reference</strong></div><span>Geom. mean snapshot (m/d)</span></div></td>
+                  <td><span class="soft">12.3</span></td>
+                  <td><span class="soft">3.1</span></td>
+                  <td><span class="soft">48.7</span></td>
+                  <td><span class="soft">16.4</span></td>
+                  <td><span class="soft">2.4</span></td>
+                  <td><span class="soft">57.2</span></td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+        </div>
+
+        <aside class="rail">
+          <section class="rail-sec">
+            <h3>Focus</h3>
+            <div class="focus-list">
+              <div class="focus-item on"><i class="fa-solid fa-ruler"></i>Grain parameter matrix</div>
+              <div class="focus-item"><i class="fa-solid fa-water"></i>K-value matrix</div>
+              <div class="focus-item"><i class="fa-solid fa-thumbtack"></i>Pinned critical rows</div>
+            </div>
+          </section>
+
+          <section class="rail-sec">
+            <h3>Insights</h3>
+            <div class="insight-list">
+              <div class="insight">
+                <strong>Largest D50 spread</strong>
+                <p>SY-04 and GW-2024-A separate this set most clearly. That row should stay pinned.</p>
+              </div>
+              <div class="insight">
+                <strong>Likely story</strong>
+                <p>Two finer samples cluster, while LC-11 and SY-04 define the coarse end of the group.</p>
+              </div>
+              <div class="insight">
+                <strong>Why this layout</strong>
+                <p>The matrix stays primary. Interpretation lives here, not in another competing full table.</p>
+              </div>
+            </div>
+          </section>
+
+          <section class="rail-sec">
+            <h3>Method Status</h3>
+            <div class="status-list">
+              <div class="status-item">
+                <div class="status-copy"><strong>Hazen</strong><span>Valid for 5 / 6 datasets</span></div>
+                <div class="badge ok">OK</div>
+              </div>
+              <div class="status-item">
+                <div class="status-copy"><strong>Beyer</strong><span>One dataset outside range</span></div>
+                <div class="badge warn">Warn</div>
+              </div>
+              <div class="status-item">
+                <div class="status-copy"><strong>Pavchich</strong><span>Unavailable on finer samples</span></div>
+                <div class="badge na">N/A</div>
+              </div>
+            </div>
+          </section>
+
+          <section class="rail-sec">
+            <h3>Heat Legend</h3>
+            <div class="legend">
+              <div class="legend-row">
+                <span class="legend-left"><span class="band" style="background:rgba(107,142,35,.07)"></span>Lower range</span>
+                <span>green bias</span>
+              </div>
+              <div class="legend-row">
+                <span class="legend-left"><span class="band" style="background:rgba(187,140,47,.08)"></span>Middle range</span>
+                <span>amber bias</span>
+              </div>
+              <div class="legend-row">
+                <span class="legend-left"><span class="band" style="background:rgba(180,100,40,.09)"></span>Higher range</span>
+                <span>earth bias</span>
+              </div>
+            </div>
+          </section>
+
+          <div class="foot">
+            Refined direction: less chrome, fewer boxes, stronger matrix-first hierarchy, and a quieter inspector rail.
+          </div>
+        </aside>
+      </div>
+    </div>
+  </div>
+</body>
+</html>
