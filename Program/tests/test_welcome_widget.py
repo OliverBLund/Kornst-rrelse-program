@@ -18,19 +18,34 @@ APP = QApplication.instance() or QApplication([])
 
 
 class TestWelcomeWidget(unittest.TestCase):
-    def test_load_batch_button_emits_signal_when_clicked(self):
+    def test_load_processed_button_emits_mode_signal_when_clicked(self):
         widget = WelcomeWidget(recent_files=[], recent_sessions=[])
         emitted = []
-        widget.load_files_requested.connect(lambda: emitted.append(True))
+        widget.load_files_with_mode_requested.connect(emitted.append)
 
         load_btn = next(
             btn for btn in widget.findChildren(QPushButton)
-            if btn.text() == "Load Batch Files"
+            if btn.text() == "Processed Curve Data"
         )
         load_btn.click()
         APP.processEvents()
 
-        self.assertEqual(emitted, [True])
+        self.assertEqual(emitted, ["processed"])
+        widget.deleteLater()
+
+    def test_load_raw_sieve_button_emits_mode_signal_when_clicked(self):
+        widget = WelcomeWidget(recent_files=[], recent_sessions=[])
+        emitted = []
+        widget.load_files_with_mode_requested.connect(emitted.append)
+
+        load_btn = next(
+            btn for btn in widget.findChildren(QPushButton)
+            if btn.text() == "Raw Sieve Weighings"
+        )
+        load_btn.click()
+        APP.processEvents()
+
+        self.assertEqual(emitted, ["raw_sieve"])
         widget.deleteLater()
 
     def test_resume_button_disabled_without_recent_sessions(self):

@@ -99,12 +99,14 @@ class _ControlPanelHarness:
     remove_file_by_path = ControlPanel.remove_file_by_path
     register_external_file = ControlPanel.register_external_file
     register_external_issue = ControlPanel.register_external_issue
+    _queue_raw_sieve_files_for_mapping = ControlPanel._queue_raw_sieve_files_for_mapping
 
     def __init__(self):
         self.loaded_samples = {}
         self.file_statuses = {}
         self.file_mapping_states = {}
         self.dataset_loaded_successfully = _SignalRecorder()
+        self.error_dataset = _SignalRecorder()
         self.sample_info_label = _Label()
         self._file_list = _FileList()
         self.samples_table = _FakeTable([])
@@ -487,6 +489,21 @@ class TestRemapReplacement(unittest.TestCase):
         emitted_datasets, emitted_path = panel.dataset_loaded_successfully.calls[0]
         self.assertEqual(emitted_path, file_path)
         self.assertEqual(len(emitted_datasets), 2)
+
+    def test_raw_sieve_path_queues_files_for_mapping_with_raw_mode_state(self):
+        panel = _ControlPanelHarness()
+        file_path = os.path.normpath(r"C:\temp\raw_sieve.csv")
+
+        ControlPanel._queue_raw_sieve_files_for_mapping(panel, [file_path])
+
+        self.assertEqual(panel.file_statuses[file_path], "review")
+        self.assertTrue(panel.file_mapping_states[file_path]["raw_sieve_mode"])
+        self.assertEqual(panel.added_rows, [(file_path, "review", None)])
+        self.assertEqual(len(panel.error_dataset.calls), 1)
+        emitted_path, message = panel.error_dataset.calls[0]
+        self.assertEqual(emitted_path, file_path)
+        self.assertIn("Raw sieve weighing data requires column mapping", message)
+        self.assertIn("queued for mapping", panel.sample_info_label.text)
 
     def test_register_external_file_formats_sheet_keys_for_display(self):
         panel = ControlPanel()

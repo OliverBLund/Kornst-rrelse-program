@@ -241,9 +241,22 @@ class TestComparisonTabSelectionState(unittest.TestCase):
         )
         heated_item = self.widget._grain_table.item(d50_row, 1)
         heated_color = heated_item.data(comparison_tab_module.Qt.ItemDataRole.BackgroundRole)
+        heated_widget = self.widget._grain_table.cellWidget(d50_row, 1)
 
         self.assertIsNotNone(heated_color)
         self.assertGreater(heated_color.alpha(), 0)
+        self.assertIn(heated_color.name(), heated_widget.styleSheet())
+
+    def test_method_column_uses_hidden_sort_item_without_duplicate_visible_text(self):
+        self.widget.set_dataset_state(self.tabs, selected_tabs=self.tabs)
+        self.widget._set_details_mode('k')
+
+        method_item = self.widget._k_table.item(0, 0)
+        method_widget = self.widget._k_table.cellWidget(0, 0)
+        method_label = method_widget.layout().itemAt(0).widget().text()
+
+        self.assertEqual(method_item.text(), '')
+        self.assertEqual(method_item.data(comparison_tab_module.Qt.ItemDataRole.UserRole), method_label.lower())
 
     def test_grain_table_header_sort_reorders_rows_by_dataset_values(self):
         self.widget.set_dataset_state(self.tabs, selected_tabs=self.tabs)
@@ -263,6 +276,56 @@ class TestComparisonTabSelectionState(unittest.TestCase):
 
         self.assertGreater(len(values), 3)
         self.assertEqual(values, sorted(values, reverse=True))
+
+    def test_details_row_header_column_has_readable_fixed_width(self):
+        self.widget.set_dataset_state(self.tabs, selected_tabs=self.tabs)
+
+        self.assertGreaterEqual(self.widget._grain_table.columnWidth(0), 200)
+
+        self.widget._set_details_mode('k')
+        self.assertGreaterEqual(self.widget._k_table.columnWidth(0), 200)
+
+    def test_dataset_subset_change_recalculates_details_heat_cells(self):
+        self.widget.set_dataset_state(self.tabs, selected_tabs=self.tabs)
+        self.widget._set_details_mode('k')
+
+        hazen_row = next(
+            row for row in range(self.widget._k_table.rowCount())
+            if self.widget._k_table.cellWidget(row, 0).layout().itemAt(0).widget().text() == 'Hazen'
+        )
+        sample_b_initial = self.widget._k_table.cellWidget(hazen_row, 2).styleSheet()
+
+        self.widget.set_dataset_state(self.tabs, selected_tabs=[self.tabs[1], self.tabs[2]])
+        self.widget._set_details_mode('k')
+        hazen_row = next(
+            row for row in range(self.widget._k_table.rowCount())
+            if self.widget._k_table.cellWidget(row, 0).layout().itemAt(0).widget().text() == 'Hazen'
+        )
+        sample_b_after_subset_change = self.widget._k_table.cellWidget(hazen_row, 1).styleSheet()
+
+        self.assertNotEqual(sample_b_initial, sample_b_after_subset_change)
+        self.assertIn(comparison_tab_module._heat_color(0.0).name(), sample_b_after_subset_change)
+
+    def test_result_change_recalculates_details_heat_cells_on_update(self):
+        self.widget.set_dataset_state(self.tabs, selected_tabs=self.tabs)
+        self.widget._set_details_mode('k')
+
+        hazen_row = next(
+            row for row in range(self.widget._k_table.rowCount())
+            if self.widget._k_table.cellWidget(row, 0).layout().itemAt(0).widget().text() == 'Hazen'
+        )
+        sample_b_initial = self.widget._k_table.cellWidget(hazen_row, 2).styleSheet()
+
+        self.tabs[1]._results = build_results(4.0)
+        self.widget.update_comparison()
+        hazen_row = next(
+            row for row in range(self.widget._k_table.rowCount())
+            if self.widget._k_table.cellWidget(row, 0).layout().itemAt(0).widget().text() == 'Hazen'
+        )
+        sample_b_after_result_change = self.widget._k_table.cellWidget(hazen_row, 2).styleSheet()
+
+        self.assertNotEqual(sample_b_initial, sample_b_after_result_change)
+        self.assertIn(comparison_tab_module._heat_color(1.0).name(), sample_b_after_result_change)
 
     def test_details_heat_legend_uses_real_palette_swatch_widgets(self):
         self.widget.set_dataset_state(self.tabs, selected_tabs=self.tabs)
@@ -287,18 +350,35 @@ class TestComparisonTabSelectionState(unittest.TestCase):
 
         self.widget._k_table.sortItems(1, comparison_tab_module.Qt.SortOrder.DescendingOrder)
 
-        values = []
+        labels = [
+            self.widget._k_table.cellWidget(row, 0).layout().itemAt(0).widget().text()
+            for row in range(self.widget._k_table.rowCount())
+            if not self.widget._k_table.isRowHidden(row)
+        ]
+        self.assertEqual(labels[:2], ['Beyer', 'Hazen'])
+        self.assertEqual(labels[-5:], [
+            'K\u0304 geometric',
+            'K\u0304 arithmetic',
+            'K median',
+            'K std. dev.',
+            'Perm. class',
+        ])
+
+        method_values = []
         for row in range(self.widget._k_table.rowCount()):
             if self.widget._k_table.isRowHidden(row):
+                continue
+            label = self.widget._k_table.cellWidget(row, 0).layout().itemAt(0).widget().text()
+            if label.startswith('K\u0304') or label in {'K median', 'K std. dev.', 'Perm. class'}:
                 continue
             sort_value = self.widget._k_table.item(row, 1).data(
                 comparison_tab_module.Qt.ItemDataRole.UserRole
             )
             if isinstance(sort_value, (int, float)) and sort_value != float('inf'):
-                values.append(sort_value)
+                method_values.append(sort_value)
 
-        self.assertGreater(len(values), 3)
-        self.assertEqual(values, sorted(values, reverse=True))
+        self.assertGreaterEqual(len(method_values), 2)
+        self.assertEqual(method_values, sorted(method_values, reverse=True))
 
     def test_scheme_change_updates_scheme_sensitive_grain_rows(self):
         self.widget.set_dataset_state(self.tabs, selected_tabs=self.tabs)
@@ -332,6 +412,14 @@ class TestComparisonTabSelectionState(unittest.TestCase):
 
         method_labels = [tick.get_text() for tick in self.widget._heat_fig.axes[0].get_yticklabels()]
         self.assertEqual(method_labels[:2], ['Hazen', 'Beyer'])
+
+    def test_dataset_subset_change_rebuilds_statistics_heatmap_labels(self):
+        self.widget.set_dataset_state(self.tabs, selected_tabs=self.tabs)
+
+        self.widget.set_dataset_state(self.tabs, selected_tabs=[self.tabs[1], self.tabs[2]])
+
+        dataset_labels = [tick.get_text() for tick in self.widget._heat_fig.axes[0].get_xticklabels()]
+        self.assertEqual(dataset_labels, ['Sample B', 'Sample C'])
 
 
 if __name__ == '__main__':

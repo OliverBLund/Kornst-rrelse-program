@@ -1679,6 +1679,16 @@ class ControlPanel(QFrame):
         self.review_failed_btn.setToolTip("Review files needing manual mapping")
         self.review_failed_btn.setStyleSheet(_MINI_BTN)
 
+        self.add_processed_btn = QPushButton("Processed")
+        self.add_processed_btn.clicked.connect(lambda _checked=False: self.add_files("processed"))
+        self.add_processed_btn.setToolTip("Load files that already contain particle size and cumulative percent passing")
+        self.add_processed_btn.setStyleSheet(_MINI_BTN)
+
+        self.add_raw_sieve_btn = QPushButton("Raw Weighings")
+        self.add_raw_sieve_btn.clicked.connect(lambda _checked=False: self.add_files("raw_sieve"))
+        self.add_raw_sieve_btn.setToolTip("Load files with sieve size, empty sieve weight, and sieve + sample weight")
+        self.add_raw_sieve_btn.setStyleSheet(_MINI_BTN)
+
         self.clear_all_btn = QPushButton("Clear All")
         self.clear_all_btn.clicked.connect(self.clear_all_files)
         self.clear_all_btn.setStyleSheet(
@@ -1688,6 +1698,8 @@ class ControlPanel(QFrame):
             f"QPushButton:hover {{ color: {C.LED_ERR}; }}"
         )
 
+        mini_btns.addWidget(self.add_processed_btn, 1)
+        mini_btns.addWidget(self.add_raw_sieve_btn, 1)
         mini_btns.addWidget(self.review_failed_btn, 1)
         mini_btns.addStretch()
         mini_btns.addWidget(self.clear_all_btn)
@@ -2073,11 +2085,19 @@ class ControlPanel(QFrame):
         except Exception:
             self._strata_widget.update_result(None)
 
-    def add_files(self):
+    def add_files(self, data_mode: str = "processed"):
         """Add multiple files for batch processing"""
+        if data_mode not in {"processed", "raw_sieve"}:
+            data_mode = "processed"
+
+        title = (
+            "Add Raw Sieve Weighing Files"
+            if data_mode == "raw_sieve"
+            else "Add Processed Curve Data Files"
+        )
         file_paths, _ = QFileDialog.getOpenFileNames(
             self,
-            "Add Grain Size Data Files",
+            title,
             "",
             "All Supported (*.csv *.xlsx *.xls);;CSV files (*.csv);;Excel files (*.xlsx *.xls);;All files (*.*)"
         )
@@ -2103,6 +2123,10 @@ class ControlPanel(QFrame):
             expanded_files.extend(other_files)
 
             if expanded_files:
+                if data_mode == "raw_sieve":
+                    self._queue_raw_sieve_files_for_mapping(expanded_files, already_added)
+                    return
+
                 # Add files to tracking
                 for file_entry in expanded_files:
                     if isinstance(file_entry, tuple):
@@ -2141,6 +2165,37 @@ class ControlPanel(QFrame):
                     QMessageBox.information(self, "No New Files", f"'{already_added[0]}' is already in the list.")
                 elif already_added:
                     QMessageBox.information(self, "No New Files", f"All {len(already_added)} selected files are already in the list.")
+
+    def _queue_raw_sieve_files_for_mapping(self, file_entries: list, already_added: list | None = None):
+        """Register raw-weighing files as review items and open raw mode in the mapper."""
+        already_added = already_added or []
+        review_message = (
+            "Raw sieve weighing data requires column mapping. Map Sieve Size, "
+            "Weight of Empty Sieve, and Weight of Sieve + Sample."
+        )
+
+        for file_entry in file_entries:
+            if isinstance(file_entry, tuple):
+                file_path, sheet_name = file_entry
+                file_key = f"{file_path}:::{sheet_name}"
+                display_name = f"{os.path.basename(file_path)} [{sheet_name}]"
+            else:
+                file_key = file_entry
+                display_name = None
+
+            self.file_statuses[file_key] = 'review'
+            self.file_mapping_states[file_key] = {
+                "raw_sieve_mode": True,
+                "calculated_selection_mode": "column",
+            }
+            self.add_file_to_table(file_key, 'review', display_name=display_name)
+            self.error_dataset.emit(file_key, review_message)
+
+        self.update_ui_state()
+        message = f"{len(file_entries)} raw weighing item(s) queued for mapping"
+        if already_added:
+            message += f" ({len(already_added)} duplicate skipped)"
+        self.sample_info_label.setText(message)
 
     def handle_batch_multisheet_excel(self, excel_files: list):
         """

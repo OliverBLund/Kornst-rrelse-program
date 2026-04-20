@@ -60,7 +60,7 @@ class TestColumnMapperDialog(unittest.TestCase):
         self.assertTrue(self.dialog.range_tools_group.isHidden())
         self.assertTrue(self.dialog.raw_sieve_group.isHidden())
         self.assertIsNotNone(self.dialog._mapping_splitter)
-        self.assertIn("Calculated Data -> Column Mapping", self.dialog.pathway_summary_label.text())
+        self.assertIn("Processed Curve Data -> Column Mapping", self.dialog.pathway_summary_label.text())
         self.assertIn("Check the sheets you want to import", self.dialog.sheet_info_label.text())
         self.assertLess(self.dialog.sizeHint().height(), 900)
 

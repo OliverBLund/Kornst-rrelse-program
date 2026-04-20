@@ -38,7 +38,16 @@
       "Bash(python -m py_compile Program/gui/reporting_tab.py)",
       "Bash(python -c \"import sys; sys.path.insert\\(0, 'Program'\\); from gui import reporting_tab; print\\('imports OK'\\); print\\(dir\\(reporting_tab.ReportingTab\\)[:5]\\)\")",
       "Bash(python -c \"import sys; sys.path.insert\\(0,'Program'\\); from gui import reporting_tab; print\\('imports OK'\\); print\\('class:', reporting_tab.ReportingTab.__name__\\)\")",
-      "Bash(python -c \"import sys; sys.path.insert\\(0,'Program'\\); from gui import reporting_tab; print\\('OK'\\)\")"
+      "Bash(python -c \"import sys; sys.path.insert\\(0,'Program'\\); from gui import reporting_tab; print\\('OK'\\)\")",
+      "Bash(python -m py_compile Program/gui/plot_constants.py)",
+      "Bash(python -m py_compile Program/gui/plot_renderers.py)",
+      "Bash(python -m py_compile Program/gui/plot_widget.py)",
+      "Bash(python -m py_compile Program/gui/comparison_plot_widget.py)",
+      "Bash(python -m py_compile Program/plot_export.py)",
+      "Bash(grep -n 'method_colors\\\\s*=' \"C:/Users/s194420/OneDrive - Danmarks Tekniske Universitet/Poul Løgstrup Bjergs filer - Work_Projects_Oliver Lund/Programmer/Kornstørrelse - Program/Program\"/**/*.py)",
+      "Bash(grep:*)",
+      "Bash(python -c \"import ast; [ast.parse\\(open\\(f, encoding='utf-8'\\).read\\(\\), filename=f\\) for f in ['gui/plot_widget.py', 'gui/comparison_plot_widget.py', 'report_generator.py']]; print\\('Syntax OK'\\)\")",
+      "Bash(python -m pytest -q)"
     ],
     "deny": [],
     "ask": []

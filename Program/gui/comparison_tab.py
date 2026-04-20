@@ -59,10 +59,33 @@ def _dot_icon(color_hex: str, size: int = 8) -> QIcon:
     return QIcon(pix)
 
 
+_SORT_VALUE_ROLE = Qt.ItemDataRole.UserRole
+_SORT_GROUP_ROLE = Qt.ItemDataRole.UserRole.value + 1
+_SORT_PINNED_ORDER_ROLE = Qt.ItemDataRole.UserRole.value + 2
+_DETAILS_ROW_HEADER_WIDTH = 210
+_DETAILS_ROW_HEIGHT = 48
+_DETAILS_SUMMARY_ROW_HEIGHT = 50
+
+
 class _SortableTableWidgetItem(QTableWidgetItem):
     """QTableWidgetItem with explicit sort-role precedence."""
 
     def __lt__(self, other):
+        lhs_group = self.data(_SORT_GROUP_ROLE)
+        rhs_group = other.data(_SORT_GROUP_ROLE) if other is not None else None
+        if lhs_group is not None and rhs_group is not None and lhs_group != rhs_group:
+            table = self.tableWidget()
+            order = table.horizontalHeader().sortIndicatorOrder() if table is not None else Qt.SortOrder.AscendingOrder
+            # Keep numeric/method rows above classification/summary rows in both sort directions.
+            return lhs_group > rhs_group if order == Qt.SortOrder.DescendingOrder else lhs_group < rhs_group
+
+        lhs_pinned = self.data(_SORT_PINNED_ORDER_ROLE)
+        rhs_pinned = other.data(_SORT_PINNED_ORDER_ROLE) if other is not None else None
+        if lhs_group not in (None, 0) and lhs_pinned is not None and rhs_pinned is not None:
+            table = self.tableWidget()
+            order = table.horizontalHeader().sortIndicatorOrder() if table is not None else Qt.SortOrder.AscendingOrder
+            return lhs_pinned > rhs_pinned if order == Qt.SortOrder.DescendingOrder else lhs_pinned < rhs_pinned
+
         lhs = self.data(Qt.ItemDataRole.UserRole)
         rhs = other.data(Qt.ItemDataRole.UserRole) if other is not None else None
         if lhs is not None and rhs is not None:
@@ -768,6 +791,8 @@ class ComparisonTab(QWidget):
         t.setSortingEnabled(False)
         t.horizontalHeader().setSectionsClickable(True)
         t.horizontalHeader().setSortIndicatorShown(True)
+        t.horizontalHeader().setMinimumSectionSize(72)
+        t.verticalHeader().setDefaultSectionSize(_DETAILS_ROW_HEIGHT)
         t.setStyleSheet(f"""
             QTableWidget {{
                 background: {C.BG};
@@ -904,10 +929,7 @@ class ComparisonTab(QWidget):
         """Toggle heat coloring on/off and refresh both tables."""
         self._heat_on = checked
         self._heat_btn.setText("On" if checked else "Off")
-        if self.selected_datasets:
-            self._refresh_grain_table()
-            self._refresh_k_table()
-            self._refresh_details_views()
+        self._refresh_details_views()
 
     def _scheme_label(self) -> str:
         return getattr(self._active_scheme, "name", None) or self._active_scheme.__class__.__name__.replace("_", " ")
@@ -1481,8 +1503,6 @@ class ComparisonTab(QWidget):
         self._export_btn.setEnabled(enabled)
         if not enabled:
             self._clear_views()
-        else:
-            self._refresh_details_views()
         self._refresh_pin_list()
         self._update_header_count()
 
@@ -1518,14 +1538,23 @@ class ComparisonTab(QWidget):
     def update_comparison(self) -> None:
         """Refresh all views from current dataset_tabs.  Public API."""
         if len(self.selected_datasets) < 2:
+            self._clear_views()
+            self._update_header_count()
             return
-        self._update_plot()
-        self._refresh_grain_table()
-        self._refresh_k_table()
+        self._refresh_comparison_surfaces(include_plot=True)
+        self.comparison_updated.emit()
+
+    def _refresh_comparison_surfaces(self, *, include_plot: bool = True) -> None:
+        """Rebuild every comparison surface from the current selected datasets."""
+        if len(self.selected_datasets) < 2:
+            self._clear_views()
+            self._update_header_count()
+            return
+        if include_plot:
+            self._update_plot()
         self._refresh_details_views()
         self._refresh_stats()
         self._update_header_count()
-        self.comparison_updated.emit()
 
     # ── Internal update helpers ───────────────────────────────────────────────
 
@@ -1654,25 +1683,67 @@ class ComparisonTab(QWidget):
             return result.gradation
         return _gc_cu_label(dataset.get_uniformity_coefficient())
 
-    def _make_param_cell(self, label: str, description: str, olive: bool) -> QWidget:
+    def _make_param_cell(
+        self,
+        label: str,
+        description: str,
+        olive: bool,
+        *,
+        summary: bool = False,
+    ) -> QWidget:
         """Build a two-line parameter cell widget (name + description)."""
         w = QWidget()
-        w.setStyleSheet("background: transparent;")
+        w.setAttribute(Qt.WidgetAttribute.WA_StyledBackground)
+        bg = C.BG_LOW if summary else C.BG
+        border = "2px solid rgba(139,117,84,0.30)" if summary else "1px solid rgba(212,196,168,0.45)"
+        w.setStyleSheet(f"background: {bg}; border-bottom: {border};")
         lay = QVBoxLayout(w)
-        lay.setContentsMargins(10, 5, 8, 5)
+        lay.setContentsMargins(12, 5, 10, 5)
         lay.setSpacing(1)
         name_lbl = QLabel(label)
+        name_lbl.setWordWrap(False)
         name_lbl.setStyleSheet(
             f"font-family: '{F.UI}'; font-size: {F.SZ_BASE}pt; font-weight: 600;"
             f"color: {C.OLIVE if olive else C.TEXT_MID}; background: transparent;"
         )
         desc_lbl = QLabel(description)
+        desc_lbl.setWordWrap(False)
         desc_lbl.setStyleSheet(
             f"font-family: '{F.UI}'; font-size: 8pt;"
             f"color: {C.TEXT_MUTED}; background: transparent;"
         )
         lay.addWidget(name_lbl)
         lay.addWidget(desc_lbl)
+        return w
+
+    def _make_value_cell(
+        self,
+        text: str,
+        color: str,
+        background: str,
+        *,
+        bold: bool = False,
+        summary: bool = False,
+    ) -> QWidget:
+        """Build an explicit value surface so heat fills render reliably."""
+        w = QWidget()
+        w.setAttribute(Qt.WidgetAttribute.WA_StyledBackground)
+        border = "2px solid rgba(139,117,84,0.30)" if summary else "1px solid rgba(212,196,168,0.45)"
+        w.setStyleSheet(
+            f"background: {background};"
+            f"border-bottom: {border};"
+        )
+        lay = QHBoxLayout(w)
+        lay.setContentsMargins(8, 0, 10, 0)
+        lay.setSpacing(0)
+        lbl = QLabel(text)
+        lbl.setAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
+        weight = 700 if bold else 500
+        lbl.setStyleSheet(
+            f"font-family: '{F.MONO}'; font-size: {F.SZ_SM}pt;"
+            f"font-weight: {weight}; color: {color}; background: transparent;"
+        )
+        lay.addWidget(lbl)
         return w
 
     def _make_dataset_header_item(self, name: str, color: str) -> QTableWidgetItem:
@@ -1691,6 +1762,13 @@ class ComparisonTab(QWidget):
     def _format_k_value(self, value_m_s: float) -> str:
         converted = HydraulicConductivityConverter.convert_from_m_per_s(value_m_s, self._details_k_unit)
         return HydraulicConductivityConverter.DISPLAY_FORMATS[self._details_k_unit].format(converted)
+
+    def _configure_details_columns(self, table: QTableWidget, column_count: int) -> None:
+        header = table.horizontalHeader()
+        header.setSectionResizeMode(0, QHeaderView.ResizeMode.Fixed)
+        table.setColumnWidth(0, _DETAILS_ROW_HEADER_WIDTH)
+        for c in range(1, column_count):
+            header.setSectionResizeMode(c, QHeaderView.ResizeMode.ResizeToContents)
 
     def _apply_grain_row_preset(self) -> None:
         allowed = self._GRAIN_PRESETS[self._details_preset]
@@ -1733,14 +1811,7 @@ class ComparisonTab(QWidget):
             hdr_item = self._make_dataset_header_item(name, color)
             self._grain_table.setHorizontalHeaderItem(1 + col_i, hdr_item)
 
-        # First column: stretch; data columns: resize-to-contents
-        self._grain_table.horizontalHeader().setSectionResizeMode(
-            0, QHeaderView.ResizeMode.Stretch
-        )
-        for c in range(1, 1 + n_ds):
-            self._grain_table.horizontalHeader().setSectionResizeMode(
-                c, QHeaderView.ResizeMode.ResizeToContents
-            )
+        self._configure_details_columns(self._grain_table, 1 + n_ds)
 
         # ── Collect numeric values per row ────────────────────────────────────
         TEXT_ROWS = {"Classif.", "Class"}
@@ -1757,15 +1828,20 @@ class ComparisonTab(QWidget):
         for row_i, (label, tooltip, bold, olive) in enumerate(self._GRAIN_ROWS):
             is_text = label in TEXT_ROWS
             vals = row_values[row_i]
+            pinned_order = 0 if label == "Classif." else 1
 
             # Column 0: two-line param cell widget
-            label_item = _SortableTableWidgetItem(label)
+            summary_row = is_text
+            label_item = _SortableTableWidgetItem("")
             label_item.setData(Qt.ItemDataRole.UserRole, label.lower())
+            label_item.setData(_SORT_GROUP_ROLE, 1 if summary_row else 0)
+            if summary_row:
+                label_item.setData(_SORT_PINNED_ORDER_ROLE, pinned_order)
             self._grain_table.setItem(row_i, 0, label_item)
             self._grain_table.setCellWidget(
-                row_i, 0, self._make_param_cell(label, tooltip, olive)
+                row_i, 0, self._make_param_cell(label, tooltip, olive, summary=summary_row)
             )
-            self._grain_table.setRowHeight(row_i, 42)
+            self._grain_table.setRowHeight(row_i, _DETAILS_SUMMARY_ROW_HEIGHT if summary_row else _DETAILS_ROW_HEIGHT)
 
             if is_text:
                 if label == "Classif.":
@@ -1774,24 +1850,38 @@ class ComparisonTab(QWidget):
                         color = DATASET_COLORS[col_i % len(DATASET_COLORS)]
                         item = _SortableTableWidgetItem(val_str)
                         item.setData(Qt.ItemDataRole.UserRole, val_str.lower())
+                        item.setData(_SORT_GROUP_ROLE, 1)
+                        item.setData(_SORT_PINNED_ORDER_ROLE, pinned_order)
                         item.setForeground(QBrush(QColor(color)))
                         item.setFont(QFont(F.MONO, F.SZ_SM))
                         item.setTextAlignment(
                             Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter
                         )
                         self._grain_table.setItem(row_i, 1 + col_i, item)
+                        self._grain_table.setCellWidget(
+                            row_i,
+                            1 + col_i,
+                            self._make_value_cell(val_str, color, C.BG_LOW, summary=True),
+                        )
                 elif label == "Class":
                     for col_i, tab in enumerate(tabs):
                         val_str = self._gradation_class(tab.get_dataset())
                         color = DATASET_COLORS[col_i % len(DATASET_COLORS)]
                         item = _SortableTableWidgetItem(val_str)
                         item.setData(Qt.ItemDataRole.UserRole, val_str.lower())
+                        item.setData(_SORT_GROUP_ROLE, 1)
+                        item.setData(_SORT_PINNED_ORDER_ROLE, pinned_order)
                         item.setForeground(QBrush(QColor(color)))
                         item.setFont(QFont(F.MONO, F.SZ_SM))
                         item.setTextAlignment(
                             Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter
                         )
                         self._grain_table.setItem(row_i, 1 + col_i, item)
+                        self._grain_table.setCellWidget(
+                            row_i,
+                            1 + col_i,
+                            self._make_value_cell(val_str, color, C.BG_LOW, summary=True),
+                        )
                 continue
 
             # Numeric row — heat range
@@ -1805,10 +1895,12 @@ class ComparisonTab(QWidget):
                 if val is None:
                     item = _SortableTableWidgetItem("—")
                     item.setData(Qt.ItemDataRole.UserRole, float("inf"))
+                    item.setData(_SORT_GROUP_ROLE, 0)
                     item.setForeground(QBrush(QColor(C.TEXT_MUTED)))
                 else:
                     item = _SortableTableWidgetItem(f"{val:.4g}")
                     item.setData(Qt.ItemDataRole.UserRole, float(val))
+                    item.setData(_SORT_GROUP_ROLE, 0)
                     item.setForeground(QBrush(QColor(color)))
                     if self._heat_on and v_range > 0:
                         norm = (val - v_min) / v_range
@@ -1820,11 +1912,16 @@ class ComparisonTab(QWidget):
                     Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter
                 )
                 self._grain_table.setItem(row_i, 1 + col_i, item)
+                bg = item.data(Qt.ItemDataRole.BackgroundRole)
+                bg_color = bg.name() if isinstance(bg, QColor) else C.BG
+                self._grain_table.setCellWidget(
+                    row_i,
+                    1 + col_i,
+                    self._make_value_cell(item.text(), color if val is not None else C.TEXT_MUTED, bg_color),
+                )
 
         self._grain_table.resizeColumnsToContents()
-        self._grain_table.horizontalHeader().setSectionResizeMode(
-            0, QHeaderView.ResizeMode.Stretch
-        )
+        self._configure_details_columns(self._grain_table, 1 + n_ds)
         self._apply_grain_row_preset()
         self._grain_table.setSortingEnabled(True)
 
@@ -1879,14 +1976,7 @@ class ComparisonTab(QWidget):
             hdr_item = self._make_dataset_header_item(name, color)
             self._k_table.setHorizontalHeaderItem(1 + col_i, hdr_item)
 
-        # First column stretch; data columns resize-to-contents
-        self._k_table.horizontalHeader().setSectionResizeMode(
-            0, QHeaderView.ResizeMode.Stretch
-        )
-        for c in range(1, 1 + n_ds):
-            self._k_table.horizontalHeader().setSectionResizeMode(
-                c, QHeaderView.ResizeMode.ResizeToContents
-            )
+        self._configure_details_columns(self._k_table, 1 + n_ds)
 
         # Build k_matrix[method_index][dataset_index] = k_value | None
         k_matrix: List[List[Optional[float]]] = []
@@ -1906,13 +1996,14 @@ class ComparisonTab(QWidget):
 
             # Two-line cell widget for method name
             desc = f"K ({self._details_unit_symbol()}) · {self._K_DESCS.get(method, 'method result')}"
-            method_item = _SortableTableWidgetItem(method)
+            method_item = _SortableTableWidgetItem("")
             method_item.setData(Qt.ItemDataRole.UserRole, method.lower())
+            method_item.setData(_SORT_GROUP_ROLE, 0)
             self._k_table.setItem(row_i, 0, method_item)
             self._k_table.setCellWidget(
                 row_i, 0, self._make_param_cell(method, desc, olive=False)
             )
-            self._k_table.setRowHeight(row_i, 42)
+            self._k_table.setRowHeight(row_i, _DETAILS_ROW_HEIGHT)
 
             # Heat range (log scale across row)
             if valid_vals:
@@ -1928,10 +2019,12 @@ class ComparisonTab(QWidget):
                 if val is None or val <= 0:
                     item = _SortableTableWidgetItem("—")
                     item.setData(Qt.ItemDataRole.UserRole, float("inf"))
+                    item.setData(_SORT_GROUP_ROLE, 0)
                     item.setForeground(QBrush(QColor(C.TEXT_MUTED)))
                 else:
                     item = _SortableTableWidgetItem(self._format_k_value(val))
                     item.setData(Qt.ItemDataRole.UserRole, float(val))
+                    item.setData(_SORT_GROUP_ROLE, 0)
                     item.setForeground(QBrush(QColor(color)))
                     if self._heat_on and v_range > 0:
                         norm = (math.log10(val) - v_min) / v_range
@@ -1943,6 +2036,14 @@ class ComparisonTab(QWidget):
                     Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter
                 )
                 self._k_table.setItem(row_i, 1 + col_i, item)
+                bg = item.data(Qt.ItemDataRole.BackgroundRole)
+                bg_color = bg.name() if isinstance(bg, QColor) else C.BG
+                text_color = color if val is not None and val > 0 else C.TEXT_MUTED
+                self._k_table.setCellWidget(
+                    row_i,
+                    1 + col_i,
+                    self._make_value_cell(item.text(), text_color, bg_color),
+                )
 
         # ── Build per-dataset valid K lists ───────────────────────────────────
         valid_k_per_ds: List[List[float]] = []
@@ -1960,16 +2061,18 @@ class ComparisonTab(QWidget):
 
         for si, (s_label, s_desc) in enumerate(SUMMARY_ROWS):
             row_i = n_method + si
-            self._k_table.setRowHeight(row_i, 42)
+            self._k_table.setRowHeight(row_i, _DETAILS_SUMMARY_ROW_HEIGHT)
 
             is_geom = s_label == "K̄ geometric"
             detail = s_desc if s_label == "Perm. class" else f"{s_desc} · {self._details_unit_symbol()}"
             # Two-line summary label, olive-highlighted for K̄ geometric
-            summary_item = _SortableTableWidgetItem(s_label)
+            summary_item = _SortableTableWidgetItem("")
             summary_item.setData(Qt.ItemDataRole.UserRole, s_label.lower())
+            summary_item.setData(_SORT_GROUP_ROLE, 1)
+            summary_item.setData(_SORT_PINNED_ORDER_ROLE, si)
             self._k_table.setItem(row_i, 0, summary_item)
             self._k_table.setCellWidget(
-                row_i, 0, self._make_param_cell(s_label, detail, olive=is_geom)
+                row_i, 0, self._make_param_cell(s_label, detail, olive=is_geom, summary=True)
             )
 
             for col_i, vk in enumerate(valid_k_per_ds):
@@ -1995,6 +2098,8 @@ class ComparisonTab(QWidget):
                 )
                 if s_label == "Perm. class":
                     cell.setData(Qt.ItemDataRole.UserRole, txt.lower())
+                    cell.setData(_SORT_GROUP_ROLE, 1)
+                    cell.setData(_SORT_PINNED_ORDER_ROLE, si)
                 elif vk:
                     if s_label == "K̄ geometric":
                         sort_val = float(np.exp(np.mean(np.log(vk))))
@@ -2007,8 +2112,12 @@ class ComparisonTab(QWidget):
                     else:
                         sort_val = float("inf")
                     cell.setData(Qt.ItemDataRole.UserRole, sort_val)
+                    cell.setData(_SORT_GROUP_ROLE, 1)
+                    cell.setData(_SORT_PINNED_ORDER_ROLE, si)
                 else:
                     cell.setData(Qt.ItemDataRole.UserRole, float("inf"))
+                    cell.setData(_SORT_GROUP_ROLE, 1)
+                    cell.setData(_SORT_PINNED_ORDER_ROLE, si)
                 if s_label == "Perm. class" and vk:
                     cell.setForeground(QBrush(QColor(_perm_color(vk))))
                 elif is_geom and vk:
@@ -2020,11 +2129,23 @@ class ComparisonTab(QWidget):
                 else:
                     cell.setForeground(QBrush(QColor(C.TEXT_MID)))
                 self._k_table.setItem(row_i, 1 + col_i, cell)
+                if s_label == "Perm. class" and vk:
+                    text_color = _perm_color(vk)
+                    bold_value = False
+                elif is_geom and vk:
+                    text_color = color
+                    bold_value = True
+                else:
+                    text_color = C.TEXT_MID
+                    bold_value = False
+                self._k_table.setCellWidget(
+                    row_i,
+                    1 + col_i,
+                    self._make_value_cell(cell.text(), text_color, summary_bg.name(), bold=bold_value, summary=True),
+                )
 
         self._k_table.resizeColumnsToContents()
-        self._k_table.horizontalHeader().setSectionResizeMode(
-            0, QHeaderView.ResizeMode.Stretch
-        )
+        self._configure_details_columns(self._k_table, 1 + n_ds)
         self._apply_k_row_preset(method_names, SUMMARY_ROWS)
         self._k_table.setSortingEnabled(True)
 

@@ -13,11 +13,6 @@ import base64
 import io
 import os
 import re
-import matplotlib
-matplotlib.use('Agg')  # Use non-interactive backend
-import matplotlib.pyplot as plt
-from matplotlib.figure import Figure
-from matplotlib.colors import ListedColormap
 from data_loader import GrainSizeData
 from k_calculations import KCalculationResult
 from grain_classification import (
@@ -26,6 +21,13 @@ from grain_classification import (
     permeability_class as _gc_perm_class,
     cc_label as _gc_cc_label,
 )
+from gui.plot_constants import classify_k_status
+
+
+def _get_plot_export():
+    """Lazy import to avoid circular dependency (plot_export -> gui -> report_generator)."""
+    import plot_export as _pe
+    return _pe
 from report_model import (
     AppendixLabelConfig,
     HeadingBlock,
@@ -1119,266 +1121,56 @@ class ReportGenerator:
 
         return html
 
-    def _fig_to_base64(self, fig: Figure) -> str:
-        """Convert a matplotlib figure to base64 encoded PNG"""
-        buffer = io.BytesIO()
-        fig.savefig(buffer, format='png', dpi=150, bbox_inches='tight', facecolor='white')
-        buffer.seek(0)
-        image_base64 = base64.b64encode(buffer.read()).decode('utf-8')
-        plt.close(fig)
-        return f'data:image/png;base64,{image_base64}'
-
     def _create_grain_size_plot(self, dataset: GrainSizeData) -> str:
-        """Create grain size distribution curve and return as base64"""
-        fig, ax = plt.subplots(figsize=(10, 6))
-
-        # Plot cumulative distribution
-        ax.semilogx(dataset.particle_sizes, dataset.percent_passing,
-                   'o-', linewidth=2, markersize=6, color='#6b8e23',
-                   markerfacecolor='white', markeredgewidth=2)
-
-        ax.set_xlabel('Grain Size (mm)', fontsize=12, fontweight='bold')
-        ax.set_ylabel('Percent Passing (%)', fontsize=12, fontweight='bold')
-        ax.set_title(f'Grain Size Distribution - {dataset.sample_name}',
-                    fontsize=14, fontweight='bold', color='#2c5530')
-        ax.grid(True, which='both', alpha=0.3, linestyle='--')
-        ax.set_xlim(left=min(dataset.particle_sizes)*0.8, right=max(dataset.particle_sizes)*1.2)
-        ax.set_ylim(0, 100)
-
-        # Add characteristic grain size markers
-        d10 = dataset.get_d10()
-        d50 = dataset.get_d50()
-        d60 = dataset.get_d60()
-
-        for d_val, label, color in [(d10, 'D₁₀', '#ff6b6b'),
-                                      (d50, 'D₅₀', '#4ecdc4'),
-                                      (d60, 'D₆₀', '#95e1d3')]:
-            if d_val:
-                ax.axvline(d_val, color=color, linestyle='--', linewidth=1.5, alpha=0.7)
-                ax.text(d_val, 95, label, rotation=0, verticalalignment='bottom',
-                       fontweight='bold', color=color, fontsize=10)
-
-        return self._fig_to_base64(fig)
+        """Create grain size distribution curve and return as base64."""
+        pe = _get_plot_export()
+        return pe.export_grain_size_plot(
+            dataset,
+            show_d_lines=True,
+            show_markers=True,
+            classification_scheme=self._scheme,
+        )
 
     def _create_k_value_bar_chart(self, k_results: List[KCalculationResult]) -> str:
-        """Create K-value comparison bar chart with error indication"""
+        """Create K-value comparison bar chart with error indication."""
         valid_results = [r for r in k_results if r.k_value is not None and r.k_value > 0]
-
         if not valid_results:
             return ""
 
-        fig, ax = plt.subplots(figsize=(12, 6))
-
         methods = [r.method_name for r in valid_results]
         k_values = [r.k_value for r in valid_results]
+        flagged = {r.method_name for r in valid_results if classify_k_status(r) != "OK"}
 
-        # Color code by status
-        colors = []
-        for r in valid_results:
-            if "OK" in str(r.status):
-                colors.append('#6bcf7f')  # Green
-            elif "WARNING" in str(r.status):
-                colors.append('#ffd93d')  # Yellow
-            else:
-                colors.append('#ff6b6b')  # Red
-
-        bars = ax.bar(range(len(methods)), k_values, color=colors,
-                     edgecolor='#333', linewidth=1.5, alpha=0.8)
-
-        ax.set_yscale('log')
-        ax.set_ylabel('Hydraulic Conductivity (m/s)', fontsize=12, fontweight='bold')
-        ax.set_xlabel('Method', fontsize=12, fontweight='bold')
-        ax.set_title('Hydraulic Conductivity Estimates by Method',
-                    fontsize=14, fontweight='bold', color='#2c5530')
-        ax.set_xticks(range(len(methods)))
-        ax.set_xticklabels(methods, rotation=45, ha='right', fontsize=9)
-        ax.grid(True, axis='y', alpha=0.3, linestyle='--')
-
-        # Add mean line
-        mean_k = np.mean(k_values)
-        ax.axhline(mean_k, color='red', linestyle='--', linewidth=2,
-                  label=f'Mean: {mean_k:.2e} m/s', alpha=0.7)
-        ax.legend(loc='best')
-
-        plt.tight_layout()
-        return self._fig_to_base64(fig)
+        pe = _get_plot_export()
+        return pe.export_k_bar_chart(
+            methods, k_values,
+            flagged_methods=flagged,
+            title="Hydraulic Conductivity Estimates by Method",
+        )
 
     def _create_method_applicability_heatmap(self, k_results: List[KCalculationResult]) -> str:
-        """Create method applicability status heatmap"""
+        """Create method applicability status heatmap."""
         if not k_results:
             return ""
-
-        fig, ax = plt.subplots(figsize=(10, max(4, len(k_results) * 0.4)))
-
-        # Create status matrix: 0 = N/A, 1 = Error, 2 = Warning, 3 = OK
-        methods = [r.method_name for r in k_results]
-        status_values = []
-        status_labels = []
-
-        for r in k_results:
-            if r.k_value is None or r.k_value <= 0:
-                status_values.append(0)
-                status_labels.append('N/A')
-            elif "OK" in str(r.status):
-                status_values.append(3)
-                status_labels.append('OK')
-            elif "WARNING" in str(r.status):
-                status_values.append(2)
-                status_labels.append('Warning')
-            else:
-                status_values.append(1)
-                status_labels.append('Error')
-
-        # Reshape for heatmap
-        data = np.array(status_values).reshape(-1, 1)
-
-        # Create custom colormap
-        colors_map = ['#cccccc', '#ff6b6b', '#ffd93d', '#6bcf7f']
-        cmap = ListedColormap(colors_map)
-
-        # Plot heatmap
-        im = ax.imshow(data, cmap=cmap, aspect='auto', vmin=0, vmax=3)
-
-        # Set ticks and labels
-        ax.set_yticks(range(len(methods)))
-        ax.set_yticklabels(methods, fontsize=10)
-        ax.set_xticks([0])
-        ax.set_xticklabels(['Status'], fontsize=11, fontweight='bold')
-        ax.set_title('Method Applicability Status', fontsize=14, fontweight='bold', color='#2c5530')
-
-        # Add text annotations
-        for i, (val, label) in enumerate(zip(status_values, status_labels)):
-            ax.text(0, i, label, ha='center', va='center',
-                   fontweight='bold', fontsize=10,
-                   color='white' if val in [1, 3] else 'black')
-
-        plt.tight_layout()
-        return self._fig_to_base64(fig)
+        return _get_plot_export().export_applicability_heatmap(k_results)
 
     def _create_comparison_grain_size_plot(self, datasets: List[GrainSizeData],
                                            sample_labels: Optional[List[str]] = None) -> str:
-        """Create side-by-side grain size curves for comparison"""
-        fig, ax = plt.subplots(figsize=(12, 7))
-
-        colors = plt.cm.tab10(np.linspace(0, 1, len(datasets)))
-        labels = sample_labels or [dataset.sample_name for dataset in datasets]
-
-        for dataset, label, color in zip(datasets, labels, colors):
-            ax.semilogx(dataset.particle_sizes, dataset.percent_passing,
-                       'o-', linewidth=2, markersize=4, label=label,
-                       color=color, markerfacecolor='white', markeredgewidth=1.5)
-
-        ax.set_xlabel('Grain Size (mm)', fontsize=12, fontweight='bold')
-        ax.set_ylabel('Percent Passing (%)', fontsize=12, fontweight='bold')
-        ax.set_title('Grain Size Distribution Comparison',
-                    fontsize=14, fontweight='bold', color='#2c5530')
-        ax.grid(True, which='both', alpha=0.3, linestyle='--')
-        ax.set_ylim(0, 100)
-        ax.legend(loc='best', fontsize=9, framealpha=0.9)
-
-        plt.tight_layout()
-        return self._fig_to_base64(fig)
+        """Create side-by-side grain size curves for comparison."""
+        labels = sample_labels or [ds.sample_name for ds in datasets]
+        return _get_plot_export().export_distribution_overlay(datasets, labels=labels)
 
     def _create_k_value_boxplot(self, k_results_dict: Dict[str, List[KCalculationResult]]) -> str:
-        """Create box plots for K-value comparison across samples"""
-        fig, ax = plt.subplots(figsize=(12, 7))
-
-        data_for_plot = []
-        labels = []
-
-        for sample_name, results in k_results_dict.items():
-            k_values = [r.k_value for r in results if r.k_value is not None and r.k_value > 0]
-            if k_values:
-                data_for_plot.append(k_values)
-                labels.append(sample_name)
-
-        if not data_for_plot:
-            plt.close(fig)
-            return ""
-
-        bp = ax.boxplot(data_for_plot, labels=labels, patch_artist=True,
-                       showmeans=True, meanline=True,
-                       boxprops=dict(facecolor='#d2b48c', alpha=0.7),
-                       medianprops=dict(color='red', linewidth=2),
-                       meanprops=dict(color='green', linewidth=2, linestyle='--'))
-
-        ax.set_yscale('log')
-        ax.set_ylabel('Hydraulic Conductivity (m/s)', fontsize=12, fontweight='bold')
-        ax.set_xlabel('Sample', fontsize=12, fontweight='bold')
-        ax.set_title('K-Value Distribution Comparison',
-                    fontsize=14, fontweight='bold', color='#2c5530')
-        ax.grid(True, axis='y', alpha=0.3, linestyle='--')
-
-        # Rotate x-labels if needed
-        if len(labels) > 5:
-            ax.set_xticklabels(labels, rotation=45, ha='right', fontsize=9)
-
-        plt.tight_layout()
-        return self._fig_to_base64(fig)
-
-    def _create_method_reliability_matrix(self, k_results_dict: Dict[str, List[KCalculationResult]]) -> str:
-        """Create method reliability matrix for comparison report"""
+        """Create box plots for K-value comparison across samples."""
         if not k_results_dict:
             return ""
+        return _get_plot_export().export_k_boxplot(k_results_dict)
 
-        # Collect all unique methods
-        all_methods = set()
-        for results in k_results_dict.values():
-            for r in results:
-                all_methods.add(r.method_name)
-
-        methods = sorted(list(all_methods))
-        sample_names = list(k_results_dict.keys())
-
-        if not methods or not sample_names:
+    def _create_method_reliability_matrix(self, k_results_dict: Dict[str, List[KCalculationResult]]) -> str:
+        """Create method reliability matrix for comparison report."""
+        if not k_results_dict:
             return ""
-
-        fig, ax = plt.subplots(figsize=(max(10, len(sample_names) * 0.8),
-                                        max(6, len(methods) * 0.5)))
-
-        # Create status matrix
-        matrix = np.zeros((len(methods), len(sample_names)))
-
-        for j, sample_name in enumerate(sample_names):
-            results = k_results_dict[sample_name]
-            for i, method in enumerate(methods):
-                # Find result for this method
-                result = next((r for r in results if r.method_name == method), None)
-                if result is None or result.k_value is None or result.k_value <= 0:
-                    matrix[i, j] = 0  # N/A
-                elif "OK" in str(result.status):
-                    matrix[i, j] = 3  # OK
-                elif "WARNING" in str(result.status):
-                    matrix[i, j] = 2  # Warning
-                else:
-                    matrix[i, j] = 1  # Error
-
-        # Create custom colormap
-        colors_map = ['#cccccc', '#ff6b6b', '#ffd93d', '#6bcf7f']
-        cmap = ListedColormap(colors_map)
-
-        # Plot heatmap
-        im = ax.imshow(matrix, cmap=cmap, aspect='auto', vmin=0, vmax=3)
-
-        # Set ticks and labels
-        ax.set_xticks(range(len(sample_names)))
-        ax.set_xticklabels(sample_names, rotation=45, ha='right', fontsize=10)
-        ax.set_yticks(range(len(methods)))
-        ax.set_yticklabels(methods, fontsize=9)
-        ax.set_title('Method Applicability Matrix - All Samples',
-                    fontsize=14, fontweight='bold', color='#2c5530')
-
-        # Add text annotations
-        for i in range(len(methods)):
-            for j in range(len(sample_names)):
-                val = matrix[i, j]
-                label = ['N/A', 'ERR', 'WARN', 'OK'][int(val)]
-                ax.text(j, i, label, ha='center', va='center',
-                       fontweight='bold', fontsize=8,
-                       color='white' if val in [1, 3] else 'black')
-
-        plt.tight_layout()
-        return self._fig_to_base64(fig)
+        return _get_plot_export().export_reliability_matrix(k_results_dict)
 
     def _format_metadata_section(self, metadata: Dict[str, str]) -> str:
         """Format project metadata section with modern grid layout"""
@@ -1913,7 +1705,7 @@ class ReportGenerator:
             """
 
             for result in k_results:
-                status_class = "success" if "OK" in str(result.status) else "warning"
+                status_class = "success" if classify_k_status(result) == "OK" else "warning"
                 k_display = f"{result.k_value:.2e}" if result.k_value else "N/A"
 
                 html += f"""
@@ -2696,47 +2488,20 @@ class ReportGenerator:
     def _create_gradation_table(self, dataset: GrainSizeData, scheme=None) -> str:
         """Generate HTML table showing gradation breakdown using scheme boundaries."""
         s = scheme if scheme is not None else ISO14688
-        silt_bnd  = s.silt_max   # upper limit of fines (e.g. 0.063 ISO / 0.075 USCS)
-        sand_bnd  = s.sand_max   # upper limit of sand  (e.g. 2.0   ISO / 4.75  USCS)
 
-        gravel_percent = 0.0
-        sand_percent   = 0.0
-        fines_percent  = 0.0
+        # Use the dataset's own classification to get accurate fractions
+        try:
+            result = dataset.classify(scheme=s)
+            fracs = result.fractions
+            gravel_percent = fracs.gravel_pct + getattr(fracs, 'cobble_pct', 0)
+            sand_percent   = fracs.sand_pct
+            fines_percent  = fracs.silt_pct + fracs.clay_pct
+        except Exception:
+            # Fallback to 0 if classification fails
+            gravel_percent = sand_percent = fines_percent = 0.0
 
-        # Calculate percentages based on percent passing
-        for i, size in enumerate(dataset.particle_sizes):
-            if i == 0:
-                continue
-
-            prev_size    = dataset.particle_sizes[i-1]
-            prev_passing = dataset.percent_passing[i-1]
-            curr_passing = dataset.percent_passing[i]
-
-            # Fraction retained in this interval
-            retained = prev_passing - curr_passing
-
-            # Classify based on size using scheme boundaries
-            if prev_size > sand_bnd:
-                gravel_percent += retained
-            elif prev_size > silt_bnd:
-                sand_percent += retained
-            else:
-                fines_percent += retained
-
-        # Handle edge cases
-        if dataset.particle_sizes[0] > sand_bnd:
-            gravel_percent += 100 - dataset.percent_passing[0]
-        elif dataset.particle_sizes[0] > silt_bnd:
-            sand_percent += 100 - dataset.percent_passing[0]
-        else:
-            fines_percent += 100 - dataset.percent_passing[0]
-
-        if dataset.particle_sizes[-1] < silt_bnd:
-            fines_percent += dataset.percent_passing[-1]
-        elif dataset.particle_sizes[-1] < sand_bnd:
-            sand_percent += dataset.percent_passing[-1]
-        else:
-            gravel_percent += dataset.percent_passing[-1]
+        silt_bnd = s.silt_max
+        sand_bnd = s.sand_max
 
         html = f"""
         <table>
@@ -2751,9 +2516,9 @@ class ReportGenerator:
         """
 
         gradations = [
-            ("Gravel", f"> {sand_bnd} mm",            gravel_percent),
+            ("Gravel", f"> {sand_bnd} mm",                  gravel_percent),
             ("Sand",   f"{silt_bnd} \u2013 {sand_bnd} mm", sand_percent),
-            ("Fines",  f"< {silt_bnd} mm",             fines_percent),
+            ("Fines",  f"< {silt_bnd} mm",                  fines_percent),
         ]
 
         for name, size_range, percent in gradations:
@@ -2781,20 +2546,9 @@ class ReportGenerator:
         """
 
         for result in k_results:
-            # Determine status text
-            status_str = str(result.status) if hasattr(result.status, 'value') else str(result.status)
-
-            if "OK" in status_str or "WITHIN_RANGE" in status_str:
-                status_text = "OK"
-            elif "WARNING" in status_str or "OUTSIDE_RANGE" in status_str:
-                status_text = "Warning"
-            else:
-                status_text = "Error"
-
+            status_text = classify_k_status(result)
             k_display = f"{result.k_value:.2e}" if result.k_value else "N/A"
-
-            # Get status message or default text
-            notes = result.status_message if hasattr(result, 'status_message') and result.status_message else status_str
+            notes = result.status_message if hasattr(result, 'status_message') and result.status_message else str(result.status)
 
             html += f"""
             <tr>
@@ -2899,7 +2653,7 @@ class ReportGenerator:
         for param in params:
             html += f"<tr><td style='font-weight: bold;'>{param}</td>"
 
-            # Collect values for this parameter
+            # Collect values for this parameter using dataset accessors
             values = []
             for dataset in datasets:
                 if param == "D₁₀ (mm)":
@@ -2909,14 +2663,9 @@ class ReportGenerator:
                 elif param == "D₆₀ (mm)":
                     val = dataset.get_d60()
                 elif param == "Cu":
-                    d10 = dataset.get_d10()
-                    d60 = dataset.get_d60()
-                    val = (d60 / d10) if (d10 and d60 and d10 > 0) else None
+                    val = dataset.get_uniformity_coefficient()
                 elif param == "Cc":
-                    d10 = dataset.get_d10()
-                    d30 = dataset.get_d30()
-                    d60 = dataset.get_d60()
-                    val = ((d30 * d30) / (d10 * d60)) if (d10 and d30 and d60 and d10 > 0 and d60 > 0) else None
+                    val = dataset.get_coefficient_of_curvature()
                 else:
                     val = None
 

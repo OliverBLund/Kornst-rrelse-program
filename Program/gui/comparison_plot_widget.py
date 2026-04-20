@@ -17,6 +17,14 @@ from typing import List, Dict
 from .k_plot_helpers import annotate_log_bars, apply_log_bar_limits, format_method_label
 from .matplotlib_canvas import FigureCanvas
 from .plot_interactions import AxesInteractionController
+from .plot_constants import METHOD_COLORS, DATASET_COLORS, DEFAULT_METHOD_ORDER, ordered_methods
+from .plot_renderers import (
+    render_distribution_overlay,
+    render_k_overlay,
+    _style_k_bar_simple,
+    _add_flagged_legend_handle,
+)
+from .plot_styles import PROFESSIONAL_STYLE
 from .theme import C, apply_matplotlib_style, icon
 
 
@@ -80,12 +88,7 @@ class ComparisonPlotWidget(QWidget):
     
     # Signals
     plot_updated = pyqtSignal()
-    DEFAULT_METHOD_ORDER = [
-        'Hazen', 'Hazen_1892', 'Slichter', 'Terzaghi',
-        'Beyer', 'Sauerbrei', 'Kruger', 'Kozeny-Carman',
-        'Zunker', 'Zamarin', 'USBR', 'Barr',
-        'Alyamani-Sen', 'Chapuis', 'Shepherd', 'Krumbein-Monk',
-    ]
+    DEFAULT_METHOD_ORDER = DEFAULT_METHOD_ORDER  # from plot_constants
     
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -105,31 +108,9 @@ class ComparisonPlotWidget(QWidget):
         self._default_limits = {}
         self._pan_state = None
         
-        # Color scheme for consistency
-        self.dataset_colors = [
-            '#1f77b4', '#ff7f0e', '#2ca02c', '#d62728', '#9467bd',
-            '#8c564b', '#e377c2', '#7f7f7f', '#bcbd22', '#17becf'
-        ]
-        
-        # Method colors (same as PlotWidget)
-        self.method_colors = {
-            "Hazen": "#b71c1c",
-            "Terzaghi": "#2e7d32",
-            "Beyer": "#1565c0",
-            "Slichter": "#ef6c00",
-            "Kozeny-Carman": "#7b1fa2",
-            "Shepherd": "#c2185b",
-            "Zunker": "#00acc1",
-            "Zamarin": "#fbc02d",
-            "USBR": "#6d4c41",
-            "Sauerbrei": "#546e7a",
-            "Hazen_1892": "#d84315",
-            "Kruger": "#4527a0",
-            "Barr": "#8d6e63",
-            "Alyamani-Sen": "#5d4037",
-            "Chapuis": "#ff5722",
-            "Krumbein-Monk": "#9c27b0",
-        }
+        # Shared color schemes from plot_constants
+        self.dataset_colors = DATASET_COLORS
+        self.method_colors = METHOD_COLORS
         
         self.init_ui()
 
@@ -344,10 +325,7 @@ class ComparisonPlotWidget(QWidget):
 
     def _ordered_methods(self, method_names) -> List[str]:
         """Return K-methods in a stable, domain-specific order."""
-        seen = set(method_names)
-        ordered = [name for name in self.DEFAULT_METHOD_ORDER if name in seen]
-        extras = sorted(seen.difference(self.DEFAULT_METHOD_ORDER))
-        return ordered + extras
+        return ordered_methods(method_names)
 
     def _calculate_histogram_frequencies(self, particle_sizes, percent_passing):
         """Convert cumulative percent passing to retained fractions per size class."""
@@ -387,10 +365,6 @@ class ComparisonPlotWidget(QWidget):
         labels = labels + ['Flagged / Warning']
         ax.legend(handles, labels, loc='best', fontsize=8)
 
-    def _overlay_value_labels_enabled(self, n_methods: int, n_datasets: int) -> bool:
-        """Avoid unreadable label walls in dense comparison overlays."""
-        return n_datasets <= 4 and (n_methods * n_datasets) <= 36
-    
     def on_grid_layout_changed(self, text: str):
         """Handle grid layout change"""
         layouts = {
@@ -533,24 +507,14 @@ class ComparisonPlotWidget(QWidget):
             self.plot_distribution_grid()
     
     def plot_distribution_overlay(self, ax):
-        """Plot all distributions on single axes"""
-        for i, dataset in enumerate(self.datasets):
-            color = self.dataset_colors[i % len(self.dataset_colors)]
-            ax.semilogx(dataset.particle_sizes, dataset.percent_passing,
-                       linewidth=2, label=dataset.sample_name, color=color,
-                       marker='o' if len(dataset.particle_sizes) < 20 else None,
-                       markersize=4)
-        
-        ax.set_xlabel('Grain Size (mm)', fontsize=10)
-        ax.set_ylabel('Percent Passing (%)', fontsize=10)
-        ax.set_title('Grain Size Distribution Comparison', fontsize=12, fontweight='bold')
-        ax.set_xlim(0.001, 100)
-        ax.set_ylim(0, 100)
-        
-        if self.show_grid:
-            ax.grid(True, which='both', alpha=0.3)
-        if self.show_legend:
-            ax.legend(loc='best', fontsize=8)
+        """Plot all distributions on single axes via shared renderer."""
+        render_distribution_overlay(
+            ax, self.datasets,
+            colors=self.dataset_colors[:len(self.datasets)],
+            style=PROFESSIONAL_STYLE,
+            show_grid=self.show_grid,
+            show_legend=self.show_legend,
+        )
     
     def plot_distribution_grid(self):
         """Plot distributions in grid layout"""
@@ -592,76 +556,17 @@ class ComparisonPlotWidget(QWidget):
             self.plot_k_values_grid()
     
     def plot_k_values_overlay(self):
-        """Plot K-values as grouped bars"""
+        """Plot K-values as grouped bars via shared renderer."""
         ax = self.figure.add_subplot(1, 1, 1)
-        ax.set_axisbelow(True)
-        
-        # Get all unique methods
-        all_methods = set()
-        for k_dict in self.k_results_dict.values():
-            all_methods.update(k_dict.keys())
-        methods = self._ordered_methods(all_methods)
-        
-        # Prepare data
-        n_datasets = len(self.k_results_dict)
-        n_methods = len(methods)
-        bar_width = 0.8 / n_datasets
-        show_value_labels = self._overlay_value_labels_enabled(n_methods, n_datasets)
-        label_bars = []
-        label_texts = []
-        label_levels = []
-        positive_values = []
-        
-        # Plot bars for each dataset
-        has_flagged = False
-        for i, (name, k_dict) in enumerate(self.k_results_dict.items()):
-            values = [k_dict.get(method, 0) for method in methods]
-            positions = np.arange(n_methods) + i * bar_width
-            color = self.dataset_colors[i % len(self.dataset_colors)]
-            flagged_methods = self.flagged_methods_dict.get(name, set())
-            
-            bars = ax.bar(positions, values, bar_width, label=name,
-                          color=color, alpha=0.8, edgecolor='black', linewidth=0.5)
-            
-            for bar, method, val in zip(bars, methods, values):
-                flagged = method in flagged_methods
-                has_flagged = has_flagged or flagged
-                self._style_k_bar(bar, color, flagged)
-                if val > 0:
-                    positive_values.append(val)
-                    if show_value_labels:
-                        label_bars.append(bar)
-                        label_texts.append(f'{val:.1e}')
-                        label_levels.append(i)
-        
-        ax.set_xlabel('Method', fontsize=10)
-        ax.set_ylabel('K (m/s)', fontsize=10)
-        ax.set_title('Hydraulic Conductivity Comparison', fontsize=12, fontweight='bold')
-        ax.set_xticks(np.arange(n_methods) + bar_width * (n_datasets - 1) / 2)
-        ax.set_xticklabels(
-            [format_method_label(method, compact=True) for method in methods],
-            rotation=45,
-            ha='right',
-            fontsize=8,
+
+        render_k_overlay(
+            ax, self.k_results_dict,
+            flagged_methods_dict=self.flagged_methods_dict,
+            style=PROFESSIONAL_STYLE,
+            show_grid=self.show_grid,
+            show_legend=self.show_legend,
+            show_value_labels=True,
         )
-        apply_log_bar_limits(ax, positive_values, max_label_level=max(label_levels, default=0))
-        if show_value_labels:
-            annotate_log_bars(
-                ax,
-                label_bars,
-                label_texts,
-                level_indices=label_levels,
-                fontsize=5.75 if n_datasets > 2 else 6.0,
-                add_bbox=n_datasets > 1,
-            )
-        
-        if self.show_grid:
-            ax.grid(True, axis='y', alpha=0.3)
-        if self.show_legend:
-            if has_flagged:
-                self._add_flagged_legend_handle(ax)
-            else:
-                ax.legend(loc='best', fontsize=8)
     
     def plot_k_values_grouped(self):
         """Plot K-values grouped by dataset"""

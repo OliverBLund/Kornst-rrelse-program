@@ -48,6 +48,7 @@ class _AppToolbar(QWidget):
     """
     tab_changed = pyqtSignal(int)   # emits 0=Individual, 1=Comparison, 2=Reports, 3=Export
     add_files_clicked = pyqtSignal()
+    add_files_mode_clicked = pyqtSignal(str)
     calculate_clicked = pyqtSignal()
     help_clicked = pyqtSignal()
 
@@ -111,7 +112,7 @@ class _AppToolbar(QWidget):
         layout.addSpacing(6)
 
         # ── Action buttons — .tb-btn ─────────────────────────────────
-        self._add_btn = QPushButton(" Add Files")
+        self._add_btn = QPushButton(" Add Data")
         self._add_btn.setObjectName("tb-add")
         self._add_btn.setProperty("toolaction", True)
         try:
@@ -120,7 +121,12 @@ class _AppToolbar(QWidget):
         except Exception:
             pass
         self._add_btn.setCursor(Qt.CursorShape.PointingHandCursor)
-        self._add_btn.clicked.connect(self.add_files_clicked)
+        add_menu = QMenu(self._add_btn)
+        processed_action = add_menu.addAction("Processed Curve Data...")
+        processed_action.triggered.connect(lambda _checked=False: self.add_files_mode_clicked.emit("processed"))
+        raw_action = add_menu.addAction("Raw Sieve Weighings...")
+        raw_action.triggered.connect(lambda _checked=False: self.add_files_mode_clicked.emit("raw_sieve"))
+        self._add_btn.setMenu(add_menu)
         layout.addWidget(self._add_btn)
         layout.addSpacing(4)
 
@@ -538,6 +544,7 @@ class MainWindow(FramelessMainWindowMixin, QMainWindow):
         self.app_toolbar = _AppToolbar()
         self.app_toolbar.tab_changed.connect(self._on_nav_tab_changed)
         self.app_toolbar.add_files_clicked.connect(self.control_panel.add_files)
+        self.app_toolbar.add_files_mode_clicked.connect(self.control_panel.add_files)
         self.app_toolbar.calculate_clicked.connect(self.calculate_all_k_values)
         self.app_toolbar.help_clicked.connect(self.show_help)
         main_layout.addWidget(self.app_toolbar)
@@ -933,6 +940,7 @@ class MainWindow(FramelessMainWindowMixin, QMainWindow):
 
     def _connect_welcome_signals(self):
         self.welcome_widget.load_files_requested.connect(self.on_welcome_load_files)
+        self.welcome_widget.load_files_with_mode_requested.connect(self.on_welcome_load_files)
         self.welcome_widget.load_sample_data_requested.connect(self.on_welcome_load_sample)
         self.welcome_widget.open_recent_file_requested.connect(self.on_welcome_open_recent)
         self.welcome_widget.open_recent_session_requested.connect(self.on_welcome_open_session)
@@ -940,9 +948,12 @@ class MainWindow(FramelessMainWindowMixin, QMainWindow):
         self.welcome_widget.dont_show_again_changed.connect(self.on_welcome_dont_show_again)
         self.welcome_widget.clear_sessions_requested.connect(self.on_clear_sessions)
 
-    def on_welcome_load_files(self):
-        self.control_panel.add_files()
-        self._show_status_message("Select files to load\u2026")
+    def on_welcome_load_files(self, data_mode: str = "processed"):
+        self.control_panel.add_files(data_mode)
+        if data_mode == "raw_sieve":
+            self._show_status_message("Select raw sieve weighing files\u2026")
+        else:
+            self._show_status_message("Select processed curve files\u2026")
 
     def on_welcome_load_sample(self):
         test_data_folder = os.path.join(os.path.dirname(os.path.dirname(__file__)), "test_data")

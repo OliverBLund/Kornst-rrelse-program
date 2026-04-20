@@ -45,6 +45,20 @@ class TestAppToolbar(unittest.TestCase):
         self.assertEqual(self.toolbar._help_btn.iconSize().width(), 13)
         self.assertEqual(self.toolbar._nav_btns[0].iconSize().width(), 13)
 
+    def test_add_data_toolbar_exposes_import_path_menu(self):
+        emitted = []
+        self.toolbar.add_files_mode_clicked.connect(emitted.append)
+
+        menu = self.toolbar._add_btn.menu()
+        self.assertIsNotNone(menu)
+        self.assertEqual(
+            [action.text() for action in menu.actions()],
+            ["Processed Curve Data...", "Raw Sieve Weighings..."],
+        )
+
+        menu.actions()[1].trigger()
+        self.assertEqual(emitted, ["raw_sieve"])
+
     def test_badge_font_uses_valid_point_size(self):
         badge = self.toolbar._badge_lbls[0]
 

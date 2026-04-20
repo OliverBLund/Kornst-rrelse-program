@@ -338,12 +338,12 @@ class ColumnMapperDialog(FramelessDialogBase):
             mapping_layout.addWidget(sheet_group)
 
         # Input format selector (available for all file types)
-        input_format_group = QGroupBox("Data Type")
+        input_format_group = QGroupBox("Import Path")
         input_format_layout = QHBoxLayout(input_format_group)
         input_format_layout.setContentsMargins(10, 8, 10, 10)
         input_format_layout.setSpacing(8)
 
-        self.calculated_data_btn = QPushButton("Calculated Data")
+        self.calculated_data_btn = QPushButton("Processed Curve Data")
         self.raw_sieve_btn = QPushButton("Raw Sieve Weighings")
 
         self.calculated_data_btn.setCheckable(True)
@@ -476,7 +476,7 @@ class ColumnMapperDialog(FramelessDialogBase):
         range_tools_layout.addWidget(self.pattern_info_label)
 
         # Mapping group (for column mode)
-        self.mapping_group = QGroupBox("Calculated Data Columns")
+        self.mapping_group = QGroupBox("Processed Curve Columns")
         mapping_form = QFormLayout(self.mapping_group)
 
         # Create combo boxes for mapping
@@ -816,7 +816,7 @@ class ColumnMapperDialog(FramelessDialogBase):
 
         if self.raw_sieve_mode:
             text = (
-                "Raw Sieve Weighings always uses column mapping. Switch back to Calculated Data "
+                "Raw Sieve Weighings always uses column mapping. Switch back to Processed Curve Data "
                 "to use Cell Range Selection for irregular Excel layouts."
             )
         elif self.calculated_selection_mode == "range":
@@ -849,14 +849,14 @@ class ColumnMapperDialog(FramelessDialogBase):
                 text += " The same raw-sieve mapping can be applied across the checked sheets."
         elif self.calculated_selection_mode == "range":
             text = (
-                "Current path: Calculated Data -> Cell Range Selection. Use this for irregular "
+                "Current path: Processed Curve Data -> Cell Range Selection. Use this for irregular "
                 "Excel layouts where the relevant cells are scattered or include spacer columns."
             )
             if file_ext in ['.xlsx', '.xls']:
                 text += " This path works one sheet at a time; use Apply Pattern to Batch for repeated layouts."
         else:
             text = (
-                "Current path: Calculated Data -> Column Mapping. Use this when the file already "
+                "Current path: Processed Curve Data -> Column Mapping. Use this when the file already "
                 "contains particle size plus cumulative percent passing or percent retained columns."
             )
             if excel_multi_sheet:

@@ -102,6 +102,7 @@ class WelcomeWidget(QWidget):
     )
 
     load_files_requested       = pyqtSignal()
+    load_files_with_mode_requested = pyqtSignal(str)
     load_sample_data_requested = pyqtSignal()
     open_recent_file_requested = pyqtSignal(str)
     open_recent_session_requested = pyqtSignal(dict)
@@ -1240,7 +1241,7 @@ class WelcomeWidget(QWidget):
         lay.setHorizontalSpacing(8)
         lay.setVerticalSpacing(8)
 
-        load_btn = QPushButton("Load Batch Files")
+        load_btn = QPushButton("Processed Curve Data")
         load_btn.setIcon(icon("fa6s.folder-open", "#ffffff"))
         load_btn.setMinimumHeight(34)
         load_btn.setCursor(QCursor(Qt.CursorShape.PointingHandCursor))
@@ -1258,8 +1259,34 @@ class WelcomeWidget(QWidget):
             QPushButton:hover   {{ background: {C.OLIVE_H}; }}
             QPushButton:pressed {{ background: {C.OLIVE_DK}; }}
         """)
-        load_btn.clicked.connect(lambda _checked=False: self.load_files_requested.emit())
-        lay.addWidget(load_btn, 0, 0, 1, 2)
+        load_btn.setToolTip("Use this when files already contain particle size and cumulative percent passing.")
+        load_btn.clicked.connect(lambda _checked=False: self.load_files_with_mode_requested.emit("processed"))
+        lay.addWidget(load_btn, 0, 0)
+
+        raw_btn = QPushButton("Raw Sieve Weighings")
+        raw_btn.setIcon(icon("fa6s.scale-balanced", C.TEXT_MID))
+        raw_btn.setMinimumHeight(32)
+        raw_btn.setCursor(QCursor(Qt.CursorShape.PointingHandCursor))
+        raw_btn.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
+        raw_btn.setToolTip("Use this when files contain sieve size, empty sieve weight, and sieve + sample weight.")
+        raw_btn.setStyleSheet(f"""
+            QPushButton {{
+                background: rgba(255,255,255,170);
+                color: {C.TEXT_MID};
+                border: 1.5px solid {C.BORDER_DK};
+                border-radius: 8px;
+                padding: 7px 18px;
+                font-size: {F.SZ_BASE}pt;
+                font-weight: 600;
+            }}
+            QPushButton:hover {{
+                background: rgba(196,165,116,24);
+                border-color: rgba(196,165,116,160);
+                color: {C.TEXT};
+            }}
+        """)
+        raw_btn.clicked.connect(lambda _checked=False: self.load_files_with_mode_requested.emit("raw_sieve"))
+        lay.addWidget(raw_btn, 0, 1)
 
         resume_btn = QPushButton("Resume Latest Session")
         resume_btn.setIcon(icon("fa6s.clock-rotate-left", C.TEXT_MID))
