@@ -166,6 +166,7 @@ class _SampleCard(QWidget):
 
     _STATUS_DOT = {
         'pending': C.SB_MUTED,
+        'mapping': C.OLIVE,
         'failed':  C.LED_ERR,
         'review':  C.LED_WARN,
         'loaded':  C.OLIVE,
@@ -445,6 +446,7 @@ class _SampleCard(QWidget):
         # Status line text
         status_text = {
             'pending': '\u23f3 Loading...',
+            'mapping': 'Mapping required',
             'failed': '\u274c Load failed',
             'review': '\u26a0 Needs review',
             'loaded': '\u2705 Loaded successfully',
@@ -581,7 +583,7 @@ class _FileListWidget(QScrollArea):
 
     def get_warning_count(self) -> int:
         return sum(1 for card in self._cards.values()
-                   if card._status in ('review', 'failed'))
+                   if card._status in ('mapping', 'review', 'failed'))
 
     def apply_filter(self, filter_type: str):
         """Show/hide cards based on filter: 'all', 'selected', 'warnings'."""
@@ -591,7 +593,7 @@ class _FileListWidget(QScrollArea):
             elif filter_type == 'selected':
                 card.setVisible(card.is_selected)
             elif filter_type == 'warnings':
-                card.setVisible(card._status in ('review', 'failed'))
+                card.setVisible(card._status in ('mapping', 'review', 'failed'))
 
     def _on_card_clicked(self, file_path: str):
         self.set_active(file_path)
@@ -1357,6 +1359,7 @@ class ControlPanel(QFrame):
     analysis_requested = pyqtSignal(dict)  # Emitted when analysis is requested
     sample_selected = pyqtSignal(str)  # Emitted when a sample is selected
     error_dataset = pyqtSignal(str, str)  # Emitted when dataset fails to load (file_path, error_message)
+    mapping_required = pyqtSignal(str, str)  # Emitted when a valid import path needs user mapping
     dataset_loaded_successfully = pyqtSignal(object, str)  # Emitted when dataset loads successfully (dataset, file_path)
     update_error_tab_message = pyqtSignal(str, str)  # Update existing error tab with new message
     dataset_fix_requested = pyqtSignal(str)  # Emitted when user wants to fix/remap a dataset (file_path)
@@ -1371,7 +1374,7 @@ class ControlPanel(QFrame):
         self.file_mapping_states = {}  # Remember mapper path and column choices per file
         self.validation_errors = []  # Track validation issues
         self.data_loader = DataLoader()  # Data loading engine
-        self.file_statuses = {}  # Track file loading status: 'pending', 'failed', 'review', 'loaded'
+        self.file_statuses = {}  # Track status: 'pending', 'mapping', 'failed', 'review', 'loaded'
         self._active_scheme: GrainClassificationScheme = ISO14688
         self._import_process = None
         self._import_queue = None
@@ -1510,7 +1513,7 @@ class ControlPanel(QFrame):
             f"  background: rgba(255,255,255,0.25); }}"
             f"QFrame:hover {{ border-color: {C.OLIVE};"
             f"  background: rgba(107,142,35,0.07); }}")
-        self._drop_zone.mousePressEvent = lambda e: self.add_files()
+        self._drop_zone.mousePressEvent = self._show_add_data_menu_for_drop_zone
 
         dz_v = QVBoxLayout(self._drop_zone)
         dz_v.setContentsMargins(10, 11, 10, 11)
@@ -1526,7 +1529,7 @@ class ControlPanel(QFrame):
         dz_icon.setStyleSheet("background: transparent; border: none;")
         dz_v.addWidget(dz_icon)
 
-        dz_text = QLabel("Drop files or click to browse")
+        dz_text = QLabel("Drop files or click to choose import path")
         dz_text.setAlignment(Qt.AlignmentFlag.AlignCenter)
         dz_text.setStyleSheet(
             f"font-size: 11px; color: {C.SB_MID};"
@@ -1554,7 +1557,7 @@ class ControlPanel(QFrame):
         # Connect the "+ Add" button in section header to add_files
         samples_hdr = body_v.itemAt(body_v.count() - 1).widget()
         if hasattr(samples_hdr, 'action_btn') and samples_hdr.action_btn:
-            samples_hdr.action_btn.clicked.connect(self.add_files)
+            self._install_add_data_menu(samples_hdr.action_btn)
 
         # Filter pills row — matches .s-filter-row in CSS
         pills_w = QWidget()
@@ -1676,18 +1679,8 @@ class ControlPanel(QFrame):
         self.review_failed_btn = QPushButton("\u26a0 Review")
         self.review_failed_btn.clicked.connect(self.review_failed_files)
         self.review_failed_btn.setEnabled(False)
-        self.review_failed_btn.setToolTip("Review files needing manual mapping")
+        self.review_failed_btn.setToolTip("Open files waiting for mapping or manual review")
         self.review_failed_btn.setStyleSheet(_MINI_BTN)
-
-        self.add_processed_btn = QPushButton("Processed")
-        self.add_processed_btn.clicked.connect(lambda _checked=False: self.add_files("processed"))
-        self.add_processed_btn.setToolTip("Load files that already contain particle size and cumulative percent passing")
-        self.add_processed_btn.setStyleSheet(_MINI_BTN)
-
-        self.add_raw_sieve_btn = QPushButton("Raw Weighings")
-        self.add_raw_sieve_btn.clicked.connect(lambda _checked=False: self.add_files("raw_sieve"))
-        self.add_raw_sieve_btn.setToolTip("Load files with sieve size, empty sieve weight, and sieve + sample weight")
-        self.add_raw_sieve_btn.setStyleSheet(_MINI_BTN)
 
         self.clear_all_btn = QPushButton("Clear All")
         self.clear_all_btn.clicked.connect(self.clear_all_files)
@@ -1698,8 +1691,6 @@ class ControlPanel(QFrame):
             f"QPushButton:hover {{ color: {C.LED_ERR}; }}"
         )
 
-        mini_btns.addWidget(self.add_processed_btn, 1)
-        mini_btns.addWidget(self.add_raw_sieve_btn, 1)
         mini_btns.addWidget(self.review_failed_btn, 1)
         mini_btns.addStretch()
         mini_btns.addWidget(self.clear_all_btn)
@@ -1931,7 +1922,7 @@ class ControlPanel(QFrame):
         status = self.file_statuses.get(file_path, 'pending')
         menu = QMenu(self)
 
-        if status == 'review':
+        if status in ('mapping', 'review'):
             act = QAction("Map Columns\u2026", self)
             act.triggered.connect(lambda: self.edit_file_mapping(file_path))
             menu.addAction(act)
@@ -1973,10 +1964,11 @@ class ControlPanel(QFrame):
         """Refresh stat chips from current file_statuses and card state."""
         total = len(self.file_statuses)
         selected = self._file_list.get_selected_count()
+        loaded = sum(1 for s in self.file_statuses.values() if s == 'loaded')
         warnings = sum(1 for s in self.file_statuses.values()
-                       if s in ('review', 'failed'))
+                       if s in ('mapping', 'review', 'failed'))
 
-        self._chip_loaded.setText(f"{total} loaded" if total else "0 loaded")
+        self._chip_loaded.setText(f"{loaded} loaded" if total else "0 loaded")
         self._chip_selected.setText(f"{selected} selected")
         if warnings > 0:
             self._chip_warnings.setText(f"\u26a0 {warnings}")
@@ -2085,6 +2077,33 @@ class ControlPanel(QFrame):
         except Exception:
             self._strata_widget.update_result(None)
 
+    def _build_add_data_menu(self, parent=None) -> QMenu:
+        """Create the shared import-path menu used by sidebar entry points."""
+        menu = QMenu(parent or self)
+        processed_action = QAction("Processed Curve Data...", menu)
+        processed_action.triggered.connect(lambda _checked=False: self.add_files("processed"))
+        menu.addAction(processed_action)
+
+        raw_action = QAction("Raw Sieve Weighings...", menu)
+        raw_action.triggered.connect(lambda _checked=False: self.add_files("raw_sieve"))
+        menu.addAction(raw_action)
+        return menu
+
+    def _install_add_data_menu(self, button: QPushButton) -> None:
+        button.setMenu(self._build_add_data_menu(button))
+        button.setToolTip("Choose whether the files contain processed curves or raw sieve weighings")
+
+    def _show_add_data_menu_for_drop_zone(self, event) -> None:
+        if event.button() != Qt.MouseButton.LeftButton:
+            return
+        menu = self._build_add_data_menu(self)
+        global_pos = (
+            event.globalPosition().toPoint()
+            if hasattr(event, "globalPosition")
+            else event.globalPos()
+        )
+        menu.exec(global_pos)
+
     def add_files(self, data_mode: str = "processed"):
         """Add multiple files for batch processing"""
         if data_mode not in {"processed", "raw_sieve"}:
@@ -2167,10 +2186,10 @@ class ControlPanel(QFrame):
                     QMessageBox.information(self, "No New Files", f"All {len(already_added)} selected files are already in the list.")
 
     def _queue_raw_sieve_files_for_mapping(self, file_entries: list, already_added: list | None = None):
-        """Register raw-weighing files as review items and open raw mode in the mapper."""
+        """Register raw-weighing files as neutral mapping-required items."""
         already_added = already_added or []
-        review_message = (
-            "Raw sieve weighing data requires column mapping. Map Sieve Size, "
+        mapping_message = (
+            "Raw sieve weighing data is ready for column mapping. Map Sieve Size, "
             "Weight of Empty Sieve, and Weight of Sieve + Sample."
         )
 
@@ -2183,13 +2202,13 @@ class ControlPanel(QFrame):
                 file_key = file_entry
                 display_name = None
 
-            self.file_statuses[file_key] = 'review'
+            self.file_statuses[file_key] = 'mapping'
             self.file_mapping_states[file_key] = {
                 "raw_sieve_mode": True,
                 "calculated_selection_mode": "column",
             }
-            self.add_file_to_table(file_key, 'review', display_name=display_name)
-            self.error_dataset.emit(file_key, review_message)
+            self.add_file_to_table(file_key, 'mapping', display_name=display_name)
+            self.mapping_required.emit(file_key, mapping_message)
 
         self.update_ui_state()
         message = f"{len(file_entries)} raw weighing item(s) queued for mapping"
@@ -2344,17 +2363,19 @@ class ControlPanel(QFrame):
     def get_status_text(self, status: str) -> str:
         """Get descriptive status text with icon"""
         status_map = {
-            'pending': '🔄 Processing...',
-            'failed': '❌ Failed',
-            'review': '⚠️ Needs Review',
-            'loaded': '📄 Loaded'
+            'pending': 'Processing...',
+            'mapping': 'Map Columns',
+            'failed': 'Failed',
+            'review': 'Needs Review',
+            'loaded': 'Loaded'
         }
-        return status_map.get(status, '❓ Unknown')
+        return status_map.get(status, 'Unknown')
 
     def get_status_tooltip(self, status: str) -> str:
         """Get tooltip text for status"""
         tooltip_map = {
             'pending': 'File is being processed',
+            'mapping': 'Raw sieve weighing file is waiting for column mapping',
             'failed': 'File failed validation - contains errors',
             'review': 'File needs manual column mapping',
             'loaded': 'File successfully loaded and ready for analysis'
@@ -2382,7 +2403,7 @@ class ControlPanel(QFrame):
         menu = QMenu(self)
 
         # Add actions based on status
-        if status == 'review':
+        if status in ('mapping', 'review'):
             map_action = QAction("🗺️ Map Columns...", self)
             map_action.triggered.connect(lambda: self.edit_file_mapping(file_path))
             menu.addAction(map_action)
@@ -2748,7 +2769,10 @@ class ControlPanel(QFrame):
 
     def review_failed_files(self):
         """Open manual column mapping for files that need review"""
-        review_files = [path for path, status in self.file_statuses.items() if status == 'review']
+        review_files = [
+            path for path, status in self.file_statuses.items()
+            if status in ('mapping', 'review')
+        ]
 
         for file_path in review_files:
             try:
@@ -2996,10 +3020,12 @@ class ControlPanel(QFrame):
 
         # Count files by status
         review_count = sum(1 for status in self.file_statuses.values() if status == 'review')
+        mapping_count = sum(1 for status in self.file_statuses.values() if status == 'mapping')
+        action_count = review_count + mapping_count
         loaded_count = sum(1 for status in self.file_statuses.values() if status == 'loaded')
 
         # Update batch action buttons
-        self.review_failed_btn.setEnabled(review_count > 0)
+        self.review_failed_btn.setEnabled(action_count > 0)
 
         # Basic UI state
         self.remove_file_btn.setEnabled(has_selection)
@@ -3008,8 +3034,16 @@ class ControlPanel(QFrame):
         if has_files and not hasattr(self, '_manual_status_update'):
             if loaded_count > 0:
                 summary = f"📊 {loaded_count} ready"
+                if mapping_count > 0:
+                    summary += f", {mapping_count} need mapping"
                 if review_count > 0:
                     summary += f", {review_count} need review"
+            elif mapping_count > 0:
+                summary = f"{mapping_count} need mapping"
+                if review_count > 0:
+                    summary += f", {review_count} need review"
+            elif review_count > 0:
+                summary = f"{review_count} need review"
             else:
                 summary = f"{len(self.file_statuses)} file(s) added"
 

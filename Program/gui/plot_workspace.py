@@ -7,20 +7,44 @@ Matches the design concept in 02_tabs.html / _shared.css (.pw-* classes).
 from PyQt6.QtWidgets import (
     QWidget, QHBoxLayout, QVBoxLayout, QFrame, QComboBox,
     QPushButton, QLabel, QFileDialog, QMessageBox, QLineEdit,
-    QSizePolicy, QButtonGroup,
+    QSizePolicy, QButtonGroup, QSpinBox, QDoubleSpinBox, QScrollArea,
 )
 from PyQt6.QtCore import (
     Qt, pyqtSignal, QPropertyAnimation, QEasingCurve, QSize,
 )
 from typing import Optional, Dict, Set
+import dataclasses
 import math
 import numpy as np
 
 from data_loader import GrainSizeData
 from .plot_widget import PlotWidget
+from .plot_styles import PlotStyle, get_style, get_available_style_names
 from .toggle_switch import ToggleSwitch
 from .theme import C, F, SZ, icon
+from .collapsible_section import CollapsibleSection
 from unit_conversions import HydraulicConductivityUnit, HydraulicConductivityConverter
+
+# Legend placement options exposed in the sidebar.
+# Each entry is (matplotlib_loc, bbox_to_anchor_or_None, display_label).
+# bbox_to_anchor=None → inside the axes (standard matplotlib loc).
+# bbox_to_anchor set → anchored relative to the axes, which puts the legend
+# outside the plot. See plot_styles.PlotStyle.legend_bbox_to_anchor.
+_LEGEND_LOCATIONS: list[tuple[str, Optional[tuple[float, float]], str]] = [
+    ("best",         None,          "Best (auto)"),
+    ("upper left",   None,          "Inside — upper left"),
+    ("upper right",  None,          "Inside — upper right"),
+    ("lower left",   None,          "Inside — lower left"),
+    ("lower right",  None,          "Inside — lower right"),
+    ("center left",  None,          "Inside — center left"),
+    ("center right", None,          "Inside — center right"),
+    ("upper center", None,          "Inside — upper center"),
+    ("lower center", None,          "Inside — lower center"),
+    ("center left",  (1.02, 0.5),   "Outside — right"),
+    ("center right", (-0.02, 0.5),  "Outside — left"),
+    ("upper center", (0.5, -0.14),  "Outside — below"),
+    ("lower center", (0.5, 1.02),   "Outside — above"),
+]
 
 
 # ─────────────────────────────────────────────────────────────
@@ -103,6 +127,11 @@ class PlotWorkspace(QWidget):
         self.fill_curve = False
         self.fill_zone_labels = False
         self.log_x_scale = True
+
+        # Per-workspace custom style — starts as None (preset is authoritative).
+        # Populated when the user tweaks any field in the "Legend & Typography"
+        # section; cleared when the user picks a different preset or clicks Reset.
+        self._custom_style: Optional[PlotStyle] = None
 
         self._init_ui()
 
@@ -291,14 +320,35 @@ class PlotWorkspace(QWidget):
         sidebar = QFrame()
         sidebar.setObjectName("pw-sidebar")
         sidebar.setMinimumWidth(0)
+        # minimumHeight=0 plus a QScrollArea wrapper keeps the sidebar from
+        # forcing the host tab to grow as new sections are added. Without this,
+        # minimumSizeHint sums every row and propagates up to DatasetTab.
+        sidebar.setMinimumHeight(0)
         sidebar.setSizePolicy(QSizePolicy.Policy.Fixed, QSizePolicy.Policy.Expanding)
-        lay = QVBoxLayout(sidebar)
+
+        outer = QVBoxLayout(sidebar)
+        outer.setContentsMargins(0, 0, 0, 0)
+        outer.setSpacing(0)
+
+        scroll = QScrollArea()
+        scroll.setObjectName("pw-sidebar-scroll")
+        scroll.setWidgetResizable(True)
+        scroll.setFrameShape(QFrame.Shape.NoFrame)
+        scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+        scroll.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAsNeeded)
+        outer.addWidget(scroll)
+
+        content = QWidget()
+        lay = QVBoxLayout(content)
         lay.setContentsMargins(0, 0, 0, 0)
         lay.setSpacing(0)
+        scroll.setWidget(content)
 
         # ── Axis Controls ──
-        self._sect_axis = self._sect_label("Axis Controls")
-        lay.addWidget(self._sect_axis)
+        self._sect_axis = CollapsibleSection(
+            "Axis Controls", "fa6s.ruler-combined",
+            CollapsibleSection.BLUE, expanded=True,
+        )
         for label_text, default, row_attr, label_attr, input_attr in [
             ("X min (mm)", "0.001", "_row_xmin", "_lbl_xmin", "_in_xmin"),
             ("X max (mm)", "100",   "_row_xmax", "_lbl_xmax", "_in_xmax"),
@@ -310,11 +360,14 @@ class PlotWorkspace(QWidget):
             setattr(self, label_attr, lbl)
             setattr(self, input_attr, inp)
             inp.editingFinished.connect(self._on_axis_changed)
-            lay.addWidget(row)
+            self._sect_axis.add_widget(row)
+        lay.addWidget(self._sect_axis)
 
         # ── Display Options ──
-        self._sect_display = self._sect_label("Display Options")
-        lay.addWidget(self._sect_display)
+        self._sect_display = CollapsibleSection(
+            "Display Options", "fa6s.eye",
+            CollapsibleSection.OLIVE, expanded=True,
+        )
         for label_text, checked, row_attr, switch_attr in [
             ("Show grid lines",      True,  "_row_grid",        "_sw_grid"),
             ("Show soil zones",      False, "_row_zones",       "_sw_zones"),
@@ -323,35 +376,99 @@ class PlotWorkspace(QWidget):
             row_w, sw = self._toggle_row(label_text, checked)
             setattr(self, row_attr, row_w)
             setattr(self, switch_attr, sw)
-            lay.addWidget(row_w)
+            self._sect_display.add_widget(row_w)
 
         # Fill curve + sub-option (zone labels)
         self._row_fill, self._sw_fill = self._toggle_row("Fill curve area", False)
-        lay.addWidget(self._row_fill)
+        self._sect_display.add_widget(self._row_fill)
 
         self._row_fill_labels, self._sw_fill_labels = self._toggle_row("  └ Zone % in fill", False)
         self._row_fill_labels.layout().setContentsMargins(22, 4, 10, 4)
         self._row_fill_labels.setStyleSheet(
             f"border-bottom: 1px solid rgba(212,196,168,0.4); background: rgba(0,0,0,0.02);")
-        lay.addWidget(self._row_fill_labels)
+        self._sect_display.add_widget(self._row_fill_labels)
 
         self._row_markers, self._sw_markers = self._toggle_row("Markers on curve", False)
-        lay.addWidget(self._row_markers)
+        self._sect_display.add_widget(self._row_markers)
+        lay.addWidget(self._sect_display)
 
         # ── Curve Color ──
-        self._sect_curve_color = self._sect_label("Curve Color")
-        lay.addWidget(self._sect_curve_color)
+        self._sect_curve_color = CollapsibleSection(
+            "Curve Color", "fa6s.palette",
+            CollapsibleSection.PURPLE, expanded=False,
+        )
         self._color_container = QWidget()
         self._color_container_lay = QVBoxLayout(self._color_container)
         self._color_container_lay.setContentsMargins(0, 0, 0, 0)
         self._color_container_lay.setSpacing(0)
         # Populate with current dataset
         self._add_color_row(self.dataset.sample_name, C.SAMPLE_COLORS[0])
-        lay.addWidget(self._color_container)
+        self._sect_curve_color.add_widget(self._color_container)
+        lay.addWidget(self._sect_curve_color)
+
+        # ── Legend & Typography ──
+        self._sect_advanced = CollapsibleSection(
+            "Legend & Typography", "fa6s.text-height",
+            CollapsibleSection.AMBER, expanded=False,
+        )
+
+        self._row_legend_loc, self._legend_loc_combo = self._combo_row(
+            "Legend position", [label for _, _, label in _LEGEND_LOCATIONS])
+        self._legend_loc_combo.currentIndexChanged.connect(
+            self._on_legend_location_changed)
+        self._sect_advanced.add_widget(self._row_legend_loc)
+
+        self._row_legend_alpha, self._legend_alpha_spin = self._dspin_row(
+            "Legend opacity", 0.0, 1.0, 0.05, 2)
+        self._legend_alpha_spin.valueChanged.connect(
+            lambda v: self._update_style_field("legend_framealpha", float(v)))
+        self._sect_advanced.add_widget(self._row_legend_alpha)
+
+        self._row_title_size, self._title_size_spin = self._spin_row(
+            "Title size", 6, 36)
+        self._title_size_spin.valueChanged.connect(
+            lambda v: self._update_style_field("title_fontsize", int(v)))
+        self._sect_advanced.add_widget(self._row_title_size)
+
+        self._row_label_size, self._label_size_spin = self._spin_row(
+            "Axis label size", 6, 36)
+        self._label_size_spin.valueChanged.connect(
+            lambda v: self._update_style_field("label_fontsize", int(v)))
+        self._sect_advanced.add_widget(self._row_label_size)
+
+        self._row_tick_size, self._tick_size_spin = self._spin_row(
+            "Tick size", 5, 24)
+        self._tick_size_spin.valueChanged.connect(
+            lambda v: self._update_style_field("tick_fontsize", int(v)))
+        self._sect_advanced.add_widget(self._row_tick_size)
+
+        self._row_legend_size, self._legend_size_spin = self._spin_row(
+            "Legend size", 5, 24)
+        self._legend_size_spin.valueChanged.connect(
+            lambda v: self._update_style_field("legend_fontsize", int(v)))
+        self._sect_advanced.add_widget(self._row_legend_size)
+
+        reset_row = QWidget()
+        reset_lay = QHBoxLayout(reset_row)
+        reset_lay.setContentsMargins(10, 6, 10, 6)
+        self._style_reset_btn = QPushButton("Reset to preset")
+        self._style_reset_btn.setProperty("pw-btn", True)
+        self._style_reset_btn.setEnabled(False)
+        self._style_reset_btn.setToolTip(
+            "Discard legend/typography overrides and revert to the selected preset")
+        self._style_reset_btn.clicked.connect(self._on_reset_custom_style)
+        reset_lay.addWidget(self._style_reset_btn)
+        self._sect_advanced.add_widget(reset_row)
+        lay.addWidget(self._sect_advanced)
+
+        # Seed advanced widgets with the initial preset's values.
+        self._sync_advanced_style_widgets(get_style(self._style_sel.currentText()))
 
         # ── K-value unit selector ──
-        self._sect_units = self._sect_label("K-Value Units")
-        lay.addWidget(self._sect_units)
+        self._sect_units = CollapsibleSection(
+            "K-Value Units", "fa6s.scale-balanced",
+            CollapsibleSection.EARTH, expanded=False,
+        )
         self._unit_combo = QComboBox()
         self._unit_combo.setObjectName("pw-style-sel")
         all_units = HydraulicConductivityConverter.get_all_units()
@@ -364,11 +481,14 @@ class PlotWorkspace(QWidget):
         unit_lay = QHBoxLayout(self._row_units)
         unit_lay.setContentsMargins(10, 5, 10, 5)
         unit_lay.addWidget(self._unit_combo)
-        lay.addWidget(self._row_units)
+        self._sect_units.add_widget(self._row_units)
+        lay.addWidget(self._sect_units)
 
         # ── Export controls ──
-        self._sect_export = self._sect_label("Export")
-        lay.addWidget(self._sect_export)
+        self._sect_export = CollapsibleSection(
+            "Export", "fa6s.download",
+            CollapsibleSection.RED, expanded=False,
+        )
         export_w = QWidget()
         export_lay = QVBoxLayout(export_w)
         export_lay.setContentsMargins(10, 5, 10, 8)
@@ -381,18 +501,14 @@ class PlotWorkspace(QWidget):
         btn_data.clicked.connect(self.export_data)
         export_lay.addWidget(btn_svg)
         export_lay.addWidget(btn_data)
-        lay.addWidget(export_w)
+        self._sect_export.add_widget(export_w)
+        lay.addWidget(self._sect_export)
 
         lay.addStretch(1)
         self._update_contextual_controls()
         return sidebar
 
     # ── Sidebar sub-builders ───────────────────────────────────
-
-    def _sect_label(self, text: str) -> QLabel:
-        lbl = QLabel(text.upper())
-        lbl.setProperty("pws-sect", True)
-        return lbl
 
     def _axis_row(self, label: str, default: str):
         row = QWidget()
@@ -424,6 +540,64 @@ class PlotWorkspace(QWidget):
         lay.addWidget(lbl, 1)
         lay.addWidget(sw, 0)
         return row, sw
+
+    def _combo_row(self, label: str, items: list[str]):
+        """Row with a label stacked above a full-width QComboBox.
+
+        Stacked because combo items like "Inside — upper left" would overflow
+        a narrow sidebar when laid out beside a label.
+        """
+        row = QWidget()
+        row.setStyleSheet("border-bottom: 1px solid rgba(212,196,168,0.4);")
+        lay = QVBoxLayout(row)
+        lay.setContentsMargins(10, 6, 10, 6)
+        lay.setSpacing(3)
+        lbl = QLabel(label)
+        lbl.setProperty("pws-lbl", True)
+        combo = QComboBox()
+        combo.setObjectName("pw-style-sel")
+        combo.addItems(items)
+        combo.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
+        lay.addWidget(lbl)
+        lay.addWidget(combo)
+        return row, combo
+
+    def _spin_row(self, label: str, minimum: int, maximum: int):
+        """Row with a label on the left and a QSpinBox on the right."""
+        row = QWidget()
+        row.setStyleSheet("border-bottom: 1px solid rgba(212,196,168,0.4);")
+        lay = QHBoxLayout(row)
+        lay.setContentsMargins(10, 5, 10, 5)
+        lay.setSpacing(6)
+        lbl = QLabel(label)
+        lbl.setProperty("pws-lbl", True)
+        spin = QSpinBox()
+        spin.setRange(minimum, maximum)
+        spin.setFixedWidth(72)
+        spin.setAlignment(Qt.AlignmentFlag.AlignRight)
+        lay.addWidget(lbl, 1)
+        lay.addWidget(spin, 0)
+        return row, spin
+
+    def _dspin_row(self, label: str, minimum: float, maximum: float,
+                   step: float, decimals: int):
+        """Row with a label on the left and a QDoubleSpinBox on the right."""
+        row = QWidget()
+        row.setStyleSheet("border-bottom: 1px solid rgba(212,196,168,0.4);")
+        lay = QHBoxLayout(row)
+        lay.setContentsMargins(10, 5, 10, 5)
+        lay.setSpacing(6)
+        lbl = QLabel(label)
+        lbl.setProperty("pws-lbl", True)
+        spin = QDoubleSpinBox()
+        spin.setRange(minimum, maximum)
+        spin.setSingleStep(step)
+        spin.setDecimals(decimals)
+        spin.setFixedWidth(72)
+        spin.setAlignment(Qt.AlignmentFlag.AlignRight)
+        lay.addWidget(lbl, 1)
+        lay.addWidget(spin, 0)
+        return row, spin
 
     def _add_color_row(self, name: str, color: str):
         row = QWidget()
@@ -502,10 +676,92 @@ class PlotWorkspace(QWidget):
         self.refresh_plot()
 
     def _on_style_changed(self, style_name: str):
+        # Switching presets discards any per-field customizations — the preset
+        # becomes authoritative again. The "Legend & Typography" widgets resync
+        # to the new preset values below.
+        self._custom_style = None
+        preset = get_style(style_name)
         if self.plot_widget:
-            from .plot_styles import get_style
-            self.plot_widget.set_style(get_style(style_name))
-            self.refresh_plot()
+            self.plot_widget.set_style(preset)
+        self._sync_advanced_style_widgets(preset)
+        self._sync_reset_button()
+        self.refresh_plot()
+
+    def _effective_style(self) -> PlotStyle:
+        """Style currently driving the plot — custom override if any, else the preset."""
+        if self._custom_style is not None:
+            return self._custom_style
+        return get_style(self._style_sel.currentText())
+
+    def _update_style_field(self, field: str, value) -> None:
+        """Override a single PlotStyle field, cloning the preset on first edit."""
+        self._update_style_fields(**{field: value})
+
+    def _update_style_fields(self, **changes) -> None:
+        """Override one or more PlotStyle fields, cloning the preset on first edit."""
+        base = self._custom_style or get_style(self._style_sel.currentText())
+        dirty = {k: v for k, v in changes.items() if getattr(base, k) != v}
+        if not dirty:
+            return
+        self._custom_style = dataclasses.replace(base, **dirty)
+        if self.plot_widget:
+            self.plot_widget.set_style(self._custom_style)
+        self._sync_reset_button()
+        self.refresh_plot()
+
+    def _on_legend_location_changed(self, index: int) -> None:
+        """Apply both legend_loc and legend_bbox_to_anchor from the dropdown."""
+        if index < 0 or index >= len(_LEGEND_LOCATIONS):
+            return
+        loc, bbox, _label = _LEGEND_LOCATIONS[index]
+        self._update_style_fields(legend_loc=loc, legend_bbox_to_anchor=bbox)
+
+    def _sync_advanced_style_widgets(self, style: PlotStyle) -> None:
+        """Push preset values into the advanced-style widgets without firing signals."""
+        widgets = [
+            getattr(self, '_legend_loc_combo', None),
+            getattr(self, '_legend_alpha_spin', None),
+            getattr(self, '_title_size_spin', None),
+            getattr(self, '_label_size_spin', None),
+            getattr(self, '_tick_size_spin', None),
+            getattr(self, '_legend_size_spin', None),
+        ]
+        if not all(widgets):
+            return  # sidebar not yet built
+        for w in widgets:
+            w.blockSignals(True)
+        loc_idx = next(
+            (
+                i for i, (loc, bbox, _label) in enumerate(_LEGEND_LOCATIONS)
+                if loc == style.legend_loc and bbox == style.legend_bbox_to_anchor
+            ),
+            0,
+        )
+        self._legend_loc_combo.setCurrentIndex(loc_idx)
+        self._legend_alpha_spin.setValue(float(style.legend_framealpha))
+        self._title_size_spin.setValue(int(style.title_fontsize))
+        self._label_size_spin.setValue(int(style.label_fontsize))
+        self._tick_size_spin.setValue(int(style.tick_fontsize))
+        self._legend_size_spin.setValue(int(style.legend_fontsize))
+        for w in widgets:
+            w.blockSignals(False)
+
+    def _sync_reset_button(self) -> None:
+        btn = getattr(self, '_style_reset_btn', None)
+        if btn is not None:
+            btn.setEnabled(self._custom_style is not None)
+
+    def _on_reset_custom_style(self) -> None:
+        """Discard per-field overrides and revert to the selected preset."""
+        if self._custom_style is None:
+            return
+        self._custom_style = None
+        preset = get_style(self._style_sel.currentText())
+        if self.plot_widget:
+            self.plot_widget.set_style(preset)
+        self._sync_advanced_style_widgets(preset)
+        self._sync_reset_button()
+        self.refresh_plot()
 
     def _update_display_options(self):
         self.show_grid = self._chk_grid.isChecked()
@@ -746,9 +1002,15 @@ class PlotWorkspace(QWidget):
                         linestyle=style.grid_linestyle,
                         color=style.grid_color, linewidth=style.grid_linewidth)
             if self.show_legend:
-                ax.legend(loc=style.legend_loc, fontsize=style.legend_fontsize,
-                          framealpha=style.legend_framealpha,
-                          edgecolor=style.legend_edgecolor)
+                legend_kwargs = dict(
+                    loc=style.legend_loc,
+                    fontsize=style.legend_fontsize,
+                    framealpha=style.legend_framealpha,
+                    edgecolor=style.legend_edgecolor,
+                )
+                if style.legend_bbox_to_anchor is not None:
+                    legend_kwargs["bbox_to_anchor"] = style.legend_bbox_to_anchor
+                ax.legend(**legend_kwargs)
         else:
             ax.plot(sizes, cumulative, 'g-', linewidth=2,
                     label=self.dataset.sample_name)

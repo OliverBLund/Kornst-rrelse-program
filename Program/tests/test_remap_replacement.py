@@ -107,6 +107,7 @@ class _ControlPanelHarness:
         self.file_mapping_states = {}
         self.dataset_loaded_successfully = _SignalRecorder()
         self.error_dataset = _SignalRecorder()
+        self.mapping_required = _SignalRecorder()
         self.sample_info_label = _Label()
         self._file_list = _FileList()
         self.samples_table = _FakeTable([])
@@ -190,6 +191,7 @@ class _ExternalIssueRecorder:
 
 class _ErrorTabHost(QWidget):
     add_error_tab = MainWindow.add_error_tab
+    add_mapping_required_tab = MainWindow.add_mapping_required_tab
     update_error_tab_message = MainWindow.update_error_tab_message
     _on_external_load_file_failed = MainWindow._on_external_load_file_failed
 
@@ -496,14 +498,32 @@ class TestRemapReplacement(unittest.TestCase):
 
         ControlPanel._queue_raw_sieve_files_for_mapping(panel, [file_path])
 
-        self.assertEqual(panel.file_statuses[file_path], "review")
+        self.assertEqual(panel.file_statuses[file_path], "mapping")
         self.assertTrue(panel.file_mapping_states[file_path]["raw_sieve_mode"])
-        self.assertEqual(panel.added_rows, [(file_path, "review", None)])
-        self.assertEqual(len(panel.error_dataset.calls), 1)
-        emitted_path, message = panel.error_dataset.calls[0]
+        self.assertEqual(panel.added_rows, [(file_path, "mapping", None)])
+        self.assertEqual(panel.error_dataset.calls, [])
+        self.assertEqual(len(panel.mapping_required.calls), 1)
+        emitted_path, message = panel.mapping_required.calls[0]
         self.assertEqual(emitted_path, file_path)
-        self.assertIn("Raw sieve weighing data requires column mapping", message)
+        self.assertIn("Raw sieve weighing data is ready for column mapping", message)
         self.assertIn("queued for mapping", panel.sample_info_label.text)
+
+    def test_mapping_required_tab_is_neutral_not_error_colored(self):
+        host = _ErrorTabHost()
+        try:
+            file_path = os.path.normpath(r"C:\temp\raw_sieve.csv")
+            host.add_mapping_required_tab(file_path, "Raw sieve weighing data is ready for column mapping.")
+            APP.processEvents()
+
+            self.assertEqual(host.dataset_tabs_widget.count(), 1)
+            tab = host.dataset_tabs_widget.widget(0)
+            self.assertIsInstance(tab, ErrorTab)
+            self.assertEqual(tab.issue_variant, "mapping_required")
+            self.assertIn(("Mapping required: raw_sieve.csv", True), host.messages)
+        finally:
+            host.close()
+            host.deleteLater()
+            APP.processEvents()
 
     def test_register_external_file_formats_sheet_keys_for_display(self):
         panel = ControlPanel()

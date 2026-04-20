@@ -47,7 +47,9 @@
       "Bash(grep -n 'method_colors\\\\s*=' \"C:/Users/s194420/OneDrive - Danmarks Tekniske Universitet/Poul Løgstrup Bjergs filer - Work_Projects_Oliver Lund/Programmer/Kornstørrelse - Program/Program\"/**/*.py)",
       "Bash(grep:*)",
       "Bash(python -c \"import ast; [ast.parse\\(open\\(f, encoding='utf-8'\\).read\\(\\), filename=f\\) for f in ['gui/plot_widget.py', 'gui/comparison_plot_widget.py', 'report_generator.py']]; print\\('Syntax OK'\\)\")",
-      "Bash(python -m pytest -q)"
+      "Bash(python -m pytest -q)",
+      "Bash(python -c \"import ast; [ast.parse\\(open\\(f, encoding='utf-8'\\).read\\(\\), filename=f\\) for f in ['gui/plot_workspace.py', 'gui/comparison_plot_widget.py']]; print\\('Syntax OK'\\)\")",
+      "Bash(python -c \"from gui.collapsible_section import CollapsibleSection; print\\('OK'\\)\")"
     ],
     "deny": [],
     "ask": []

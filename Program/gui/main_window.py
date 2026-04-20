@@ -525,6 +525,7 @@ class MainWindow(FramelessMainWindowMixin, QMainWindow):
         self.control_panel = ControlPanel()
         self.control_panel.setMinimumWidth(280)
         self.control_panel.error_dataset.connect(self.add_error_tab)
+        self.control_panel.mapping_required.connect(self.add_mapping_required_tab)
         self.control_panel.dataset_loaded_successfully.connect(self.replace_error_tab_with_dataset)
         self.control_panel.update_error_tab_message.connect(self.update_error_tab_message)
         self.control_panel.dataset_integration_started.connect(self._begin_bulk_dataset_add)
@@ -650,12 +651,17 @@ class MainWindow(FramelessMainWindowMixin, QMainWindow):
 
         # File
         file_menu = QMenu("File", self)
-        open_action = QAction("&Open Files\u2026", self)
-        open_action.setShortcut("Ctrl+O")
-        open_action.setIcon(icon("fa6s.folder-open", C.TEXT_MUTED))
-        open_action.triggered.connect(self.control_panel.add_files)
-        file_menu.addAction(open_action)
-        self.addAction(open_action)
+        open_processed_action = QAction("&Open Processed Curve Data\u2026", self)
+        open_processed_action.setShortcut("Ctrl+O")
+        open_processed_action.setIcon(icon("fa6s.folder-open", C.TEXT_MUTED))
+        open_processed_action.triggered.connect(lambda _checked=False: self.control_panel.add_files("processed"))
+        file_menu.addAction(open_processed_action)
+        self.addAction(open_processed_action)
+
+        open_raw_action = QAction("Open &Raw Sieve Weighings\u2026", self)
+        open_raw_action.setIcon(icon("fa6s.table-columns", C.TEXT_MUTED))
+        open_raw_action.triggered.connect(lambda _checked=False: self.control_panel.add_files("raw_sieve"))
+        file_menu.addAction(open_raw_action)
 
         file_menu.addSeparator()
 
@@ -853,6 +859,8 @@ class MainWindow(FramelessMainWindowMixin, QMainWindow):
         """Return the appropriate qtawesome icon for each dataset sub-tab."""
         color = C.TEXT if active else C.TEXT_MUTED
         if isinstance(widget, ErrorTab):
+            if getattr(widget, "issue_variant", "") == "mapping_required":
+                return icon("fa6s.table-columns", C.OLIVE if not active else C.OLIVE_DK)
             return icon("fa6s.triangle-exclamation", C.LED_ERR if not active else "#b03a2e")
         return icon("fa6s.vial", color)
 
@@ -1958,6 +1966,24 @@ class MainWindow(FramelessMainWindowMixin, QMainWindow):
             self.dataset_tabs_widget.setCurrentIndex(index)
             self._refresh_dataset_tab_icons()
             self._show_status_message(f"Error loading: {file_name} \u2014 click tab to fix", ok=False)
+
+    def add_mapping_required_tab(self, file_path: str, message: str):
+        bulk_mode = self._bulk_dataset_add_depth > 0
+        self._hide_welcome()
+        mapping_tab = ErrorTab(file_path, message, self, issue_variant="mapping_required")
+        mapping_tab.dataset_fixed.connect(self.on_dataset_fixed)
+        file_name = os.path.basename(file_path)
+        index = self.dataset_tabs_widget.addTab(mapping_tab, file_name)
+        self.dataset_tabs_widget.setTabToolTip(index, file_name)
+        self.dataset_tabs_widget.tabBar().setTabTextColor(index, QColor(C.OLIVE_DK))
+        if bulk_mode:
+            self._bulk_dataset_add_dirty = True
+            self._bulk_dataset_add_last_index = index
+            self._bulk_dataset_add_last_label = file_name
+        else:
+            self.dataset_tabs_widget.setCurrentIndex(index)
+            self._refresh_dataset_tab_icons()
+            self._show_status_message(f"Mapping required: {file_name}")
 
     def _remove_error_tab(self, file_path: str) -> bool:
         for i in range(self.dataset_tabs_widget.count()):

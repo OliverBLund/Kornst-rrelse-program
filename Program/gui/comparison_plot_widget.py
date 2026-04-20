@@ -2,6 +2,7 @@
 Enhanced plot widget for comparison tab with multiple display modes
 """
 
+import dataclasses
 import math
 
 from PyQt6.QtWidgets import (
@@ -13,7 +14,7 @@ from matplotlib.figure import Figure
 from matplotlib.patches import Patch
 import numpy as np
 import warnings
-from typing import List, Dict
+from typing import List, Dict, Optional
 from .k_plot_helpers import annotate_log_bars, apply_log_bar_limits, format_method_label
 from .matplotlib_canvas import FigureCanvas
 from .plot_interactions import AxesInteractionController
@@ -24,8 +25,28 @@ from .plot_renderers import (
     _style_k_bar_simple,
     _add_flagged_legend_handle,
 )
-from .plot_styles import PROFESSIONAL_STYLE
+from .plot_styles import PlotStyle, PROFESSIONAL_STYLE, get_style, get_available_style_names
 from .theme import C, apply_matplotlib_style, icon
+
+
+# Matches the single-tab sidebar. Kept in sync manually — both lists are small.
+# Format: (matplotlib_loc, bbox_to_anchor_or_None, display_label).
+# bbox=None → inside the axes. bbox set → anchored outside the plot area.
+_CMP_LEGEND_LOCATIONS: list[tuple[str, Optional[tuple[float, float]], str]] = [
+    ("best",         None,          "Best (auto)"),
+    ("upper left",   None,          "Inside — upper left"),
+    ("upper right",  None,          "Inside — upper right"),
+    ("lower left",   None,          "Inside — lower left"),
+    ("lower right",  None,          "Inside — lower right"),
+    ("center left",  None,          "Inside — center left"),
+    ("center right", None,          "Inside — center right"),
+    ("upper center", None,          "Inside — upper center"),
+    ("lower center", None,          "Inside — lower center"),
+    ("center left",  (1.02, 0.5),   "Outside — right"),
+    ("center right", (-0.02, 0.5),  "Outside — left"),
+    ("upper center", (0.5, -0.14),  "Outside — below"),
+    ("lower center", (0.5, 1.02),   "Outside — above"),
+]
 
 
 def _cmp_sep() -> QFrame:
@@ -99,7 +120,13 @@ class ComparisonPlotWidget(QWidget):
         self.grid_layout = (2, 2)  # Default grid size
         self.show_grid = True
         self.show_legend = True
-        
+
+        # Active style — swapped by set_style(). Starts at the Professional preset
+        # so the comparison view now honors the preset selector (previously it was
+        # hardcoded to PROFESSIONAL_STYLE at every render call).
+        self.current_style: PlotStyle = PROFESSIONAL_STYLE
+        self._style_is_custom: bool = False
+
         # Data storage
         self.datasets = []
         self.k_results_dict = {}  # dataset_name -> k_results
@@ -107,12 +134,18 @@ class ComparisonPlotWidget(QWidget):
         self.current_ax = None
         self._default_limits = {}
         self._pan_state = None
-        
+
         # Shared color schemes from plot_constants
         self.dataset_colors = DATASET_COLORS
         self.method_colors = METHOD_COLORS
-        
+
         self.init_ui()
+
+    def set_style(self, style: PlotStyle) -> None:
+        """Swap the active PlotStyle and re-render."""
+        self.current_style = style
+        self.figure.patch.set_facecolor(style.figure_facecolor)
+        self.refresh_plot()
 
     def init_ui(self):
         """Initialize the UI"""
@@ -245,6 +278,36 @@ class ComparisonPlotWidget(QWidget):
 
         row.addWidget(_cmp_sep())
 
+        # Style preset — drives the PlotStyle used by every render call.
+        style_label = QLabel("Style")
+        style_label.setStyleSheet("color: #6a6254;")
+        row.addWidget(style_label)
+
+        self.style_selector = QComboBox()
+        self.style_selector.setObjectName("pw-style-sel")
+        self.style_selector.addItems(get_available_style_names())
+        self.style_selector.setCurrentText(self.current_style.name)
+        self.style_selector.setMaximumWidth(118)
+        self.style_selector.setToolTip("Plot style preset")
+        self.style_selector.currentTextChanged.connect(self._on_style_preset_changed)
+        row.addWidget(self.style_selector)
+
+        # Legend location — overrides the preset's default position.
+        legend_label = QLabel("Legend")
+        legend_label.setStyleSheet("color: #6a6254;")
+        row.addWidget(legend_label)
+
+        self.legend_loc_selector = QComboBox()
+        self.legend_loc_selector.setObjectName("pw-style-sel")
+        self.legend_loc_selector.addItems([lbl for _, _, lbl in _CMP_LEGEND_LOCATIONS])
+        self._sync_legend_loc_selector()
+        self.legend_loc_selector.setMaximumWidth(148)
+        self.legend_loc_selector.setToolTip("Legend position (inside or outside the plot)")
+        self.legend_loc_selector.currentIndexChanged.connect(self._on_legend_loc_changed)
+        row.addWidget(self.legend_loc_selector)
+
+        row.addWidget(_cmp_sep())
+
         self.zoom_in_btn = _cmp_btn("", "Zoom in", "fa6s.magnifying-glass-plus")
         self.zoom_in_btn.clicked.connect(self.zoom_in)
         row.addWidget(self.zoom_in_btn)
@@ -351,6 +414,18 @@ class ComparisonPlotWidget(QWidget):
             bar.set_edgecolor('black')
             bar.set_linewidth(0.5)
 
+    def _legend_kwargs(self) -> dict:
+        """Build legend kwargs from the active PlotStyle so loc/bbox/fontsize are honoured."""
+        kwargs = dict(
+            loc=self.current_style.legend_loc,
+            fontsize=self.current_style.legend_fontsize,
+            framealpha=self.current_style.legend_framealpha,
+            edgecolor=self.current_style.legend_edgecolor,
+        )
+        if self.current_style.legend_bbox_to_anchor is not None:
+            kwargs["bbox_to_anchor"] = self.current_style.legend_bbox_to_anchor
+        return kwargs
+
     def _add_flagged_legend_handle(self, ax):
         """Append a warning-state legend entry when flagged methods are present."""
         handles, labels = ax.get_legend_handles_labels()
@@ -363,7 +438,7 @@ class ComparisonPlotWidget(QWidget):
             )
         ]
         labels = labels + ['Flagged / Warning']
-        ax.legend(handles, labels, loc='best', fontsize=8)
+        ax.legend(handles, labels, **self._legend_kwargs())
 
     def on_grid_layout_changed(self, text: str):
         """Handle grid layout change"""
@@ -381,7 +456,50 @@ class ComparisonPlotWidget(QWidget):
         self.show_grid = self.grid_check.isChecked()
         self.show_legend = self.legend_check.isChecked()
         self.refresh_plot()
-    
+
+    def _on_style_preset_changed(self, preset_name: str) -> None:
+        # Picking a preset discards any legend-location override — the preset's
+        # own legend_loc becomes authoritative again. Matches the single-tab
+        # "Reset to preset" semantics.
+        self._style_is_custom = False
+        self.set_style(get_style(preset_name))
+        self._sync_legend_loc_selector()
+
+    def _on_legend_loc_changed(self, index: int) -> None:
+        if index < 0 or index >= len(_CMP_LEGEND_LOCATIONS):
+            return
+        new_loc, new_bbox, _label = _CMP_LEGEND_LOCATIONS[index]
+        if (self.current_style.legend_loc == new_loc
+                and self.current_style.legend_bbox_to_anchor == new_bbox):
+            return
+        # Clone the active style with the new legend placement so we don't mutate
+        # the shared preset instance.
+        self.current_style = dataclasses.replace(
+            self.current_style,
+            legend_loc=new_loc,
+            legend_bbox_to_anchor=new_bbox,
+        )
+        self._style_is_custom = True
+        self.refresh_plot()
+
+    def _sync_legend_loc_selector(self) -> None:
+        """Point the legend-loc dropdown at the active style's value, silently."""
+        selector = getattr(self, 'legend_loc_selector', None)
+        if selector is None:
+            return
+        idx = next(
+            (
+                i for i, (loc, bbox, _label) in enumerate(_CMP_LEGEND_LOCATIONS)
+                if loc == self.current_style.legend_loc
+                and bbox == self.current_style.legend_bbox_to_anchor
+            ),
+            0,
+        )
+        selector.blockSignals(True)
+        selector.setCurrentIndex(idx)
+        selector.blockSignals(False)
+
+
     def set_datasets(self, dataset_tabs: List):
         """Set the datasets to compare"""
         self.datasets = []
@@ -511,7 +629,7 @@ class ComparisonPlotWidget(QWidget):
         render_distribution_overlay(
             ax, self.datasets,
             colors=self.dataset_colors[:len(self.datasets)],
-            style=PROFESSIONAL_STYLE,
+            style=self.current_style,
             show_grid=self.show_grid,
             show_legend=self.show_legend,
         )
@@ -562,7 +680,7 @@ class ComparisonPlotWidget(QWidget):
         render_k_overlay(
             ax, self.k_results_dict,
             flagged_methods_dict=self.flagged_methods_dict,
-            style=PROFESSIONAL_STYLE,
+            style=self.current_style,
             show_grid=self.show_grid,
             show_legend=self.show_legend,
             show_value_labels=True,
@@ -613,7 +731,7 @@ class ComparisonPlotWidget(QWidget):
             if has_flagged:
                 self._add_flagged_legend_handle(ax)
             else:
-                ax.legend(loc='best', fontsize=7, ncol=2)
+                ax.legend(ncol=2, **self._legend_kwargs())
     
     def plot_k_values_grid(self):
         """Plot K-values in grid layout"""

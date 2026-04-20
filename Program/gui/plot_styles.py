@@ -2,8 +2,8 @@
 Plot styling system with preset templates for consistent visualization
 """
 
-from dataclasses import dataclass
-from typing import Dict
+from dataclasses import dataclass, field
+from typing import Dict, Optional, Tuple
 
 
 @dataclass
@@ -65,6 +65,11 @@ class PlotStyle:
     # Misc
     show_minor_grid: bool
     minor_grid_alpha: float
+
+    # Optional — non-None puts the legend at `bbox_to_anchor` relative to the
+    # axes, which is how matplotlib expresses "outside the plot". When None,
+    # matplotlib uses `legend_loc` alone for inside-axes placement.
+    legend_bbox_to_anchor: Optional[Tuple[float, float]] = None
 
 
 # Preset style templates

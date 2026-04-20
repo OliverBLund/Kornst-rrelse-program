@@ -238,7 +238,7 @@ class SZ:
     DS_TABBAR_H     = 30
     STATUS_H        = 24
     PLOT_INNER_TB_H = 34
-    PLOT_SIDEBAR_W  = 200
+    PLOT_SIDEBAR_W  = 240
     SUB_TABBAR_H    = 32
     CMP_TABBAR_H    = 34
     CMP_PINNED_W    = 188

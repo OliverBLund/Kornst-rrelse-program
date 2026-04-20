@@ -31,14 +31,15 @@ from gui.theme import C, F, icon
 
 
 class ErrorTab(QWidget):
-    """Tab widget for datasets that failed to load."""
+    """Tab widget for failed datasets and neutral mapping-required states."""
 
     dataset_fixed = pyqtSignal(object, str)
 
-    def __init__(self, file_path: str, error_message: str, parent=None):
+    def __init__(self, file_path: str, error_message: str, parent=None, *, issue_variant: str = "error"):
         super().__init__(parent)
         self.file_path = file_path
         self.error_message = error_message
+        self.issue_variant = issue_variant
         self._details_expanded = False
         self._entry_animated = False
         self._entry_effect = None
@@ -61,14 +62,21 @@ class ErrorTab(QWidget):
         """Build the error workspace to match the approved concept."""
         self.setObjectName("error-tab")
         self.setAttribute(Qt.WidgetAttribute.WA_StyledBackground, True)
+        is_mapping = self.issue_variant == "mapping_required"
+        accent_top = C.OLIVE if is_mapping else "#bf543e"
+        accent_bottom = C.OLIVE_DK if is_mapping else "#8f3525"
+        accent_rgba = "107,142,35" if is_mapping else "192,56,40"
+        accent_text = C.OLIVE if is_mapping else "#8f3525"
+        self._mark_icon = "fa6s.table-columns" if is_mapping else "fa6s.triangle-exclamation"
+        self._mark_color = C.OLIVE if is_mapping else C.LED_ERR
         self.setStyleSheet(
             f"""
             QWidget#error-tab {{
                 background:
                     qradialgradient(cx:1.05, cy:-0.15, radius:0.6,
                                     fx:1.05, fy:-0.15,
-                                    stop:0 rgba(192,56,40,18),
-                                    stop:1 rgba(192,56,40,0)),
+                                    stop:0 rgba({accent_rgba},18),
+                                    stop:1 rgba({accent_rgba},0)),
                     {C.BG};
             }}
             QFrame#ev-strip {{
@@ -100,15 +108,15 @@ class ErrorTab(QWidget):
             }}
             QFrame#ev-hero-accent {{
                 background: qlineargradient(x1:0, y1:0, x2:0, y2:1,
-                                            stop:0 #bf543e,
-                                            stop:1 #8f3525);
+                                            stop:0 {accent_top},
+                                            stop:1 {accent_bottom});
                 border: none;
                 border-top-left-radius: 8px;
                 border-bottom-left-radius: 8px;
             }}
             QFrame#ev-hero-mark {{
-                background: rgba(192,56,40,0.10);
-                border: 1px solid rgba(192,56,40,0.22);
+                background: rgba({accent_rgba},0.10);
+                border: 1px solid rgba({accent_rgba},0.22);
                 border-radius: 6px;
             }}
             QLabel#ev-eyebrow {{
@@ -128,11 +136,11 @@ class ErrorTab(QWidget):
                 font-size: {F.SZ_LG}pt;
             }}
             QLabel#ev-fault {{
-                color: #8f3525;
+                color: {accent_text};
                 font-family: "{F.MONO}";
                 font-size: {F.SZ_SM}pt;
-                background: rgba(192,56,40,0.08);
-                border: 1px solid rgba(192,56,40,0.22);
+                background: rgba({accent_rgba},0.08);
+                border: 1px solid rgba({accent_rgba},0.22);
                 border-radius: 999px;
                 padding: 5px 9px;
             }}
@@ -274,7 +282,8 @@ class ErrorTab(QWidget):
         layout.setSpacing(10)
 
         icon_label = QLabel()
-        icon_label.setPixmap(icon("fa6s.file-circle-exclamation", C.EARTH, 13).pixmap(16, 16))
+        strip_icon = "fa6s.table-columns" if self.issue_variant == "mapping_required" else "fa6s.file-circle-exclamation"
+        icon_label.setPixmap(icon(strip_icon, C.EARTH, 13).pixmap(16, 16))
         icon_label.setStyleSheet("background: transparent;")
         layout.addWidget(icon_label)
 
@@ -317,7 +326,7 @@ class ErrorTab(QWidget):
         mark_layout.setContentsMargins(0, 0, 0, 0)
         mark_layout.setSpacing(0)
         mark_icon = QLabel()
-        mark_icon.setPixmap(icon("fa6s.triangle-exclamation", C.LED_ERR, 18).pixmap(20, 20))
+        mark_icon.setPixmap(icon(self._mark_icon, self._mark_color, 18).pixmap(20, 20))
         mark_icon.setAlignment(Qt.AlignmentFlag.AlignCenter)
         mark_icon.setStyleSheet("background: transparent;")
         mark_layout.addStretch()
@@ -330,18 +339,24 @@ class ErrorTab(QWidget):
         copy_layout.setContentsMargins(0, 0, 0, 0)
         copy_layout.setSpacing(0)
 
-        eyebrow = QLabel("Dataset Issue")
+        eyebrow = QLabel("Mapping Required" if self.issue_variant == "mapping_required" else "Dataset Issue")
         eyebrow.setObjectName("ev-eyebrow")
         copy_layout.addWidget(eyebrow)
 
-        self.title_label = QLabel("Column mapping needs confirmation")
+        self.title_label = QLabel(
+            "Raw sieve columns need mapping"
+            if self.issue_variant == "mapping_required"
+            else "Column mapping needs confirmation"
+        )
         self.title_label.setObjectName("ev-title")
         self.title_label.setWordWrap(True)
         self.title_label.setContentsMargins(0, 4, 0, 0)
         copy_layout.addWidget(self.title_label)
 
         subtitle = QLabel(
-            "The workbook is in the workspace, but this sheet needs a manual column check before it can be analysed."
+            "The file has been added as raw sieve weighings. Map the size and weighing columns before analysis."
+            if self.issue_variant == "mapping_required"
+            else "The workbook is in the workspace, but this sheet needs a manual column check before it can be analysed."
         )
         subtitle.setObjectName("ev-subtitle")
         subtitle.setWordWrap(True)
@@ -385,13 +400,17 @@ class ErrorTab(QWidget):
         pane = self._pane_shell(
             kind="Preview",
             title="Source rows",
-            subtitle="Enough context to spot the grain-size and percent columns quickly.",
+            subtitle=(
+                "Use this preview to identify sieve size, empty sieve, and sieve + sample columns."
+                if self.issue_variant == "mapping_required"
+                else "Enough context to spot the grain-size and percent columns quickly."
+            ),
         )
         body = pane.layout().itemAt(1).widget()
         body_layout = body.layout()
 
         note = QLabel(
-            "Numeric cells are softly marked so the likely data columns stand out without overwhelming the preview."
+            "Numeric cells are softly marked so likely measurement columns stand out without overwhelming the preview."
         )
         note.setObjectName("ev-note")
         note.setWordWrap(True)
@@ -419,13 +438,17 @@ class ErrorTab(QWidget):
     def _build_status_pane(self) -> QWidget:
         pane = self._pane_shell(
             kind="Status",
-            title="What to do",
-            subtitle="Keep the decision surface small and obvious.",
+            title="Next step",
+            subtitle=(
+                "No import error occurred. This raw pathway always needs column mapping first."
+                if self.issue_variant == "mapping_required"
+                else "Keep the decision surface small and obvious."
+            ),
         )
         body = pane.layout().itemAt(1).widget()
         layout = body.layout()
 
-        layout.addWidget(self._summary_row("fa6s.file-excel", "Source", "Excel workbook"))
+        layout.addWidget(self._summary_row("fa6s.file-excel", "Source", self._source_kind_label()))
         layout.addWidget(self._summary_row("fa6s.table-cells-large", "Sheet", self.sheet_name or "Single sheet"))
         layout.addWidget(self._summary_row("fa6s.arrow-right", "Next step", "Open the mapper"))
 
@@ -448,13 +471,21 @@ class ErrorTab(QWidget):
     def _build_detail_pane(self) -> QWidget:
         pane = self._pane_shell(
             kind="Detail",
-            title="Raw loader message",
-            subtitle="Visible on demand, not forced into the first read.",
+            title="Import note" if self.issue_variant == "mapping_required" else "Raw loader message",
+            subtitle=(
+                "Visible if you need to confirm why mapping is required."
+                if self.issue_variant == "mapping_required"
+                else "Visible on demand, not forced into the first read."
+            ),
         )
         body = pane.layout().itemAt(1).widget()
         layout = body.layout()
 
-        hint = QLabel("The loader could not match the incoming columns to a valid grain-size / percent-passing pair.")
+        hint = QLabel(
+            "Raw sieve weighings need explicit size and weight columns before the program can calculate percent passing."
+            if self.issue_variant == "mapping_required"
+            else "The loader could not match the incoming columns to a valid grain-size / percent-passing pair."
+        )
         hint.setObjectName("ev-note")
         hint.setWordWrap(True)
         layout.addWidget(hint)
@@ -463,7 +494,9 @@ class ErrorTab(QWidget):
         self.details_toggle.setObjectName("ev-toggle")
         self.details_toggle.setToolButtonStyle(Qt.ToolButtonStyle.ToolButtonTextBesideIcon)
         self.details_toggle.setArrowType(Qt.ArrowType.RightArrow)
-        self.details_toggle.setText("Show raw message")
+        self.details_toggle.setText(
+            "Show import note" if self.issue_variant == "mapping_required" else "Show raw message"
+        )
         self.details_toggle.setCursor(Qt.CursorShape.PointingHandCursor)
         self.details_toggle.clicked.connect(self.toggle_details)
         layout.addWidget(self.details_toggle, 0, Qt.AlignmentFlag.AlignLeft)
@@ -596,10 +629,22 @@ class ErrorTab(QWidget):
             chunks.append(ext.upper())
         if self.sheet_name:
             chunks.append(self.sheet_name)
-        chunks.append("Load failed")
+        chunks.append("Mapping required" if self.issue_variant == "mapping_required" else "Load failed")
         return chunks
 
+    def _source_kind_label(self) -> str:
+        ext = os.path.splitext(self.actual_file_path)[1].lower()
+        if ext in (".xlsx", ".xls"):
+            return "Excel workbook"
+        if ext == ".csv":
+            return "CSV file"
+        if ext == ".txt":
+            return "Text file"
+        return "Source file"
+
     def _fault_line_text(self) -> str:
+        if self.issue_variant == "mapping_required":
+            return "waiting for raw sieve column mapping"
         lowered = self.error_message.lower()
         if "percent" in lowered:
             return "percent-passing column was not recognized"
@@ -641,7 +686,10 @@ class ErrorTab(QWidget):
         self.details_toggle.setArrowType(
             Qt.ArrowType.DownArrow if self._details_expanded else Qt.ArrowType.RightArrow
         )
-        self.details_toggle.setText("Hide raw message" if self._details_expanded else "Show raw message")
+        if self.issue_variant == "mapping_required":
+            self.details_toggle.setText("Hide import note" if self._details_expanded else "Show import note")
+        else:
+            self.details_toggle.setText("Hide raw message" if self._details_expanded else "Show raw message")
 
         target_height = self.details_text.sizeHint().height() + 10 if self._details_expanded else 0
         animation = QPropertyAnimation(self.details_container, b"maximumHeight", self)

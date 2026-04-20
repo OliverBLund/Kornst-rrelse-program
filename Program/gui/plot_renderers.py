@@ -121,10 +121,7 @@ def render_grain_size_distribution(
     ax.tick_params(labelsize=style.tick_fontsize)
 
     if show_legend:
-        ax.legend(loc=style.legend_loc,
-                  fontsize=style.legend_fontsize,
-                  framealpha=style.legend_framealpha,
-                  edgecolor=style.legend_edgecolor)
+        _apply_styled_legend(ax, style)
 
 
 # ═══════════════════════════════════════════════════════════════════
@@ -265,9 +262,7 @@ def render_distribution_overlay(
     _apply_grid(ax, style, show_grid, which="both")
 
     if show_legend:
-        ax.legend(loc="best", fontsize=style.legend_fontsize,
-                  framealpha=style.legend_framealpha,
-                  edgecolor=style.legend_edgecolor)
+        _apply_styled_legend(ax, style)
 
 
 # ═══════════════════════════════════════════════════════════════════
@@ -347,9 +342,9 @@ def render_k_overlay(
         ax.grid(True, axis="y", alpha=0.3)
     if show_legend:
         if has_flagged:
-            _add_flagged_legend_handle(ax)
+            _add_flagged_legend_handle(ax, style)
         else:
-            ax.legend(loc="best", fontsize=8)
+            _apply_styled_legend(ax, style)
 
 
 # ═══════════════════════════════════════════════════════════════════
@@ -633,6 +628,23 @@ def _apply_grid(ax: Axes, style: PlotStyle, show: bool,
                 linewidth=style.grid_linewidth * 0.5)
 
 
+def _apply_styled_legend(ax: Axes, style: PlotStyle) -> None:
+    """Draw a legend using *style*'s font, alpha, edge, loc, and optional bbox.
+
+    When ``style.legend_bbox_to_anchor`` is set, matplotlib anchors the legend
+    relative to the axes — this is how "outside the plot" placements work.
+    """
+    kwargs = dict(
+        loc=style.legend_loc,
+        fontsize=style.legend_fontsize,
+        framealpha=style.legend_framealpha,
+        edgecolor=style.legend_edgecolor,
+    )
+    if style.legend_bbox_to_anchor is not None:
+        kwargs["bbox_to_anchor"] = style.legend_bbox_to_anchor
+    ax.legend(**kwargs)
+
+
 def _style_k_bar(bar, method: str, color: str, flagged: Set[str]) -> None:
     """Apply warning styling (hatch) to flagged K-value bars."""
     if method in flagged:
@@ -669,10 +681,10 @@ def _add_k_status_legend(ax: Axes, flagged: Set[str], style: PlotStyle) -> None:
         )
         labels.append("Flagged / Warning")
     if handles:
-        ax.legend(handles, labels, loc="upper right", fontsize=8)
+        _apply_styled_legend_with_handles(ax, style, handles, labels)
 
 
-def _add_flagged_legend_handle(ax: Axes) -> None:
+def _add_flagged_legend_handle(ax: Axes, style: PlotStyle = PROFESSIONAL_STYLE) -> None:
     """Append a warning-state legend entry (comparison widget style)."""
     handles, labels = ax.get_legend_handles_labels()
     handles.append(
@@ -680,4 +692,18 @@ def _add_flagged_legend_handle(ax: Axes) -> None:
               hatch="////", label="Flagged / Warning")
     )
     labels.append("Flagged / Warning")
-    ax.legend(handles, labels, loc="best", fontsize=8)
+    _apply_styled_legend_with_handles(ax, style, handles, labels)
+
+
+def _apply_styled_legend_with_handles(ax: Axes, style: PlotStyle,
+                                      handles, labels) -> None:
+    """Draw a legend with explicit handles/labels but honour style fields."""
+    kwargs = dict(
+        loc=style.legend_loc,
+        fontsize=style.legend_fontsize,
+        framealpha=style.legend_framealpha,
+        edgecolor=style.legend_edgecolor,
+    )
+    if style.legend_bbox_to_anchor is not None:
+        kwargs["bbox_to_anchor"] = style.legend_bbox_to_anchor
+    ax.legend(handles, labels, **kwargs)
