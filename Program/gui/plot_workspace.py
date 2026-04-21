@@ -23,28 +23,14 @@ from .plot_styles import PlotStyle, get_style, get_available_style_names
 from .toggle_switch import ToggleSwitch
 from .theme import C, F, SZ, icon
 from .collapsible_section import CollapsibleSection
+from .sidebar_controls import (
+    LEGEND_LOCATIONS as _LEGEND_LOCATIONS,
+    LEGEND_LAYOUTS as _LEGEND_LAYOUTS,
+    make_axis_row, make_color_row, make_combo_row, make_dspin_row,
+    make_spin_row, make_toggle_row,
+)
+from .plot_renderers import apply_legend_aware_layout, build_legend_kwargs
 from unit_conversions import HydraulicConductivityUnit, HydraulicConductivityConverter
-
-# Legend placement options exposed in the sidebar.
-# Each entry is (matplotlib_loc, bbox_to_anchor_or_None, display_label).
-# bbox_to_anchor=None → inside the axes (standard matplotlib loc).
-# bbox_to_anchor set → anchored relative to the axes, which puts the legend
-# outside the plot. See plot_styles.PlotStyle.legend_bbox_to_anchor.
-_LEGEND_LOCATIONS: list[tuple[str, Optional[tuple[float, float]], str]] = [
-    ("best",         None,          "Best (auto)"),
-    ("upper left",   None,          "Inside — upper left"),
-    ("upper right",  None,          "Inside — upper right"),
-    ("lower left",   None,          "Inside — lower left"),
-    ("lower right",  None,          "Inside — lower right"),
-    ("center left",  None,          "Inside — center left"),
-    ("center right", None,          "Inside — center right"),
-    ("upper center", None,          "Inside — upper center"),
-    ("lower center", None,          "Inside — lower center"),
-    ("center left",  (1.02, 0.5),   "Outside — right"),
-    ("center right", (-0.02, 0.5),  "Outside — left"),
-    ("upper center", (0.5, -0.14),  "Outside — below"),
-    ("lower center", (0.5, 1.02),   "Outside — above"),
-]
 
 
 # ─────────────────────────────────────────────────────────────
@@ -418,6 +404,12 @@ class PlotWorkspace(QWidget):
             self._on_legend_location_changed)
         self._sect_advanced.add_widget(self._row_legend_loc)
 
+        self._row_legend_layout, self._legend_layout_combo = self._combo_row(
+            "Legend layout", [label for _, label in _LEGEND_LAYOUTS])
+        self._legend_layout_combo.currentIndexChanged.connect(
+            self._on_legend_layout_changed)
+        self._sect_advanced.add_widget(self._row_legend_layout)
+
         self._row_legend_alpha, self._legend_alpha_spin = self._dspin_row(
             "Legend opacity", 0.0, 1.0, 0.05, 2)
         self._legend_alpha_spin.valueChanged.connect(
@@ -511,110 +503,25 @@ class PlotWorkspace(QWidget):
     # ── Sidebar sub-builders ───────────────────────────────────
 
     def _axis_row(self, label: str, default: str):
-        row = QWidget()
-        row.setStyleSheet(f"border-bottom: 1px solid rgba(212,196,168,0.4);")
-        lay = QHBoxLayout(row)
-        lay.setContentsMargins(10, 5, 10, 5)
-        lay.setSpacing(5)
-        lbl = QLabel(label)
-        lbl.setProperty("pws-lbl", True)
-        inp = QLineEdit(default)
-        inp.setProperty("pws-in", True)
-        inp.setAlignment(Qt.AlignmentFlag.AlignRight)
-        lay.addWidget(lbl, 1)
-        lay.addWidget(inp, 0)
-        return row, inp, lbl
+        return make_axis_row(label, default)
 
     def _toggle_row(self, label: str, checked: bool):
-        """Return (row_widget, ToggleSwitch) — caller adds to layout."""
-        row = QWidget()
-        row.setStyleSheet("border-bottom: 1px solid rgba(212,196,168,0.4);")
-        row.setCursor(Qt.CursorShape.PointingHandCursor)
-        lay = QHBoxLayout(row)
-        lay.setContentsMargins(10, 5, 10, 5)
-        lay.setSpacing(5)
-        lbl = QLabel(label)
-        lbl.setProperty("pws-lbl", True)
-        sw = ToggleSwitch(checked)
+        row, sw = make_toggle_row(label, checked)
         sw.toggled.connect(self._on_sidebar_toggle_changed)
-        lay.addWidget(lbl, 1)
-        lay.addWidget(sw, 0)
         return row, sw
 
     def _combo_row(self, label: str, items: list[str]):
-        """Row with a label stacked above a full-width QComboBox.
-
-        Stacked because combo items like "Inside — upper left" would overflow
-        a narrow sidebar when laid out beside a label.
-        """
-        row = QWidget()
-        row.setStyleSheet("border-bottom: 1px solid rgba(212,196,168,0.4);")
-        lay = QVBoxLayout(row)
-        lay.setContentsMargins(10, 6, 10, 6)
-        lay.setSpacing(3)
-        lbl = QLabel(label)
-        lbl.setProperty("pws-lbl", True)
-        combo = QComboBox()
-        combo.setObjectName("pw-style-sel")
-        combo.addItems(items)
-        combo.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
-        lay.addWidget(lbl)
-        lay.addWidget(combo)
-        return row, combo
+        return make_combo_row(label, items)
 
     def _spin_row(self, label: str, minimum: int, maximum: int):
-        """Row with a label on the left and a QSpinBox on the right."""
-        row = QWidget()
-        row.setStyleSheet("border-bottom: 1px solid rgba(212,196,168,0.4);")
-        lay = QHBoxLayout(row)
-        lay.setContentsMargins(10, 5, 10, 5)
-        lay.setSpacing(6)
-        lbl = QLabel(label)
-        lbl.setProperty("pws-lbl", True)
-        spin = QSpinBox()
-        spin.setRange(minimum, maximum)
-        spin.setFixedWidth(72)
-        spin.setAlignment(Qt.AlignmentFlag.AlignRight)
-        lay.addWidget(lbl, 1)
-        lay.addWidget(spin, 0)
-        return row, spin
+        return make_spin_row(label, minimum, maximum)
 
     def _dspin_row(self, label: str, minimum: float, maximum: float,
                    step: float, decimals: int):
-        """Row with a label on the left and a QDoubleSpinBox on the right."""
-        row = QWidget()
-        row.setStyleSheet("border-bottom: 1px solid rgba(212,196,168,0.4);")
-        lay = QHBoxLayout(row)
-        lay.setContentsMargins(10, 5, 10, 5)
-        lay.setSpacing(6)
-        lbl = QLabel(label)
-        lbl.setProperty("pws-lbl", True)
-        spin = QDoubleSpinBox()
-        spin.setRange(minimum, maximum)
-        spin.setSingleStep(step)
-        spin.setDecimals(decimals)
-        spin.setFixedWidth(72)
-        spin.setAlignment(Qt.AlignmentFlag.AlignRight)
-        lay.addWidget(lbl, 1)
-        lay.addWidget(spin, 0)
-        return row, spin
+        return make_dspin_row(label, minimum, maximum, step, decimals)
 
     def _add_color_row(self, name: str, color: str):
-        row = QWidget()
-        row.setStyleSheet(f"border-bottom: 1px solid rgba(212,196,168,0.4);")
-        lay = QHBoxLayout(row)
-        lay.setContentsMargins(10, 5, 10, 5)
-        lay.setSpacing(5)
-        lbl = QLabel(name)
-        lbl.setProperty("pws-lbl", True)
-        dot = QLabel()
-        dot.setFixedSize(12, 12)
-        dot.setStyleSheet(
-            f"background: {color}; border-radius: 6px; "
-            f"border: 1px solid rgba(0,0,0,0.1);"
-        )
-        lay.addWidget(lbl, 1)
-        lay.addWidget(dot, 0)
+        row, _dot = make_color_row(name, color)
         self._color_container_lay.addWidget(row)
 
     # ── Sidebar toggle ─────────────────────────────────────────
@@ -716,10 +623,18 @@ class PlotWorkspace(QWidget):
         loc, bbox, _label = _LEGEND_LOCATIONS[index]
         self._update_style_fields(legend_loc=loc, legend_bbox_to_anchor=bbox)
 
+    def _on_legend_layout_changed(self, index: int) -> None:
+        """Apply the requested legend column layout."""
+        if index < 0 or index >= len(_LEGEND_LAYOUTS):
+            return
+        ncol, _label = _LEGEND_LAYOUTS[index]
+        self._update_style_fields(legend_ncol=ncol)
+
     def _sync_advanced_style_widgets(self, style: PlotStyle) -> None:
         """Push preset values into the advanced-style widgets without firing signals."""
         widgets = [
             getattr(self, '_legend_loc_combo', None),
+            getattr(self, '_legend_layout_combo', None),
             getattr(self, '_legend_alpha_spin', None),
             getattr(self, '_title_size_spin', None),
             getattr(self, '_label_size_spin', None),
@@ -737,7 +652,15 @@ class PlotWorkspace(QWidget):
             ),
             0,
         )
+        layout_idx = next(
+            (
+                i for i, (ncol, _label) in enumerate(_LEGEND_LAYOUTS)
+                if ncol == getattr(style, 'legend_ncol', 1)
+            ),
+            0,
+        )
         self._legend_loc_combo.setCurrentIndex(loc_idx)
+        self._legend_layout_combo.setCurrentIndex(layout_idx)
         self._legend_alpha_spin.setValue(float(style.legend_framealpha))
         self._title_size_spin.setValue(int(style.title_fontsize))
         self._label_size_spin.setValue(int(style.label_fontsize))
@@ -1002,15 +925,8 @@ class PlotWorkspace(QWidget):
                         linestyle=style.grid_linestyle,
                         color=style.grid_color, linewidth=style.grid_linewidth)
             if self.show_legend:
-                legend_kwargs = dict(
-                    loc=style.legend_loc,
-                    fontsize=style.legend_fontsize,
-                    framealpha=style.legend_framealpha,
-                    edgecolor=style.legend_edgecolor,
-                )
-                if style.legend_bbox_to_anchor is not None:
-                    legend_kwargs["bbox_to_anchor"] = style.legend_bbox_to_anchor
-                ax.legend(**legend_kwargs)
+                handles, labels = ax.get_legend_handles_labels()
+                ax.legend(handles, labels, **build_legend_kwargs(style, len(labels)))
         else:
             ax.plot(sizes, cumulative, 'g-', linewidth=2,
                     label=self.dataset.sample_name)
@@ -1028,7 +944,10 @@ class PlotWorkspace(QWidget):
         self.plot_widget.grain_size_ax = ax
         self.plot_widget.k_value_ax = None
         self.plot_widget.active_axes = [ax]
-        self.plot_widget.figure.tight_layout()
+        if style:
+            apply_legend_aware_layout(self.plot_widget.figure, style)
+        else:
+            self.plot_widget.figure.tight_layout()
         self.plot_widget.canvas.draw()
         self._sync_axis_inputs_from_ax(ax)
 
@@ -1085,7 +1004,10 @@ class PlotWorkspace(QWidget):
         self.plot_widget.grain_size_ax = ax
         self.plot_widget.k_value_ax = None
         self.plot_widget.active_axes = [ax]
-        self.plot_widget.figure.tight_layout()
+        if style:
+            apply_legend_aware_layout(self.plot_widget.figure, style)
+        else:
+            self.plot_widget.figure.tight_layout()
         self.plot_widget.canvas.draw()
         self._sync_axis_inputs_from_ax(ax)
 

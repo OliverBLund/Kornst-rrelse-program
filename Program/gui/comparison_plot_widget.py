@@ -4,49 +4,38 @@ Enhanced plot widget for comparison tab with multiple display modes
 
 import dataclasses
 import math
-
 from PyQt6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QFrame, QPushButton,
-    QComboBox, QLabel, QButtonGroup, QSizePolicy
+    QComboBox, QLabel, QButtonGroup, QSizePolicy, QScrollArea,
+    QColorDialog, QFileDialog, QMessageBox,
 )
-from PyQt6.QtCore import Qt, pyqtSignal, QSize
+from PyQt6.QtCore import Qt, pyqtSignal, QSize, QPropertyAnimation, QEasingCurve
+from PyQt6.QtGui import QColor
 from matplotlib.figure import Figure
 from matplotlib.patches import Patch
 import numpy as np
-import warnings
 from typing import List, Dict, Optional
+from .collapsible_section import CollapsibleSection
 from .k_plot_helpers import annotate_log_bars, apply_log_bar_limits, format_method_label
 from .matplotlib_canvas import FigureCanvas
 from .plot_interactions import AxesInteractionController
 from .plot_constants import METHOD_COLORS, DATASET_COLORS, DEFAULT_METHOD_ORDER, ordered_methods
 from .plot_renderers import (
+    apply_legend_aware_layout,
+    build_legend_kwargs,
     render_distribution_overlay,
     render_k_overlay,
     _style_k_bar_simple,
     _add_flagged_legend_handle,
 )
 from .plot_styles import PlotStyle, PROFESSIONAL_STYLE, get_style, get_available_style_names
-from .theme import C, apply_matplotlib_style, icon
-
-
-# Matches the single-tab sidebar. Kept in sync manually — both lists are small.
-# Format: (matplotlib_loc, bbox_to_anchor_or_None, display_label).
-# bbox=None → inside the axes. bbox set → anchored outside the plot area.
-_CMP_LEGEND_LOCATIONS: list[tuple[str, Optional[tuple[float, float]], str]] = [
-    ("best",         None,          "Best (auto)"),
-    ("upper left",   None,          "Inside — upper left"),
-    ("upper right",  None,          "Inside — upper right"),
-    ("lower left",   None,          "Inside — lower left"),
-    ("lower right",  None,          "Inside — lower right"),
-    ("center left",  None,          "Inside — center left"),
-    ("center right", None,          "Inside — center right"),
-    ("upper center", None,          "Inside — upper center"),
-    ("lower center", None,          "Inside — lower center"),
-    ("center left",  (1.02, 0.5),   "Outside — right"),
-    ("center right", (-0.02, 0.5),  "Outside — left"),
-    ("upper center", (0.5, -0.14),  "Outside — below"),
-    ("lower center", (0.5, 1.02),   "Outside — above"),
-]
+from .sidebar_controls import (
+    LEGEND_LOCATIONS as _CMP_LEGEND_LOCATIONS,
+    LEGEND_LAYOUTS as _CMP_LEGEND_LAYOUTS,
+    make_color_row, make_combo_row, make_dspin_row,
+    make_spin_row, make_toggle_row, set_swatch_color,
+)
+from .theme import C, SZ, apply_matplotlib_style, icon
 
 
 def _cmp_sep() -> QFrame:
@@ -120,6 +109,7 @@ class ComparisonPlotWidget(QWidget):
         self.grid_layout = (2, 2)  # Default grid size
         self.show_grid = True
         self.show_legend = True
+        self.sidebar_visible = False
 
         # Active style — swapped by set_style(). Starts at the Professional preset
         # so the comparison view now honors the preset selector (previously it was
@@ -144,22 +134,45 @@ class ComparisonPlotWidget(QWidget):
     def set_style(self, style: PlotStyle) -> None:
         """Swap the active PlotStyle and re-render."""
         self.current_style = style
-        self.figure.patch.set_facecolor(style.figure_facecolor)
+        if hasattr(self, "figure"):
+            self.figure.patch.set_facecolor(style.figure_facecolor)
+        self._sync_sidebar_style_widgets(style)
+        self._sync_reset_button()
         self.refresh_plot()
 
     def init_ui(self):
         """Initialize the UI"""
         apply_matplotlib_style()
 
+        # Per-dataset color overrides (sample_name -> hex). None = use default.
+        self._dataset_color_overrides: Dict[str, str] = {}
+        # Live handles to the color swatch widgets, keyed by sample name.
+        self._dataset_color_rows: Dict[str, QLabel] = {}
+
         layout = QVBoxLayout(self)
         layout.setContentsMargins(2, 2, 2, 2)
         layout.setSpacing(2)
 
-        # Create toolbar
+        # Toolbar row (plot type, view mode, zoom, style preset).
         toolbar = self.create_toolbar()
         layout.addWidget(toolbar)
 
-        # Create matplotlib figure and canvas
+        # Body row: collapsible sidebar + canvas side-by-side.
+        body = QWidget()
+        body_row = QHBoxLayout(body)
+        body_row.setContentsMargins(0, 0, 0, 0)
+        body_row.setSpacing(0)
+
+        self._sidebar = self._build_sidebar()
+        self._sidebar.setMaximumWidth(0)
+        body_row.addWidget(self._sidebar)
+
+        self._chart_area = QWidget()
+        chart_lay = QVBoxLayout(self._chart_area)
+        chart_lay.setContentsMargins(10, 0, 0, 0)
+        chart_lay.setSpacing(0)
+
+        # Create matplotlib figure and canvas.
         self.figure = Figure(figsize=(12, 8))
         self.figure.patch.set_facecolor(C.BG)
         self.canvas = FigureCanvas(self.figure)
@@ -176,7 +189,28 @@ class ComparisonPlotWidget(QWidget):
         self.canvas.mpl_connect("scroll_event", self._on_canvas_scroll)
         self.canvas.mpl_connect("motion_notify_event", self._on_canvas_motion)
         self.canvas.mpl_connect("button_release_event", self._on_canvas_release)
-        layout.addWidget(self.canvas, 1)
+        chart_lay.addWidget(self.canvas, 1)
+
+        self._toggle_handle = QPushButton(self._chart_area)
+        self._toggle_handle.setObjectName("pw-toggle-handle")
+        self._toggle_handle.setIcon(icon("fa6s.chevron-right", C.TEXT_MID, 8))
+        self._toggle_handle.setIconSize(QSize(8, 8))
+        self._toggle_handle.setToolTip("Toggle sidebar")
+        self._toggle_handle.setCursor(Qt.CursorShape.PointingHandCursor)
+        self._toggle_handle.clicked.connect(self._toggle_sidebar)
+        self._toggle_handle.raise_()
+
+        body_row.addWidget(self._chart_area, 1)
+
+        self._sidebar_anim = QPropertyAnimation(self._sidebar, b"maximumWidth")
+        self._sidebar_anim.setDuration(200)
+        self._sidebar_anim.setEasingCurve(QEasingCurve.Type.InOutQuad)
+        self._sidebar_anim.valueChanged.connect(self._on_sidebar_width_changed)
+
+        layout.addWidget(body, 1)
+
+        # Seed sidebar style widgets with the initial preset's values.
+        self._sync_sidebar_style_widgets(self.current_style)
     
     def create_toolbar(self):
         """Create the toolbar with plot controls."""
@@ -268,16 +302,6 @@ class ComparisonPlotWidget(QWidget):
 
         row.addWidget(_cmp_sep())
 
-        self.grid_check = _cmp_chk(" Grid", "Toggle grid", True, "fa6s.hashtag")
-        self.grid_check.toggled.connect(self.update_display_options)
-        row.addWidget(self.grid_check)
-
-        self.legend_check = _cmp_chk(" Legend", "Toggle legend", True, "fa6s.list")
-        self.legend_check.toggled.connect(self.update_display_options)
-        row.addWidget(self.legend_check)
-
-        row.addWidget(_cmp_sep())
-
         # Style preset — drives the PlotStyle used by every render call.
         style_label = QLabel("Style")
         style_label.setStyleSheet("color: #6a6254;")
@@ -292,19 +316,13 @@ class ComparisonPlotWidget(QWidget):
         self.style_selector.currentTextChanged.connect(self._on_style_preset_changed)
         row.addWidget(self.style_selector)
 
-        # Legend location — overrides the preset's default position.
-        legend_label = QLabel("Legend")
-        legend_label.setStyleSheet("color: #6a6254;")
-        row.addWidget(legend_label)
+        row.addWidget(_cmp_sep())
 
-        self.legend_loc_selector = QComboBox()
-        self.legend_loc_selector.setObjectName("pw-style-sel")
-        self.legend_loc_selector.addItems([lbl for _, _, lbl in _CMP_LEGEND_LOCATIONS])
-        self._sync_legend_loc_selector()
-        self.legend_loc_selector.setMaximumWidth(148)
-        self.legend_loc_selector.setToolTip("Legend position (inside or outside the plot)")
-        self.legend_loc_selector.currentIndexChanged.connect(self._on_legend_loc_changed)
-        row.addWidget(self.legend_loc_selector)
+        self._tb_sidebar_btn = _cmp_chk(
+            " Controls", "Toggle controls panel", False, "fa6s.sliders"
+        )
+        self._tb_sidebar_btn.clicked.connect(self._toggle_sidebar)
+        row.addWidget(self._tb_sidebar_btn)
 
         row.addWidget(_cmp_sep())
 
@@ -328,6 +346,352 @@ class ComparisonPlotWidget(QWidget):
 
         row.addStretch(1)
         return toolbar
+
+    def resizeEvent(self, event):
+        """Keep the sidebar toggle handle aligned to the chart edge."""
+        super().resizeEvent(event)
+        self._position_toggle_handle()
+
+    def _position_toggle_handle(self) -> None:
+        if not hasattr(self, "_toggle_handle") or not hasattr(self, "_chart_area"):
+            return
+        handle_w = 16
+        handle_h = 40
+        y = max(0, (self._chart_area.height() - handle_h) // 2)
+        self._toggle_handle.setGeometry(0, y, handle_w, handle_h)
+
+    def _toggle_sidebar(self) -> None:
+        self.sidebar_visible = not self.sidebar_visible
+        target = SZ.PLOT_SIDEBAR_W if self.sidebar_visible else 0
+        self._sidebar_anim.stop()
+        current_width = self._sidebar.width()
+        self._sidebar.setMinimumWidth(current_width)
+        self._sidebar.setMaximumWidth(current_width)
+        self._sidebar_anim.setStartValue(current_width)
+        self._sidebar_anim.setEndValue(target)
+        self._sidebar_anim.start()
+
+        self._tb_sidebar_btn.blockSignals(True)
+        self._tb_sidebar_btn.setChecked(self.sidebar_visible)
+        self._tb_sidebar_btn.blockSignals(False)
+        _sync_cmp_chk(self._tb_sidebar_btn, self.sidebar_visible)
+
+        chevron = "fa6s.chevron-left" if self.sidebar_visible else "fa6s.chevron-right"
+        self._toggle_handle.setIcon(icon(chevron, C.TEXT_MID, 8))
+
+    def _on_sidebar_width_changed(self, value) -> None:
+        width = int(value)
+        self._sidebar.setMinimumWidth(width)
+        self._position_toggle_handle()
+
+    # ═══════════════════════════════════════════════════════════════════
+    # Sidebar
+    # ═══════════════════════════════════════════════════════════════════
+
+    def _build_sidebar(self) -> QFrame:
+        """Sidebar matching the Individual Samples tab layout.
+
+        Uses the same CollapsibleSection widgets and row builders so both tabs
+        stay visually in sync — any tweak to sidebar_controls ripples here too.
+        """
+        sidebar = QFrame()
+        sidebar.setObjectName("pw-sidebar")
+        sidebar.setMinimumWidth(0)
+        sidebar.setMinimumHeight(0)
+        sidebar.setSizePolicy(QSizePolicy.Policy.Fixed, QSizePolicy.Policy.Expanding)
+
+        outer = QVBoxLayout(sidebar)
+        outer.setContentsMargins(0, 0, 0, 0)
+        outer.setSpacing(0)
+
+        scroll = QScrollArea()
+        scroll.setObjectName("pw-sidebar-scroll")
+        scroll.setWidgetResizable(True)
+        scroll.setFrameShape(QFrame.Shape.NoFrame)
+        scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+        scroll.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAsNeeded)
+        outer.addWidget(scroll)
+
+        content = QWidget()
+        lay = QVBoxLayout(content)
+        lay.setContentsMargins(0, 0, 0, 0)
+        lay.setSpacing(0)
+        scroll.setWidget(content)
+
+        # ── Display Options ──
+        self._sect_display = CollapsibleSection(
+            "Display Options", "fa6s.eye",
+            CollapsibleSection.OLIVE, expanded=True,
+        )
+        row_grid, self._sw_grid = make_toggle_row("Show grid lines", self.show_grid)
+        self._sw_grid.toggled.connect(self._on_sidebar_grid_toggled)
+        self._sect_display.add_widget(row_grid)
+
+        row_legend, self._sw_legend = make_toggle_row("Show legend", self.show_legend)
+        self._sw_legend.toggled.connect(self._on_sidebar_legend_toggled)
+        self._sect_display.add_widget(row_legend)
+        lay.addWidget(self._sect_display)
+
+        # ── Dataset Colors ──
+        self._sect_dataset_colors = CollapsibleSection(
+            "Dataset Colors", "fa6s.palette",
+            CollapsibleSection.PURPLE, expanded=False,
+        )
+        self._color_container = QWidget()
+        self._color_container_lay = QVBoxLayout(self._color_container)
+        self._color_container_lay.setContentsMargins(0, 0, 0, 0)
+        self._color_container_lay.setSpacing(0)
+        self._empty_colors_hint = QLabel("  Add datasets to see per-sample colors.")
+        self._empty_colors_hint.setStyleSheet(
+            f"color: #8a816f; padding: 10px; font-size: 10px;"
+        )
+        self._color_container_lay.addWidget(self._empty_colors_hint)
+        self._sect_dataset_colors.add_widget(self._color_container)
+        lay.addWidget(self._sect_dataset_colors)
+
+        # ── Legend & Typography ──
+        self._sect_advanced = CollapsibleSection(
+            "Legend & Typography", "fa6s.text-height",
+            CollapsibleSection.AMBER, expanded=False,
+        )
+
+        self._row_legend_loc, self._legend_loc_combo = make_combo_row(
+            "Legend position", [label for _, _, label in _CMP_LEGEND_LOCATIONS])
+        self._legend_loc_combo.currentIndexChanged.connect(self._on_legend_loc_changed)
+        self._sect_advanced.add_widget(self._row_legend_loc)
+
+        self._row_legend_layout, self._legend_layout_combo = make_combo_row(
+            "Legend layout", [label for _, label in _CMP_LEGEND_LAYOUTS])
+        self._legend_layout_combo.currentIndexChanged.connect(
+            self._on_legend_layout_changed)
+        self._sect_advanced.add_widget(self._row_legend_layout)
+
+        self._row_legend_alpha, self._legend_alpha_spin = make_dspin_row(
+            "Legend opacity", 0.0, 1.0, 0.05, 2)
+        self._legend_alpha_spin.valueChanged.connect(
+            lambda v: self._update_style_field("legend_framealpha", float(v)))
+        self._sect_advanced.add_widget(self._row_legend_alpha)
+
+        self._row_title_size, self._title_size_spin = make_spin_row(
+            "Title size", 6, 36)
+        self._title_size_spin.valueChanged.connect(
+            lambda v: self._update_style_field("title_fontsize", int(v)))
+        self._sect_advanced.add_widget(self._row_title_size)
+
+        self._row_label_size, self._label_size_spin = make_spin_row(
+            "Axis label size", 6, 36)
+        self._label_size_spin.valueChanged.connect(
+            lambda v: self._update_style_field("label_fontsize", int(v)))
+        self._sect_advanced.add_widget(self._row_label_size)
+
+        self._row_tick_size, self._tick_size_spin = make_spin_row(
+            "Tick size", 5, 24)
+        self._tick_size_spin.valueChanged.connect(
+            lambda v: self._update_style_field("tick_fontsize", int(v)))
+        self._sect_advanced.add_widget(self._row_tick_size)
+
+        self._row_legend_size, self._legend_size_spin = make_spin_row(
+            "Legend size", 5, 24)
+        self._legend_size_spin.valueChanged.connect(
+            lambda v: self._update_style_field("legend_fontsize", int(v)))
+        self._sect_advanced.add_widget(self._row_legend_size)
+
+        reset_row = QWidget()
+        reset_lay = QHBoxLayout(reset_row)
+        reset_lay.setContentsMargins(10, 6, 10, 6)
+        self._style_reset_btn = QPushButton("Reset to preset")
+        self._style_reset_btn.setProperty("pw-btn", True)
+        self._style_reset_btn.setEnabled(False)
+        self._style_reset_btn.setToolTip(
+            "Discard legend/typography overrides and revert to the selected preset")
+        self._style_reset_btn.clicked.connect(self._on_reset_custom_style)
+        reset_lay.addWidget(self._style_reset_btn)
+        self._sect_advanced.add_widget(reset_row)
+        lay.addWidget(self._sect_advanced)
+
+        # ── Export ──
+        self._sect_export = CollapsibleSection(
+            "Export", "fa6s.download",
+            CollapsibleSection.RED, expanded=False,
+        )
+        export_w = QWidget()
+        export_lay = QVBoxLayout(export_w)
+        export_lay.setContentsMargins(10, 5, 10, 8)
+        export_lay.setSpacing(4)
+        btn_png = QPushButton("Export as PNG")
+        btn_png.setProperty("pw-btn", True)
+        btn_png.clicked.connect(lambda: self._export_figure("png"))
+        btn_svg = QPushButton("Export as SVG")
+        btn_svg.setProperty("pw-btn", True)
+        btn_svg.clicked.connect(lambda: self._export_figure("svg"))
+        export_lay.addWidget(btn_png)
+        export_lay.addWidget(btn_svg)
+        self._sect_export.add_widget(export_w)
+        lay.addWidget(self._sect_export)
+
+        lay.addStretch(1)
+        return sidebar
+
+    # ── Sidebar handlers ───────────────────────────────────────────
+
+    def _on_sidebar_grid_toggled(self, on: bool) -> None:
+        self.show_grid = on
+        self.refresh_plot()
+
+    def _on_sidebar_legend_toggled(self, on: bool) -> None:
+        self.show_legend = on
+        self.refresh_plot()
+
+    def _update_style_field(self, field: str, value) -> None:
+        """Override a single PlotStyle field, cloning the preset on first edit."""
+        self._update_style_fields(**{field: value})
+
+    def _update_style_fields(self, **changes) -> None:
+        """Override one or more PlotStyle fields on the active custom style."""
+        dirty = {
+            k: v for k, v in changes.items()
+            if getattr(self.current_style, k) != v
+        }
+        if not dirty:
+            return
+        self.current_style = dataclasses.replace(self.current_style, **dirty)
+        self._style_is_custom = True
+        self._sync_reset_button()
+        self.refresh_plot()
+
+    def _sync_sidebar_style_widgets(self, style: PlotStyle) -> None:
+        """Push the given style into the sidebar spinboxes/combos without firing."""
+        widgets = [
+            getattr(self, '_legend_loc_combo', None),
+            getattr(self, '_legend_layout_combo', None),
+            getattr(self, '_legend_alpha_spin', None),
+            getattr(self, '_title_size_spin', None),
+            getattr(self, '_label_size_spin', None),
+            getattr(self, '_tick_size_spin', None),
+            getattr(self, '_legend_size_spin', None),
+        ]
+        if not all(widgets):
+            return
+        for w in widgets:
+            w.blockSignals(True)
+        loc_idx = next(
+            (
+                i for i, (loc, bbox, _label) in enumerate(_CMP_LEGEND_LOCATIONS)
+                if loc == style.legend_loc
+                and bbox == style.legend_bbox_to_anchor
+            ),
+            0,
+        )
+        layout_idx = next(
+            (
+                i for i, (ncol, _label) in enumerate(_CMP_LEGEND_LAYOUTS)
+                if ncol == getattr(style, 'legend_ncol', 1)
+            ),
+            0,
+        )
+        self._legend_loc_combo.setCurrentIndex(loc_idx)
+        self._legend_layout_combo.setCurrentIndex(layout_idx)
+        self._legend_alpha_spin.setValue(float(style.legend_framealpha))
+        self._title_size_spin.setValue(int(style.title_fontsize))
+        self._label_size_spin.setValue(int(style.label_fontsize))
+        self._tick_size_spin.setValue(int(style.tick_fontsize))
+        self._legend_size_spin.setValue(int(style.legend_fontsize))
+        for w in widgets:
+            w.blockSignals(False)
+
+    def _sync_reset_button(self) -> None:
+        btn = getattr(self, '_style_reset_btn', None)
+        if btn is not None:
+            btn.setEnabled(self._style_is_custom)
+
+    def _on_reset_custom_style(self) -> None:
+        """Revert to the selected preset, discarding per-field overrides."""
+        if not self._style_is_custom:
+            return
+        preset = get_style(self.style_selector.currentText())
+        self.current_style = preset
+        self._style_is_custom = False
+        self.figure.patch.set_facecolor(preset.figure_facecolor)
+        self._sync_sidebar_style_widgets(preset)
+        self._sync_reset_button()
+        self.refresh_plot()
+
+    def _rebuild_dataset_color_rows(self) -> None:
+        """Refresh the Dataset Colors section when datasets change."""
+        if not hasattr(self, '_color_container_lay'):
+            return
+        while self._color_container_lay.count():
+            item = self._color_container_lay.takeAt(0)
+            w = item.widget()
+            if w is not None:
+                w.setParent(None)
+        self._dataset_color_rows.clear()
+
+        if not self.datasets:
+            self._color_container_lay.addWidget(self._empty_colors_hint)
+            self._empty_colors_hint.show()
+            return
+
+        self._empty_colors_hint.hide()
+        for i, ds in enumerate(self.datasets):
+            color = self._effective_color_for(ds.sample_name, i)
+            row, dot = make_color_row(ds.sample_name, color)
+            dot.mousePressEvent = (
+                lambda _event, name=ds.sample_name, swatch=dot:
+                self._pick_dataset_color(name, swatch)
+            )
+            self._color_container_lay.addWidget(row)
+            self._dataset_color_rows[ds.sample_name] = dot
+
+    def _effective_color_for(self, sample_name: str, index: int) -> str:
+        override = self._dataset_color_overrides.get(sample_name)
+        if override:
+            return override
+        return self.dataset_colors[index % len(self.dataset_colors)]
+
+    def _pick_dataset_color(self, sample_name: str, swatch: QLabel) -> None:
+        dataset_index = next(
+            (
+                i for i, dataset in enumerate(self.datasets)
+                if dataset.sample_name == sample_name
+            ),
+            0,
+        )
+        current = self._dataset_color_overrides.get(
+            sample_name,
+            self._effective_color_for(sample_name, dataset_index),
+        )
+        chosen = QColorDialog.getColor(
+            QColor(current), self, f"Color for {sample_name}"
+        )
+        if not chosen.isValid():
+            return
+        hex_color = chosen.name()
+        self._dataset_color_overrides[sample_name] = hex_color
+        set_swatch_color(swatch, hex_color)
+        self.refresh_plot()
+
+    def _effective_dataset_colors(self) -> List[str]:
+        """Dataset-color list honouring any per-sample overrides."""
+        return [
+            self._effective_color_for(ds.sample_name, i)
+            for i, ds in enumerate(self.datasets)
+        ]
+
+    def _export_figure(self, fmt: str) -> None:
+        """Save the current comparison figure to disk."""
+        if self.figure is None:
+            return
+        ext_filter = {"png": "PNG (*.png)", "svg": "SVG (*.svg)"}.get(fmt, "All Files (*)")
+        path, _ = QFileDialog.getSaveFileName(
+            self, "Export plot", f"comparison.{fmt}", ext_filter,
+        )
+        if not path:
+            return
+        try:
+            self.figure.savefig(path, dpi=200, bbox_inches="tight")
+        except Exception as exc:  # pragma: no cover — user-facing dialog
+            QMessageBox.warning(self, "Export failed", str(exc))
 
     def on_plot_type_changed(self, text: str):
         """Handle plot type change"""
@@ -414,17 +778,9 @@ class ComparisonPlotWidget(QWidget):
             bar.set_edgecolor('black')
             bar.set_linewidth(0.5)
 
-    def _legend_kwargs(self) -> dict:
+    def _legend_kwargs(self, label_count: Optional[int] = None) -> dict:
         """Build legend kwargs from the active PlotStyle so loc/bbox/fontsize are honoured."""
-        kwargs = dict(
-            loc=self.current_style.legend_loc,
-            fontsize=self.current_style.legend_fontsize,
-            framealpha=self.current_style.legend_framealpha,
-            edgecolor=self.current_style.legend_edgecolor,
-        )
-        if self.current_style.legend_bbox_to_anchor is not None:
-            kwargs["bbox_to_anchor"] = self.current_style.legend_bbox_to_anchor
-        return kwargs
+        return build_legend_kwargs(self.current_style, label_count)
 
     def _add_flagged_legend_handle(self, ax):
         """Append a warning-state legend entry when flagged methods are present."""
@@ -438,7 +794,7 @@ class ComparisonPlotWidget(QWidget):
             )
         ]
         labels = labels + ['Flagged / Warning']
-        ax.legend(handles, labels, **self._legend_kwargs())
+        ax.legend(handles, labels, **self._legend_kwargs(len(labels)))
 
     def on_grid_layout_changed(self, text: str):
         """Handle grid layout change"""
@@ -452,9 +808,11 @@ class ComparisonPlotWidget(QWidget):
         self.refresh_plot()
     
     def update_display_options(self):
-        """Update display options"""
-        self.show_grid = self.grid_check.isChecked()
-        self.show_legend = self.legend_check.isChecked()
+        """Update display options from the sidebar controls."""
+        if hasattr(self, "_sw_grid"):
+            self.show_grid = self._sw_grid.isChecked()
+        if hasattr(self, "_sw_legend"):
+            self.show_legend = self._sw_legend.isChecked()
         self.refresh_plot()
 
     def _on_style_preset_changed(self, preset_name: str) -> None:
@@ -463,7 +821,6 @@ class ComparisonPlotWidget(QWidget):
         # "Reset to preset" semantics.
         self._style_is_custom = False
         self.set_style(get_style(preset_name))
-        self._sync_legend_loc_selector()
 
     def _on_legend_loc_changed(self, index: int) -> None:
         if index < 0 or index >= len(_CMP_LEGEND_LOCATIONS):
@@ -480,11 +837,26 @@ class ComparisonPlotWidget(QWidget):
             legend_bbox_to_anchor=new_bbox,
         )
         self._style_is_custom = True
+        self._sync_reset_button()
+        self.refresh_plot()
+
+    def _on_legend_layout_changed(self, index: int) -> None:
+        if index < 0 or index >= len(_CMP_LEGEND_LAYOUTS):
+            return
+        ncol, _label = _CMP_LEGEND_LAYOUTS[index]
+        if getattr(self.current_style, 'legend_ncol', 1) == ncol:
+            return
+        self.current_style = dataclasses.replace(
+            self.current_style,
+            legend_ncol=ncol,
+        )
+        self._style_is_custom = True
+        self._sync_reset_button()
         self.refresh_plot()
 
     def _sync_legend_loc_selector(self) -> None:
         """Point the legend-loc dropdown at the active style's value, silently."""
-        selector = getattr(self, 'legend_loc_selector', None)
+        selector = getattr(self, '_legend_loc_combo', None)
         if selector is None:
             return
         idx = next(
@@ -524,6 +896,14 @@ class ComparisonPlotWidget(QWidget):
                 if k_dict:
                     self.k_results_dict[dataset.sample_name] = k_dict
                     self.flagged_methods_dict[dataset.sample_name] = flagged_methods
+
+        active_names = {dataset.sample_name for dataset in self.datasets}
+        self._dataset_color_overrides = {
+            name: color
+            for name, color in self._dataset_color_overrides.items()
+            if name in active_names
+        }
+        self._rebuild_dataset_color_rows()
     
     def refresh_plot(self):
         """Refresh the plot based on current settings"""
@@ -553,23 +933,19 @@ class ComparisonPlotWidget(QWidget):
 
     def _apply_figure_layout(self):
         """Keep labels visible without letting tight_layout warnings spill into the console."""
-        try:
-            with warnings.catch_warnings():
-                warnings.filterwarnings(
-                    "error",
-                    message="Tight layout not applied.*",
-                    category=UserWarning,
-                )
-                self.figure.tight_layout(pad=0.9)
-        except UserWarning:
-            self.figure.subplots_adjust(
+        apply_legend_aware_layout(
+            self.figure,
+            self.current_style,
+            pad=0.9,
+            fallback=dict(
                 left=0.08,
                 right=0.98,
                 top=0.94,
                 bottom=0.16,
                 wspace=0.28,
                 hspace=0.34,
-            )
+            ),
+        )
 
     def _on_canvas_click(self, event) -> None:
         self._interactions.on_click(event)
@@ -628,7 +1004,7 @@ class ComparisonPlotWidget(QWidget):
         """Plot all distributions on single axes via shared renderer."""
         render_distribution_overlay(
             ax, self.datasets,
-            colors=self.dataset_colors[:len(self.datasets)],
+            colors=self._effective_dataset_colors(),
             style=self.current_style,
             show_grid=self.show_grid,
             show_legend=self.show_legend,
@@ -637,13 +1013,14 @@ class ComparisonPlotWidget(QWidget):
     def plot_distribution_grid(self):
         """Plot distributions in grid layout"""
         rows, cols = self.grid_layout
-        
+        dataset_colors = self._effective_dataset_colors()
+
         for i, dataset in enumerate(self.datasets):
             if i >= rows * cols:
                 break
-                
+
             ax = self.figure.add_subplot(rows, cols, i + 1)
-            color = self.dataset_colors[i % len(self.dataset_colors)]
+            color = dataset_colors[i % len(dataset_colors)]
             
             ax.semilogx(dataset.particle_sizes, dataset.percent_passing,
                        linewidth=2, color=color,
@@ -680,6 +1057,7 @@ class ComparisonPlotWidget(QWidget):
         render_k_overlay(
             ax, self.k_results_dict,
             flagged_methods_dict=self.flagged_methods_dict,
+            colors=self._effective_dataset_colors(),
             style=self.current_style,
             show_grid=self.show_grid,
             show_legend=self.show_legend,
@@ -731,7 +1109,8 @@ class ComparisonPlotWidget(QWidget):
             if has_flagged:
                 self._add_flagged_legend_handle(ax)
             else:
-                ax.legend(ncol=2, **self._legend_kwargs())
+                handles, labels = ax.get_legend_handles_labels()
+                ax.legend(handles, labels, **self._legend_kwargs(len(labels)))
     
     def plot_k_values_grid(self):
         """Plot K-values in grid layout"""
@@ -773,7 +1152,8 @@ class ComparisonPlotWidget(QWidget):
     def plot_combined(self):
         """Plot combined view"""
         rows, cols = self.grid_layout
-        
+        dataset_colors = self._effective_dataset_colors()
+
         for i, dataset in enumerate(self.datasets):
             if i >= rows * cols:
                 break
@@ -782,7 +1162,7 @@ class ComparisonPlotWidget(QWidget):
             ax1 = self.figure.add_subplot(rows, cols*2, i*2 + 1)
             ax2 = self.figure.add_subplot(rows, cols*2, i*2 + 2)
             
-            color = self.dataset_colors[i % len(self.dataset_colors)]
+            color = dataset_colors[i % len(dataset_colors)]
             
             # Plot distribution
             ax1.semilogx(dataset.particle_sizes, dataset.percent_passing,
@@ -829,13 +1209,14 @@ class ComparisonPlotWidget(QWidget):
     def plot_histogram(self):
         """Plot histogram comparison"""
         rows, cols = self.grid_layout
-        
+        dataset_colors = self._effective_dataset_colors()
+
         for i, dataset in enumerate(self.datasets):
             if i >= rows * cols:
                 break
-            
+
             ax = self.figure.add_subplot(rows, cols, i + 1)
-            color = self.dataset_colors[i % len(self.dataset_colors)]
+            color = dataset_colors[i % len(dataset_colors)]
             
             # Calculate retained frequency for each size class from cumulative passing
             sizes, freq = self._calculate_histogram_frequencies(

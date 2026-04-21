@@ -70,6 +70,7 @@ class PlotStyle:
     # axes, which is how matplotlib expresses "outside the plot". When None,
     # matplotlib uses `legend_loc` alone for inside-axes placement.
     legend_bbox_to_anchor: Optional[Tuple[float, float]] = None
+    legend_ncol: int = 1
 
 
 # Preset style templates

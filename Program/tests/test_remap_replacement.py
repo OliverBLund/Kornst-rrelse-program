@@ -142,8 +142,9 @@ class _BatchExcelHarness:
 
 
 class _FakeTabWidget:
-    def __init__(self, widgets):
+    def __init__(self, widgets, current=0):
         self.widgets = list(widgets)
+        self.current = current if self.widgets else -1
 
     def count(self):
         return len(self.widgets)
@@ -151,8 +152,23 @@ class _FakeTabWidget:
     def widget(self, index):
         return self.widgets[index]
 
+    def currentIndex(self):
+        return self.current
+
+    def currentWidget(self):
+        if 0 <= self.current < len(self.widgets):
+            return self.widgets[self.current]
+        return None
+
+    def setCurrentIndex(self, index):
+        self.current = index
+
     def removeTab(self, index):
         self.widgets.pop(index)
+        if not self.widgets:
+            self.current = -1
+        elif self.current >= len(self.widgets):
+            self.current = len(self.widgets) - 1
 
 
 class _MainWindowHarness:
@@ -262,6 +278,42 @@ class _CloseDatasetHarness:
 
     def _show_status_message(self, message, ok=True):
         self.messages.append((message, ok))
+
+
+class _ExportPlotWorkspace:
+    def __init__(self):
+        self.plot_exports = []
+
+    def export_plot(self, fmt):
+        self.plot_exports.append(fmt)
+
+
+class _ExportDatasetTab:
+    def __init__(self, name):
+        self.name = name
+        self.result_exports = 0
+        self.plot_workspace = _ExportPlotWorkspace()
+
+    def export_results(self):
+        self.result_exports += 1
+
+
+class _ExportHarness:
+    _current_dataset_tab = MainWindow._current_dataset_tab
+    export_current = MainWindow.export_current
+    export_results = MainWindow.export_results
+    export_plot = MainWindow.export_plot
+
+    def __init__(self, widgets, dataset_tabs, *, current=0):
+        self.dataset_tabs_widget = _FakeTabWidget(widgets, current=current)
+        self.dataset_tabs = list(dataset_tabs)
+        self.content_stack = SimpleNamespace(currentIndex=lambda: 0)
+        self.comparison_exports = 0
+        self.comparison_tab = SimpleNamespace(
+            export_comparison=lambda: setattr(
+                self, "comparison_exports", self.comparison_exports + 1
+            )
+        )
 
 
 class _SessionHarness:
@@ -675,6 +727,55 @@ class TestRemapReplacement(unittest.TestCase):
 
         self.assertEqual(harness.control_panel.calls, [])
         self.assertEqual(harness.dataset_tabs_widget.widgets, [second_tab])
+
+    def test_closing_error_tab_does_not_remove_loaded_dataset(self):
+        error_path = "bad.xlsx:::NeedsMapping"
+        dataset_path = "good.csv"
+        error_tab = _Tab(file_path=error_path)
+        dataset_tab = _Tab(dataset=SimpleNamespace(file_path=dataset_path))
+        harness = _CloseDatasetHarness([error_tab, dataset_tab], [dataset_tab])
+
+        MainWindow.close_dataset_tab(harness, 0)
+
+        self.assertEqual(harness.dataset_tabs, [dataset_tab])
+        self.assertEqual(harness.dataset_tabs_widget.widgets, [dataset_tab])
+        self.assertFalse(harness.welcome_shown)
+        self.assertEqual(
+            harness.control_panel.calls,
+            [(error_path, False, False)],
+        )
+
+    def test_closing_last_loaded_dataset_keeps_error_tab_visible(self):
+        error_tab = _Tab(file_path="bad.xlsx:::NeedsMapping")
+        dataset_tab = _Tab(dataset=SimpleNamespace(file_path="good.csv"))
+        harness = _CloseDatasetHarness([error_tab, dataset_tab], [dataset_tab])
+
+        MainWindow.close_dataset_tab(harness, 1)
+
+        self.assertEqual(harness.dataset_tabs, [])
+        self.assertEqual(harness.dataset_tabs_widget.widgets, [error_tab])
+        self.assertFalse(harness.welcome_shown)
+
+    def test_export_results_uses_current_dataset_widget_without_welcome_offset(self):
+        first = _ExportDatasetTab("first")
+        second = _ExportDatasetTab("second")
+        harness = _ExportHarness([first, second], [first, second], current=0)
+
+        MainWindow.export_results(harness)
+
+        self.assertEqual(first.result_exports, 1)
+        self.assertEqual(second.result_exports, 0)
+
+    def test_export_ignores_current_error_tab(self):
+        error_tab = _Tab(file_path="bad.csv")
+        dataset_tab = _ExportDatasetTab("dataset")
+        harness = _ExportHarness([error_tab, dataset_tab], [dataset_tab], current=0)
+
+        MainWindow.export_results(harness)
+        MainWindow.export_plot(harness)
+
+        self.assertEqual(dataset_tab.result_exports, 0)
+        self.assertEqual(dataset_tab.plot_workspace.plot_exports, [])
 
     def test_error_tab_fix_routes_through_control_panel(self):
         control_panel = _ApplyRecorder()

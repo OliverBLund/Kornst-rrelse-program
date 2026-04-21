@@ -13,6 +13,7 @@ from .matplotlib_canvas import FigureCanvas, NavigationToolbar
 from .plot_interactions import AxesInteractionController
 from .plot_constants import METHOD_COLORS
 from .plot_renderers import (
+    apply_legend_aware_layout,
     render_grain_size_distribution,
     render_k_bar_chart,
 )
@@ -216,7 +217,7 @@ class PlotWidget(QWidget):
             fill_zone_labels=self.fill_zone_labels,
         )
 
-        self.figure.tight_layout()
+        apply_legend_aware_layout(self.figure, self.current_style)
         self.interactions.prime_current_ax()
         self.interactions.capture_default_limits()
         self.interactions.apply_active_axes_styling()
@@ -296,7 +297,7 @@ class PlotWidget(QWidget):
         self.k_value_ax = ax2 if self.k_results else None
         self.active_axes = [ax1, ax2]
 
-        self.figure.tight_layout()
+        apply_legend_aware_layout(self.figure, self.current_style)
         self.interactions.prime_current_ax()
         self.interactions.capture_default_limits()
         self.interactions.apply_active_axes_styling()
@@ -338,7 +339,7 @@ class PlotWidget(QWidget):
         )
 
         # Adjust layout and redraw
-        self.figure.tight_layout()
+        apply_legend_aware_layout(self.figure, self.current_style)
         self.interactions.prime_current_ax()
         self.interactions.capture_default_limits()
         self.interactions.apply_active_axes_styling()

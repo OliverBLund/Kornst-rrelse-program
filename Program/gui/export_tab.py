@@ -34,6 +34,7 @@ class ExportTab(QWidget):
         self._scheme = ISO14688
         self.datasets = []  # List of (name, GrainSizeData, List[KCalculationResult])
         self.plot_figures: List[Any] = []
+        self.plot_contexts: List[Dict[str, Any]] = []
 
         # Selected formats (for card-based selection)
         self.selected_formats = {
@@ -281,6 +282,27 @@ class ExportTab(QWidget):
         self.update_summary_card()
         self.update_preview()
 
+    def _selected_plot_formats(self) -> List[str]:
+        """Return selected plot file formats in display/export order."""
+        formats = []
+        if self.selected_formats.get('png'):
+            formats.append('png')
+        if self.selected_formats.get('svg'):
+            formats.append('svg')
+        if self.selected_formats.get('pdf'):
+            formats.append('pdf')
+        return formats
+
+    def _plot_exports_enabled(self) -> bool:
+        """Return whether plot files will actually be exported."""
+        plots = self.content_selection.get('plots', {})
+        items = plots.get('items', {})
+        return bool(
+            plots.get('enabled', True)
+            and items.get('grain_size_curve', True)
+            and self._selected_plot_formats()
+        )
+
     def update_file_tree(self):
         """Update the file tree showing exact files that will be created"""
         if not hasattr(self, 'file_tree'):
@@ -328,18 +350,21 @@ class ExportTab(QWidget):
             excel_folder.setExpanded(True)
 
         # Plot Files
-        if any([self.selected_formats.get('png'), self.selected_formats.get('svg'), self.selected_formats.get('pdf')]):
+        if self._plot_exports_enabled():
             plots_folder = QTreeWidgetItem(["📁 Plot Files"])
             plots_folder.setFont(0, QFont("Segoe UI", 10, QFont.Weight.Bold))
 
-            plot_count = 0
+            labels = {'png': 'PNG', 'svg': 'SVG', 'pdf': 'PDF'}
             for name, _, _ in datasets_to_export[:3]:  # Show first 3
-                if self.selected_formats.get('png'):
-                    png_item = QTreeWidgetItem([f"🖼️ {name}_plot.png", "~200 KB", "Grain size plot"])
-                    plots_folder.addChild(png_item)
-                    plot_count += 1
+                for fmt in self._selected_plot_formats():
+                    plot_item = QTreeWidgetItem([
+                        f"🖼️ {name}_plot.{fmt}",
+                        "~200 KB",
+                        f"Grain size plot ({labels[fmt]})",
+                    ])
+                    plots_folder.addChild(plot_item)
 
-            if len(datasets_to_export) > 3 or plot_count > 3:
+            if len(datasets_to_export) > 3:
                 more_item = QTreeWidgetItem([f"... more plot files", "", ""])
                 plots_folder.addChild(more_item)
 
@@ -388,11 +413,7 @@ class ExportTab(QWidget):
             format_count += 1
 
         # Count plot files
-        plot_formats = sum([
-            self.selected_formats.get('png', False),
-            self.selected_formats.get('svg', False),
-            self.selected_formats.get('pdf', False)
-        ])
+        plot_formats = len(self._selected_plot_formats()) if self._plot_exports_enabled() else 0
         if plot_formats > 0:
             file_count += dataset_count * plot_formats
             format_count += plot_formats
@@ -895,18 +916,50 @@ class ExportTab(QWidget):
     def _toggle_category(self, category_key: str, enabled: bool):
         """Toggle entire content category"""
         self.content_selection[category_key]['enabled'] = enabled
+        legacy_key = {
+            'grain_size': 'grain_data',
+            'k_values': 'k_values',
+            'statistics': 'statistics',
+            'plots': 'plots',
+        }.get(category_key)
+        if legacy_key:
+            self.content_enabled[legacy_key] = enabled
         # Update all items in category
         for key, cb in self.content_checkboxes.items():
             if key.startswith(f'{category_key}_') and key != f'{category_key}_header':
                 cb.setEnabled(enabled)
         self.update_file_tree()
         self.update_summary_card()
+        self.update_preview()
 
     def _toggle_content_item(self, category_key: str, item_key: str, enabled: bool):
         """Toggle individual content item"""
-        # This is a simplified version - will be expanded when implementing granular selection
+        category = self.content_selection.get(category_key)
+        if not category:
+            return
+
+        items = category.get('items')
+        if isinstance(items, dict) and item_key in items:
+            value = items[item_key]
+            if isinstance(value, dict) and 'enabled' in value:
+                value['enabled'] = enabled
+            else:
+                items[item_key] = enabled
+        elif item_key in category:
+            category[item_key] = enabled
+        elif category_key == 'k_values':
+            if item_key == 'all_methods':
+                category['filter_mode'] = 'all' if enabled else 'individual'
+                if not enabled:
+                    for method in category['individual_methods']:
+                        category['individual_methods'][method] = False
+            elif item_key == 'units_group':
+                for unit_key in category['units']:
+                    category['units'][unit_key] = enabled
+
         self.update_file_tree()
         self.update_summary_card()
+        self.update_preview()
 
     def _select_all_content(self):
         """Select all content items"""
@@ -1374,7 +1427,7 @@ class ExportTab(QWidget):
             self._add_json_preview_tab(datasets_to_export)
 
         # Add plot preview if any plot format is selected
-        if self.selected_formats.get('png') or self.selected_formats.get('svg') or self.selected_formats.get('pdf'):
+        if self._plot_exports_enabled():
             self._add_plot_preview_tab(datasets_to_export)
 
         # If no formats selected, show help
@@ -1675,15 +1728,12 @@ class ExportTab(QWidget):
         preview.setFont(QFont("Segoe UI", 9))
 
         text = []
-        plot_formats = []
-        if self.selected_formats.get('png'):
-            plot_formats.append("PNG")
-        if self.selected_formats.get('svg'):
-            plot_formats.append("SVG")
-        if self.selected_formats.get('pdf'):
-            plot_formats.append("PDF")
+        labels = {'png': 'PNG', 'svg': 'SVG', 'pdf': 'PDF'}
+        plot_formats = [labels[fmt] for fmt in self._selected_plot_formats()]
 
         text.append(f"Format(s): {', '.join(plot_formats)}")
+        text.append("")
+        text.append("Plots are regenerated with the shared plot renderer and current plot style/options.")
         text.append("")
         text.append("Each plot will show:")
         text.append("  • Cumulative % passing curve")
@@ -1737,13 +1787,19 @@ class ExportTab(QWidget):
         """Set the active classification scheme used for all exports."""
         self._scheme = scheme
 
-    def update_datasets(self, datasets: List[tuple], plot_figures: Optional[List[Any]] = None):
+    def update_datasets(
+        self,
+        datasets: List[tuple],
+        plot_figures: Optional[List[Any]] = None,
+        plot_contexts: Optional[List[Dict[str, Any]]] = None,
+    ):
         """
         Update the list of available datasets
 
         Args:
             datasets: List of (name, GrainSizeData, List[KCalculationResult]) tuples
             plot_figures: Optional list of matplotlib Figure objects aligned with datasets
+            plot_contexts: Optional list of live plot style/state dictionaries aligned with datasets
         """
         self.datasets = datasets
         if plot_figures is None:
@@ -1753,6 +1809,13 @@ class ExportTab(QWidget):
             if len(figures) < len(datasets):
                 figures.extend([None] * (len(datasets) - len(figures)))
             self.plot_figures = figures
+        if plot_contexts is None:
+            self.plot_contexts = [{} for _ in datasets]
+        else:
+            contexts = list(plot_contexts[:len(datasets)])
+            if len(contexts) < len(datasets):
+                contexts.extend({} for _ in range(len(datasets) - len(contexts)))
+            self.plot_contexts = contexts
 
         # Update current dataset combo
         self.current_dataset_combo.clear()
@@ -2065,13 +2128,8 @@ class ExportTab(QWidget):
                 preview_text.append(f"Total: {len(datasets_to_export)} JSON file(s) will be created")
 
         # Show plot formats preview if selected
-        plot_formats = []
-        if self.selected_formats.get('png'):
-            plot_formats.append("PNG")
-        if self.selected_formats.get('svg'):
-            plot_formats.append("SVG")
-        if self.selected_formats.get('pdf'):
-            plot_formats.append("PDF")
+        labels = {'png': 'PNG', 'svg': 'SVG', 'pdf': 'PDF'}
+        plot_formats = [labels[fmt] for fmt in self._selected_plot_formats()] if self._plot_exports_enabled() else []
 
         if plot_formats:
             if preview_text:
@@ -2177,16 +2235,11 @@ class ExportTab(QWidget):
             preview_lines.append(f"  • JSON files: {total_datasets} files")
             file_count += total_datasets
 
-        if self.content_enabled.get('plots', True):
-            plot_formats = sum([
-                self.selected_formats.get('png', False),
-                self.selected_formats.get('svg', False),
-                self.selected_formats.get('pdf', False)
-            ])
-            if plot_formats > 0:
-                count = total_datasets * plot_formats
-                preview_lines.append(f"  • Plot files: ~{count} files ({plot_formats} formats × {total_datasets} datasets)")
-                file_count += count
+        if self._plot_exports_enabled():
+            plot_formats = len(self._selected_plot_formats())
+            count = total_datasets * plot_formats
+            preview_lines.append(f"  • Plot files: ~{count} files ({plot_formats} formats × {total_datasets} datasets)")
+            file_count += count
 
         preview_lines.append("")
         preview_lines.append(f"Total estimated files: ~{file_count}")
@@ -2205,11 +2258,11 @@ class ExportTab(QWidget):
         content_items = []
         if self.content_enabled.get('grain_data', True):
             content_items.append("Grain size distribution data")
-        if self.content_enabled.get('k_values', True):
+        if self.content_selection['k_values']['enabled']:
             content_items.append("K-value results (all methods)")
         if self.content_enabled.get('statistics', True):
             content_items.append("Statistical summaries")
-        if self.content_enabled.get('plots', True):
+        if self._plot_exports_enabled():
             content_items.append("Plots/figures")
 
         for item in content_items:
@@ -2242,7 +2295,7 @@ class ExportTab(QWidget):
             return
 
         # Check if K-values are requested but not available
-        if self.content_enabled.get('k_values', True):
+        if self.content_selection['k_values']['enabled']:
             datasets_without_k = []
             for name, dataset, results in datasets_to_export:
                 if not results or len(results) == 0:
@@ -2365,8 +2418,27 @@ class ExportTab(QWidget):
 
         return []
 
+    def _get_plot_contexts_to_export(self) -> List[Dict[str, Any]]:
+        """Return plot contexts aligned to the dataset export selection."""
+        if self.scope_current.isChecked():
+            idx = self.current_dataset_combo.currentIndex()
+            if 0 <= idx < len(self.plot_contexts):
+                return [self.plot_contexts[idx]]
+            return []
+
+        if self.scope_all.isChecked():
+            return list(self.plot_contexts)
+
+        return []
+
     def _build_export_config(self) -> Dict:
         """Build export configuration dictionary"""
+        plots_config = self.content_selection['plots']
+        plots_items = plots_config['items']
+        plots_enabled = (
+            plots_config['enabled']
+            and plots_items.get('grain_size_curve', True)
+        )
         config = {
             # Formats - using new selected_formats dict
             'csv': self.selected_formats.get('csv_long') or self.selected_formats.get('csv_wide'),
@@ -2392,7 +2464,9 @@ class ExportTab(QWidget):
             'classification': self.content_selection['grain_size']['items']['classification'],
             'k_values': self.content_selection['k_values']['enabled'],
             'statistics': self.content_selection['statistics']['enabled'],
-            'plots': self.content_selection['plots']['enabled'],
+            'plots': plots_enabled,
+            'plot_include_legend': plots_items.get('include_legend', True),
+            'plot_include_grid': plots_items.get('include_grid', True),
             'formulas': self.content_selection['k_values']['include_formulas'],
             'validation': self.content_selection['k_values']['include_validation'],
 
@@ -2428,11 +2502,8 @@ class ExportTab(QWidget):
             'filename_template': '{sample_name}_results_{date}',  # Default template
         }
 
-        if any([
-            self.selected_formats.get('png', False),
-            self.selected_formats.get('svg', False),
-            self.selected_formats.get('pdf', False),
-        ]):
+        if self._plot_exports_enabled():
             config['plot_figures'] = self._get_plot_figures_to_export()
+            config['plot_contexts'] = self._get_plot_contexts_to_export()
 
         return config

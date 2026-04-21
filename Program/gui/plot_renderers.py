@@ -13,6 +13,7 @@ can be called from:
 from __future__ import annotations
 
 import math
+import warnings
 from typing import Dict, List, Optional, Sequence, Set
 
 import numpy as np
@@ -274,6 +275,7 @@ def render_k_overlay(
     k_results_dict: Dict[str, Dict[str, float]],
     *,
     flagged_methods_dict: Optional[Dict[str, Set[str]]] = None,
+    colors: Optional[List[str]] = None,
     style: PlotStyle = PROFESSIONAL_STYLE,
     show_grid: bool = True,
     show_legend: bool = True,
@@ -283,6 +285,7 @@ def render_k_overlay(
     """Draw grouped K-value bars for multiple samples."""
     ax.set_axisbelow(True)
     flagged = flagged_methods_dict or {}
+    _colors = colors or DATASET_COLORS
 
     all_methods: set[str] = set()
     for kd in k_results_dict.values():
@@ -303,7 +306,7 @@ def render_k_overlay(
     for i, (name, k_dict) in enumerate(k_results_dict.items()):
         values = [k_dict.get(m, 0) for m in methods]
         positions = np.arange(n_methods) + i * bar_width
-        color = DATASET_COLORS[i % len(DATASET_COLORS)]
+        color = _colors[i % len(_colors)]
         sample_flagged = flagged.get(name, set())
 
         bars = ax.bar(positions, values, bar_width, label=name,
@@ -628,21 +631,108 @@ def _apply_grid(ax: Axes, style: PlotStyle, show: bool,
                 linewidth=style.grid_linewidth * 0.5)
 
 
+def legend_column_count(style: PlotStyle, label_count: Optional[int] = None) -> int:
+    """Return the Matplotlib legend column count requested by *style*."""
+    configured = int(getattr(style, "legend_ncol", 1) or 0)
+    if configured <= 0:
+        return max(1, label_count or 1)
+    if label_count:
+        return max(1, min(configured, label_count))
+    return max(1, configured)
+
+
+def build_legend_kwargs(
+    style: PlotStyle,
+    label_count: Optional[int] = None,
+) -> dict:
+    """Build common Matplotlib legend kwargs from a PlotStyle."""
+    kwargs = dict(
+        loc=style.legend_loc,
+        fontsize=style.legend_fontsize,
+        framealpha=style.legend_framealpha,
+        edgecolor=style.legend_edgecolor,
+        ncol=legend_column_count(style, label_count),
+    )
+    if style.legend_bbox_to_anchor is not None:
+        kwargs["bbox_to_anchor"] = style.legend_bbox_to_anchor
+    return kwargs
+
+
+def legend_outside_side(style: PlotStyle) -> Optional[str]:
+    """Return the outside side implied by the style's bbox anchor."""
+    bbox = getattr(style, "legend_bbox_to_anchor", None)
+    if bbox is None:
+        return None
+    x, y = bbox
+    if x > 1.0:
+        return "right"
+    if x < 0.0:
+        return "left"
+    if y > 1.0:
+        return "top"
+    if y < 0.0:
+        return "bottom"
+    return None
+
+
+def apply_legend_aware_layout(
+    figure: Figure,
+    style: PlotStyle,
+    *,
+    pad: float = 0.9,
+    fallback: Optional[dict] = None,
+) -> None:
+    """Run tight_layout and reserve figure margin for outside legends."""
+    try:
+        with warnings.catch_warnings():
+            warnings.filterwarnings(
+                "error",
+                message="Tight layout not applied.*",
+                category=UserWarning,
+            )
+            figure.tight_layout(pad=pad)
+    except UserWarning:
+        figure.subplots_adjust(**(fallback or {}))
+
+    side = legend_outside_side(style)
+    if side is None:
+        return
+
+    pars = figure.subplotpars
+    left = pars.left
+    right = pars.right
+    top = pars.top
+    bottom = pars.bottom
+    vertical = legend_column_count(style) == 1
+
+    if side == "top":
+        top = min(top, 0.72 if vertical else 0.80)
+    elif side == "bottom":
+        bottom = max(bottom, 0.24 if vertical else 0.18)
+    elif side == "right":
+        right = min(right, 0.78)
+    elif side == "left":
+        left = max(left, 0.22)
+
+    figure.subplots_adjust(
+        left=left,
+        right=right,
+        top=top,
+        bottom=bottom,
+        wspace=max(pars.wspace, 0.2),
+        hspace=max(pars.hspace, 0.2),
+    )
+
+
 def _apply_styled_legend(ax: Axes, style: PlotStyle) -> None:
     """Draw a legend using *style*'s font, alpha, edge, loc, and optional bbox.
 
     When ``style.legend_bbox_to_anchor`` is set, matplotlib anchors the legend
     relative to the axes — this is how "outside the plot" placements work.
     """
-    kwargs = dict(
-        loc=style.legend_loc,
-        fontsize=style.legend_fontsize,
-        framealpha=style.legend_framealpha,
-        edgecolor=style.legend_edgecolor,
-    )
-    if style.legend_bbox_to_anchor is not None:
-        kwargs["bbox_to_anchor"] = style.legend_bbox_to_anchor
-    ax.legend(**kwargs)
+    handles, labels = ax.get_legend_handles_labels()
+    if handles:
+        _apply_styled_legend_with_handles(ax, style, handles, labels)
 
 
 def _style_k_bar(bar, method: str, color: str, flagged: Set[str]) -> None:
@@ -698,12 +788,5 @@ def _add_flagged_legend_handle(ax: Axes, style: PlotStyle = PROFESSIONAL_STYLE) 
 def _apply_styled_legend_with_handles(ax: Axes, style: PlotStyle,
                                       handles, labels) -> None:
     """Draw a legend with explicit handles/labels but honour style fields."""
-    kwargs = dict(
-        loc=style.legend_loc,
-        fontsize=style.legend_fontsize,
-        framealpha=style.legend_framealpha,
-        edgecolor=style.legend_edgecolor,
-    )
-    if style.legend_bbox_to_anchor is not None:
-        kwargs["bbox_to_anchor"] = style.legend_bbox_to_anchor
+    kwargs = build_legend_kwargs(style, len(labels))
     ax.legend(handles, labels, **kwargs)

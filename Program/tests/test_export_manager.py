@@ -8,12 +8,19 @@ import os
 import sys
 import tempfile
 import unittest
+from unittest.mock import patch
 
+os.environ.setdefault('QT_QPA_PLATFORM', 'offscreen')
 sys.path.insert(0, 'Program')
 
 from data_loader import GrainSizeData
+from PyQt6.QtWidgets import QApplication
+from gui.export_tab import ExportTab
 from gui.export_manager import ExportManager
+from gui.plot_styles import PROFESSIONAL_STYLE
 from k_calculations_v2 import CalculationStatus, KCalculationResult
+
+APP = QApplication.instance() or QApplication([])
 
 
 def build_dataset(name: str = 'Sample A') -> GrainSizeData:
@@ -308,6 +315,169 @@ class TestExportManagerExports(unittest.TestCase):
             self.assertIn(('Median', 12.96), stats_rows)
             self.assertIn(('Valid Count', 3), stats_rows)
             self.assertFalse(any(row and row[0] == 'Mean' for row in stats_rows[1:]))
+
+    def test_plot_export_generates_png_without_live_figure(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            config = self.make_config(
+                temp_dir,
+                csv=False,
+                png=True,
+                plots=True,
+                plot_figures=[],
+                plot_contexts=[],
+            )
+
+            exported = ExportManager().export(self.datasets, config)
+
+            self.assertEqual(len(exported), 1)
+            self.assertTrue(exported[0].endswith('_plot.png'))
+            with open(exported[0], 'rb') as handle:
+                self.assertEqual(handle.read(8), b'\x89PNG\r\n\x1a\n')
+
+    def test_plot_export_generates_vector_formats_without_live_figure(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            config = self.make_config(
+                temp_dir,
+                csv=False,
+                svg=True,
+                pdf_plot=True,
+                plots=True,
+                plot_figures=[],
+                plot_contexts=[],
+            )
+
+            exported = ExportManager().export(self.datasets, config)
+
+            self.assertEqual({os.path.splitext(path)[1] for path in exported}, {'.svg', '.pdf'})
+            svg_path = next(path for path in exported if path.endswith('.svg'))
+            pdf_path = next(path for path in exported if path.endswith('.pdf'))
+            with open(svg_path, encoding='utf-8') as handle:
+                self.assertIn('<svg', handle.read())
+            with open(pdf_path, 'rb') as handle:
+                self.assertEqual(handle.read(4), b'%PDF')
+
+    def test_plot_export_uses_shared_renderer_and_plot_options(self):
+        calls = []
+
+        def capture_renderer(ax, particle_sizes, percent_passing, **kwargs):
+            calls.append(kwargs)
+            ax.plot(particle_sizes, percent_passing, label=kwargs.get('sample_name'))
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            config = self.make_config(
+                temp_dir,
+                csv=False,
+                png=True,
+                plots=True,
+                plot_include_legend=False,
+                plot_include_grid=False,
+                plot_contexts=[{
+                    'style': PROFESSIONAL_STYLE,
+                    'show_d_lines': True,
+                    'show_markers': True,
+                    'show_classification_zones': True,
+                }],
+            )
+
+            with patch(
+                'gui.export_manager.render_grain_size_distribution',
+                side_effect=capture_renderer,
+            ):
+                exported = ExportManager().export(self.datasets, config)
+
+            self.assertEqual(len(exported), 1)
+            self.assertEqual(len(calls), 1)
+            self.assertFalse(calls[0]['show_legend'])
+            self.assertFalse(calls[0]['show_grid'])
+            self.assertTrue(calls[0]['show_d_lines'])
+            self.assertTrue(calls[0]['show_markers'])
+            self.assertTrue(calls[0]['show_classification_zones'])
+
+    def test_plot_export_keeps_live_legend_and_grid_state_when_allowed(self):
+        calls = []
+
+        def capture_renderer(ax, particle_sizes, percent_passing, **kwargs):
+            calls.append(kwargs)
+            ax.plot(particle_sizes, percent_passing, label=kwargs.get('sample_name'))
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            config = self.make_config(
+                temp_dir,
+                csv=False,
+                png=True,
+                plots=True,
+                plot_contexts=[{
+                    'show_legend': False,
+                    'show_grid': False,
+                }],
+            )
+
+            with patch(
+                'gui.export_manager.render_grain_size_distribution',
+                side_effect=capture_renderer,
+            ):
+                exported = ExportManager().export(self.datasets, config)
+
+        self.assertEqual(len(exported), 1)
+        self.assertEqual(len(calls), 1)
+        self.assertFalse(calls[0]['show_legend'])
+        self.assertFalse(calls[0]['show_grid'])
+
+    def test_plot_export_applies_axis_limits_from_plot_context(self):
+        manager = ExportManager()
+
+        figure = manager._build_grain_size_plot_figure(
+            self.dataset.sample_name,
+            self.dataset,
+            self.make_config(output_dir='unused', csv=False),
+            {
+                'axis_limits': {
+                    'xlim': (0.01, 10.0),
+                    'ylim': (5.0, 95.0),
+                },
+            },
+        )
+
+        ax = figure.axes[0]
+        self.assertAlmostEqual(ax.get_xlim()[0], 0.01)
+        self.assertAlmostEqual(ax.get_xlim()[1], 10.0)
+        self.assertAlmostEqual(ax.get_ylim()[0], 5.0)
+        self.assertAlmostEqual(ax.get_ylim()[1], 95.0)
+        figure.clear()
+
+
+class TestExportTabConfig(unittest.TestCase):
+    def setUp(self):
+        self.dataset = build_dataset()
+        self.results = build_results()
+        self.tab = ExportTab()
+        self.tab.update_datasets(
+            [(self.dataset.sample_name, self.dataset, self.results)],
+            plot_contexts=[{'style': PROFESSIONAL_STYLE, 'show_grid': False}],
+        )
+
+    def tearDown(self):
+        self.tab.deleteLater()
+
+    def test_plot_content_options_are_written_to_export_config(self):
+        self.tab._toggle_content_item('plots', 'include_legend', False)
+        self.tab._toggle_content_item('plots', 'include_grid', False)
+
+        config = self.tab._build_export_config()
+
+        self.assertFalse(config['plot_include_legend'])
+        self.assertFalse(config['plot_include_grid'])
+        self.assertEqual(config['plot_contexts'][0]['style'], PROFESSIONAL_STYLE)
+        self.assertFalse(config['plot_contexts'][0]['show_grid'])
+
+    def test_disabling_grain_size_plot_item_disables_plot_export(self):
+        self.tab._toggle_content_item('plots', 'grain_size_curve', False)
+
+        config = self.tab._build_export_config()
+
+        self.assertFalse(config['plots'])
+        self.assertFalse(self.tab._plot_exports_enabled())
+        self.assertNotIn('plot_contexts', config)
 
 
 if __name__ == '__main__':

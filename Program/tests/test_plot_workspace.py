@@ -135,6 +135,24 @@ class TestPlotWorkspaceWiring(unittest.TestCase):
     def test_toolbar_sidebar_toggle_sits_with_left_side_controls(self):
         self.assertLess(self.workspace._tb_sidebar_btn.x(), self.workspace._chk_grid.x())
 
+    def test_legend_outside_bottom_reserves_margin(self):
+        loc_idx = self.workspace._legend_loc_combo.findText('Outside bottom - center')
+        layout_idx = self.workspace._legend_layout_combo.findText('Vertical (1 column)')
+
+        self.workspace._legend_loc_combo.setCurrentIndex(loc_idx)
+        self.workspace._legend_layout_combo.setCurrentIndex(layout_idx)
+        self.workspace.refresh_plot()
+
+        legend = self.workspace.plot_widget.current_ax.get_legend()
+
+        self.assertEqual(self.workspace._effective_style().legend_loc, 'upper center')
+        self.assertEqual(
+            self.workspace._effective_style().legend_bbox_to_anchor,
+            (0.5, -0.22),
+        )
+        self.assertEqual(getattr(legend, '_ncols', None), 1)
+        self.assertGreaterEqual(self.workspace.plot_widget.figure.subplotpars.bottom, 0.24)
+
     def test_more_plots_dropdown_uses_dedicated_toolbar_style(self):
         self.assertEqual(self.workspace._more_plots.objectName(), 'pw-more-plots-sel')
         self.assertEqual(self.workspace._more_plots.maxVisibleItems(), 6)

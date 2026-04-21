@@ -10,10 +10,12 @@ from types import SimpleNamespace
 os.environ.setdefault('QT_QPA_PLATFORM', 'offscreen')
 sys.path.insert(0, 'Program')
 
+from matplotlib.colors import to_hex
 from PyQt6.QtWidgets import QApplication
 
 from data_loader import GrainSizeData
 from gui.comparison_plot_widget import ComparisonPlotWidget
+from gui.theme import SZ
 from k_calculations_v2 import CalculationStatus, KCalculationResult
 
 
@@ -198,9 +200,110 @@ class TestComparisonPlotWidget(unittest.TestCase):
         self.assertEqual(toolbar.objectName(), 'pw-toolbar')
         self.assertEqual(self.widget.plot_selector.objectName(), 'pw-style-sel')
         self.assertTrue(self.widget.zoom_in_btn.property('pw-btn'))
-        self.assertTrue(self.widget.grid_check.property('pw-chk'))
+        self.assertTrue(self.widget._tb_sidebar_btn.property('pw-chk'))
+        self.assertTrue(hasattr(self.widget, '_sw_grid'))
+        self.assertTrue(hasattr(self.widget, '_sw_legend'))
+        self.assertGreaterEqual(
+            self.widget._legend_loc_combo.findText('Outside top - right'),
+            0,
+        )
+        self.assertGreaterEqual(
+            self.widget._legend_layout_combo.findText('Vertical (1 column)'),
+            0,
+        )
 
         toolbar.deleteLater()
+
+    def test_outside_top_right_legend_can_be_vertical_and_gets_margin(self):
+        loc_idx = self.widget._legend_loc_combo.findText('Outside top - right')
+        layout_idx = self.widget._legend_layout_combo.findText('Vertical (1 column)')
+
+        self.widget._legend_loc_combo.setCurrentIndex(loc_idx)
+        self.widget._legend_layout_combo.setCurrentIndex(layout_idx)
+        self.widget.on_plot_type_changed('Distribution')
+        self.widget.set_display_mode('overlay')
+        self.widget.refresh_plot()
+
+        legend = self.widget.figure.axes[0].get_legend()
+
+        self.assertEqual(self.widget.current_style.legend_loc, 'lower right')
+        self.assertEqual(self.widget.current_style.legend_bbox_to_anchor, (1.0, 1.12))
+        self.assertEqual(getattr(legend, '_ncols', None), 1)
+        self.assertLessEqual(self.widget.figure.subplotpars.top, 0.72)
+
+    def test_legend_layout_can_be_horizontal_when_requested(self):
+        layout_idx = self.widget._legend_layout_combo.findText('Horizontal (fit)')
+
+        self.widget._legend_layout_combo.setCurrentIndex(layout_idx)
+        self.widget.on_plot_type_changed('Distribution')
+        self.widget.set_display_mode('overlay')
+        self.widget.refresh_plot()
+
+        legend = self.widget.figure.axes[0].get_legend()
+
+        self.assertEqual(self.widget.current_style.legend_ncol, 0)
+        self.assertEqual(getattr(legend, '_ncols', None), 2)
+
+    def test_sidebar_can_toggle_open_and_closed(self):
+        self.widget.resize(1000, 600)
+        self.widget.show()
+        APP.processEvents()
+
+        self.assertFalse(self.widget.sidebar_visible)
+        self.assertEqual(self.widget._sidebar.width(), 0)
+        self.assertEqual(self.widget._sidebar.maximumWidth(), 0)
+        self.assertFalse(self.widget._tb_sidebar_btn.isChecked())
+        self.assertEqual(self.widget._toggle_handle.objectName(), 'pw-toggle-handle')
+
+        self.widget._toggle_sidebar()
+        self.widget._sidebar_anim.setCurrentTime(self.widget._sidebar_anim.duration())
+        APP.processEvents()
+
+        self.assertTrue(self.widget.sidebar_visible)
+        self.assertTrue(self.widget._tb_sidebar_btn.isChecked())
+        self.assertTrue(self.widget._tb_sidebar_btn.property('active'))
+        self.assertEqual(self.widget._sidebar.width(), SZ.PLOT_SIDEBAR_W)
+        self.assertEqual(self.widget._sidebar.minimumWidth(), SZ.PLOT_SIDEBAR_W)
+        self.assertEqual(self.widget._sidebar.maximumWidth(), SZ.PLOT_SIDEBAR_W)
+
+        self.widget._toggle_sidebar()
+        self.widget._sidebar_anim.setCurrentTime(self.widget._sidebar_anim.duration())
+        APP.processEvents()
+
+        self.assertFalse(self.widget.sidebar_visible)
+        self.assertFalse(self.widget._tb_sidebar_btn.isChecked())
+        self.assertFalse(self.widget._tb_sidebar_btn.property('active'))
+        self.assertEqual(self.widget._sidebar.width(), 0)
+        self.assertEqual(self.widget._sidebar.minimumWidth(), 0)
+        self.assertEqual(self.widget._sidebar.maximumWidth(), 0)
+
+    def test_dataset_color_rows_rebuild_when_datasets_change(self):
+        self.assertEqual(
+            set(self.widget._dataset_color_rows),
+            {'Sample A', 'Sample B'},
+        )
+
+        self.widget.set_datasets([DummyDatasetTab('Sample C', 1.0)])
+
+        self.assertEqual(set(self.widget._dataset_color_rows), {'Sample C'})
+
+    def test_distribution_uses_dataset_color_override(self):
+        self.widget._dataset_color_overrides['Sample A'] = '#123456'
+        self.widget.on_plot_type_changed('Distribution')
+        self.widget.set_display_mode('overlay')
+        self.widget.refresh_plot()
+
+        ax = self.widget.figure.axes[0]
+        self.assertEqual(ax.lines[0].get_color().lower(), '#123456')
+
+    def test_k_overlay_uses_dataset_color_override(self):
+        self.widget._dataset_color_overrides['Sample A'] = '#123456'
+        self.widget.on_plot_type_changed('K-Values')
+        self.widget.set_display_mode('overlay')
+        self.widget.refresh_plot()
+
+        ax = self.widget.figure.axes[0]
+        self.assertEqual(to_hex(ax.patches[0].get_facecolor()).lower(), '#123456')
 
     def test_wheel_zoom_targets_hovered_subplot(self):
         self.widget.on_plot_type_changed('Distribution')

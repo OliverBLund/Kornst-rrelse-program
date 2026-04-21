@@ -37,6 +37,7 @@ render_k_overlay               = _renderers.render_k_overlay
 render_k_boxplot               = _renderers.render_k_boxplot
 render_applicability_heatmap   = _renderers.render_applicability_heatmap
 render_reliability_matrix      = _renderers.render_reliability_matrix
+apply_legend_aware_layout      = _renderers.apply_legend_aware_layout
 
 PlotStyle          = _styles.PlotStyle
 PROFESSIONAL_STYLE = _styles.PROFESSIONAL_STYLE
@@ -94,7 +95,7 @@ def export_grain_size_plot(
         title=title,
     )
 
-    fig.tight_layout()
+    apply_legend_aware_layout(fig, style)
     return _fig_to_base64(fig, dpi=dpi)
 
 
@@ -133,7 +134,7 @@ def export_k_bar_chart(
         sample_name=sample_name,
     )
 
-    fig.tight_layout()
+    apply_legend_aware_layout(fig, style)
     return _fig_to_base64(fig, dpi=dpi)
 
 
@@ -161,7 +162,7 @@ def export_distribution_overlay(
         show_grid=show_grid, show_legend=show_legend, title=title,
     )
 
-    fig.tight_layout()
+    apply_legend_aware_layout(fig, style)
     return _fig_to_base64(fig, dpi=dpi)
 
 
@@ -193,7 +194,7 @@ def export_k_overlay(
         title=title,
     )
 
-    fig.tight_layout()
+    apply_legend_aware_layout(fig, style)
     return _fig_to_base64(fig, dpi=dpi)
 
 

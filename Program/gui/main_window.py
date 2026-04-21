@@ -2019,7 +2019,7 @@ class MainWindow(FramelessMainWindowMixin, QMainWindow):
             self.reporting_tab.set_dataset_tabs(self.dataset_tabs)
             self._update_export_tab()
             self._refresh_dataset_status_segments()
-            if not self.dataset_tabs:
+            if self.dataset_tabs_widget.count() == 0:
                 self._show_welcome()
 
         return removed
@@ -2103,13 +2103,16 @@ class MainWindow(FramelessMainWindowMixin, QMainWindow):
     def close_dataset_tab(self, index: int):
         widget = self.dataset_tabs_widget.widget(index)
         file_path = self._tab_file_path(widget)
-        dataset_index = index
-        if 0 <= dataset_index < len(self.dataset_tabs):
-            self.dataset_tabs.pop(dataset_index)
+
+        if widget in self.dataset_tabs:
+            self.dataset_tabs.remove(widget)
+
         self.dataset_tabs_widget.removeTab(index)
         self._refresh_dataset_tab_icons()
-        if not self.dataset_tabs:
+
+        if self.dataset_tabs_widget.count() == 0:
             self._show_welcome()
+
         self._sync_comparison_dataset_state()
         self.reporting_tab.set_dataset_tabs(self.dataset_tabs)
         self._update_export_tab()
@@ -2171,33 +2174,47 @@ class MainWindow(FramelessMainWindowMixin, QMainWindow):
     # EXPORT
     # ──────────────────────────────────────────────────────────────────
 
+    def _current_dataset_tab(self):
+        """Return the selected dataset tab, ignoring error/review tabs."""
+        widget = None
+        if hasattr(self.dataset_tabs_widget, "currentWidget"):
+            widget = self.dataset_tabs_widget.currentWidget()
+        elif hasattr(self.dataset_tabs_widget, "currentIndex"):
+            index = self.dataset_tabs_widget.currentIndex()
+            if index is not None and index >= 0:
+                widget = self.dataset_tabs_widget.widget(index)
+
+        if widget in self.dataset_tabs or isinstance(widget, DatasetTab):
+            return widget
+        return None
+
     def export_current(self):
         current = self.content_stack.currentIndex()
         if current == 0:
-            idx = self.dataset_tabs_widget.currentIndex() - 1
-            if 0 <= idx < len(self.dataset_tabs):
+            dataset_tab = self._current_dataset_tab()
+            if dataset_tab is not None:
                 try:
-                    self.dataset_tabs[idx].export_results()
+                    dataset_tab.export_results()
                 except Exception:
-                    self.dataset_tabs[idx].plot_workspace.export_plot("png")
+                    dataset_tab.plot_workspace.export_plot("png")
         else:
             self.comparison_tab.export_comparison()
 
     def export_results(self):
         current = self.content_stack.currentIndex()
         if current == 0:
-            idx = self.dataset_tabs_widget.currentIndex() - 1
-            if 0 <= idx < len(self.dataset_tabs):
-                self.dataset_tabs[idx].export_results()
+            dataset_tab = self._current_dataset_tab()
+            if dataset_tab is not None:
+                dataset_tab.export_results()
         else:
             self.comparison_tab.export_comparison()
 
     def export_plot(self):
         current = self.content_stack.currentIndex()
         if current == 0:
-            idx = self.dataset_tabs_widget.currentIndex() - 1
-            if 0 <= idx < len(self.dataset_tabs):
-                self.dataset_tabs[idx].plot_workspace.export_plot("png")
+            dataset_tab = self._current_dataset_tab()
+            if dataset_tab is not None:
+                dataset_tab.plot_workspace.export_plot("png")
         else:
             self.comparison_tab.export_comparison()
 
@@ -2290,15 +2307,56 @@ class MainWindow(FramelessMainWindowMixin, QMainWindow):
     def _update_export_tab(self):
         datasets = []
         plot_figures = []
+        plot_contexts = []
         for tab in self.dataset_tabs:
             datasets.append((tab.get_dataset_name(), tab.get_dataset(), tab.get_results()))
             figure = None
+            context = {}
             try:
                 figure = tab.plot_workspace.plot_widget.figure
             except Exception:
                 figure = None
+            try:
+                workspace = tab.plot_workspace
+                plot_widget = workspace.plot_widget
+                style = (
+                    workspace._effective_style()
+                    if hasattr(workspace, "_effective_style")
+                    else getattr(plot_widget, "current_style", None)
+                )
+                context = {
+                    "style": style,
+                    "show_grid": getattr(workspace, "show_grid", True),
+                    "show_legend": getattr(workspace, "show_legend", True),
+                    "show_d_lines": getattr(workspace, "show_dlines", False),
+                    "show_markers": getattr(workspace, "show_markers", False),
+                    "show_classification_zones": getattr(workspace, "show_zones", False),
+                    "fill_curve": getattr(workspace, "fill_curve", False),
+                    "fill_zone_labels": getattr(workspace, "fill_zone_labels", False),
+                    "classification_scheme": getattr(
+                        plot_widget,
+                        "_scheme",
+                        getattr(self, "active_scheme", ISO14688),
+                    ),
+                }
+                current_ax = getattr(plot_widget, "current_ax", None)
+                if (
+                    getattr(workspace, "current_plot_type", "distribution") == "distribution"
+                    and current_ax is not None
+                ):
+                    context["axis_limits"] = {
+                        "xlim": current_ax.get_xlim(),
+                        "ylim": current_ax.get_ylim(),
+                    }
+            except Exception:
+                context = {}
             plot_figures.append(figure)
-        self.export_tab.update_datasets(datasets, plot_figures=plot_figures)
+            plot_contexts.append(context)
+        self.export_tab.update_datasets(
+            datasets,
+            plot_figures=plot_figures,
+            plot_contexts=plot_contexts,
+        )
 
     def closeEvent(self, event):
         if self.dataset_tabs:

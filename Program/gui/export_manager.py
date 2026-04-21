@@ -8,10 +8,17 @@ import json
 from datetime import datetime
 from typing import List, Dict, Optional, Any
 from PyQt6.QtWidgets import QProgressDialog
+from matplotlib.figure import Figure
 
 from data_loader import GrainSizeData
 from k_calculations_v2 import KCalculationResult
 from grain_classification import ISO14688
+from .plot_renderers import (
+    apply_legend_aware_layout,
+    render_grain_size_distribution,
+)
+from .plot_styles import PROFESSIONAL_STYLE, PlotStyle
+from .theme import apply_matplotlib_style
 
 
 class ExportManager:
@@ -230,24 +237,102 @@ class ExportManager:
                     progress.setValue(current_step)
 
         # Plot Export
-        if config.get('plots', False) and config.get('plot_figures'):
-            # Plot figures will be passed in config if available
-            plot_figures = config.get('plot_figures', [])
+        if config.get('plots', False) and self._plot_formats_requested(config):
+            plot_contexts = config.get('plot_contexts') or []
             for idx, (name, dataset, results) in enumerate(datasets):
-                if idx < len(plot_figures) and plot_figures[idx] is not None:
-                    self._export_plots(name, plot_figures[idx], config)
-                    current_step += 1
-                    if progress:
-                        progress.setValue(current_step)
+                context = plot_contexts[idx] if idx < len(plot_contexts) else {}
+                self._export_plots(name, dataset, results, config, context)
+                current_step += 1
+                if progress:
+                    progress.setValue(current_step)
 
         return self.exported_files
 
-    def _export_plots(self, name: str, figure, config: Dict):
-        """Export matplotlib figure to various formats"""
+    def _plot_formats_requested(self, config: Dict) -> bool:
+        return any((
+            config.get('png', False),
+            config.get('svg', False),
+            config.get('pdf_plot', False),
+        ))
+
+    def _plot_context_value(self, context: Optional[Dict], key: str, default):
+        if context and key in context:
+            return context[key]
+        return default
+
+    def _plot_style_from_context(self, context: Optional[Dict]) -> PlotStyle:
+        style = self._plot_context_value(context, 'style', None)
+        return style if style is not None else PROFESSIONAL_STYLE
+
+    def _build_grain_size_plot_figure(
+        self,
+        name: str,
+        dataset: GrainSizeData,
+        config: Dict,
+        context: Optional[Dict] = None,
+    ) -> Figure:
+        """Create a fresh plot figure through the shared renderer."""
+        apply_matplotlib_style()
+        style = self._plot_style_from_context(context)
+        figure = Figure(figsize=config.get('plot_figsize', (10, 6)))
+        figure.patch.set_facecolor(style.figure_facecolor)
+        ax = figure.add_subplot(1, 1, 1)
+
+        show_legend = (
+            config.get('plot_include_legend', True)
+            and self._plot_context_value(context, 'show_legend', True)
+        )
+        show_grid = (
+            config.get('plot_include_grid', True)
+            and self._plot_context_value(context, 'show_grid', True)
+        )
+
+        render_grain_size_distribution(
+            ax,
+            dataset.particle_sizes,
+            dataset.percent_passing,
+            sample_name=name,
+            grain_size_data=dataset,
+            style=style,
+            show_d_lines=self._plot_context_value(context, 'show_d_lines', False),
+            show_markers=self._plot_context_value(context, 'show_markers', False),
+            show_grid=show_grid,
+            show_legend=show_legend,
+            show_classification_zones=self._plot_context_value(
+                context, 'show_classification_zones', False,
+            ),
+            classification_scheme=self._plot_context_value(
+                context, 'classification_scheme', self._scheme,
+            ),
+            fill_curve=self._plot_context_value(context, 'fill_curve', False),
+            fill_zone_labels=self._plot_context_value(context, 'fill_zone_labels', False),
+        )
+        axis_limits = self._plot_context_value(context, 'axis_limits', None)
+        if axis_limits:
+            xlim = axis_limits.get('xlim')
+            ylim = axis_limits.get('ylim')
+            if xlim is not None:
+                ax.set_xlim(*xlim)
+            if ylim is not None:
+                ax.set_ylim(*ylim)
+
+        apply_legend_aware_layout(figure, style)
+        return figure
+
+    def _export_plots(
+        self,
+        name: str,
+        dataset: GrainSizeData,
+        results: List[KCalculationResult],
+        config: Dict,
+        context: Optional[Dict] = None,
+    ):
+        """Export plot files generated from the shared plot renderer."""
         output_dir = config['output_dir']
         template = config['filename_template']
 
         base_filename = self._format_filename(template, name, '')
+        figure = self._build_grain_size_plot_figure(name, dataset, config, context)
 
         # PNG export
         if config.get('png', False):
@@ -270,6 +355,8 @@ class ExportManager:
             filepath = os.path.join(output_dir, filename)
             figure.savefig(filepath, format='pdf', bbox_inches='tight')
             self.exported_files.append(filepath)
+
+        figure.clear()
 
     def _calculate_total_steps(self, datasets: List[tuple], config: Dict) -> int:
         """Calculate total steps for progress bar"""
@@ -297,8 +384,8 @@ class ExportManager:
         if config.get('json', False):
             steps += len(datasets)
 
-        if config.get('plots', False) and config.get('plot_figures'):
-            steps += sum(1 for fig in config.get('plot_figures', []) if fig is not None)
+        if config.get('plots', False) and self._plot_formats_requested(config):
+            steps += len(datasets)
 
         return max(steps, 1)
 
