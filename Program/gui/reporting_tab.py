@@ -27,6 +27,7 @@ except ImportError as exc:
 
 from .theme import C, F, icon as theme_icon
 from .report_brand import ReportBrand
+from .plot_context import build_plot_context_from_tab
 from report_generator import ReportGenerator
 from grain_classification import ISO14688
 
@@ -1965,9 +1966,11 @@ class ReportingTab(QWidget):
                 dataset, tab.get_results(), tab.temperature, tab.porosity,
                 metadata=metadata, sections=sections, brand=brand,
             )
+        plot_context = build_plot_context_from_tab(tab, self._scheme)
         return self.report_generator.generate_grain_size_report(
             dataset, metadata=metadata, sections=sections, brand=brand,
             appendix_label_config=appendix_cfg,
+            plot_context=plot_context,
         )
 
     def _gen_comparison(self, brand, metadata, sections) -> str:
@@ -1984,6 +1987,7 @@ class ReportingTab(QWidget):
                 "k_results":   list(tab.get_results() or []),
                 "temperature": tab.temperature,
                 "porosity":    tab.porosity,
+                "plot_context": build_plot_context_from_tab(tab, self._scheme),
             })
 
         return self.report_generator.generate_comparison_report(
@@ -2004,6 +2008,7 @@ class ReportingTab(QWidget):
                 "k_results":   list(tab.get_results() or []),
                 "temperature": tab.temperature,
                 "porosity":    tab.porosity,
+                "plot_context": build_plot_context_from_tab(tab, self._scheme),
             })
         return self.report_generator.generate_comparison_report(
             [item["dataset"] for item in sample_details],

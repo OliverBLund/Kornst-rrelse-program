@@ -68,6 +68,11 @@ def render_grain_size_distribution(
     fill_curve: bool = False,
     fill_zone_labels: bool = False,
     title: Optional[str] = None,
+    show_title: bool = True,
+    x_label: str = "Grain Diameter (mm)",
+    y_label: str = "Cumulative % Passing",
+    show_x_label: bool = True,
+    show_y_label: bool = True,
 ) -> None:
     """Draw a single-sample grain size distribution curve on *ax*."""
 
@@ -108,14 +113,17 @@ def render_grain_size_distribution(
                                    grain_size_data, style)
 
     # Labels & formatting ─────────────────────────────────────────
-    ax.set_xlabel("Grain Diameter (mm)",
+    ax.set_xlabel(x_label if show_x_label else "",
                   fontsize=style.label_fontsize, fontfamily=style.font_family)
-    ax.set_ylabel("Cumulative % Passing",
+    ax.set_ylabel(y_label if show_y_label else "",
                   fontsize=style.label_fontsize, fontfamily=style.font_family)
-    ax.set_title(title or f"Grain Size Distribution: {sample_name}",
-                 fontsize=style.title_fontsize,
-                 fontweight=style.title_fontweight,
-                 fontfamily=style.font_family)
+    if show_title:
+        ax.set_title(title or f"Grain Size Distribution: {sample_name}",
+                     fontsize=style.title_fontsize,
+                     fontweight=style.title_fontweight,
+                     fontfamily=style.font_family)
+    else:
+        ax.set_title("")
 
     _apply_grid(ax, style, show_grid)
     ax.set_facecolor(style.axes_facecolor)
@@ -378,9 +386,7 @@ def render_k_boxplot(
     if not data_for_plot:
         return
 
-    ax.boxplot(
-        data_for_plot,
-        labels=labels,
+    boxplot_kwargs = dict(
         patch_artist=True,
         showmeans=True,
         meanline=True,
@@ -388,6 +394,10 @@ def render_k_boxplot(
         medianprops=dict(color=style.d10_color, linewidth=2),
         meanprops=dict(color=style.d30_color, linewidth=2, linestyle="--"),
     )
+    try:
+        ax.boxplot(data_for_plot, tick_labels=labels, **boxplot_kwargs)
+    except TypeError:
+        ax.boxplot(data_for_plot, labels=labels, **boxplot_kwargs)
 
     ax.set_yscale("log")
     ax.set_ylabel("Hydraulic Conductivity (m/s)",

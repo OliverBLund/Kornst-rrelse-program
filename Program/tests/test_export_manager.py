@@ -356,6 +356,58 @@ class TestExportManagerExports(unittest.TestCase):
             with open(pdf_path, 'rb') as handle:
                 self.assertEqual(handle.read(4), b'%PDF')
 
+    def test_plot_export_writes_selected_single_sample_plot_types(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            config = self.make_config(
+                temp_dir,
+                csv=False,
+                png=True,
+                plots=True,
+                selected_plot_types=[
+                    'grain_size_curve',
+                    'k_value_bar',
+                    'applicability_heatmap',
+                ],
+            )
+
+            exported = ExportManager().export(self.datasets, config)
+
+            basenames = {os.path.basename(path) for path in exported}
+            self.assertEqual(len(exported), 3)
+            self.assertTrue(any(name.endswith('_plot.png') for name in basenames))
+            self.assertTrue(any(name.endswith('_k_values.png') for name in basenames))
+            self.assertTrue(any(name.endswith('_applicability.png') for name in basenames))
+
+    def test_plot_export_writes_selected_collection_plot_types_once(self):
+        dataset_b = build_dataset('Sample B')
+        datasets = [
+            (self.dataset.sample_name, self.dataset, self.results),
+            (dataset_b.sample_name, dataset_b, self.results),
+        ]
+        with tempfile.TemporaryDirectory() as temp_dir:
+            config = self.make_config(
+                temp_dir,
+                csv=False,
+                png=True,
+                plots=True,
+                selected_plot_types=[
+                    'distribution_overlay',
+                    'k_value_comparison',
+                    'statistical_boxplots',
+                    'reliability_matrix',
+                ],
+            )
+
+            exported = ExportManager().export(datasets, config)
+
+            basenames = {os.path.basename(path) for path in exported}
+            self.assertEqual(len(exported), 4)
+            self.assertTrue(any(name.endswith('_distribution_overlay.png') for name in basenames))
+            self.assertTrue(any(name.endswith('_k_value_comparison.png') for name in basenames))
+            self.assertTrue(any(name.endswith('_k_value_boxplot.png') for name in basenames))
+            self.assertTrue(any(name.endswith('_reliability_matrix.png') for name in basenames))
+            self.assertTrue(all(name.startswith('all_datasets_results_') for name in basenames))
+
     def test_plot_export_uses_shared_renderer_and_plot_options(self):
         calls = []
 
@@ -445,6 +497,29 @@ class TestExportManagerExports(unittest.TestCase):
         self.assertAlmostEqual(ax.get_ylim()[1], 95.0)
         figure.clear()
 
+    def test_plot_export_applies_shared_text_options_from_context(self):
+        manager = ExportManager()
+
+        figure = manager._build_grain_size_plot_figure(
+            self.dataset.sample_name,
+            self.dataset,
+            self.make_config(output_dir='unused', csv=False),
+            {
+                'show_title': False,
+                'plot_title': 'Custom Title',
+                'show_x_label': True,
+                'plot_x_label': 'Custom X',
+                'show_y_label': False,
+                'plot_y_label': 'Custom Y',
+            },
+        )
+
+        ax = figure.axes[0]
+        self.assertEqual(ax.get_title(), '')
+        self.assertEqual(ax.get_xlabel(), 'Custom X')
+        self.assertEqual(ax.get_ylabel(), '')
+        figure.clear()
+
 
 class TestExportTabConfig(unittest.TestCase):
     def setUp(self):
@@ -462,11 +537,13 @@ class TestExportTabConfig(unittest.TestCase):
     def test_plot_content_options_are_written_to_export_config(self):
         self.tab._toggle_content_item('plots', 'include_legend', False)
         self.tab._toggle_content_item('plots', 'include_grid', False)
+        self.tab._toggle_content_item('plots', 'k_value_bar', True)
 
         config = self.tab._build_export_config()
 
         self.assertFalse(config['plot_include_legend'])
         self.assertFalse(config['plot_include_grid'])
+        self.assertEqual(config['selected_plot_types'], ['grain_size_curve', 'k_value_bar'])
         self.assertEqual(config['plot_contexts'][0]['style'], PROFESSIONAL_STYLE)
         self.assertFalse(config['plot_contexts'][0]['show_grid'])
 
@@ -478,6 +555,19 @@ class TestExportTabConfig(unittest.TestCase):
         self.assertFalse(config['plots'])
         self.assertFalse(self.tab._plot_exports_enabled())
         self.assertNotIn('plot_contexts', config)
+
+    def test_plot_preview_renders_canvas_and_can_request_dataset_jump(self):
+        requested = []
+        self.tab.jump_to_dataset_requested.connect(requested.append)
+
+        self.tab.update_preview()
+        self.assertIsNotNone(self.tab._plot_preview_table)
+        self.assertEqual(self.tab._plot_preview_table.rowCount(), 1)
+        self.assertIsNotNone(self.tab._plot_preview_canvas)
+
+        self.tab._open_selected_plot_dataset()
+
+        self.assertEqual(requested, [self.dataset.sample_name])
 
 
 if __name__ == '__main__':

@@ -29,6 +29,7 @@ import importlib as _il  # noqa: E402
 _renderers = _il.import_module("gui.plot_renderers")
 _styles    = _il.import_module("gui.plot_styles")
 _theme     = _il.import_module("gui.theme")
+_plot_ctx  = _il.import_module("gui.plot_context")
 
 render_grain_size_distribution = _renderers.render_grain_size_distribution
 render_k_bar_chart             = _renderers.render_k_bar_chart
@@ -38,6 +39,8 @@ render_k_boxplot               = _renderers.render_k_boxplot
 render_applicability_heatmap   = _renderers.render_applicability_heatmap
 render_reliability_matrix      = _renderers.render_reliability_matrix
 apply_legend_aware_layout      = _renderers.apply_legend_aware_layout
+apply_axis_limits_from_context = _plot_ctx.apply_axis_limits_from_context
+grain_size_renderer_kwargs_from_context = _plot_ctx.grain_size_renderer_kwargs_from_context
 
 PlotStyle          = _styles.PlotStyle
 PROFESSIONAL_STYLE = _styles.PROFESSIONAL_STYLE
@@ -72,30 +75,53 @@ def export_grain_size_plot(
     show_classification_zones: bool = False,
     classification_scheme=None,
     fill_curve: bool = False,
+    fill_zone_labels: bool = False,
     title: Optional[str] = None,
+    show_title: bool = True,
+    x_label: str = "Grain Diameter (mm)",
+    y_label: str = "Cumulative % Passing",
+    show_x_label: bool = True,
+    show_y_label: bool = True,
+    axis_limits: Optional[Dict[str, tuple[float, float]]] = None,
+    plot_context: Optional[Dict] = None,
 ) -> str:
     """Return a base64-encoded PNG of a grain-size distribution plot."""
     apply_matplotlib_style()
     fig, ax = plt.subplots(figsize=figsize)
+    renderer_kwargs = grain_size_renderer_kwargs_from_context(
+        dataset.sample_name,
+        dataset,
+        plot_context,
+        default_style=style,
+        default_show_d_lines=show_d_lines,
+        default_show_markers=show_markers,
+        default_show_grid=show_grid,
+        default_show_legend=show_legend,
+        default_show_classification_zones=show_classification_zones,
+        default_classification_scheme=classification_scheme,
+        default_fill_curve=fill_curve,
+        default_fill_zone_labels=fill_zone_labels,
+        default_title=title,
+        default_show_title=show_title,
+        default_x_label=x_label,
+        default_y_label=y_label,
+        default_show_x_label=show_x_label,
+        default_show_y_label=show_y_label,
+    )
 
     render_grain_size_distribution(
         ax,
         dataset.particle_sizes,
         dataset.percent_passing,
-        sample_name=dataset.sample_name,
-        grain_size_data=dataset,
-        style=style,
-        show_d_lines=show_d_lines,
-        show_markers=show_markers,
-        show_grid=show_grid,
-        show_legend=show_legend,
-        show_classification_zones=show_classification_zones,
-        classification_scheme=classification_scheme,
-        fill_curve=fill_curve,
-        title=title,
+        **renderer_kwargs,
     )
+    effective_axis_limits = axis_limits
+    if plot_context and "axis_limits" in plot_context:
+        effective_axis_limits = plot_context["axis_limits"]
+    if effective_axis_limits:
+        apply_axis_limits_from_context(ax, {"axis_limits": effective_axis_limits})
 
-    apply_legend_aware_layout(fig, style)
+    apply_legend_aware_layout(fig, renderer_kwargs.get("style", style))
     return _fig_to_base64(fig, dpi=dpi)
 
 

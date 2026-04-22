@@ -15,9 +15,19 @@ from k_calculations_v2 import KCalculationResult
 from grain_classification import ISO14688
 from .plot_renderers import (
     apply_legend_aware_layout,
+    render_applicability_heatmap,
+    render_distribution_overlay,
     render_grain_size_distribution,
+    render_k_bar_chart,
+    render_k_boxplot,
+    render_k_overlay,
+    render_reliability_matrix,
 )
-from .plot_styles import PROFESSIONAL_STYLE, PlotStyle
+from .plot_context import (
+    apply_axis_limits_from_context,
+    grain_size_renderer_kwargs_from_context,
+    plot_style_from_context,
+)
 from .theme import apply_matplotlib_style
 
 
@@ -50,6 +60,26 @@ class ExportManager:
         ('max', 'Max', 'K_Max', 'max_k'),
         ('valid_count', 'Valid Count', 'Valid_Methods_Count', 'valid_count'),
     ]
+    SINGLE_PLOT_TYPES = {
+        'grain_size_curve',
+        'k_value_bar',
+        'applicability_heatmap',
+    }
+    COLLECTION_PLOT_TYPES = {
+        'distribution_overlay',
+        'k_value_comparison',
+        'statistical_boxplots',
+        'reliability_matrix',
+    }
+    PLOT_FILE_SUFFIXES = {
+        'grain_size_curve': 'plot',
+        'k_value_bar': 'k_values',
+        'applicability_heatmap': 'applicability',
+        'distribution_overlay': 'distribution_overlay',
+        'k_value_comparison': 'k_value_comparison',
+        'statistical_boxplots': 'k_value_boxplot',
+        'reliability_matrix': 'reliability_matrix',
+    }
 
     def __init__(self):
         self.exported_files = []
@@ -237,11 +267,22 @@ class ExportManager:
                     progress.setValue(current_step)
 
         # Plot Export
-        if config.get('plots', False) and self._plot_formats_requested(config):
+        selected_plot_types = self._selected_plot_types(config)
+        if config.get('plots', False) and self._plot_formats_requested(config) and selected_plot_types:
             plot_contexts = config.get('plot_contexts') or []
-            for idx, (name, dataset, results) in enumerate(datasets):
-                context = plot_contexts[idx] if idx < len(plot_contexts) else {}
-                self._export_plots(name, dataset, results, config, context)
+            single_plot_types = [key for key in selected_plot_types if key in self.SINGLE_PLOT_TYPES]
+            collection_plot_types = [key for key in selected_plot_types if key in self.COLLECTION_PLOT_TYPES]
+
+            if single_plot_types:
+                for idx, (name, dataset, results) in enumerate(datasets):
+                    context = plot_contexts[idx] if idx < len(plot_contexts) else {}
+                    self._export_single_sample_plots(name, dataset, results, config, context, single_plot_types)
+                    current_step += 1
+                    if progress:
+                        progress.setValue(current_step)
+
+            if collection_plot_types:
+                self._export_collection_plots(datasets, config, plot_contexts, collection_plot_types)
                 current_step += 1
                 if progress:
                     progress.setValue(current_step)
@@ -255,14 +296,18 @@ class ExportManager:
             config.get('pdf_plot', False),
         ))
 
-    def _plot_context_value(self, context: Optional[Dict], key: str, default):
-        if context and key in context:
-            return context[key]
-        return default
+    def _selected_plot_types(self, config: Dict) -> List[str]:
+        """Return selected plot types, preserving the legacy grain-plot default."""
+        requested = config.get('selected_plot_types')
+        if requested is None:
+            requested = ['grain_size_curve'] if config.get('plots', False) else []
 
-    def _plot_style_from_context(self, context: Optional[Dict]) -> PlotStyle:
-        style = self._plot_context_value(context, 'style', None)
-        return style if style is not None else PROFESSIONAL_STYLE
+        allowed = self.SINGLE_PLOT_TYPES | self.COLLECTION_PLOT_TYPES
+        selected = []
+        for plot_type in requested:
+            if plot_type in allowed and plot_type not in selected:
+                selected.append(plot_type)
+        return selected
 
     def _build_grain_size_plot_figure(
         self,
@@ -273,51 +318,216 @@ class ExportManager:
     ) -> Figure:
         """Create a fresh plot figure through the shared renderer."""
         apply_matplotlib_style()
-        style = self._plot_style_from_context(context)
+        style = plot_style_from_context(context)
         figure = Figure(figsize=config.get('plot_figsize', (10, 6)))
         figure.patch.set_facecolor(style.figure_facecolor)
         ax = figure.add_subplot(1, 1, 1)
-
-        show_legend = (
-            config.get('plot_include_legend', True)
-            and self._plot_context_value(context, 'show_legend', True)
-        )
-        show_grid = (
-            config.get('plot_include_grid', True)
-            and self._plot_context_value(context, 'show_grid', True)
-        )
 
         render_grain_size_distribution(
             ax,
             dataset.particle_sizes,
             dataset.percent_passing,
-            sample_name=name,
-            grain_size_data=dataset,
-            style=style,
-            show_d_lines=self._plot_context_value(context, 'show_d_lines', False),
-            show_markers=self._plot_context_value(context, 'show_markers', False),
-            show_grid=show_grid,
-            show_legend=show_legend,
-            show_classification_zones=self._plot_context_value(
-                context, 'show_classification_zones', False,
+            **grain_size_renderer_kwargs_from_context(
+                name,
+                dataset,
+                context,
+                default_classification_scheme=self._scheme,
+                include_grid=config.get('plot_include_grid', True),
+                include_legend=config.get('plot_include_legend', True),
             ),
-            classification_scheme=self._plot_context_value(
-                context, 'classification_scheme', self._scheme,
-            ),
-            fill_curve=self._plot_context_value(context, 'fill_curve', False),
-            fill_zone_labels=self._plot_context_value(context, 'fill_zone_labels', False),
         )
-        axis_limits = self._plot_context_value(context, 'axis_limits', None)
-        if axis_limits:
-            xlim = axis_limits.get('xlim')
-            ylim = axis_limits.get('ylim')
-            if xlim is not None:
-                ax.set_xlim(*xlim)
-            if ylim is not None:
-                ax.set_ylim(*ylim)
+        apply_axis_limits_from_context(ax, context)
 
         apply_legend_aware_layout(figure, style)
         return figure
+
+    def _build_k_value_bar_figure(
+        self,
+        name: str,
+        results: List[KCalculationResult],
+        config: Dict,
+        context: Optional[Dict] = None,
+    ) -> Figure:
+        apply_matplotlib_style()
+        style = plot_style_from_context(context)
+        figure = Figure(figsize=config.get('plot_figsize', (10, 6)))
+        figure.patch.set_facecolor(style.figure_facecolor)
+        ax = figure.add_subplot(1, 1, 1)
+
+        filtered_results = self._filter_results(results, config)
+        methods = [result.method_name for result in filtered_results]
+        k_values = [result.k_value for result in filtered_results]
+        flagged_methods = {
+            result.method_name
+            for result in filtered_results
+            if not getattr(result, 'conditions_met', True)
+            or getattr(getattr(result, 'status', None), 'name', 'OK') != 'OK'
+        }
+
+        render_k_bar_chart(
+            ax,
+            methods,
+            k_values,
+            flagged_methods=flagged_methods,
+            style=style,
+            show_grid=config.get('plot_include_grid', True),
+            show_legend=config.get('plot_include_legend', True),
+            sample_name=name,
+        )
+        apply_legend_aware_layout(figure, style)
+        return figure
+
+    def _build_applicability_heatmap_figure(
+        self,
+        name: str,
+        results: List[KCalculationResult],
+        config: Dict,
+        context: Optional[Dict] = None,
+    ) -> Figure:
+        apply_matplotlib_style()
+        style = plot_style_from_context(context)
+        filtered_results = self._filter_results(results, config)
+        figure = Figure(figsize=config.get('plot_figsize', (10, max(4, len(filtered_results) * 0.4))))
+        figure.patch.set_facecolor(style.figure_facecolor)
+        ax = figure.add_subplot(1, 1, 1)
+
+        render_applicability_heatmap(
+            ax,
+            filtered_results,
+            style=style,
+            title=f"Method Applicability: {name}",
+        )
+        figure.tight_layout()
+        return figure
+
+    def _build_collection_plot_figure(
+        self,
+        plot_type: str,
+        datasets: List[tuple],
+        config: Dict,
+        context: Optional[Dict] = None,
+    ) -> Figure:
+        apply_matplotlib_style()
+        style = plot_style_from_context(context)
+        figure = Figure(figsize=config.get('plot_figsize', (12, 7)))
+        figure.patch.set_facecolor(style.figure_facecolor)
+        ax = figure.add_subplot(1, 1, 1)
+
+        if plot_type == 'distribution_overlay':
+            render_distribution_overlay(
+                ax,
+                [dataset for _, dataset, _ in datasets],
+                labels=[name for name, _, _ in datasets],
+                style=style,
+                show_grid=config.get('plot_include_grid', True),
+                show_legend=config.get('plot_include_legend', True),
+            )
+            apply_legend_aware_layout(figure, style)
+            return figure
+
+        if plot_type == 'k_value_comparison':
+            k_results_dict = {}
+            flagged_methods_dict = {}
+            for name, _, results in datasets:
+                filtered_results = self._filter_results(results, config)
+                k_results_dict[name] = {
+                    result.method_name: result.k_value
+                    for result in filtered_results
+                    if result.k_value is not None
+                }
+                flagged_methods_dict[name] = {
+                    result.method_name
+                    for result in filtered_results
+                    if not getattr(result, 'conditions_met', True)
+                    or getattr(getattr(result, 'status', None), 'name', 'OK') != 'OK'
+                }
+            render_k_overlay(
+                ax,
+                k_results_dict,
+                flagged_methods_dict=flagged_methods_dict,
+                style=style,
+                show_grid=config.get('plot_include_grid', True),
+                show_legend=config.get('plot_include_legend', True),
+            )
+            apply_legend_aware_layout(figure, style)
+            return figure
+
+        if plot_type == 'statistical_boxplots':
+            render_k_boxplot(
+                ax,
+                {name: self._filter_results(results, config) for name, _, results in datasets},
+                style=style,
+                show_grid=config.get('plot_include_grid', True),
+            )
+            figure.tight_layout()
+            return figure
+
+        if plot_type == 'reliability_matrix':
+            render_reliability_matrix(
+                ax,
+                {name: self._filter_results(results, config) for name, _, results in datasets},
+                style=style,
+            )
+            figure.tight_layout()
+            return figure
+
+        raise ValueError(f"Unsupported plot type: {plot_type}")
+
+    def _build_single_sample_plot_figure(
+        self,
+        plot_type: str,
+        name: str,
+        dataset: GrainSizeData,
+        results: List[KCalculationResult],
+        config: Dict,
+        context: Optional[Dict] = None,
+    ) -> Figure:
+        if plot_type == 'grain_size_curve':
+            return self._build_grain_size_plot_figure(name, dataset, config, context)
+        if plot_type == 'k_value_bar':
+            return self._build_k_value_bar_figure(name, results, config, context)
+        if plot_type == 'applicability_heatmap':
+            return self._build_applicability_heatmap_figure(name, results, config, context)
+        raise ValueError(f"Unsupported plot type: {plot_type}")
+
+    def _save_plot_figure(self, figure: Figure, base_filename: str, plot_type: str, config: Dict) -> None:
+        output_dir = config['output_dir']
+        suffix = self.PLOT_FILE_SUFFIXES.get(plot_type, plot_type)
+
+        if config.get('png', False):
+            filepath = os.path.join(output_dir, f"{base_filename}_{suffix}.png")
+            figure.savefig(filepath, dpi=config.get('png_dpi', 300), bbox_inches='tight')
+            self.exported_files.append(filepath)
+
+        if config.get('svg', False):
+            filepath = os.path.join(output_dir, f"{base_filename}_{suffix}.svg")
+            figure.savefig(filepath, format='svg', bbox_inches='tight')
+            self.exported_files.append(filepath)
+
+        if config.get('pdf_plot', False):
+            filepath = os.path.join(output_dir, f"{base_filename}_{suffix}.pdf")
+            figure.savefig(filepath, format='pdf', bbox_inches='tight')
+            self.exported_files.append(filepath)
+
+    def _export_single_sample_plots(
+        self,
+        name: str,
+        dataset: GrainSizeData,
+        results: List[KCalculationResult],
+        config: Dict,
+        context: Optional[Dict] = None,
+        plot_types: Optional[List[str]] = None,
+    ):
+        """Export selected single-sample plot files."""
+        template = config['filename_template']
+        base_filename = self._format_filename(template, name, '')
+
+        for plot_type in plot_types or ['grain_size_curve']:
+            figure = self._build_single_sample_plot_figure(
+                plot_type, name, dataset, results, config, context,
+            )
+            self._save_plot_figure(figure, base_filename, plot_type, config)
+            figure.clear()
 
     def _export_plots(
         self,
@@ -327,36 +537,27 @@ class ExportManager:
         config: Dict,
         context: Optional[Dict] = None,
     ):
-        """Export plot files generated from the shared plot renderer."""
-        output_dir = config['output_dir']
+        """Legacy entry point: export the grain-size curve plot."""
+        self._export_single_sample_plots(
+            name, dataset, results, config, context, ['grain_size_curve'],
+        )
+
+    def _export_collection_plots(
+        self,
+        datasets: List[tuple],
+        config: Dict,
+        plot_contexts: Optional[List[Dict]] = None,
+        plot_types: Optional[List[str]] = None,
+    ) -> None:
+        """Export selected collection-level comparison plots."""
         template = config['filename_template']
+        base_filename = self._format_filename(template, 'all_datasets', '')
+        context = plot_contexts[0] if plot_contexts else {}
 
-        base_filename = self._format_filename(template, name, '')
-        figure = self._build_grain_size_plot_figure(name, dataset, config, context)
-
-        # PNG export
-        if config.get('png', False):
-            filename = f"{base_filename}_plot.png"
-            filepath = os.path.join(output_dir, filename)
-            dpi = config.get('png_dpi', 300)
-            figure.savefig(filepath, dpi=dpi, bbox_inches='tight')
-            self.exported_files.append(filepath)
-
-        # SVG export
-        if config.get('svg', False):
-            filename = f"{base_filename}_plot.svg"
-            filepath = os.path.join(output_dir, filename)
-            figure.savefig(filepath, format='svg', bbox_inches='tight')
-            self.exported_files.append(filepath)
-
-        # PDF export
-        if config.get('pdf_plot', False):
-            filename = f"{base_filename}_plot.pdf"
-            filepath = os.path.join(output_dir, filename)
-            figure.savefig(filepath, format='pdf', bbox_inches='tight')
-            self.exported_files.append(filepath)
-
-        figure.clear()
+        for plot_type in plot_types or []:
+            figure = self._build_collection_plot_figure(plot_type, datasets, config, context)
+            self._save_plot_figure(figure, base_filename, plot_type, config)
+            figure.clear()
 
     def _calculate_total_steps(self, datasets: List[tuple], config: Dict) -> int:
         """Calculate total steps for progress bar"""
@@ -385,7 +586,11 @@ class ExportManager:
             steps += len(datasets)
 
         if config.get('plots', False) and self._plot_formats_requested(config):
-            steps += len(datasets)
+            selected_plot_types = self._selected_plot_types(config)
+            if any(plot_type in self.SINGLE_PLOT_TYPES for plot_type in selected_plot_types):
+                steps += len(datasets)
+            if any(plot_type in self.COLLECTION_PLOT_TYPES for plot_type in selected_plot_types):
+                steps += 1
 
         return max(steps, 1)
 

@@ -17,6 +17,7 @@ from .plot_renderers import (
     render_grain_size_distribution,
     render_k_bar_chart,
 )
+from .plot_text_options import PlotTextOptions, plot_text_options_to_renderer_kwargs
 from .theme import C, apply_matplotlib_style
 from grain_classification import ISO14688
 
@@ -58,6 +59,7 @@ class PlotWidget(QWidget):
 
         # Style system
         self.current_style = PROFESSIONAL_STYLE
+        self.plot_text_options = PlotTextOptions()
 
         # Method colors — shared across app + reports
         self.method_colors = METHOD_COLORS
@@ -215,6 +217,7 @@ class PlotWidget(QWidget):
             classification_scheme=self._scheme,
             fill_curve=self.fill_curve,
             fill_zone_labels=self.fill_zone_labels,
+            **plot_text_options_to_renderer_kwargs(self.plot_text_options),
         )
 
         apply_legend_aware_layout(self.figure, self.current_style)

@@ -30,6 +30,7 @@ from .sidebar_controls import (
     make_spin_row, make_toggle_row,
 )
 from .plot_renderers import apply_legend_aware_layout, build_legend_kwargs
+from .plot_text_options import PlotTextOptionsDialog
 from unit_conversions import HydraulicConductivityUnit, HydraulicConductivityConverter
 
 
@@ -196,6 +197,13 @@ class PlotWorkspace(QWidget):
         self._style_sel.setToolTip("Plot style")
         self._style_sel.currentTextChanged.connect(self._on_style_changed)
         lay.addWidget(self._style_sel)
+
+        lay.addWidget(_pw_sep())
+
+        # ── Shared plot text settings ──
+        self._plot_text_btn = _pw_btn("", "Edit title and axis labels", "fa6s.pen-ruler")
+        self._plot_text_btn.clicked.connect(self._open_plot_text_dialog)
+        lay.addWidget(self._plot_text_btn)
 
         lay.addWidget(_pw_sep())
 
@@ -592,6 +600,20 @@ class PlotWorkspace(QWidget):
             self.plot_widget.set_style(preset)
         self._sync_advanced_style_widgets(preset)
         self._sync_reset_button()
+        self.refresh_plot()
+
+    def _open_plot_text_dialog(self) -> None:
+        """Edit shared title and axis-label options for this plot."""
+        if not self.plot_widget:
+            return
+        dialog = PlotTextOptionsDialog(
+            self.dataset.sample_name,
+            self.plot_widget.plot_text_options,
+            self,
+        )
+        if not dialog.exec():
+            return
+        self.plot_widget.plot_text_options = dialog.options()
         self.refresh_plot()
 
     def _effective_style(self) -> PlotStyle:

@@ -30,6 +30,7 @@ from gui.loading_dialog import LoadingDialog
 from gui.stack_fade import StackFadeController, TabFadeInController
 from gui.welcome_widget import WelcomeWidget
 from gui.theme import C, F, SZ, build_stylesheet, icon, apply_matplotlib_style
+from gui.plot_context import build_plot_context_from_tab
 from qt_chrome import FramelessMainWindowMixin
 from data_loader import DataLoader, GrainSizeData
 from k_calculations import KCalculator
@@ -623,6 +624,7 @@ class MainWindow(FramelessMainWindowMixin, QMainWindow):
 
         # Page 3 — Export
         self.export_tab = ExportTab()
+        self.export_tab.jump_to_dataset_requested.connect(self._on_export_dataset_requested)
         self.content_stack.addWidget(self.export_tab)
 
         shell_splitter = QSplitter(Qt.Orientation.Horizontal)
@@ -907,6 +909,8 @@ class MainWindow(FramelessMainWindowMixin, QMainWindow):
             self.comparison_tab.update_comparison()
         elif index == 2:
             self.reporting_tab.set_dataset_tabs(self.dataset_tabs)
+        elif index == 3:
+            self._update_export_tab()
 
     def _on_sidebar_sample_selected(self, sample_name: str) -> None:
         """When a sidebar card is clicked, switch to that dataset's tab."""
@@ -919,6 +923,10 @@ class MainWindow(FramelessMainWindowMixin, QMainWindow):
             if hasattr(tab, 'dataset') and tab.dataset.sample_name == sample_name:
                 self.dataset_tabs_widget.setCurrentIndex(i)
                 return
+
+    def _on_export_dataset_requested(self, sample_name: str) -> None:
+        """Open a dataset tab requested from the Export page."""
+        self._on_sidebar_sample_selected(sample_name)
 
     def _on_dataset_tab_changed(self, index: int) -> None:
         """When a dataset tab is clicked, highlight the corresponding sidebar card."""
@@ -2316,40 +2324,10 @@ class MainWindow(FramelessMainWindowMixin, QMainWindow):
                 figure = tab.plot_workspace.plot_widget.figure
             except Exception:
                 figure = None
-            try:
-                workspace = tab.plot_workspace
-                plot_widget = workspace.plot_widget
-                style = (
-                    workspace._effective_style()
-                    if hasattr(workspace, "_effective_style")
-                    else getattr(plot_widget, "current_style", None)
-                )
-                context = {
-                    "style": style,
-                    "show_grid": getattr(workspace, "show_grid", True),
-                    "show_legend": getattr(workspace, "show_legend", True),
-                    "show_d_lines": getattr(workspace, "show_dlines", False),
-                    "show_markers": getattr(workspace, "show_markers", False),
-                    "show_classification_zones": getattr(workspace, "show_zones", False),
-                    "fill_curve": getattr(workspace, "fill_curve", False),
-                    "fill_zone_labels": getattr(workspace, "fill_zone_labels", False),
-                    "classification_scheme": getattr(
-                        plot_widget,
-                        "_scheme",
-                        getattr(self, "active_scheme", ISO14688),
-                    ),
-                }
-                current_ax = getattr(plot_widget, "current_ax", None)
-                if (
-                    getattr(workspace, "current_plot_type", "distribution") == "distribution"
-                    and current_ax is not None
-                ):
-                    context["axis_limits"] = {
-                        "xlim": current_ax.get_xlim(),
-                        "ylim": current_ax.get_ylim(),
-                    }
-            except Exception:
-                context = {}
+            context = build_plot_context_from_tab(
+                tab,
+                getattr(self, "active_scheme", ISO14688),
+            )
             plot_figures.append(figure)
             plot_contexts.append(context)
         self.export_tab.update_datasets(

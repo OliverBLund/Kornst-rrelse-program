@@ -12,7 +12,7 @@ import pandas as pd
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 sys.path.insert(0, "Program")
 
-from PyQt6.QtWidgets import QApplication
+from PyQt6.QtWidgets import QApplication, QFormLayout, QTableWidgetSelectionRange
 
 from gui.column_mapper import ColumnMapperDialog
 
@@ -95,6 +95,36 @@ class TestColumnMapperDialog(unittest.TestCase):
         self.dialog.switch_to_raw_sieve_mode()
         APP.processEvents()
         self.assertIn("same raw sieve column mapping", self.dialog.sheet_info_label.text())
+
+    def test_mapper_inspector_keeps_readable_control_width(self):
+        self.assertIsNotNone(self.dialog._mapping_splitter)
+        controls = self.dialog._mapping_splitter.widget(0)
+        self.assertGreaterEqual(controls.minimumWidth(), 390)
+        self.assertEqual(
+            self.dialog.mapping_group.layout().rowWrapPolicy(),
+            QFormLayout.RowWrapPolicy.WrapAllRows,
+        )
+
+    def test_range_mode_can_mark_selected_size_and_passing_cells(self):
+        self.dialog.switch_to_range_mode()
+        APP.processEvents()
+
+        self.dialog.preview_table.setRangeSelected(
+            QTableWidgetSelectionRange(1, 0, 3, 0),
+            True,
+        )
+        self.dialog._mark_current_selection("size")
+
+        self.dialog.preview_table.setRangeSelected(
+            QTableWidgetSelectionRange(1, 1, 3, 1),
+            True,
+        )
+        self.dialog._mark_current_selection("percent")
+
+        self.assertEqual(len(self.dialog.selected_size_range), 3)
+        self.assertEqual(len(self.dialog.selected_percent_range), 3)
+        self.assertIn("3 size cells", self.dialog.size_range_count_label.text())
+        self.assertIn("3 passing cells", self.dialog.percent_range_count_label.text())
 
 
 if __name__ == "__main__":

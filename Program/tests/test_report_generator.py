@@ -6,6 +6,7 @@ import sys
 import unittest
 import io
 import zipfile
+from unittest.mock import patch
 
 sys.path.insert(0, 'Program')
 
@@ -205,6 +206,58 @@ class TestReportGeneratorAppendices(unittest.TestCase):
 
         self.assertIn('Grain Size Analysis Report', document_xml)
         self.assertIn('Detailed Percentile Data', document_xml)
+
+    def test_grain_size_report_plot_uses_live_plot_context(self):
+        calls = []
+
+        def capture_renderer(ax, particle_sizes, percent_passing, **kwargs):
+            calls.append(kwargs)
+            ax.plot(particle_sizes, percent_passing, label=kwargs.get('sample_name'))
+
+        context = {
+            'show_d_lines': False,
+            'show_markers': False,
+            'show_grid': False,
+            'show_legend': False,
+            'show_title': True,
+            'plot_title': 'Custom report plot',
+            'show_x_label': False,
+            'plot_x_label': 'Custom diameter',
+            'show_y_label': True,
+            'plot_y_label': 'Custom passing',
+        }
+
+        with patch('plot_export.render_grain_size_distribution', side_effect=capture_renderer):
+            html = self.generator.generate_grain_size_report(
+                self.dataset,
+                sections={
+                    'cover_page': False,
+                    'executive_summary': False,
+                    'methodology': False,
+                    'results': False,
+                    'plots': True,
+                    'raw_data': False,
+                    'interpretation': False,
+                    'percentiles': False,
+                    'gradation': False,
+                    'data_quality': False,
+                },
+                plot_context=context,
+            )
+
+        self.assertEqual(len(calls), 1)
+        call = calls[0]
+        self.assertFalse(call['show_d_lines'])
+        self.assertFalse(call['show_markers'])
+        self.assertFalse(call['show_grid'])
+        self.assertFalse(call['show_legend'])
+        self.assertTrue(call['show_title'])
+        self.assertEqual(call['title'], 'Custom report plot')
+        self.assertFalse(call['show_x_label'])
+        self.assertEqual(call['x_label'], 'Custom diameter')
+        self.assertTrue(call['show_y_label'])
+        self.assertEqual(call['y_label'], 'Custom passing')
+        self.assertIn('data:image/png;base64,', html)
 
 
 if __name__ == '__main__':

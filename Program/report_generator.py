@@ -1121,13 +1121,18 @@ class ReportGenerator:
 
         return html
 
-    def _create_grain_size_plot(self, dataset: GrainSizeData) -> str:
+    def _create_grain_size_plot(
+        self,
+        dataset: GrainSizeData,
+        plot_context: Optional[Dict[str, Any]] = None,
+    ) -> str:
         """Create grain size distribution curve and return as base64."""
         pe = _get_plot_export()
         return pe.export_grain_size_plot(
             dataset,
-            show_d_lines=True,
-            show_markers=True,
+            plot_context=plot_context,
+            show_d_lines=False,
+            show_markers=False,
             classification_scheme=self._scheme,
         )
 
@@ -1200,7 +1205,8 @@ class ReportGenerator:
                                   sections: Optional[Dict[str, bool]] = None,
                                   report_template: str = "standard",
                                   brand=None,
-                                  appendix_label_config: Optional[Any] = None) -> str:
+                                  appendix_label_config: Optional[Any] = None,
+                                  plot_context: Optional[Dict[str, Any]] = None) -> str:
         """
         Generate a grain size analysis report for a single sample
 
@@ -1455,7 +1461,7 @@ class ReportGenerator:
 
         # Visual Charts
         if sections.get('plots', True):
-            grain_plot = self._create_grain_size_plot(dataset)
+            grain_plot = self._create_grain_size_plot(dataset, plot_context)
             html += f"""
 <div class="page-break">
 <h2>Grain Size Distribution Curve</h2>
@@ -1802,7 +1808,8 @@ class ReportGenerator:
                                 metadata: Optional[Dict[str, str]] = None,
                                 sections: Optional[Dict[str, bool]] = None,
                                 brand=None,
-                                appendix_label_config: Optional[Any] = None) -> str:
+                                appendix_label_config: Optional[Any] = None,
+                                plot_context: Optional[Dict[str, Any]] = None) -> str:
         """Generate a combined report with both grain size and K-value analysis"""
 
         # Set defaults
@@ -1828,6 +1835,7 @@ class ReportGenerator:
             sections=grain_sections,
             brand=brand,
             appendix_label_config=appendix_label_config,
+            plot_context=plot_context,
         )
         k_report = self.generate_k_value_report(
             dataset,
@@ -2166,6 +2174,7 @@ class ReportGenerator:
                     "k_results": list(k_results_dict.get(label, [])),
                     "temperature": temperature,
                     "porosity": porosity,
+                    "plot_context": None,
                 })
         else:
             normalized_details = []
@@ -2179,6 +2188,7 @@ class ReportGenerator:
                     "k_results": list(item.get("k_results") or []),
                     "temperature": item.get("temperature"),
                     "porosity": item.get("porosity"),
+                    "plot_context": item.get("plot_context"),
                 })
             sample_details = normalized_details
 
