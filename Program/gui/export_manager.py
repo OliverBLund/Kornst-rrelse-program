@@ -80,6 +80,18 @@ class ExportManager:
         'statistical_boxplots': 'k_value_boxplot',
         'reliability_matrix': 'reliability_matrix',
     }
+    PERCENTILE_SPECS = [
+        ('d5', 'D5', 5),
+        ('d10', 'D10', 10),
+        ('d16', 'D16', 16),
+        ('d17', 'D17', 17),
+        ('d20', 'D20', 20),
+        ('d30', 'D30', 30),
+        ('d50', 'D50', 50),
+        ('d60', 'D60', 60),
+        ('d84', 'D84', 84),
+        ('d95', 'D95', 95),
+    ]
 
     def __init__(self):
         self.exported_files = []
@@ -107,6 +119,35 @@ class ExportManager:
     def _get_export_timestamp(self, config: Dict) -> str:
         """Return the export timestamp shared across this export run."""
         return config.get('_export_timestamp', datetime.now().isoformat(timespec='seconds'))
+
+    def _category_output_dir(self, config: Dict, *parts: str) -> str:
+        """Return and create the output subdirectory for an export category."""
+        base_dir = config['output_dir']
+        if config.get('enforce_folder_structure', True) and parts:
+            base_dir = os.path.join(base_dir, *parts)
+        os.makedirs(base_dir, exist_ok=True)
+        return base_dir
+
+    def _selected_percentile_specs(self, config: Dict) -> List[tuple]:
+        """Return selected percentile specs in UI/export order."""
+        selected = config.get('selected_percentiles')
+        if selected is None:
+            selected = ['d10', 'd20', 'd30', 'd50', 'd60']
+        selected_set = set(selected)
+        return [spec for spec in self.PERCENTILE_SPECS if spec[0] in selected_set]
+
+    def _percentile_value(self, dataset: GrainSizeData, percentile_num: int) -> Optional[float]:
+        """Return a percentile value using dataset helpers when available."""
+        getter = getattr(dataset, f'get_d{percentile_num}', None)
+        if callable(getter):
+            return getter()
+        interpolator = getattr(dataset, '_interpolate_grain_size', None)
+        if callable(interpolator):
+            return interpolator(percentile_num)
+        get_percentile = getattr(dataset, 'get_percentile', None)
+        if callable(get_percentile):
+            return get_percentile(percentile_num)
+        return None
 
     def _format_converted_value(self, k_value: float, unit_spec: tuple) -> str:
         """Format a conductivity value in the requested unit."""
@@ -187,6 +228,204 @@ class ExportManager:
             'valid_count': len(valid_k_values),
         }
 
+    def _append_dataset_context_columns(
+        self,
+        row: List[Any],
+        dataset: GrainSizeData,
+        config: Dict,
+        percentile_specs: List[tuple],
+        include_environmental: bool,
+        include_timestamp: bool,
+    ) -> None:
+        """Append non-method dataset columns shared by CSV Long and Wide."""
+        if include_environmental:
+            row.extend([dataset.temperature, dataset.current_porosity or dataset.porosity])
+
+        for _key, _label, percentile_num in percentile_specs:
+            value = self._percentile_value(dataset, percentile_num)
+            row.append(value if value is not None else '')
+
+        if config.get('gradation', True):
+            row.extend([
+                dataset.get_uniformity_coefficient() if hasattr(dataset, 'get_uniformity_coefficient') else '',
+                dataset.get_coefficient_of_curvature() if hasattr(dataset, 'get_coefficient_of_curvature') else '',
+            ])
+
+        if config.get('classification', True):
+            row.append(dataset.classify(scheme=self._scheme).label)
+
+        if include_timestamp:
+            row.append(self._get_export_timestamp(config))
+
+    def build_csv_long_table(
+        self,
+        datasets: List[tuple],
+        config: Dict,
+        max_data_rows: Optional[int] = None,
+    ) -> List[List[Any]]:
+        """Build CSV Long rows using the same schema as the exported file."""
+        k_values_enabled = config.get('k_values', True)
+        unit_specs = self._get_enabled_unit_specs(config) if k_values_enabled else []
+        include_environmental = self._metadata_enabled(config, 'environmental')
+        include_timestamp = self._metadata_enabled(config, 'export_timestamp')
+        percentile_specs = self._selected_percentile_specs(config) if config.get('percentiles', True) else []
+
+        header = ['Sample Name']
+        if k_values_enabled:
+            header.append('Method')
+            header.extend(unit_label for _, unit_label, _, _, _, _ in unit_specs)
+            header.append('Status')
+            if config.get('validation', False):
+                header.append('Status Message')
+            if config.get('formulas', False):
+                header.append('Formula')
+        if include_environmental:
+            header.extend(['Temperature (C)', 'Porosity'])
+        header.extend(f'{label} (mm)' for _key, label, _num in percentile_specs)
+        if config.get('gradation', True):
+            header.extend(['Cu', 'Cc'])
+        if config.get('classification', True):
+            header.append('Soil Classification')
+        if include_timestamp:
+            header.append('Export Timestamp')
+
+        rows: List[List[Any]] = [header]
+        data_rows = 0
+
+        for name, dataset, results in datasets:
+            if k_values_enabled:
+                for result in self._filter_results(results, config):
+                    row = [name, result.method_name]
+                    row.extend(self._format_converted_value(result.k_value, unit_spec) for unit_spec in unit_specs)
+                    row.append(result.status.value if hasattr(result.status, 'value') else str(result.status))
+                    if config.get('validation', False):
+                        row.append(result.status_message)
+                    if config.get('formulas', False):
+                        row.append(result.formula_used)
+                    self._append_dataset_context_columns(
+                        row, dataset, config, percentile_specs, include_environmental, include_timestamp,
+                    )
+                    rows.append(row)
+                    data_rows += 1
+                    if max_data_rows is not None and data_rows >= max_data_rows:
+                        return rows
+            else:
+                row = [name]
+                self._append_dataset_context_columns(
+                    row, dataset, config, percentile_specs, include_environmental, include_timestamp,
+                )
+                rows.append(row)
+                data_rows += 1
+                if max_data_rows is not None and data_rows >= max_data_rows:
+                    return rows
+
+        return rows
+
+    def build_csv_wide_table(
+        self,
+        datasets: List[tuple],
+        config: Dict,
+        max_data_rows: Optional[int] = None,
+    ) -> List[List[Any]]:
+        """Build CSV Wide rows using the same schema as the exported file."""
+        k_values_enabled = config.get('k_values', True)
+        method_names = self._collect_method_names(datasets, config) if k_values_enabled else []
+        unit_specs = self._get_enabled_unit_specs(config)
+        include_environmental = self._metadata_enabled(config, 'environmental')
+        include_timestamp = self._metadata_enabled(config, 'export_timestamp')
+        selected_stats = self._get_selected_stat_specs(config) if config.get('statistics', True) else []
+        percentile_specs = self._selected_percentile_specs(config) if config.get('percentiles', True) else []
+
+        header = ['Sample_Name']
+        if include_environmental:
+            header.extend(['Temperature_C', 'Porosity'])
+
+        for _key, label, _num in percentile_specs:
+            header.append(f'{label}_mm')
+
+        if config.get('gradation', True):
+            header.extend(['Cu_Uniformity_Coefficient', 'Cc_Curvature_Coefficient'])
+
+        if config.get('classification', True):
+            header.append('Soil_Classification')
+
+        if k_values_enabled:
+            for method in method_names:
+                safe_name = method.replace('-', '_').replace(' ', '_')
+                for _, _, suffix, _, _, _ in unit_specs:
+                    header.append(f'K_{safe_name}_{suffix}')
+
+            for method in method_names:
+                safe_name = method.replace('-', '_').replace(' ', '_')
+                header.append(f'Status_{safe_name}')
+
+        for _, _, suffix, _, _, _ in unit_specs:
+            for _, _, header_prefix, value_key in selected_stats:
+                if value_key != 'valid_count':
+                    header.append(f'{header_prefix}_{suffix}')
+
+        if any(value_key == 'valid_count' for _, _, _, value_key in selected_stats):
+            header.append('Valid_Methods_Count')
+
+        if include_timestamp:
+            header.append('Export_Timestamp')
+
+        rows: List[List[Any]] = [header]
+        for row_index, (name, dataset, results) in enumerate(datasets):
+            if max_data_rows is not None and row_index >= max_data_rows:
+                break
+
+            row = [name]
+            if include_environmental:
+                row.extend([dataset.temperature, dataset.current_porosity or dataset.porosity])
+
+            for _key, _label, percentile_num in percentile_specs:
+                value = self._percentile_value(dataset, percentile_num)
+                row.append(f"{value:.4f}" if value is not None else '')
+
+            if config.get('gradation', True):
+                cu = dataset.get_uniformity_coefficient() if hasattr(dataset, 'get_uniformity_coefficient') else None
+                cc = dataset.get_coefficient_of_curvature() if hasattr(dataset, 'get_coefficient_of_curvature') else None
+                row.append(f"{cu:.2f}" if cu is not None else '')
+                row.append(f"{cc:.2f}" if cc is not None else '')
+
+            if config.get('classification', True):
+                row.append(dataset.classify(scheme=self._scheme).label)
+
+            if k_values_enabled:
+                filtered_results = self._filter_results(results, config)
+                method_results = {result.method_name: result for result in filtered_results}
+
+                for method in method_names:
+                    result = method_results.get(method)
+                    for unit_spec in unit_specs:
+                        row.append(self._format_converted_value(result.k_value, unit_spec) if result else '')
+
+                for method in method_names:
+                    result = method_results.get(method)
+                    if result:
+                        row.append(result.status.value if hasattr(result.status, 'value') else str(result.status))
+                    else:
+                        row.append('')
+
+            stats_values = self._calculate_statistics(results, config)
+            for unit_spec in unit_specs:
+                for _, _, _, value_key in selected_stats:
+                    if value_key != 'valid_count':
+                        stat_value = stats_values.get(value_key)
+                        row.append(self._format_converted_value(stat_value, unit_spec) if stat_value is not None else '')
+
+            if any(value_key == 'valid_count' for _, _, _, value_key in selected_stats):
+                count_value = stats_values.get('valid_count')
+                row.append(str(count_value) if count_value is not None else '')
+
+            if include_timestamp:
+                row.append(self._get_export_timestamp(config))
+
+            rows.append(row)
+
+        return rows
+
     def export(self, datasets: List[tuple], config: Dict, progress: Optional[QProgressDialog] = None) -> List[str]:
         """
         Export datasets according to configuration
@@ -203,8 +442,7 @@ class ExportManager:
         config = dict(config)
         if self._metadata_enabled(config, 'export_timestamp') and '_export_timestamp' not in config:
             config['_export_timestamp'] = datetime.now().isoformat(timespec='seconds')
-        total_steps = self._calculate_total_steps(datasets, config)
-        current_step = 0
+        total_steps = max(int(config.get('expected_file_count') or 0), self._calculate_total_steps(datasets, config))
 
         if progress:
             progress.setMaximum(total_steps)
@@ -215,25 +453,21 @@ class ExportManager:
                 if config.get('csv_long', True):
                     for name, dataset, results in datasets:
                         self._export_csv_single(name, dataset, results, config)
-                        current_step += 1
                         if progress:
-                            progress.setValue(current_step)
+                            progress.setValue(len(self.exported_files))
                 if config.get('csv_wide', False):
                     self._export_csv_wide_format_filtered(datasets, config)
-                    current_step += 1
                     if progress:
-                        progress.setValue(current_step)
+                        progress.setValue(len(self.exported_files))
             else:
                 if config.get('csv_long', True):
                     self._export_csv_combined_filtered(datasets, config)
-                    current_step += 1
                     if progress:
-                        progress.setValue(current_step)
+                        progress.setValue(len(self.exported_files))
                 if config.get('csv_wide', False):
                     self._export_csv_wide_format_filtered(datasets, config)
-                    current_step += 1
                     if progress:
-                        progress.setValue(current_step)
+                        progress.setValue(len(self.exported_files))
 
         # Excel Export
         if config.get('excel', False):
@@ -242,29 +476,25 @@ class ExportManager:
             if excel_mode == 'per_dataset':
                 for name, dataset, results in datasets:
                     self._export_excel_single(name, dataset, results, config)
-                    current_step += 1
                     if progress:
-                        progress.setValue(current_step)
+                        progress.setValue(len(self.exported_files))
 
             elif excel_mode == 'combined':
                 self._export_excel_combined(datasets, config)
-                current_step += 1
                 if progress:
-                    progress.setValue(current_step)
+                    progress.setValue(len(self.exported_files))
 
             elif excel_mode == 'method_organized':
                 self._export_excel_method_organized(datasets, config)
-                current_step += 1
                 if progress:
-                    progress.setValue(current_step)
+                    progress.setValue(len(self.exported_files))
 
         # JSON Export
         if config.get('json', False):
             for name, dataset, results in datasets:
                 self._export_json(name, dataset, results, config)
-                current_step += 1
                 if progress:
-                    progress.setValue(current_step)
+                    progress.setValue(len(self.exported_files))
 
         # Plot Export
         selected_plot_types = self._selected_plot_types(config)
@@ -277,15 +507,13 @@ class ExportManager:
                 for idx, (name, dataset, results) in enumerate(datasets):
                     context = plot_contexts[idx] if idx < len(plot_contexts) else {}
                     self._export_single_sample_plots(name, dataset, results, config, context, single_plot_types)
-                    current_step += 1
                     if progress:
-                        progress.setValue(current_step)
+                        progress.setValue(len(self.exported_files))
 
             if collection_plot_types:
                 self._export_collection_plots(datasets, config, plot_contexts, collection_plot_types)
-                current_step += 1
                 if progress:
-                    progress.setValue(current_step)
+                    progress.setValue(len(self.exported_files))
 
         return self.exported_files
 
@@ -491,22 +719,34 @@ class ExportManager:
         raise ValueError(f"Unsupported plot type: {plot_type}")
 
     def _save_plot_figure(self, figure: Figure, base_filename: str, plot_type: str, config: Dict) -> None:
-        output_dir = config['output_dir']
+        output_dir = self._category_output_dir(
+            config,
+            'plots',
+            config.get('_active_plot_folder', 'collection'),
+        )
         suffix = self.PLOT_FILE_SUFFIXES.get(plot_type, plot_type)
+        figure.patch.set_facecolor('white')
+        figure.patch.set_alpha(1.0)
 
         if config.get('png', False):
             filepath = os.path.join(output_dir, f"{base_filename}_{suffix}.png")
-            figure.savefig(filepath, dpi=config.get('png_dpi', 300), bbox_inches='tight')
+            figure.savefig(
+                filepath,
+                dpi=config.get('png_dpi', 300),
+                bbox_inches='tight',
+                facecolor='white',
+                edgecolor='white',
+            )
             self.exported_files.append(filepath)
 
         if config.get('svg', False):
             filepath = os.path.join(output_dir, f"{base_filename}_{suffix}.svg")
-            figure.savefig(filepath, format='svg', bbox_inches='tight')
+            figure.savefig(filepath, format='svg', bbox_inches='tight', facecolor='white', edgecolor='white')
             self.exported_files.append(filepath)
 
         if config.get('pdf_plot', False):
             filepath = os.path.join(output_dir, f"{base_filename}_{suffix}.pdf")
-            figure.savefig(filepath, format='pdf', bbox_inches='tight')
+            figure.savefig(filepath, format='pdf', bbox_inches='tight', facecolor='white', edgecolor='white')
             self.exported_files.append(filepath)
 
     def _export_single_sample_plots(
@@ -521,13 +761,21 @@ class ExportManager:
         """Export selected single-sample plot files."""
         template = config['filename_template']
         base_filename = self._format_filename(template, name, '')
+        previous_folder = config.get('_active_plot_folder')
+        config['_active_plot_folder'] = self._format_filename('{sample_name}', name, '')
 
-        for plot_type in plot_types or ['grain_size_curve']:
-            figure = self._build_single_sample_plot_figure(
-                plot_type, name, dataset, results, config, context,
-            )
-            self._save_plot_figure(figure, base_filename, plot_type, config)
-            figure.clear()
+        try:
+            for plot_type in plot_types or ['grain_size_curve']:
+                figure = self._build_single_sample_plot_figure(
+                    plot_type, name, dataset, results, config, context,
+                )
+                self._save_plot_figure(figure, base_filename, plot_type, config)
+                figure.clear()
+        finally:
+            if previous_folder is None:
+                config.pop('_active_plot_folder', None)
+            else:
+                config['_active_plot_folder'] = previous_folder
 
     def _export_plots(
         self,
@@ -551,22 +799,37 @@ class ExportManager:
     ) -> None:
         """Export selected collection-level comparison plots."""
         template = config['filename_template']
-        base_filename = self._format_filename(template, 'all_datasets', '')
+        collection_name = config.get('collection_sample_name', 'all_datasets')
+        base_filename = self._format_filename(template, collection_name, '')
         context = plot_contexts[0] if plot_contexts else {}
+        previous_folder = config.get('_active_plot_folder')
+        config['_active_plot_folder'] = self._format_filename('{sample_name}', collection_name, '')
 
-        for plot_type in plot_types or []:
-            figure = self._build_collection_plot_figure(plot_type, datasets, config, context)
-            self._save_plot_figure(figure, base_filename, plot_type, config)
-            figure.clear()
+        try:
+            for plot_type in plot_types or []:
+                figure = self._build_collection_plot_figure(plot_type, datasets, config, context)
+                self._save_plot_figure(figure, base_filename, plot_type, config)
+                figure.clear()
+        finally:
+            if previous_folder is None:
+                config.pop('_active_plot_folder', None)
+            else:
+                config['_active_plot_folder'] = previous_folder
 
     def _calculate_total_steps(self, datasets: List[tuple], config: Dict) -> int:
-        """Calculate total steps for progress bar"""
+        """Calculate expected output file count for progress reporting."""
         steps = 0
 
         if config.get('csv', False):
             if config.get('csv_mode') == 'separate':
                 if config.get('csv_long', True):
-                    steps += len(datasets)
+                    for _name, _dataset, results in datasets:
+                        if config.get('grain_distribution', True):
+                            steps += 1
+                        if config.get('k_values', True) and results:
+                            steps += 1
+                        if config.get('statistics', True):
+                            steps += 1
                 if config.get('csv_wide', False):
                     steps += 1
             else:
@@ -587,10 +850,14 @@ class ExportManager:
 
         if config.get('plots', False) and self._plot_formats_requested(config):
             selected_plot_types = self._selected_plot_types(config)
-            if any(plot_type in self.SINGLE_PLOT_TYPES for plot_type in selected_plot_types):
-                steps += len(datasets)
-            if any(plot_type in self.COLLECTION_PLOT_TYPES for plot_type in selected_plot_types):
-                steps += 1
+            plot_format_count = sum(
+                1
+                for key in ('png', 'svg', 'pdf_plot')
+                if config.get(key, False)
+            )
+            single_count = len([plot_type for plot_type in selected_plot_types if plot_type in self.SINGLE_PLOT_TYPES])
+            collection_count = len([plot_type for plot_type in selected_plot_types if plot_type in self.COLLECTION_PLOT_TYPES])
+            steps += ((len(datasets) * single_count) + collection_count) * plot_format_count
 
         return max(steps, 1)
 
@@ -625,7 +892,7 @@ class ExportManager:
     def _export_csv_single(self, name: str, dataset: GrainSizeData,
                           results: List[KCalculationResult], config: Dict):
         """Export single dataset to CSV"""
-        output_dir = config['output_dir']
+        output_dir = self._category_output_dir(config, 'tables', 'csv', self._format_filename('{sample_name}', name, ''))
         template = config['filename_template']
 
         # Generate base filename
@@ -654,7 +921,7 @@ class ExportManager:
 
     def _export_csv_combined(self, datasets: List[tuple], config: Dict):
         """Export all datasets to a single combined CSV"""
-        output_dir = config['output_dir']
+        output_dir = self._category_output_dir(config, 'workbooks')
         template = config['filename_template']
 
         filename = self._format_filename(template, 'combined_all_datasets', '.csv')
@@ -703,7 +970,7 @@ class ExportManager:
         Export wide-format CSV with one row per dataset and columns for all parameters.
         Perfect for statistical analysis and comparison.
         """
-        output_dir = config['output_dir']
+        output_dir = self._category_output_dir(config, 'workbooks')
         template = config['filename_template']
 
         filename = self._format_filename(template, 'wide_format_all_datasets', '.csv')
@@ -1026,163 +1293,29 @@ class ExportManager:
 
     def _export_csv_combined_filtered(self, datasets: List[tuple], config: Dict):
         """Export a filtered long-format CSV honoring method and unit selections."""
-        output_dir = config['output_dir']
+        output_dir = self._category_output_dir(config, 'tables', 'csv')
         template = config['filename_template']
-        unit_specs = self._get_enabled_unit_specs(config)
-        include_environmental = self._metadata_enabled(config, 'environmental')
-        include_timestamp = self._metadata_enabled(config, 'export_timestamp')
 
         filename = self._format_filename(template, 'combined_all_datasets', '.csv')
         filepath = os.path.join(output_dir, filename)
 
         with open(filepath, 'w', newline='', encoding='utf-8') as f:
             writer = csv.writer(f)
-
-            header = ['Sample Name', 'Method']
-            header.extend(unit_label for _, unit_label, _, _, _, _ in unit_specs)
-            header.append('Status')
-            if config.get('validation', False):
-                header.append('Status Message')
-            if config.get('formulas', False):
-                header.append('Formula')
-            if include_environmental:
-                header.extend(['Temperature (C)', 'Porosity'])
-            header.extend(['D10 (mm)', 'D50 (mm)', 'D60 (mm)', 'Cu', 'Cc'])
-            if include_timestamp:
-                header.append('Export Timestamp')
-            writer.writerow(header)
-
-            for name, dataset, results in datasets:
-                for result in self._filter_results(results, config):
-                    row = [name, result.method_name]
-                    row.extend(self._format_converted_value(result.k_value, unit_spec) for unit_spec in unit_specs)
-                    row.append(result.status.value if hasattr(result.status, 'value') else str(result.status))
-                    if config.get('validation', False):
-                        row.append(result.status_message)
-                    if config.get('formulas', False):
-                        row.append(result.formula_used)
-                    if include_environmental:
-                        row.extend([result.temperature, result.porosity])
-                    row.extend([
-                        dataset.get_d10() if hasattr(dataset, 'get_d10') else '',
-                        dataset.get_d50() if hasattr(dataset, 'get_d50') else '',
-                        dataset.get_d60() if hasattr(dataset, 'get_d60') else '',
-                        dataset.get_uniformity_coefficient() if hasattr(dataset, 'get_uniformity_coefficient') else '',
-                        dataset.get_coefficient_of_curvature() if hasattr(dataset, 'get_coefficient_of_curvature') else '',
-                    ])
-                    if include_timestamp:
-                        row.append(self._get_export_timestamp(config))
-                    writer.writerow(row)
+            writer.writerows(self.build_csv_long_table(datasets, config))
 
         self.exported_files.append(filepath)
 
     def _export_csv_wide_format_filtered(self, datasets: List[tuple], config: Dict):
         """Export a filtered wide-format CSV honoring method and unit selections."""
-        output_dir = config['output_dir']
+        output_dir = self._category_output_dir(config, 'tables', 'csv')
         template = config['filename_template']
-        method_names = self._collect_method_names(datasets, config)
-        unit_specs = self._get_enabled_unit_specs(config)
-        include_environmental = self._metadata_enabled(config, 'environmental')
-        include_timestamp = self._metadata_enabled(config, 'export_timestamp')
-        selected_stats = self._get_selected_stat_specs(config)
 
         filename = self._format_filename(template, 'wide_format_all_datasets', '.csv')
         filepath = os.path.join(output_dir, filename)
 
         with open(filepath, 'w', newline='', encoding='utf-8') as f:
             writer = csv.writer(f)
-
-            selected_percentiles = config.get('selected_percentiles', ['d10', 'd20', 'd30', 'd50', 'd60'])
-            percentile_mapping = {
-                'd5': 5, 'd10': 10, 'd16': 16, 'd17': 17, 'd20': 20,
-                'd30': 30, 'd50': 50, 'd60': 60, 'd84': 84, 'd95': 95
-            }
-
-            header = ['Sample_Name']
-            if include_environmental:
-                header.extend(['Temperature_C', 'Porosity'])
-
-            for p_key in selected_percentiles:
-                p_num = percentile_mapping.get(p_key, 0)
-                if p_num > 0:
-                    header.append(f'D{p_num}_mm')
-
-            if config.get('gradation', True):
-                header.extend(['Cu_Uniformity_Coefficient', 'Cc_Curvature_Coefficient'])
-
-            for method in method_names:
-                safe_name = method.replace('-', '_').replace(' ', '_')
-                for _, _, suffix, _, _, _ in unit_specs:
-                    header.append(f'K_{safe_name}_{suffix}')
-
-            for method in method_names:
-                safe_name = method.replace('-', '_').replace(' ', '_')
-                header.append(f'Status_{safe_name}')
-
-            for _, _, suffix, _, _, _ in unit_specs:
-                for _, _, header_prefix, value_key in selected_stats:
-                    if value_key != 'valid_count':
-                        header.append(f'{header_prefix}_{suffix}')
-
-            if any(value_key == 'valid_count' for _, _, _, value_key in selected_stats):
-                header.append('Valid_Methods_Count')
-
-            if include_timestamp:
-                header.append('Export_Timestamp')
-            writer.writerow(header)
-
-            for name, dataset, results in datasets:
-                row = [name]
-                if include_environmental:
-                    row.extend([dataset.temperature, dataset.current_porosity or dataset.porosity])
-
-                for p_key in selected_percentiles:
-                    p_num = percentile_mapping.get(p_key, 0)
-                    if p_num > 0 and hasattr(dataset, '_interpolate_grain_size'):
-                        value = dataset._interpolate_grain_size(p_num)
-                        row.append(f"{value:.4f}" if value is not None else '')
-                    elif hasattr(dataset, f'get_d{p_num}'):
-                        value = getattr(dataset, f'get_d{p_num}')()
-                        row.append(f"{value:.4f}" if value is not None else '')
-                    else:
-                        row.append('')
-
-                if config.get('gradation', True):
-                    cu = dataset.get_uniformity_coefficient() if hasattr(dataset, 'get_uniformity_coefficient') else None
-                    cc = dataset.get_coefficient_of_curvature() if hasattr(dataset, 'get_coefficient_of_curvature') else None
-                    row.append(f"{cu:.2f}" if cu is not None else '')
-                    row.append(f"{cc:.2f}" if cc is not None else '')
-
-                filtered_results = self._filter_results(results, config)
-                method_results = {result.method_name: result for result in filtered_results}
-
-                for method in method_names:
-                    result = method_results.get(method)
-                    for unit_spec in unit_specs:
-                        row.append(self._format_converted_value(result.k_value, unit_spec) if result else '')
-
-                for method in method_names:
-                    result = method_results.get(method)
-                    if result:
-                        row.append(result.status.value if hasattr(result.status, 'value') else str(result.status))
-                    else:
-                        row.append('')
-
-                stats_values = self._calculate_statistics(results, config)
-                for unit_spec in unit_specs:
-                    for _, _, _, value_key in selected_stats:
-                        if value_key != 'valid_count':
-                            stat_value = stats_values.get(value_key)
-                            row.append(self._format_converted_value(stat_value, unit_spec) if stat_value is not None else '')
-
-                if any(value_key == 'valid_count' for _, _, _, value_key in selected_stats):
-                    count_value = stats_values.get('valid_count')
-                    row.append(str(count_value) if count_value is not None else '')
-
-                if include_timestamp:
-                    row.append(self._get_export_timestamp(config))
-
-                writer.writerow(row)
+            writer.writerows(self.build_csv_wide_table(datasets, config))
 
         self.exported_files.append(filepath)
 
@@ -1256,14 +1389,8 @@ class ExportManager:
             if include_grain_size_stats and config.get('percentiles', True):
                 writer.writerow(['Grain Size Percentiles'])
                 writer.writerow(['Percentile', 'Size (mm)'])
-                percentiles = {
-                    'D10': dataset.get_d10() if hasattr(dataset, 'get_d10') else None,
-                    'D20': dataset.get_d20() if hasattr(dataset, 'get_d20') else None,
-                    'D30': dataset.get_d30() if hasattr(dataset, 'get_d30') else None,
-                    'D50': dataset.get_d50() if hasattr(dataset, 'get_d50') else None,
-                    'D60': dataset.get_d60() if hasattr(dataset, 'get_d60') else None,
-                }
-                for pname, value in percentiles.items():
+                for _key, pname, percentile_num in self._selected_percentile_specs(config):
+                    value = self._percentile_value(dataset, percentile_num)
                     if value is not None:
                         writer.writerow([pname, f"{value:.4f}"])
                 writer.writerow([])
@@ -1311,7 +1438,7 @@ class ExportManager:
         except ImportError:
             raise ImportError("openpyxl is required for Excel export. Install with: pip install openpyxl")
 
-        output_dir = config['output_dir']
+        output_dir = self._category_output_dir(config, 'workbooks')
         template = config['filename_template']
 
         filename = self._format_filename(template, name, '.xlsx')
@@ -1335,7 +1462,7 @@ class ExportManager:
         # Sheet 3: Percentiles
         if config.get('percentiles', True):
             ws_percentiles = wb.create_sheet('Percentiles')
-            self._write_excel_percentiles(ws_percentiles, dataset)
+            self._write_excel_percentiles(ws_percentiles, dataset, config)
 
         # Sheet 4: K-Values
         if config.get('k_values', True) and results:
@@ -1358,7 +1485,7 @@ class ExportManager:
         except ImportError:
             raise ImportError("openpyxl is required for Excel export. Install with: pip install openpyxl")
 
-        output_dir = config['output_dir']
+        output_dir = self._category_output_dir(config, 'workbooks')
         template = config['filename_template']
 
         filename = self._format_filename(template, 'combined_all_datasets', '.xlsx')
@@ -1395,7 +1522,7 @@ class ExportManager:
         except ImportError:
             raise ImportError("openpyxl is required for Excel export. Install with: pip install openpyxl")
 
-        output_dir = config['output_dir']
+        output_dir = self._category_output_dir(config, 'workbooks')
         template = config['filename_template']
 
         filename = self._format_filename(template, 'method_comparison', '.xlsx')
@@ -1557,7 +1684,7 @@ class ExportManager:
         ws.column_dimensions['A'].width = 20
         ws.column_dimensions['B'].width = 20
 
-    def _write_excel_percentiles(self, ws, dataset: GrainSizeData):
+    def _write_excel_percentiles(self, ws, dataset: GrainSizeData, config: Dict):
         """Write percentiles sheet"""
         from openpyxl.styles import Font
 
@@ -1567,18 +1694,9 @@ class ExportManager:
         ws['A1'].font = Font(bold=True)
         ws['B1'].font = Font(bold=True)
 
-        # Data
-        percentiles = [
-            ('D5', dataset._interpolate_grain_size(5) if hasattr(dataset, '_interpolate_grain_size') else None),
-            ('D10', dataset.get_d10() if hasattr(dataset, 'get_d10') else None),
-            ('D20', dataset.get_d20() if hasattr(dataset, 'get_d20') else None),
-            ('D30', dataset.get_d30() if hasattr(dataset, 'get_d30') else None),
-            ('D50', dataset.get_d50() if hasattr(dataset, 'get_d50') else None),
-            ('D60', dataset.get_d60() if hasattr(dataset, 'get_d60') else None),
-        ]
-
         row = 2
-        for name, value in percentiles:
+        for _key, name, percentile_num in self._selected_percentile_specs(config):
+            value = self._percentile_value(dataset, percentile_num)
             if value is not None:
                 ws[f'A{row}'] = name
                 ws[f'B{row}'] = value
@@ -1592,23 +1710,40 @@ class ExportManager:
         from openpyxl.styles import Font
 
         # Header
-        headers = ['Method', 'K (m/s)', 'K (cm/s)', 'K (m/d)', 'Status']
+        unit_specs = self._get_enabled_unit_specs(config)
+        filtered_results = self._filter_results(results, config)
+        headers = ['Method']
+        headers.extend(unit_label for _, unit_label, _, _, _, _ in unit_specs)
+        headers.append('Status')
+        if config.get('validation', False):
+            headers.append('Status Message')
+        if config.get('formulas', False):
+            headers.append('Formula')
         for col, header in enumerate(headers, start=1):
             cell = ws.cell(row=1, column=col)
             cell.value = header
             cell.font = Font(bold=True)
 
         # Data
-        for row, result in enumerate(results, start=2):
-            if result.k_value is not None:
-                ws.cell(row=row, column=1).value = result.method_name
-                ws.cell(row=row, column=2).value = result.k_value
-                ws.cell(row=row, column=3).value = result.k_value * 100
-                ws.cell(row=row, column=4).value = result.k_value * 86400
-                ws.cell(row=row, column=5).value = result.status.value if hasattr(result.status, 'value') else str(result.status)
+        row = 2
+        for result in filtered_results:
+            col = 1
+            ws.cell(row=row, column=col).value = result.method_name
+            col += 1
+            for _unit_key, _unit_label, _suffix, _json_key, multiplier, _fmt in unit_specs:
+                ws.cell(row=row, column=col).value = result.k_value * multiplier
+                col += 1
+            ws.cell(row=row, column=col).value = result.status.value if hasattr(result.status, 'value') else str(result.status)
+            col += 1
+            if config.get('validation', False):
+                ws.cell(row=row, column=col).value = result.status_message
+                col += 1
+            if config.get('formulas', False):
+                ws.cell(row=row, column=col).value = result.formula_used
+            row += 1
 
         # Auto-size
-        for col in range(1, 6):
+        for col in range(1, len(headers) + 1):
             ws.column_dimensions[chr(64 + col)].width = 18
 
     def _write_excel_statistics(self, ws, results: List[KCalculationResult]):
@@ -1796,7 +1931,7 @@ class ExportManager:
     def _export_json(self, name: str, dataset: GrainSizeData,
                     results: List[KCalculationResult], config: Dict):
         """Export dataset to JSON format"""
-        output_dir = config['output_dir']
+        output_dir = self._category_output_dir(config, 'data', 'json')
         template = config['filename_template']
 
         filename = self._format_filename(template, name, '.json')
@@ -1938,13 +2073,8 @@ class ExportManager:
             ws[f'A{row}'].font = Font(bold=True, size=12)
             row += 1
 
-            percentiles = {
-                'D10': dataset.get_d10() if hasattr(dataset, 'get_d10') else None,
-                'D50': dataset.get_d50() if hasattr(dataset, 'get_d50') else None,
-                'D60': dataset.get_d60() if hasattr(dataset, 'get_d60') else None,
-            }
-
-            for percentile_name, value in percentiles.items():
+            for _key, percentile_name, percentile_num in self._selected_percentile_specs(config):
+                value = self._percentile_value(dataset, percentile_num)
                 if value is not None:
                     ws[f'A{row}'] = f'{percentile_name}:'
                     ws[f'B{row}'] = f'{value:.4f} mm'
@@ -1991,8 +2121,8 @@ class ExportManager:
             ws[f'A{row}'] = 'Gravel %:'
             ws[f'B{row}'] = _cls.fractions.gravel_pct
 
-        stats_values = self._calculate_statistics(results, config)
-        selected_stats = self._get_selected_stat_specs(config)
+        stats_values = self._calculate_statistics(results, config) if config.get('statistics', True) else {}
+        selected_stats = self._get_selected_stat_specs(config) if config.get('statistics', True) else []
         if stats_values and selected_stats:
             row += 2
             ws[f'A{row}'] = 'K-Value Statistics'
@@ -2029,7 +2159,7 @@ class ExportManager:
 
         unit_specs = self._get_enabled_unit_specs(config)
         stats_values = self._calculate_statistics(results, config)
-        selected_stats = self._get_selected_stat_specs(config)
+        selected_stats = self._get_selected_stat_specs(config) if config.get('statistics', True) else []
 
         if not stats_values or not selected_stats:
             return
@@ -2079,13 +2209,15 @@ class ExportManager:
         ws['A1'].font = Font(bold=True)
         col = 2
         primary_unit = self._get_primary_unit_spec(config)
-        selected_stats = self._get_selected_stat_specs(config)
+        k_values_enabled = config.get('k_values', True)
+        selected_stats = self._get_selected_stat_specs(config) if config.get('statistics', True) else []
 
         all_methods = set()
-        for _, _, results in datasets:
-            for result in self._filter_results(results, config):
-                if result.k_value is not None:
-                    all_methods.add(result.method_name)
+        if k_values_enabled:
+            for _, _, results in datasets:
+                for result in self._filter_results(results, config):
+                    if result.k_value is not None:
+                        all_methods.add(result.method_name)
 
         ordered_methods = self._ordered_method_names(all_methods)
         for method in ordered_methods:
@@ -2103,9 +2235,10 @@ class ExportManager:
             ws.cell(row=row, column=1).value = name
 
             method_values = {}
-            for result in self._filter_results(results, config):
-                if result.k_value is not None:
-                    method_values[result.method_name] = result.k_value
+            if k_values_enabled:
+                for result in self._filter_results(results, config):
+                    if result.k_value is not None:
+                        method_values[result.method_name] = result.k_value
 
             col = 2
             for method in ordered_methods:
@@ -2113,7 +2246,7 @@ class ExportManager:
                     ws.cell(row=row, column=col).value = method_values[method]
                 col += 1
 
-            stats_values = self._calculate_statistics(results, config)
+            stats_values = self._calculate_statistics(results, config) if selected_stats else {}
             for _, _, _, value_key in selected_stats:
                 if value_key == 'valid_count':
                     ws.cell(row=row, column=col).value = stats_values.get('valid_count')
@@ -2126,12 +2259,12 @@ class ExportManager:
     def _export_json(self, name: str, dataset: GrainSizeData,
                     results: List[KCalculationResult], config: Dict):
         """Export dataset to JSON format."""
-        output_dir = config['output_dir']
+        output_dir = self._category_output_dir(config, 'data', 'json')
         template = config['filename_template']
         unit_specs = self._get_enabled_unit_specs(config)
         filtered_results = self._filter_results(results, config)
-        selected_stats = self._get_selected_stat_specs(config)
-        stats_values = self._calculate_statistics(results, config)
+        selected_stats = self._get_selected_stat_specs(config) if config.get('statistics', True) else []
+        stats_values = self._calculate_statistics(results, config) if selected_stats else {}
 
         filename = self._format_filename(template, name, '.json')
         filepath = os.path.join(output_dir, filename)
@@ -2159,11 +2292,8 @@ class ExportManager:
 
         if config.get('percentiles', True):
             data['percentiles'] = {
-                'D10': dataset.get_d10() if hasattr(dataset, 'get_d10') else None,
-                'D20': dataset.get_d20() if hasattr(dataset, 'get_d20') else None,
-                'D30': dataset.get_d30() if hasattr(dataset, 'get_d30') else None,
-                'D50': dataset.get_d50() if hasattr(dataset, 'get_d50') else None,
-                'D60': dataset.get_d60() if hasattr(dataset, 'get_d60') else None,
+                label: self._percentile_value(dataset, percentile_num)
+                for _key, label, percentile_num in self._selected_percentile_specs(config)
             }
 
         if config.get('gradation', True):

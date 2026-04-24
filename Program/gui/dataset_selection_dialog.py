@@ -33,6 +33,12 @@ class DatasetSelectionDialog(FramelessDialogBase):
         self,
         dataset_tabs: List,
         currently_selected: Optional[List] = None,
+        *,
+        title: str = "Select Datasets for Comparison",
+        subtitle: str = "Choose which samples to include in the comparison view",
+        action_text: str = "Compare Selected",
+        action_icon: str = "fa6s.code-compare",
+        minimum_selection: int = 2,
         parent=None,
     ):
         super().__init__(parent, default_mode="auto")
@@ -40,8 +46,13 @@ class DatasetSelectionDialog(FramelessDialogBase):
         self.currently_selected = currently_selected or []
         self.selected_tabs: List = []
         self._rows: list[_DatasetRow] = []
+        self._title = title
+        self._subtitle = subtitle
+        self._action_text = action_text
+        self._action_icon = action_icon
+        self._minimum_selection = max(1, int(minimum_selection))
 
-        self.setWindowTitle("Select Datasets for Comparison")
+        self.setWindowTitle(self._title)
         self.setModal(True)
         self.resize(540, 500)
         self.setMinimumWidth(540)
@@ -62,8 +73,8 @@ class DatasetSelectionDialog(FramelessDialogBase):
         root.setSpacing(0)
 
         self._header_widget = make_dialog_header(
-            "Select Datasets for Comparison",
-            "Choose which samples to include in the comparison view",
+            self._title,
+            self._subtitle,
             fa_icon="fa6s.list-check",
             close_fn=self.reject,
         )
@@ -168,16 +179,16 @@ class DatasetSelectionDialog(FramelessDialogBase):
         # ── Footer ────────────────────────────────────────────────────────
         self._footer_widget = make_dialog_footer([
             ("Cancel", self.reject, "secondary"),
-            ("Compare Selected", self.accept, "primary"),
+            (self._action_text, self.accept, "primary"),
         ])
         btns = self._footer_widget.findChildren(QPushButton)
         self._compare_btn = next(
-            (b for b in btns if b.text() == "Compare Selected"),
+            (b for b in btns if b.text() == self._action_text),
             None,
         )
         if self._compare_btn:
             try:
-                self._compare_btn.setIcon(_icon("fa6s.code-compare", "#ffffff"))
+                self._compare_btn.setIcon(_icon(self._action_icon, "#ffffff"))
             except Exception:
                 pass
             self._compare_btn.setEnabled(False)
@@ -225,16 +236,17 @@ class DatasetSelectionDialog(FramelessDialogBase):
         count = len([row for row in self._rows if row.is_checked()])
         self._sel_count_badge.setText(f"{count} selected")
         if self._compare_btn:
-            self._compare_btn.setEnabled(count >= 2)
+            self._compare_btn.setEnabled(count >= self._minimum_selection)
 
     # ── Accept / reject ─────────────────────────────────────────────────────
 
     def accept(self):
         selected_rows = [row for row in self._rows if row.is_checked()]
-        if len(selected_rows) < 2:
+        if len(selected_rows) < self._minimum_selection:
+            noun = "dataset" if self._minimum_selection == 1 else "datasets"
             QMessageBox.warning(
                 self, "Invalid Selection",
-                "Please select at least 2 datasets to compare."
+                f"Please select at least {self._minimum_selection} {noun}."
             )
             return
         self.selected_tabs = [row.tab for row in selected_rows]

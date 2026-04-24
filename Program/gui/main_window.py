@@ -625,6 +625,7 @@ class MainWindow(FramelessMainWindowMixin, QMainWindow):
         # Page 3 — Export
         self.export_tab = ExportTab()
         self.export_tab.jump_to_dataset_requested.connect(self._on_export_dataset_requested)
+        self.export_tab.dataset_selection_requested.connect(self._on_export_selection_requested)
         self.content_stack.addWidget(self.export_tab)
 
         shell_splitter = QSplitter(Qt.Orientation.Horizontal)
@@ -1844,9 +1845,18 @@ class MainWindow(FramelessMainWindowMixin, QMainWindow):
     def _on_sidebar_selection_changed(self):
         """Push the current selected-tab subset to the comparison tab."""
         self._sync_comparison_dataset_state()
+        if hasattr(self, "export_tab"):
+            self.export_tab.set_dataset_selection_state(
+                self.dataset_tabs,
+                selected_tabs=self._get_selected_dataset_tabs(),
+            )
 
     def _on_comparison_selection_requested(self, file_paths: list[str]) -> None:
         """Apply comparison-dialog selections back onto the sidebar cards."""
+        self.control_panel.set_selected_paths(file_paths)
+
+    def _on_export_selection_requested(self, file_paths: list[str]) -> None:
+        """Apply export-dialog selections back onto the sidebar cards."""
         self.control_panel.set_selected_paths(file_paths)
 
     def _on_scheme_changed(self, scheme):
@@ -2334,6 +2344,8 @@ class MainWindow(FramelessMainWindowMixin, QMainWindow):
             datasets,
             plot_figures=plot_figures,
             plot_contexts=plot_contexts,
+            dataset_tabs=self.dataset_tabs,
+            selected_tabs=self._get_selected_dataset_tabs(),
         )
 
     def closeEvent(self, event):

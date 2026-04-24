@@ -30,7 +30,10 @@ from .sidebar_controls import (
     make_spin_row, make_toggle_row,
 )
 from .plot_renderers import apply_legend_aware_layout, build_legend_kwargs
-from .plot_text_options import PlotTextOptionsDialog
+from .plot_text_options import (
+    GlobalPlotStylingPlaceholderDialog,
+    PlotTextOptionsDialog,
+)
 from unit_conversions import HydraulicConductivityUnit, HydraulicConductivityConverter
 
 
@@ -204,6 +207,16 @@ class PlotWorkspace(QWidget):
         self._plot_text_btn = _pw_btn("", "Edit title and axis labels", "fa6s.pen-ruler")
         self._plot_text_btn.clicked.connect(self._open_plot_text_dialog)
         lay.addWidget(self._plot_text_btn)
+
+        self._global_plot_style_btn = _pw_btn(
+            "",
+            "Global plot styling (planned)",
+            "fa6s.brush",
+        )
+        self._global_plot_style_btn.clicked.connect(
+            self._open_global_plot_styling_placeholder
+        )
+        lay.addWidget(self._global_plot_style_btn)
 
         lay.addWidget(_pw_sep())
 
@@ -615,6 +628,11 @@ class PlotWorkspace(QWidget):
             return
         self.plot_widget.plot_text_options = dialog.options()
         self.refresh_plot()
+
+    def _open_global_plot_styling_placeholder(self) -> None:
+        """Show placeholder for a future cross-dataset styling workflow."""
+        dialog = GlobalPlotStylingPlaceholderDialog(self)
+        dialog.exec()
 
     def _effective_style(self) -> PlotStyle:
         """Style currently driving the plot — custom override if any, else the preset."""

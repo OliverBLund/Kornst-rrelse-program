@@ -8,7 +8,8 @@ from PyQt6.QtWidgets import (QDialog, QVBoxLayout, QHBoxLayout, QLabel,
                             QDoubleSpinBox, QTextEdit, QTabWidget, QWidget,
                             QMessageBox, QCheckBox, QListWidget, QListWidgetItem,
                             QScrollArea, QSplitter, QFrame, QSizePolicy,
-                            QAbstractScrollArea, QGridLayout, QHeaderView)
+                            QAbstractScrollArea, QGridLayout, QHeaderView,
+                            QStyledItemDelegate)
 from PyQt6.QtCore import Qt, QSize
 from PyQt6.QtGui import QFont, QColor, QBrush
 import csv
@@ -18,6 +19,18 @@ from data_loader import GrainSizeData
 from gui.dialog_chrome import make_dialog_header, make_dialog_footer
 from gui.theme import C, F, SZ, icon as _icon
 from qt_chrome.frameless_dialog_base import FramelessDialogBase
+
+
+class _PreviewColorDelegate(QStyledItemDelegate):
+    """Paint explicit cell backgrounds before Qt draws table text."""
+
+    def paint(self, painter, option, index):
+        bg = index.data(Qt.ItemDataRole.BackgroundRole)
+        if isinstance(bg, QBrush) and bg.style() != Qt.BrushStyle.NoBrush:
+            painter.save()
+            painter.fillRect(option.rect, bg)
+            painter.restore()
+        super().paint(painter, option, index)
 
 class ColumnMapperDialog(FramelessDialogBase):
     """Dialog for mapping CSV columns to grain size data"""
@@ -62,9 +75,19 @@ class ColumnMapperDialog(FramelessDialogBase):
         self.pathway_summary_label = None
         self.sheet_info_label = None
         self.preview_hint_label = None
+        self.preview_footer_status_label = None
         self._file_meta_label = None
+        self._file_mapping_status_label = None
+        self._file_header_label = None
+        self._footer_status_label = None
         self._mapping_splitter = None
         self._sheet_group = None
+        self._import_section = None
+        self._method_section = None
+        self._mapping_section = None
+        self._range_section = None
+        self._raw_section = None
+        self._sheet_section = None
         self.input_format_group = None
         self.selecting_mode = None
 
@@ -79,11 +102,11 @@ class ColumnMapperDialog(FramelessDialogBase):
 
         # Styling — body inherits global QSS; patch specifics here
         self.setStyleSheet(
-            f"QGroupBox {{ font-weight: 600; border: 1px solid {C.BORDER}; "
-            f"border-radius: 6px; margin-top: 8px; padding-top: 10px; "
-            f"background: {C.BG}; font-size: {F.SZ_MD}pt; }}"
-            f"QGroupBox::title {{ subcontrol-origin: margin; left: 8px; "
-            f"padding: 0 4px; color: {C.TEXT_MID}; background: {C.BG}; }}"
+            f"QGroupBox {{ font-weight: 700; border: none; "
+            f"margin-top: 0px; padding-top: 0px; background: transparent; "
+            f"font-size: {F.SZ_SM}pt; color: {C.TEXT_MUTED}; }}"
+            f"QGroupBox::title {{ subcontrol-origin: margin; left: 0px; "
+            f"padding: 0; color: transparent; background: transparent; }}"
             f"QLabel {{ color: {C.TEXT}; font-size: {F.SZ_MD}pt; }}"
             f"QComboBox, QSpinBox, QDoubleSpinBox {{ padding: 4px 6px; "
             f"border: 1px solid {C.BORDER}; border-radius: {SZ.BORDER_RADIUS}px; "
@@ -228,23 +251,26 @@ class ColumnMapperDialog(FramelessDialogBase):
     def _style_mode_button(self, button: QPushButton, fa_name: str) -> None:
         button.setCheckable(True)
         button.setMinimumHeight(46)
-        button.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
+        button.setMinimumWidth(0)
+        button.setIconSize(QSize(14, 14))
+        button.setSizePolicy(QSizePolicy.Policy.Ignored, QSizePolicy.Policy.Fixed)
         try:
             button.setIcon(_icon(fa_name, C.TEXT_MUTED))
         except Exception:
             pass
         button.setStyleSheet(
             f"QPushButton {{ border: 1px solid {C.BORDER}; border-radius: 6px; "
+            f"border-left: 3px solid transparent; "
             f"background: rgba(255,255,255,.28); color: {C.TEXT_MID}; "
             f"padding: 7px 10px; text-align: left; font-weight: 600; font-size: {F.SZ_SM}pt; }}"
             f"QPushButton:hover {{ background: {C.BG_LOW}; border-color: {C.BORDER_DK}; color: {C.TEXT}; }}"
             f"QPushButton:checked {{ background: rgba(107,142,35,.08); "
-            f"border-color: rgba(107,142,35,.34); color: {C.TEXT}; }}"
+            f"border-color: rgba(107,142,35,.34); border-left: 3px solid {C.OLIVE}; color: {C.TEXT}; }}"
             f"QPushButton:disabled {{ background: rgba(255,255,255,.12); color: {C.TEXT_MUTED}; }}"
         )
 
     def _style_tool_button(self, button: QPushButton, fa_name: str = "", *, primary: bool = False) -> None:
-        button.setMinimumHeight(30)
+        button.setMinimumHeight(44)
         if fa_name:
             try:
                 button.setIcon(_icon(fa_name, "#ffffff" if primary else C.TEXT_MID))
@@ -268,6 +294,77 @@ class ColumnMapperDialog(FramelessDialogBase):
                 f"border-color: rgba(107,142,35,.34); color: {C.TEXT}; font-weight: 600; }}"
                 f"QPushButton:disabled {{ background: {C.BG_RAISED}; color: {C.TEXT_MUTED}; }}"
             )
+
+    def _style_preview_action_button(self, button: QPushButton, fa_name: str = "") -> None:
+        button.setFixedHeight(26)
+        button.setSizePolicy(QSizePolicy.Policy.Fixed, QSizePolicy.Policy.Fixed)
+        if fa_name:
+            try:
+                button.setIcon(_icon(fa_name, C.TEXT_MID, 12))
+            except Exception:
+                pass
+        button.setStyleSheet(
+            f"QPushButton {{ border: 1px solid {C.BORDER}; border-radius: {SZ.BORDER_RADIUS}px; "
+            f"background: {C.BG_RAISED}; color: {C.TEXT_MID}; padding: 0 9px; "
+            f"font-size: {F.SZ_SM}pt; }}"
+            f"QPushButton:hover {{ background: {C.BG_LOW}; border-color: {C.BORDER_DK}; color: {C.TEXT}; }}"
+        )
+
+    def _style_plain_group(self, group: QGroupBox) -> None:
+        group.setTitle("")
+        group.setStyleSheet(
+            "QGroupBox { border: none; margin: 0; padding: 0; background: transparent; }"
+            "QGroupBox::title { color: transparent; padding: 0; margin: 0; height: 0; }"
+            "QGroupBox QLabel { background: transparent; }"
+        )
+
+    def _make_inspector_section(self, title: str, fa_name: str, content: QWidget) -> QFrame:
+        if isinstance(content, QGroupBox):
+            self._style_plain_group(content)
+
+        card = QFrame()
+        card.setObjectName("columnMapperSection")
+        card.setStyleSheet(
+            f"QFrame#columnMapperSection {{ border: 1px solid {C.BORDER}; border-radius: 6px; "
+            f"background: rgba(255,255,255,.34); }}"
+        )
+        card_layout = QVBoxLayout(card)
+        card_layout.setContentsMargins(0, 0, 0, 0)
+        card_layout.setSpacing(0)
+
+        header = QWidget()
+        header.setObjectName("columnMapperSectionHeader")
+        header.setStyleSheet(
+            f"QWidget#columnMapperSectionHeader {{ background: {C.BG_RAISED}; "
+            f"border-bottom: 1px solid {C.BORDER}; border-top-left-radius: 6px; "
+            f"border-top-right-radius: 6px; }}"
+        )
+        header_layout = QHBoxLayout(header)
+        header_layout.setContentsMargins(12, 7, 12, 7)
+        header_layout.setSpacing(8)
+
+        icon_label = QLabel()
+        try:
+            icon_label.setPixmap(_icon(fa_name, C.OLIVE, 12).pixmap(12, 12))
+        except Exception:
+            icon_label.setText("")
+        icon_label.setStyleSheet("background: transparent; border: none;")
+        header_layout.addWidget(icon_label)
+
+        title_label = QLabel(title)
+        title_label.setFont(QFont(F.UI, F.SZ_SM, QFont.Weight.DemiBold))
+        title_label.setStyleSheet(f"color: {C.TEXT_MID}; background: transparent; border: none;")
+        header_layout.addWidget(title_label)
+        header_layout.addStretch(1)
+        card_layout.addWidget(header)
+
+        body = QWidget()
+        body_layout = QVBoxLayout(body)
+        body_layout.setContentsMargins(10, 9, 10, 10)
+        body_layout.setSpacing(0)
+        body_layout.addWidget(content)
+        card_layout.addWidget(body)
+        return card
 
     def setup_ui(self):
         """Setup the dialog UI"""
@@ -328,8 +425,8 @@ class ColumnMapperDialog(FramelessDialogBase):
             mode_button_row.setContentsMargins(0, 0, 0, 0)
             mode_button_row.setSpacing(8)
 
-            self.column_mode_btn = QPushButton("Columns")
-            self.range_mode_btn = QPushButton("Cell Ranges")
+            self.column_mode_btn = QPushButton("Columns\nclean table")
+            self.range_mode_btn = QPushButton("Cell Ranges\nirregular sheet")
 
             self.column_mode_btn.setCheckable(True)
             self.range_mode_btn.setCheckable(True)
@@ -340,12 +437,12 @@ class ColumnMapperDialog(FramelessDialogBase):
 
             mode_button_row.addWidget(self.column_mode_btn)
             mode_button_row.addWidget(self.range_mode_btn)
-            mode_button_row.addStretch()
             mode_layout.addLayout(mode_button_row)
 
             self.selection_mode_help_label = QLabel()
             self.selection_mode_help_label.setWordWrap(True)
             self.selection_mode_help_label.setStyleSheet("color: #666; font-style: italic; margin: 0 4px 2px 4px;")
+            self.selection_mode_help_label.hide()
             mode_layout.addWidget(self.selection_mode_help_label)
 
             # Added to the left inspector below.
@@ -393,8 +490,8 @@ class ColumnMapperDialog(FramelessDialogBase):
         input_format_layout.setContentsMargins(10, 8, 10, 10)
         input_format_layout.setSpacing(8)
 
-        self.calculated_data_btn = QPushButton("Processed Curve")
-        self.raw_sieve_btn = QPushButton("Raw Sieve")
+        self.calculated_data_btn = QPushButton("Processed Curve\nsize + passing")
+        self.raw_sieve_btn = QPushButton("Raw Sieve\nweighings")
 
         self.calculated_data_btn.setCheckable(True)
         self.raw_sieve_btn.setCheckable(True)
@@ -426,31 +523,108 @@ class ColumnMapperDialog(FramelessDialogBase):
         # Added to the left inspector below.
 
         self.pathway_summary_label = QLabel()
-        self.pathway_summary_label.setWordWrap(True)
+        self.pathway_summary_label.setWordWrap(False)
+        self.pathway_summary_label.setFixedHeight(32)
+        self.pathway_summary_label.setFont(QFont(F.MONO, F.SZ_XS))
         self.pathway_summary_label.setStyleSheet(
             f"QLabel {{ border: 1px solid {C.BORDER}; border-radius: {SZ.BORDER_RADIUS}px; "
-            f"background: {C.BG_RAISED}; color: {C.TEXT_MID}; padding: 8px 10px; }}"
+            f"background: {C.BG}; color: {C.TEXT_MID}; padding: 0 9px; }}"
         )
+        self.pathway_summary_label.hide()
         # Added to the left inspector below.
 
         # Preview pane
-        preview_group = QGroupBox("Data Preview")
+        preview_group = QWidget()
+        preview_group.setObjectName("columnMapperPreview")
         preview_group.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
+        preview_group.setStyleSheet(
+            f"QWidget#columnMapperPreview {{ background: {C.BG}; border-left: 1px solid {C.BORDER}; }}"
+            f"QWidget#columnMapperPreview QLabel {{ background: transparent; }}"
+        )
         preview_layout = QVBoxLayout(preview_group)
-        preview_layout.setContentsMargins(10, 8, 10, 10)
-        preview_layout.setSpacing(6)
+        preview_layout.setContentsMargins(0, 0, 0, 0)
+        preview_layout.setSpacing(0)
 
-        self.preview_hint_label = QLabel()
+        preview_head = QWidget()
+        preview_head.setObjectName("columnMapperPreviewHead")
+        preview_head.setFixedHeight(44)
+        preview_head.setStyleSheet(
+            f"QWidget#columnMapperPreviewHead {{ background: {C.BG}; border-bottom: 1px solid {C.BORDER}; }}"
+        )
+        preview_head_layout = QHBoxLayout(preview_head)
+        preview_head_layout.setContentsMargins(14, 0, 14, 0)
+        preview_head_layout.setSpacing(8)
+
+        preview_icon = QLabel()
+        try:
+            preview_icon.setPixmap(_icon("fa6s.table", C.EARTH, 13).pixmap(13, 13))
+        except Exception:
+            preview_icon.setText("")
+        preview_head_layout.addWidget(preview_icon)
+
+        preview_title = QLabel("Data Preview")
+        preview_title.setStyleSheet(f"font-weight: 700; color: {C.TEXT};")
+        preview_head_layout.addWidget(preview_title)
+        preview_head_layout.addStretch(1)
+
+        zoom_out_btn = QPushButton()
+        zoom_out_btn.setToolTip("Zoom out")
+        self._style_preview_action_button(zoom_out_btn, "fa6s.magnifying-glass-minus")
+        preview_head_layout.addWidget(zoom_out_btn)
+
+        zoom_in_btn = QPushButton()
+        zoom_in_btn.setToolTip("Zoom in")
+        self._style_preview_action_button(zoom_in_btn, "fa6s.magnifying-glass-plus")
+        preview_head_layout.addWidget(zoom_in_btn)
+
+        numeric_btn = QPushButton("Numeric")
+        numeric_btn.setToolTip("Highlight numeric cells")
+        self._style_preview_action_button(numeric_btn, "fa6s.filter")
+        preview_head_layout.addWidget(numeric_btn)
+
+        preview_layout.addWidget(preview_head)
+
+        self.preview_hint_label = QLabel(preview_group)
         self.preview_hint_label.setWordWrap(True)
-        self.preview_hint_label.setStyleSheet("color: #666; font-style: italic; margin: 0 2px 2px 2px;")
-        preview_layout.addWidget(self.preview_hint_label)
+        self.preview_hint_label.hide()
 
         self.preview_table = QTableWidget()
+        self.preview_table.setItemDelegate(_PreviewColorDelegate(self.preview_table))
         self.preview_table.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
         self.preview_table.setMinimumHeight(0)
         self.preview_table.setSizeAdjustPolicy(QAbstractScrollArea.SizeAdjustPolicy.AdjustIgnored)
         self.setup_preview_table()
         preview_layout.addWidget(self.preview_table, 1)
+
+        preview_foot = QWidget()
+        preview_foot.setObjectName("columnMapperPreviewFoot")
+        preview_foot.setFixedHeight(38)
+        preview_foot.setStyleSheet(
+            f"QWidget#columnMapperPreviewFoot {{ background: {C.BG}; border-top: 1px solid {C.BORDER}; }}"
+        )
+        preview_foot_layout = QHBoxLayout(preview_foot)
+        preview_foot_layout.setContentsMargins(14, 0, 14, 0)
+        preview_foot_layout.setSpacing(7)
+
+        for color, label_text in [
+            ("#6884ab", "Particle size"),
+            (C.OLIVE, "Percent passing"),
+            ("#9a6322", "Percent retained"),
+            ("#a88452", "Header row"),
+        ]:
+            dot = QLabel()
+            dot.setFixedSize(8, 8)
+            dot.setStyleSheet(f"background: {color}; border-radius: 4px;")
+            legend_label = QLabel(label_text)
+            legend_label.setStyleSheet(f"color: {C.TEXT_MUTED}; font-size: {F.SZ_SM}pt;")
+            preview_foot_layout.addWidget(dot)
+            preview_foot_layout.addWidget(legend_label)
+
+        preview_foot_layout.addStretch(1)
+        self.preview_footer_status_label = QLabel()
+        self.preview_footer_status_label.setStyleSheet(f"color: {C.TEXT_MUTED}; font-size: {F.SZ_SM}pt;")
+        preview_foot_layout.addWidget(self.preview_footer_status_label)
+        preview_layout.addWidget(preview_foot)
 
         # Smart selection controls (used in range mode)
         self.range_tools_group = QGroupBox("Selection Tools")
@@ -464,6 +638,7 @@ class ColumnMapperDialog(FramelessDialogBase):
         )
         range_note.setWordWrap(True)
         range_note.setStyleSheet("color: #666; font-style: italic; margin: 0 2px 2px 2px;")
+        range_note.hide()
         range_tools_layout.addWidget(range_note)
 
         self.range_controls = QWidget()
@@ -472,24 +647,24 @@ class ColumnMapperDialog(FramelessDialogBase):
         range_controls_layout.setHorizontalSpacing(8)
         range_controls_layout.setVerticalSpacing(8)
 
-        self.mark_size_range_btn = QPushButton("Mark Size Cells")
+        self.mark_size_range_btn = QPushButton("Size Cells\nmark selection")
         self.mark_size_range_btn.clicked.connect(lambda: self._mark_current_selection("size"))
         self._style_tool_button(self.mark_size_range_btn, "fa6s.ruler-horizontal")
 
-        self.mark_percent_range_btn = QPushButton("Mark Passing Cells")
+        self.mark_percent_range_btn = QPushButton("Passing Cells\nmark selection")
         self.mark_percent_range_btn.clicked.connect(lambda: self._mark_current_selection("percent"))
         self._style_tool_button(self.mark_percent_range_btn, "fa6s.percent")
 
-        self.clear_ranges_btn = QPushButton("Clear")
+        self.clear_ranges_btn = QPushButton("Clear\nreset selection")
         self.clear_ranges_btn.clicked.connect(self.clear_range_selection)
         self._style_tool_button(self.clear_ranges_btn, "fa6s.eraser")
 
-        self.smart_selection_btn = QPushButton("Smart Selection")
+        self.smart_selection_btn = QPushButton("Smart Selection\nlearn pattern")
         self.smart_selection_btn.setCheckable(True)
         self.smart_selection_btn.clicked.connect(self.toggle_smart_selection)
         self._style_tool_button(self.smart_selection_btn, "fa6s.wand-magic-sparkles")
 
-        self.batch_apply_btn = QPushButton("Apply Pattern to Batch")
+        self.batch_apply_btn = QPushButton("Apply Pattern\nbatch ready")
         self.batch_apply_btn.clicked.connect(self.apply_pattern_to_batch)
         self.batch_apply_btn.setEnabled(False)
         self._style_tool_button(self.batch_apply_btn, "fa6s.bolt", primary=True)
@@ -581,11 +756,9 @@ class ColumnMapperDialog(FramelessDialogBase):
         help_text.setStyleSheet("color: #666; font-style: italic; margin: 10px;")
         mapping_form.addRow(help_text)
         help_text.setText(
-            "Required: particle size and percent passing. Percent retained is optional and is "
-            "only used when passing values are unavailable. For Excel files, verify the sheet "
-            "and detected header row before importing."
+            "Percent retained is optional and unused while passing values are mapped."
         )
-        help_text.setStyleSheet("color: #666; font-style: italic; margin: 4px 6px 2px 6px;")
+        help_text.setStyleSheet(f"color: {C.TEXT_MUTED}; font-size: {F.SZ_SM}pt; margin: 4px 6px 2px 6px;")
 
         # Added to the left inspector below.
 
@@ -620,11 +793,9 @@ class ColumnMapperDialog(FramelessDialogBase):
         raw_sieve_help.setStyleSheet("color: #666; font-style: italic; margin: 10px;")
         raw_sieve_form.addRow(raw_sieve_help)
         raw_sieve_help.setText(
-            "Map the sieve size, empty sieve, and sieve + sample columns. The program derives "
-            "retained mass and cumulative percent passing automatically, and rows with non-positive "
-            "retained weight are skipped."
+            "The program derives retained mass and cumulative percent passing."
         )
-        raw_sieve_help.setStyleSheet("color: #666; font-style: italic; margin: 4px 6px 2px 6px;")
+        raw_sieve_help.setStyleSheet(f"color: {C.TEXT_MUTED}; font-size: {F.SZ_SM}pt; margin: 4px 6px 2px 6px;")
 
         self.raw_sieve_group.setVisible(False)
         # Added to the left inspector below.
@@ -633,15 +804,20 @@ class ColumnMapperDialog(FramelessDialogBase):
         controls_scroll = QScrollArea()
         controls_scroll.setWidgetResizable(True)
         controls_scroll.setFrameShape(QFrame.Shape.NoFrame)
-        controls_scroll.setStyleSheet("QScrollArea { background: transparent; border: none; }")
+        controls_scroll.setStyleSheet(
+            f"QScrollArea {{ background: {C.BG_RAISED}; border: none; }}"
+            f"QScrollArea > QWidget > QWidget {{ background: {C.BG_RAISED}; }}"
+        )
         controls_scroll.setSizeAdjustPolicy(QAbstractScrollArea.SizeAdjustPolicy.AdjustIgnored)
         controls_scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
         controls_scroll.setMinimumWidth(390)
+        controls_scroll.setMaximumWidth(430)
         controls_scroll.setSizePolicy(QSizePolicy.Policy.Preferred, QSizePolicy.Policy.Expanding)
 
         controls_container = QWidget()
         controls_container.setSizePolicy(QSizePolicy.Policy.Preferred, QSizePolicy.Policy.Maximum)
         controls_container.setMinimumWidth(0)
+        controls_container.setMaximumWidth(410)
         controls_container.setObjectName("columnMapperInspector")
         controls_container.setStyleSheet(
             f"QWidget#columnMapperInspector {{ background: {C.BG_RAISED}; }}"
@@ -650,15 +826,33 @@ class ColumnMapperDialog(FramelessDialogBase):
         controls_layout.setContentsMargins(12, 12, 12, 12)
         controls_layout.setSpacing(10)
         if self.input_format_group is not None:
-            controls_layout.addWidget(self.input_format_group)
+            self._import_section = self._make_inspector_section(
+                "Import Path", "fa6s.route", self.input_format_group
+            )
+            controls_layout.addWidget(self._import_section)
         if self.selection_mode_group is not None:
-            controls_layout.addWidget(self.selection_mode_group)
+            self._method_section = self._make_inspector_section(
+                "Mapping Method", "fa6s.location-crosshairs", self.selection_mode_group
+            )
+            controls_layout.addWidget(self._method_section)
         controls_layout.addWidget(self.pathway_summary_label)
-        controls_layout.addWidget(self.mapping_group)
-        controls_layout.addWidget(self.range_tools_group)
-        controls_layout.addWidget(self.raw_sieve_group)
+        self._mapping_section = self._make_inspector_section(
+            "Processed Curve Columns", "fa6s.list-check", self.mapping_group
+        )
+        self._range_section = self._make_inspector_section(
+            "Cell Range Selection", "fa6s.object-group", self.range_tools_group
+        )
+        self._raw_section = self._make_inspector_section(
+            "Raw Sieve Columns", "fa6s.scale-balanced", self.raw_sieve_group
+        )
+        controls_layout.addWidget(self._mapping_section)
+        controls_layout.addWidget(self._range_section)
+        controls_layout.addWidget(self._raw_section)
         if self._sheet_group is not None:
-            controls_layout.addWidget(self._sheet_group)
+            self._sheet_section = self._make_inspector_section(
+                "Sheets", "fa6s.file-excel", self._sheet_group
+            )
+            controls_layout.addWidget(self._sheet_section)
         controls_layout.addStretch()
         controls_scroll.setWidget(controls_container)
 
@@ -678,13 +872,23 @@ class ColumnMapperDialog(FramelessDialogBase):
 
         mapping_layout.addWidget(self._mapping_splitter, 1)
 
-        tab_widget.addTab(mapping_tab, "Mapping")
+        try:
+            tab_widget.addTab(mapping_tab, _icon("fa6s.link", C.TEXT_MUTED, 12), "Mapping")
+        except Exception:
+            tab_widget.addTab(mapping_tab, "Mapping")
 
         # Tab 2: Sample Parameters
         params_tab = QWidget()
         params_layout = QVBoxLayout(params_tab)
 
         params_group = QGroupBox("Sample Parameters")
+        params_group.setStyleSheet(
+            f"QGroupBox {{ font-weight: 600; border: 1px solid {C.BORDER}; "
+            f"border-radius: 6px; margin-top: 8px; padding-top: 10px; "
+            f"background: {C.BG}; font-size: {F.SZ_MD}pt; }}"
+            f"QGroupBox::title {{ subcontrol-origin: margin; left: 8px; "
+            f"padding: 0 4px; color: {C.TEXT_MID}; background: {C.BG}; }}"
+        )
         params_form = QFormLayout(params_group)
 
         self.temperature_spin = QDoubleSpinBox()
@@ -708,25 +912,37 @@ class ColumnMapperDialog(FramelessDialogBase):
         params_layout.addWidget(params_group)
         params_layout.addStretch()
 
-        tab_widget.addTab(params_tab, "Parameters")
+        try:
+            tab_widget.addTab(params_tab, _icon("fa6s.sliders", C.TEXT_MUTED, 12), "Parameters")
+        except Exception:
+            tab_widget.addTab(params_tab, "Parameters")
 
         layout.addWidget(tab_widget)
 
         # Footer (added to root, outside body_wrap so it sticks to bottom)
-        preview_btn_widget = QPushButton("Preview Results")
-        preview_btn_widget.setFixedHeight(28)
-        preview_btn_widget.setStyleSheet(
-            f"QPushButton {{ border: 1px solid {C.BORDER}; "
-            f"border-radius: {SZ.BORDER_RADIUS}px; background: {C.BG}; "
-            f"color: {C.TEXT_MID}; padding: 0 14px; font-size: {F.SZ_LG}pt; }}"
-            f"QPushButton:hover {{ background: {C.BG_RAISED}; border-color: {C.BORDER_DK}; }}"
-        )
-        preview_btn_widget.clicked.connect(self.preview_mapping)
+        footer_status = QWidget()
+        footer_status_layout = QHBoxLayout(footer_status)
+        footer_status_layout.setContentsMargins(0, 0, 0, 0)
+        footer_status_layout.setSpacing(7)
+
+        footer_status_icon = QLabel()
+        try:
+            footer_status_icon.setPixmap(_icon("fa6s.circle-check", C.OLIVE, 12).pixmap(12, 12))
+        except Exception:
+            footer_status_icon.setText("")
+        footer_status_icon.setStyleSheet("background: transparent;")
+        footer_status_layout.addWidget(footer_status_icon)
+
+        self._footer_status_label = QLabel()
+        self._footer_status_label.setFont(QFont(F.MONO, F.SZ_XS))
+        self._footer_status_label.setStyleSheet(f"color: {C.TEXT_MUTED}; background: transparent;")
+        footer_status_layout.addWidget(self._footer_status_label)
 
         footer = make_dialog_footer([
+            ("Preview Results", self.preview_mapping, "secondary"),
             ("Cancel", self.reject, "secondary"),
             ("Import", self.accept, "primary"),
-        ], left_widget=preview_btn_widget)
+        ], left_widget=footer_status)
         root.addWidget(footer)
 
         self.install_chrome_behavior(
@@ -752,10 +968,18 @@ class ColumnMapperDialog(FramelessDialogBase):
 
         if hasattr(self, 'mapping_group'):
             self.mapping_group.setVisible(not self.raw_sieve_mode and selection_mode == "column")
+        if self._mapping_section is not None:
+            self._mapping_section.setVisible(not self.raw_sieve_mode and selection_mode == "column")
         if hasattr(self, 'range_tools_group'):
             self.range_tools_group.setVisible(not self.raw_sieve_mode and selection_mode == "range")
+        if self._range_section is not None:
+            self._range_section.setVisible(not self.raw_sieve_mode and selection_mode == "range")
         if hasattr(self, 'raw_sieve_group'):
             self.raw_sieve_group.setVisible(self.raw_sieve_mode)
+        if self._raw_section is not None:
+            self._raw_section.setVisible(self.raw_sieve_mode)
+        if self._method_section is not None:
+            self._method_section.setEnabled(not self.raw_sieve_mode)
         if self._mapping_splitter is not None:
             if self.cell_range_mode:
                 self._mapping_splitter.setSizes([390, 730])
@@ -812,6 +1036,21 @@ class ColumnMapperDialog(FramelessDialogBase):
         layout.addWidget(self._file_meta_label)
         layout.addStretch(1)
 
+        chip_style = (
+            f"QLabel {{ border: 1px solid {C.BORDER}; border-radius: 10px; "
+            f"background: rgba(255,255,255,.35); color: {C.TEXT_MID}; "
+            f"padding: 3px 8px; font-size: {F.SZ_XS}pt; }}"
+        )
+        self._file_mapping_status_label = QLabel()
+        self._file_mapping_status_label.setFont(QFont(F.MONO, F.SZ_XS))
+        self._file_mapping_status_label.setStyleSheet(chip_style)
+        layout.addWidget(self._file_mapping_status_label)
+
+        self._file_header_label = QLabel()
+        self._file_header_label.setFont(QFont(F.MONO, F.SZ_XS))
+        self._file_header_label.setStyleSheet(chip_style)
+        layout.addWidget(self._file_header_label)
+
         auto_detect_btn = QPushButton("Auto-detect")
         auto_detect_btn.setFixedHeight(24)
         auto_detect_btn.setStyleSheet(
@@ -838,6 +1077,46 @@ class ColumnMapperDialog(FramelessDialogBase):
         if self.current_sheet:
             meta_parts.append(self.current_sheet)
         self._file_meta_label.setText(" - ".join(meta_parts))
+
+        if self._file_header_label is not None:
+            self._file_header_label.setText(f"Header row {self.header_row}")
+
+        if self._file_mapping_status_label is None:
+            return
+
+        if self.raw_sieve_mode:
+            combos = [
+                getattr(self, "raw_size_combo", None),
+                getattr(self, "empty_sieve_combo", None),
+                getattr(self, "sieve_sample_combo", None),
+            ]
+            required_total = 3
+            mapped_count = sum(1 for combo in combos if combo is not None and combo.currentIndex() > 0)
+        else:
+            size_mapped = getattr(self, "size_combo", None) is not None and self.size_combo.currentIndex() > 0
+            passing_mapped = (
+                getattr(self, "passing_combo", None) is not None and self.passing_combo.currentIndex() > 0
+            )
+            retained_mapped = (
+                getattr(self, "retained_combo", None) is not None and self.retained_combo.currentIndex() > 0
+            )
+            required_total = 2
+            mapped_count = int(size_mapped) + int(passing_mapped or retained_mapped)
+
+        if mapped_count >= required_total:
+            self._file_mapping_status_label.setText(f"{required_total} required mapped")
+            self._file_mapping_status_label.setStyleSheet(
+                f"QLabel {{ border: 1px solid rgba(107,142,35,.28); border-radius: 10px; "
+                f"background: rgba(107,142,35,.08); color: {C.OLIVE}; padding: 3px 8px; "
+                f"font-size: {F.SZ_XS}pt; }}"
+            )
+        else:
+            self._file_mapping_status_label.setText(f"{mapped_count} / {required_total} required")
+            self._file_mapping_status_label.setStyleSheet(
+                f"QLabel {{ border: 1px solid rgba(154,99,34,.28); border-radius: 10px; "
+                f"background: rgba(154,99,34,.07); color: #9a6322; padding: 3px 8px; "
+                f"font-size: {F.SZ_XS}pt; }}"
+            )
 
     def _rerun_auto_detection(self):
         self.auto_detect_columns()
@@ -877,33 +1156,103 @@ class ColumnMapperDialog(FramelessDialogBase):
 
         self.selection_mode_help_label.setText(text)
 
+    def _mapped_preview_roles(self) -> Dict[int, str]:
+        role_by_column: Dict[int, str] = {}
+        if not hasattr(self, "preview_table") or self.preview_table.columnCount() == 0:
+            return role_by_column
+
+        if self.raw_sieve_mode:
+            combos = [
+                (getattr(self, 'raw_size_combo', None), "size"),
+                (getattr(self, 'empty_sieve_combo', None), "retained"),
+                (getattr(self, 'sieve_sample_combo', None), "passing"),
+            ]
+        elif not self.cell_range_mode:
+            combos = [
+                (getattr(self, 'size_combo', None), "size"),
+                (getattr(self, 'passing_combo', None), "passing"),
+                (getattr(self, 'retained_combo', None), "retained"),
+            ]
+        else:
+            combos = []
+
+        for combo, role in combos:
+            if combo is not None and combo.currentIndex() > 0:
+                role_by_column[combo.currentIndex() - 1] = role
+        return role_by_column
+
+    def _used_preview_rows(self, role_by_column: Optional[Dict[int, str]] = None) -> set[int]:
+        if not hasattr(self, "preview_table"):
+            return set()
+
+        if self.cell_range_mode and not self.raw_sieve_mode:
+            return {row for row, _ in self.selected_size_range} | {row for row, _ in self.selected_percent_range}
+
+        role_by_column = self._mapped_preview_roles() if role_by_column is None else role_by_column
+        cols_by_role = {role: col for col, role in role_by_column.items()}
+        size_col = cols_by_role.get("size")
+        passing_col = cols_by_role.get("passing")
+        retained_col = cols_by_role.get("retained")
+
+        if size_col is None:
+            return set()
+        if self.raw_sieve_mode and (passing_col is None or retained_col is None):
+            return set()
+        if not self.raw_sieve_mode and passing_col is None and retained_col is None:
+            return set()
+
+        def _numeric_at(row: int, col: Optional[int]) -> bool:
+            if col is None:
+                return False
+            item = self.preview_table.item(row, col)
+            return item is not None and self.is_numeric(item.text().strip())
+
+        used_rows: set[int] = set()
+        for row in range(self.preview_table.rowCount()):
+            if row <= self.header_row:
+                continue
+            if not _numeric_at(row, size_col):
+                continue
+            if self.raw_sieve_mode:
+                if _numeric_at(row, retained_col) and _numeric_at(row, passing_col):
+                    used_rows.add(row)
+            elif _numeric_at(row, passing_col) or _numeric_at(row, retained_col):
+                used_rows.add(row)
+        return used_rows
+
     def _update_pathway_summary(self):
         if self.pathway_summary_label is None:
             return
 
         file_ext = os.path.splitext(self.file_path)[1].lower()
         excel_multi_sheet = file_ext in ['.xlsx', '.xls'] and len(self.excel_sheets) > 1
+        used_rows_count = len(self._used_preview_rows())
 
         if self.raw_sieve_mode:
-            text = (
-                "Raw Sieve Weighings -> Column Mapping. Sieve size + two weight columns."
-            )
+            text = "Raw Sieve -> Columns"
+            count_text = f"{used_rows_count} rows used" if used_rows_count else "3 / 3"
+            footer_text = "Ready to derive percent passing from raw sieve weighings."
             if excel_multi_sheet:
-                text += " Checked sheets reuse mapping."
+                text += " - multi-sheet"
         elif self.calculated_selection_mode == "range":
-            text = (
-                "Processed Curve Data -> Cell Range Selection. Irregular Excel layout."
-            )
+            text = "Processed Curve -> Cell Ranges"
+            selected_cells = len(self.selected_size_range) + len(self.selected_percent_range)
+            count_text = f"{selected_cells} cells used" if selected_cells else "0 cells used"
+            footer_text = "Ready to import selected size and percent-passing cells."
             if file_ext in ['.xlsx', '.xls']:
-                text += " One sheet at a time."
+                text += " - one sheet"
         else:
-            text = (
-                "Processed Curve Data -> Column Mapping. Size + passing/retained columns."
-            )
+            text = "Processed Curve -> Columns"
+            count_text = f"{used_rows_count} rows used" if used_rows_count else "2 / 2"
+            footer_text = "Ready to import processed curve data from mapped columns."
             if excel_multi_sheet:
-                text += " Checked sheets reuse mapping."
+                text += " - multi-sheet"
 
         self.pathway_summary_label.setText(text)
+        if self._footer_status_label is not None:
+            self._footer_status_label.setText(footer_text)
+        if self.preview_footer_status_label is not None:
+            self.preview_footer_status_label.setText(count_text)
 
     def _update_sheet_selection_guidance(self):
         if self.sheet_info_label is None:
@@ -1000,7 +1349,8 @@ class ColumnMapperDialog(FramelessDialogBase):
         self.preview_table.resizeColumnsToContents()
         self.preview_table.horizontalHeader().setSectionResizeMode(QHeaderView.ResizeMode.Interactive)
         self.preview_table.horizontalHeader().setMinimumSectionSize(110)
-        self.preview_table.verticalHeader().setDefaultSectionSize(28)
+        self.preview_table.horizontalHeader().setFixedHeight(32)
+        self.preview_table.verticalHeader().setDefaultSectionSize(31)
         self._update_preview_header_highlights()
         self._update_file_strip()
 
@@ -1015,16 +1365,20 @@ class ColumnMapperDialog(FramelessDialogBase):
         max_cols = max(len(row) for row in sample_data)
         table.setRowCount(len(sample_data))
         table.setColumnCount(max_cols)
-        table.setAlternatingRowColors(True)
+        table.setAlternatingRowColors(False)
         table.setShowGrid(False)
         table.setFrameShape(QFrame.Shape.NoFrame)
         table.setWordWrap(False)
-        table.verticalHeader().setVisible(False)
+        table.verticalHeader().setVisible(True)
+        table.verticalHeader().setFixedWidth(44)
+        table.verticalHeader().setDefaultAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
         table.setStyleSheet(
-            f"QTableWidget {{ background: {C.BG}; border: none; alternate-background-color: rgba(255,255,255,.40); "
+            f"QTableWidget {{ background: rgba(255,255,255,.20); border: none; alternate-background-color: rgba(255,255,255,.40); "
             f"selection-background-color: rgba(107,142,35,.10); selection-color: {C.TEXT}; }}"
-            f"QHeaderView::section {{ background: {C.BG_LOW}; border: none; border-bottom: 1px solid {C.BORDER}; "
+            f"QHeaderView::section:horizontal {{ border: none; border-bottom: 1px solid {C.BORDER}; "
             f"padding: 6px 8px; color: {C.TEXT_MID}; font-size: {F.SZ_SM}pt; font-weight: 600; }}"
+            f"QHeaderView::section:vertical {{ background: {C.BG}; border: none; border-right: 1px solid {C.BORDER}; "
+            f"padding: 0 8px; color: {C.TEXT_MUTED}; font-size: {F.SZ_SM}pt; }}"
             f"QTableWidget::item {{ padding: 4px 8px; border-bottom: 1px solid rgba(0,0,0,.04); }}"
         )
 
@@ -1033,6 +1387,7 @@ class ColumnMapperDialog(FramelessDialogBase):
         else:
             derived_headers = headers + [f"Col {i+1}" for i in range(len(headers), max_cols)]
             table.setHorizontalHeaderLabels(derived_headers)
+        table.setVerticalHeaderLabels([str(i + 1) for i in range(len(sample_data))])
 
         for i, row in enumerate(sample_data):
             for j, cell in enumerate(row):
@@ -1070,44 +1425,96 @@ class ColumnMapperDialog(FramelessDialogBase):
                 self.passing_combo.setStyleSheet(f"QComboBox {{ {self.required_empty_style} padding: 5px; border-radius: 3px; }}")
 
         self._update_preview_header_highlights()
+        self._update_file_strip()
 
     def _update_preview_header_highlights(self):
         if not hasattr(self, 'preview_table') or self.preview_table.columnCount() == 0:
             return
 
-        selected_columns = set()
-        if self.raw_sieve_mode:
-            for combo in [
-                getattr(self, 'raw_size_combo', None),
-                getattr(self, 'empty_sieve_combo', None),
-                getattr(self, 'sieve_sample_combo', None),
-            ]:
-                if combo is not None and combo.currentIndex() > 0:
-                    selected_columns.add(combo.currentIndex() - 1)
-        elif not self.cell_range_mode:
-            for combo in [
-                getattr(self, 'size_combo', None),
-                getattr(self, 'passing_combo', None),
-                getattr(self, 'retained_combo', None),
-            ]:
-                if combo is not None and combo.currentIndex() > 0:
-                    selected_columns.add(combo.currentIndex() - 1)
+        role_by_column = self._mapped_preview_roles()
+        used_rows = self._used_preview_rows(role_by_column)
+
+        role_colors = {
+            "size": ("#486d95", "#c3d7ea", "#e1ebf5"),
+            "passing": (C.OLIVE, "#cfe3b4", "#e6f0d7"),
+            "retained": ("#9a6322", "#e1c5a3", "#f0dfca"),
+        }
 
         for col in range(self.preview_table.columnCount()):
             item = self.preview_table.horizontalHeaderItem(col)
             if item is None:
                 continue
 
+            role = role_by_column.get(col)
             font = item.font()
-            font.setBold(col in selected_columns)
+            font.setBold(role is not None)
             item.setFont(font)
 
-            if col in selected_columns:
-                item.setForeground(QBrush(QColor(C.OLIVE)))
-                item.setBackground(QBrush(QColor(C.BG_RAISED)))
+            if role is not None:
+                accent, fill, _ = role_colors[role]
+                item.setForeground(QBrush(QColor(accent)))
+                item.setBackground(QBrush(QColor(fill)))
             else:
                 item.setForeground(QBrush(QColor(C.TEXT_MID)))
                 item.setBackground(QBrush(QColor(C.BG_LOW)))
+
+        for row in range(self.preview_table.rowCount()):
+            header_item = self.preview_table.verticalHeaderItem(row)
+            if header_item is None:
+                header_item = QTableWidgetItem(str(row + 1))
+                self.preview_table.setVerticalHeaderItem(row, header_item)
+
+            font = header_item.font()
+            if row in used_rows:
+                header_item.setBackground(QBrush(QColor("#dce9cf")))
+                header_item.setForeground(QBrush(QColor(C.OLIVE_DK)))
+                font.setBold(True)
+            elif row == self.header_row:
+                header_item.setBackground(QBrush(QColor("#eadfc9")))
+                header_item.setForeground(QBrush(QColor("#8b5f21")))
+                font.setBold(True)
+            else:
+                header_item.setBackground(QBrush(QColor(C.BG)))
+                header_item.setForeground(QBrush(QColor(C.TEXT_MUTED)))
+                font.setBold(False)
+            header_item.setFont(font)
+
+        if self.cell_range_mode:
+            return
+
+        for row in range(self.preview_table.rowCount()):
+            for col in range(self.preview_table.columnCount()):
+                cell = self.preview_table.item(row, col)
+                if cell is None:
+                    continue
+                font = cell.font()
+                font.setWeight(QFont.Weight.Normal)
+                cell.setFont(font)
+                base = QColor("#edf3e6") if self.is_numeric(cell.text().strip()) else QColor("#ffffff")
+                role = role_by_column.get(col)
+                if row == self.header_row and role is not None:
+                    cell.setBackground(QColor("#eadfc9"))
+                    cell.setForeground(QBrush(QColor("#5d4e37")))
+                    cell.setToolTip(f"Header used to identify the {role.replace('_', ' ')} column")
+                elif role is not None and row in used_rows:
+                    accent, fill, _ = role_colors[role]
+                    cell.setBackground(QColor(fill))
+                    cell.setForeground(QBrush(QColor("#22301f")))
+                    font = cell.font()
+                    font.setWeight(QFont.Weight.Medium)
+                    cell.setFont(font)
+                    cell.setToolTip(f"Imported as {role.replace('_', ' ')} data")
+                elif role is not None:
+                    _, _, soft_fill = role_colors[role]
+                    cell.setBackground(QColor(soft_fill))
+                    cell.setForeground(QBrush(QColor(C.TEXT_MID)))
+                    cell.setToolTip("Mapped column, but this row is not imported")
+                else:
+                    cell.setBackground(base)
+                    cell.setForeground(QBrush(QColor(C.TEXT)))
+                    cell.setToolTip("Numeric preview cell" if self.is_numeric(cell.text().strip()) else "")
+        self.preview_table.viewport().update()
+        self._update_pathway_summary()
 
     def auto_detect_columns(self):
         """Try to automatically detect column types"""
@@ -1569,6 +1976,8 @@ class ColumnMapperDialog(FramelessDialogBase):
                 else:
                     headers = self.headers + [f"Col {i+1}" for i in range(len(self.headers), self.preview_table.columnCount())]
                     self.preview_table.setHorizontalHeaderLabels(headers)
+                self.validate_required_fields()
+                self._update_file_strip()
 
         except Exception as e:
             QMessageBox.warning(self, "Header Update Error", f"Could not update headers:\n{str(e)}")
@@ -1622,6 +2031,12 @@ class ColumnMapperDialog(FramelessDialogBase):
             self.size_range_count_label.setText(f"{len(self.selected_size_range)} size cells")
         if hasattr(self, "percent_range_count_label"):
             self.percent_range_count_label.setText(f"{len(self.selected_percent_range)} passing cells")
+        if self.cell_range_mode and self.preview_footer_status_label is not None:
+            self.preview_footer_status_label.setText(
+                f"{len(self.selected_size_range) + len(self.selected_percent_range)} cells"
+            )
+        if self.cell_range_mode and self.pathway_summary_label is not None:
+            self._update_pathway_summary()
 
     def extract_data_from_raw_sieve(self, sheet_name: Optional[str] = None) -> Tuple[List[float], List[float]]:
         """
@@ -1818,13 +2233,16 @@ class ColumnMapperDialog(FramelessDialogBase):
             for row, col in self.selected_size_range:
                 item = self.preview_table.item(row, col)
                 if item:
-                    item.setBackground(QColor("#dde8f4"))
+                    item.setBackground(QColor("#c3d7ea"))
+                    item.setToolTip("Imported as particle size data")
 
             for row, col in self.selected_percent_range:
                 item = self.preview_table.item(row, col)
                 if item:
-                    item.setBackground(QColor("#e1ecd2"))
+                    item.setBackground(QColor("#cfe3b4"))
+                    item.setToolTip("Imported as percent passing data")
         self._update_range_summary()
+        self._update_pathway_summary()
 
     def analyze_smart_selection(self, selected_items):
         """Analyze the smart selection and classify cells automatically"""
@@ -1921,18 +2339,19 @@ class ColumnMapperDialog(FramelessDialogBase):
         for row, col, _ in self.selected_headers:
             item = self.preview_table.item(row, col)
             if item:
-                item.setBackground(QColor("#f1e3b8"))
+                item.setBackground(QColor("#eadfc9"))
 
         for row, col in self.selected_size_range:
-            item = self.preview_table.item(row, col)
-            if item:
-                item.setBackground(QColor("#dde8f4"))
+                item = self.preview_table.item(row, col)
+                if item:
+                    item.setBackground(QColor("#c3d7ea"))
 
         for row, col in self.selected_percent_range:
             item = self.preview_table.item(row, col)
             if item:
-                item.setBackground(QColor("#e1ecd2"))
+                item.setBackground(QColor("#cfe3b4"))
         self._update_range_summary()
+        self._update_pathway_summary()
 
     def learn_pattern_from_selection(self):
         """Learn a pattern from the current cell range selection for batch processing"""

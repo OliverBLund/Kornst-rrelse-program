@@ -51,10 +51,10 @@ class _StratigraphyBackdrop(QWidget):
     """Lightweight animated backdrop that echoes the splash screen sediment bands."""
 
     _BAND_COLORS = (
-        QColor(215, 191, 142),  # sand
-        QColor(189, 157, 121),  # silt
-        QColor(153, 163, 171),  # clay
-        QColor(116, 130, 88),   # olive
+        QColor(214, 190, 138),  # warm sand
+        QColor(191, 166, 130),  # silt tan
+        QColor(167, 148, 128),  # gravel taupe
+        QColor(136, 114, 88),   # earth brown
     )
     _AMPLITUDES = (2.6, 4.0, 3.2, 1.8, 0.8)
     _FREQUENCIES = (0.92, 0.74, 1.08, 0.86, 0.60)

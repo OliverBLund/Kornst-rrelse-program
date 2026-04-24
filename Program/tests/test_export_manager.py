@@ -8,13 +8,14 @@ import os
 import sys
 import tempfile
 import unittest
-from unittest.mock import patch
+from unittest.mock import Mock, patch
 
 os.environ.setdefault('QT_QPA_PLATFORM', 'offscreen')
 sys.path.insert(0, 'Program')
 
 from data_loader import GrainSizeData
-from PyQt6.QtWidgets import QApplication
+from matplotlib.figure import Figure
+from PyQt6.QtWidgets import QApplication, QPushButton, QTableWidget
 from gui.export_tab import ExportTab
 from gui.export_manager import ExportManager
 from gui.plot_styles import PROFESSIONAL_STYLE
@@ -83,6 +84,18 @@ def read_json(path: str) -> dict:
         return json.load(handle)
 
 
+class RecordingProgress:
+    def __init__(self):
+        self.maximum = None
+        self.values = []
+
+    def setMaximum(self, value):
+        self.maximum = value
+
+    def setValue(self, value):
+        self.values.append(value)
+
+
 class TestExportManagerExports(unittest.TestCase):
     def setUp(self):
         self.dataset = build_dataset()
@@ -146,6 +159,8 @@ class TestExportManagerExports(unittest.TestCase):
                 k_filter_mode='individual',
                 selected_k_methods=['Beyer', 'USBR'],
                 k_units={'m_s': True, 'cm_s': False, 'm_d': True},
+                selected_percentiles=['d10', 'd95'],
+                gradation=False,
             )
 
             exported = ExportManager().export(self.datasets, config)
@@ -158,9 +173,16 @@ class TestExportManagerExports(unittest.TestCase):
             header = rows[0]
             methods = [row[1] for row in rows[1:]]
 
+            self.assertIn(os.path.join('tables', 'csv'), exported[0])
             self.assertIn('K (m/s)', header)
             self.assertIn('K (m/d)', header)
             self.assertNotIn('K (cm/s)', header)
+            self.assertIn('D10 (mm)', header)
+            self.assertIn('D95 (mm)', header)
+            self.assertNotIn('D20 (mm)', header)
+            self.assertNotIn('D50 (mm)', header)
+            self.assertNotIn('Cu', header)
+            self.assertNotIn('Cc', header)
             self.assertEqual(methods, ['Beyer', 'USBR'])
             self.assertTrue(all(len(row) == len(header) for row in rows[1:]))
 
@@ -170,6 +192,8 @@ class TestExportManagerExports(unittest.TestCase):
                 temp_dir,
                 csv_long=False,
                 csv_wide=True,
+                statistics=True,
+                classification=True,
                 k_filter_mode='category',
                 selected_k_categories={
                     'hazen_based': False,
@@ -195,6 +219,7 @@ class TestExportManagerExports(unittest.TestCase):
 
             self.assertIn('D10_mm', header)
             self.assertIn('D60_mm', header)
+            self.assertIn('Soil_Classification', header)
             self.assertNotIn('D20_mm', header)
             self.assertIn('K_Beyer_cm/s', header)
             self.assertIn('Status_Beyer', header)
@@ -204,6 +229,55 @@ class TestExportManagerExports(unittest.TestCase):
             self.assertNotIn('K_Beyer_m/s', header)
             self.assertNotIn('K_Beyer_m/d', header)
             self.assertEqual(data_row[header.index('Valid_Methods_Count')], '1')
+
+    def test_long_csv_omits_k_and_grain_columns_when_content_is_disabled(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            config = self.make_config(
+                temp_dir,
+                csv_long=True,
+                csv_wide=False,
+                k_values=False,
+                statistics=False,
+                percentiles=False,
+                gradation=False,
+                classification=False,
+            )
+
+            exported = ExportManager().export(self.datasets, config)
+
+            rows = read_csv_rows(exported[0])
+            header = rows[0]
+            self.assertEqual(len(rows), 2)
+            self.assertNotIn('Method', header)
+            self.assertNotIn('Status', header)
+            self.assertFalse(any(column.startswith('K ') for column in header))
+            self.assertNotIn('D10 (mm)', header)
+            self.assertNotIn('Cu', header)
+            self.assertNotIn('Soil Classification', header)
+
+    def test_wide_csv_omits_k_statistics_and_grain_columns_when_content_is_disabled(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            config = self.make_config(
+                temp_dir,
+                csv_long=False,
+                csv_wide=True,
+                k_values=False,
+                statistics=False,
+                percentiles=False,
+                gradation=False,
+                classification=False,
+            )
+
+            exported = ExportManager().export(self.datasets, config)
+
+            rows = read_csv_rows(exported[0])
+            header = rows[0]
+            self.assertNotIn('K_Hazen_m/s', header)
+            self.assertNotIn('Status_Hazen', header)
+            self.assertNotIn('K_Mean_m/s', header)
+            self.assertNotIn('Valid_Methods_Count', header)
+            self.assertNotIn('D10_mm', header)
+            self.assertNotIn('Cu_Uniformity_Coefficient', header)
 
     def test_separate_statistics_csv_uses_filtered_results_metadata_and_stat_selection(self):
         with tempfile.TemporaryDirectory() as temp_dir:
@@ -253,6 +327,7 @@ class TestExportManagerExports(unittest.TestCase):
                 statistics=True,
                 k_filter_mode='individual',
                 selected_k_methods=['USBR'],
+                selected_percentiles=['d10', 'd95'],
                 k_units={'m_s': False, 'cm_s': True, 'm_d': False},
                 selected_statistics=['median', 'valid_count'],
                 include_metadata={
@@ -275,6 +350,7 @@ class TestExportManagerExports(unittest.TestCase):
             self.assertIn('k_cm_s', payload['k_values'][0])
             self.assertNotIn('k_m_s', payload['k_values'][0])
             self.assertNotIn('k_m_d', payload['k_values'][0])
+            self.assertEqual(set(payload['percentiles'].keys()), {'D10', 'D95'})
             self.assertEqual(set(payload['statistics'].keys()), {'median_k_cm_s', 'valid_count'})
 
     def test_excel_export_honors_metadata_and_stat_selection(self):
@@ -316,6 +392,58 @@ class TestExportManagerExports(unittest.TestCase):
             self.assertIn(('Valid Count', 3), stats_rows)
             self.assertFalse(any(row and row[0] == 'Mean' for row in stats_rows[1:]))
 
+    def test_excel_export_honors_percentile_method_unit_and_detail_selection(self):
+        try:
+            from openpyxl import load_workbook
+        except ImportError:
+            self.skipTest('openpyxl not installed')
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            config = self.make_config(
+                temp_dir,
+                csv=False,
+                excel=True,
+                statistics=False,
+                selected_percentiles=['d10', 'd95'],
+                k_filter_mode='individual',
+                selected_k_methods=['USBR'],
+                k_units={'m_s': False, 'cm_s': True, 'm_d': False},
+                formulas=True,
+                validation=True,
+            )
+
+            exported = ExportManager().export(self.datasets, config)
+
+            self.assertEqual(len(exported), 1)
+            workbook = load_workbook(exported[0], data_only=True)
+
+            summary_values = [
+                row[0]
+                for row in workbook['Summary'].iter_rows(values_only=True)
+                if row and row[0]
+            ]
+            percentile_rows = [
+                row
+                for row in workbook['Percentiles'].iter_rows(values_only=True)
+                if row and row[0]
+            ]
+            k_rows = [
+                row
+                for row in workbook['K_Values'].iter_rows(values_only=True)
+                if row and row[0]
+            ]
+
+            self.assertIn('D10:', summary_values)
+            self.assertIn('D95:', summary_values)
+            self.assertNotIn('D50:', summary_values)
+            self.assertEqual(percentile_rows[0], ('Percentile', 'Size (mm)'))
+            self.assertEqual([row[0] for row in percentile_rows[1:]], ['D10', 'D95'])
+            self.assertEqual(
+                k_rows[0],
+                ('Method', 'K (cm/s)', 'Status', 'Status Message', 'Formula'),
+            )
+            self.assertEqual([row[0] for row in k_rows[1:]], ['USBR'])
+
     def test_plot_export_generates_png_without_live_figure(self):
         with tempfile.TemporaryDirectory() as temp_dir:
             config = self.make_config(
@@ -331,8 +459,25 @@ class TestExportManagerExports(unittest.TestCase):
 
             self.assertEqual(len(exported), 1)
             self.assertTrue(exported[0].endswith('_plot.png'))
+            self.assertIn(os.path.join('plots', self.dataset.sample_name), exported[0])
             with open(exported[0], 'rb') as handle:
                 self.assertEqual(handle.read(8), b'\x89PNG\r\n\x1a\n')
+
+    def test_plot_save_uses_white_report_background(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            config = self.make_config(temp_dir, csv=False, png=True)
+            manager = ExportManager()
+            figure = Figure()
+            figure.add_subplot(111).plot([1, 2], [1, 2])
+            figure.savefig = Mock()
+
+            manager._save_plot_figure(figure, 'sample', 'grain_size_curve', config)
+
+            self.assertEqual(figure.patch.get_facecolor(), (1.0, 1.0, 1.0, 1.0))
+            _, kwargs = figure.savefig.call_args
+            self.assertEqual(kwargs['facecolor'], 'white')
+            self.assertEqual(kwargs['edgecolor'], 'white')
+            self.assertIn(os.path.join('plots', 'collection'), figure.savefig.call_args[0][0])
 
     def test_plot_export_generates_vector_formats_without_live_figure(self):
         with tempfile.TemporaryDirectory() as temp_dir:
@@ -407,6 +552,35 @@ class TestExportManagerExports(unittest.TestCase):
             self.assertTrue(any(name.endswith('_k_value_boxplot.png') for name in basenames))
             self.assertTrue(any(name.endswith('_reliability_matrix.png') for name in basenames))
             self.assertTrue(all(name.startswith('all_datasets_results_') for name in basenames))
+
+    def test_progress_counts_actual_exported_files_not_export_batches(self):
+        dataset_b = build_dataset('Sample B')
+        datasets = [
+            (self.dataset.sample_name, self.dataset, self.results),
+            (dataset_b.sample_name, dataset_b, self.results),
+        ]
+        with tempfile.TemporaryDirectory() as temp_dir:
+            config = self.make_config(
+                temp_dir,
+                csv_long=True,
+                csv_wide=True,
+                excel=True,
+                png=True,
+                svg=True,
+                plots=True,
+                selected_plot_types=[
+                    'grain_size_curve',
+                    'k_value_bar',
+                    'distribution_overlay',
+                ],
+            )
+            progress = RecordingProgress()
+
+            exported = ExportManager().export(datasets, config, progress)
+
+            self.assertEqual(len(exported), 14)
+            self.assertEqual(progress.maximum, len(exported))
+            self.assertEqual(progress.values[-1], len(exported))
 
     def test_plot_export_uses_shared_renderer_and_plot_options(self):
         calls = []
@@ -556,6 +730,159 @@ class TestExportTabConfig(unittest.TestCase):
         self.assertFalse(self.tab._plot_exports_enabled())
         self.assertNotIn('plot_contexts', config)
 
+    def test_master_content_categories_gate_export_config(self):
+        self.tab._toggle_category('grain_size', False)
+        self.tab._toggle_category('k_values', False)
+        self.tab._toggle_category('statistics', False)
+
+        config = self.tab._build_export_config()
+
+        self.assertFalse(config['grain_distribution'])
+        self.assertFalse(config['percentiles'])
+        self.assertFalse(config['gradation'])
+        self.assertFalse(config['classification'])
+        self.assertFalse(config['k_values'])
+        self.assertFalse(config['statistics'])
+        self.assertFalse(config['formulas'])
+        self.assertFalse(config['validation'])
+        self.assertEqual(config['selected_percentiles'], [])
+        self.assertEqual(config['selected_k_categories'], {})
+        self.assertEqual(config['selected_statistics'], [])
+        self.assertFalse(config['include_grain_size_stats'])
+
+    def test_percentile_checkbox_updates_config_and_csv_previews(self):
+        self.tab.selected_formats.update({
+            'csv_long': True,
+            'csv_wide': True,
+            'excel': False,
+            'png': False,
+            'svg': False,
+            'pdf': False,
+        })
+
+        self.tab.content_checkboxes['percentile_d5'].setChecked(True)
+        config = self.tab._build_export_config()
+
+        self.assertIn('d5', config['selected_percentiles'])
+        previews = {
+            self.tab.preview_tabs.tabText(index): self.tab.preview_tabs.widget(index)
+            for index in range(self.tab.preview_tabs.count())
+        }
+        long_preview = previews['CSV Long']
+        wide_preview = previews['CSV Wide']
+        long_headers = [
+            long_preview.horizontalHeaderItem(column).text()
+            for column in range(long_preview.columnCount())
+        ]
+        wide_headers = [
+            wide_preview.horizontalHeaderItem(column).text()
+            for column in range(wide_preview.columnCount())
+        ]
+
+        self.assertIn('D5 (mm)', long_headers)
+        self.assertIn('D5_mm', wide_headers)
+
+    def test_gradation_checkbox_updates_config_and_csv_previews(self):
+        self.tab.selected_formats.update({
+            'csv_long': True,
+            'csv_wide': True,
+            'excel': False,
+            'png': False,
+            'svg': False,
+            'pdf': False,
+        })
+
+        self.tab.content_checkboxes['grain_size_gradation'].setChecked(False)
+        config = self.tab._build_export_config()
+
+        self.assertFalse(config['gradation'])
+        previews = {
+            self.tab.preview_tabs.tabText(index): self.tab.preview_tabs.widget(index)
+            for index in range(self.tab.preview_tabs.count())
+        }
+        long_headers = [
+            previews['CSV Long'].horizontalHeaderItem(column).text()
+            for column in range(previews['CSV Long'].columnCount())
+        ]
+        wide_headers = [
+            previews['CSV Wide'].horizontalHeaderItem(column).text()
+            for column in range(previews['CSV Wide'].columnCount())
+        ]
+
+        self.assertNotIn('Cu', long_headers)
+        self.assertNotIn('Cc', long_headers)
+        self.assertNotIn('Cu_Uniformity_Coefficient', wide_headers)
+        self.assertNotIn('Cc_Curvature_Coefficient', wide_headers)
+
+    def test_classification_checkbox_updates_config_and_csv_previews(self):
+        self.tab.selected_formats.update({
+            'csv_long': True,
+            'csv_wide': True,
+            'excel': False,
+            'png': False,
+            'svg': False,
+            'pdf': False,
+        })
+
+        self.tab.content_checkboxes['grain_size_classification'].setChecked(False)
+        config = self.tab._build_export_config()
+
+        self.assertFalse(config['classification'])
+        previews = {
+            self.tab.preview_tabs.tabText(index): self.tab.preview_tabs.widget(index)
+            for index in range(self.tab.preview_tabs.count())
+        }
+        long_headers = [
+            previews['CSV Long'].horizontalHeaderItem(column).text()
+            for column in range(previews['CSV Long'].columnCount())
+        ]
+        wide_headers = [
+            previews['CSV Wide'].horizontalHeaderItem(column).text()
+            for column in range(previews['CSV Wide'].columnCount())
+        ]
+
+        self.assertNotIn('Soil Classification', long_headers)
+        self.assertNotIn('Soil_Classification', wide_headers)
+
+    def test_csv_previews_reflect_disabled_content_categories(self):
+        self.tab.selected_formats.update({
+            'csv_long': True,
+            'csv_wide': True,
+            'excel': False,
+            'png': False,
+            'svg': False,
+            'pdf': False,
+        })
+        self.tab._toggle_category('grain_size', False)
+        self.tab._toggle_category('k_values', False)
+        self.tab._toggle_category('statistics', False)
+        self.tab.update_preview()
+
+        previews = {
+            self.tab.preview_tabs.tabText(index): self.tab.preview_tabs.widget(index)
+            for index in range(self.tab.preview_tabs.count())
+        }
+        long_preview = previews['CSV Long']
+        wide_preview = previews['CSV Wide']
+
+        self.assertIsInstance(long_preview, QTableWidget)
+        self.assertIsInstance(wide_preview, QTableWidget)
+        long_headers = [
+            long_preview.horizontalHeaderItem(column).text()
+            for column in range(long_preview.columnCount())
+        ]
+        wide_headers = [
+            wide_preview.horizontalHeaderItem(column).text()
+            for column in range(wide_preview.columnCount())
+        ]
+
+        self.assertNotIn('Method', long_headers)
+        self.assertNotIn('D10 (mm)', long_headers)
+        self.assertFalse(any(header.startswith('K ') for header in long_headers))
+        self.assertNotIn('K_Hazen_m/s', wide_headers)
+        self.assertNotIn('K_Mean_m/s', wide_headers)
+        self.assertNotIn('D10_mm', wide_headers)
+
     def test_plot_preview_renders_canvas_and_can_request_dataset_jump(self):
         requested = []
         self.tab.jump_to_dataset_requested.connect(requested.append)
@@ -568,6 +895,166 @@ class TestExportTabConfig(unittest.TestCase):
         self.tab._open_selected_plot_dataset()
 
         self.assertEqual(requested, [self.dataset.sample_name])
+
+    def test_export_now_uses_loading_dialog_progress_adapter(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            self.tab.output_dir.setText(temp_dir)
+            fake_dialog = Mock()
+
+            def export_side_effect(_datasets, config, progress):
+                progress.setMaximum(config['expected_file_count'])
+                progress.setValue(config['expected_file_count'])
+                return [os.path.join(config['output_dir'], 'tables', 'csv', 'combined_all_datasets.csv')]
+
+            with patch('gui.export_tab.LoadingDialog', return_value=fake_dialog) as dialog_cls, \
+                    patch('gui.export_manager.ExportManager.export', side_effect=export_side_effect), \
+                    patch('gui.export_tab.QMessageBox.information'):
+                self.tab.export_now()
+
+            dialog_cls.assert_called_once()
+            fake_dialog.show.assert_called_once()
+            fake_dialog.update_progress.assert_called()
+            update_kwargs = fake_dialog.update_progress.call_args.kwargs
+            self.assertIn('files', update_kwargs['count_label'])
+            fake_dialog.mark_finished.assert_called_once()
+            fake_dialog.close.assert_called_once()
+
+    def test_plot_file_tree_groups_plot_files_by_dataset(self):
+        other_dataset = build_dataset('Sample B')
+        self.tab.update_datasets(
+            [
+                (self.dataset.sample_name, self.dataset, self.results),
+                (other_dataset.sample_name, other_dataset, build_results()),
+            ],
+            plot_contexts=[
+                {'style': PROFESSIONAL_STYLE, 'show_grid': False},
+                {'style': PROFESSIONAL_STYLE, 'show_grid': True},
+            ],
+        )
+
+        plot_folder = None
+        for index in range(self.tab.file_tree.topLevelItemCount()):
+            item = self.tab.file_tree.topLevelItem(index)
+            if item.text(0) == 'plots':
+                plot_folder = item
+                break
+
+        self.assertIsNotNone(plot_folder)
+        self.assertEqual(plot_folder.childCount(), 2)
+        self.assertEqual(plot_folder.child(0).text(0), self.dataset.sample_name)
+        self.assertEqual(plot_folder.child(1).text(0), 'Sample B')
+        self.assertGreater(plot_folder.child(0).childCount(), 0)
+        self.assertEqual(plot_folder.child(0).child(0).text(0), 'plot.png')
+
+    def test_grouped_plot_queue_selection_still_targets_dataset(self):
+        other_dataset = build_dataset('Sample B')
+        requested = []
+        self.tab.jump_to_dataset_requested.connect(requested.append)
+        self.tab.update_datasets(
+            [
+                (self.dataset.sample_name, self.dataset, self.results),
+                (other_dataset.sample_name, other_dataset, build_results()),
+            ],
+            plot_contexts=[
+                {'style': PROFESSIONAL_STYLE, 'show_grid': False},
+                {'style': PROFESSIONAL_STYLE, 'show_grid': True},
+            ],
+        )
+
+        tree = self.tab.plot_queue_tree
+        self.assertEqual(tree.topLevelItemCount(), 2)
+        self.assertEqual(tree.topLevelItem(1).text(0), 'Sample B')
+        self.assertGreater(tree.topLevelItem(1).childCount(), 0)
+
+        self.tab._select_plot_queue_row(1)
+        self.assertEqual(tree.currentItem().parent().text(0), 'Sample B')
+        self.tab._open_selected_plot_dataset()
+
+        self.assertEqual(requested, ['Sample B'])
+
+    def test_selected_scope_filters_datasets_and_plot_contexts(self):
+        other_dataset = build_dataset('Sample B')
+        other_results = build_results()
+        self.tab.update_datasets(
+            [
+                (self.dataset.sample_name, self.dataset, self.results),
+                (other_dataset.sample_name, other_dataset, other_results),
+            ],
+            plot_contexts=[
+                {'style': PROFESSIONAL_STYLE, 'show_grid': False},
+                {'style': PROFESSIONAL_STYLE, 'show_grid': True},
+            ],
+        )
+
+        self.tab.selected_dataset_keys = {
+            self.tab._dataset_key(other_dataset.sample_name, other_dataset)
+        }
+        self.tab.scope_selected.setChecked(True)
+
+        datasets = self.tab._get_datasets_to_export()
+        config = self.tab._build_export_config()
+
+        self.assertEqual([name for name, _dataset, _results in datasets], ['Sample B'])
+        self.assertEqual(len(config['plot_contexts']), 1)
+        self.assertTrue(config['plot_contexts'][0]['show_grid'])
+
+    def test_update_datasets_uses_selected_tabs_for_selected_scope(self):
+        class StubDatasetTab:
+            def __init__(self, dataset):
+                self.dataset = dataset
+
+            def get_dataset(self):
+                return self.dataset
+
+            def get_dataset_name(self):
+                return self.dataset.sample_name
+
+        other_dataset = build_dataset('Sample B')
+        first_tab = StubDatasetTab(self.dataset)
+        second_tab = StubDatasetTab(other_dataset)
+
+        self.tab.update_datasets(
+            [
+                (self.dataset.sample_name, self.dataset, self.results),
+                (other_dataset.sample_name, other_dataset, build_results()),
+            ],
+            plot_contexts=[
+                {'style': PROFESSIONAL_STYLE, 'show_grid': False},
+                {'style': PROFESSIONAL_STYLE, 'show_grid': True},
+            ],
+            dataset_tabs=[first_tab, second_tab],
+            selected_tabs=[second_tab],
+        )
+        self.tab.scope_selected.setChecked(True)
+
+        datasets = self.tab._get_datasets_to_export()
+        config = self.tab._build_export_config()
+
+        self.assertEqual([name for name, _dataset, _results in datasets], ['Sample B'])
+        self.assertEqual(len(config['plot_contexts']), 1)
+        self.assertTrue(config['plot_contexts'][0]['show_grid'])
+
+    def test_dataset_scope_segments_expose_active_visual_state(self):
+        self.tab.scope_selected.setChecked(True)
+
+        self.assertFalse(self.tab.scope_all.property("active"))
+        self.assertFalse(self.tab.scope_current.property("active"))
+        self.assertTrue(self.tab.scope_selected.property("active"))
+        self.assertIn(
+            'QPushButton[exportScopeSeg="true"][active="true"]',
+            self.tab.scope_segment_frame.styleSheet(),
+        )
+
+    def test_json_format_is_not_exposed_in_export_tab(self):
+        format_keys = {
+            button.property("format_key")
+            for button in self.tab.findChildren(QPushButton)
+            if button.property("format_key")
+        }
+
+        self.assertNotIn('json', self.tab.selected_formats)
+        self.assertNotIn('json', format_keys)
+        self.assertFalse(self.tab._build_export_config()['json'])
 
 
 if __name__ == '__main__':

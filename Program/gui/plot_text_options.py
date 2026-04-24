@@ -180,3 +180,66 @@ class PlotTextOptionsDialog(QDialog):
             show_y_label=self.show_y_label_cb.isChecked(),
             y_label=self.y_label_edit.text().strip() or DEFAULT_Y_LABEL,
         )
+
+
+class GlobalPlotStylingPlaceholderDialog(QDialog):
+    """Placeholder dialog for a future shared plot-styling workflow."""
+
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.setWindowTitle("Global Plot Styling")
+        self.setMinimumWidth(560)
+
+        layout = QVBoxLayout(self)
+        layout.setContentsMargins(16, 14, 16, 12)
+        layout.setSpacing(10)
+
+        heading = QHBoxLayout()
+        heading_icon = QLabel()
+        heading_icon.setPixmap(
+            icon("fa6s.brush", C.OLIVE, 16).pixmap(QSize(16, 16))
+        )
+        heading.addWidget(heading_icon)
+        heading_label = QLabel("Global plot styling")
+        heading_label.setFont(QFont("Segoe UI", 11, QFont.Weight.Bold))
+        heading.addWidget(heading_label)
+        heading.addStretch()
+        layout.addLayout(heading)
+
+        intro = QLabel(
+            "This placeholder reserves space for a future workflow that will "
+            "let you standardize plot presentation across the whole program."
+        )
+        intro.setWordWrap(True)
+        layout.addWidget(intro)
+
+        body = QLabel(
+            "Planned scope:\n"
+            "\n"
+            "- Apply the current plot style to every dataset tab\n"
+            "- Standardize legend, grid, markers, D-lines, and fill behavior\n"
+            "- Apply shared title and axis-label rules across datasets\n"
+            "- Keep exported plots and report plots aligned with the same defaults\n"
+            "\n"
+            "This is intentionally a placeholder for the next development phase, "
+            "so testers know the feature is planned without introducing unfinished behavior."
+        )
+        body.setWordWrap(True)
+        body.setStyleSheet(f"color: {C.TEXT_MID};")
+        layout.addWidget(body)
+
+        note = QLabel(
+            "For now, plot customizations remain per dataset tab and continue to flow "
+            "through the shared plot context used by export and reporting."
+        )
+        note.setWordWrap(True)
+        note.setStyleSheet(
+            f"background: {C.BG_RAISED}; border: 1px solid {C.BORDER}; "
+            f"border-radius: 6px; padding: 10px; color: {C.TEXT};"
+        )
+        layout.addWidget(note)
+
+        buttons = QDialogButtonBox(QDialogButtonBox.StandardButton.Close)
+        buttons.rejected.connect(self.reject)
+        buttons.accepted.connect(self.accept)
+        layout.addWidget(buttons)
