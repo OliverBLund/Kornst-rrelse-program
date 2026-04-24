@@ -1814,7 +1814,7 @@ class ControlPanel(QFrame):
         dtu_prog.setStyleSheet(
             f"font-size: 10.5px; font-weight: 600; color: {C.SB_TEXT};"
             f"  background: transparent;")
-        dtu_dept = QLabel("DTU Environment \u00b7 Oliver Lund")
+        dtu_dept = QLabel("DTU Sustain \u00b7 Oliver Lund")
         dtu_dept.setFont(QFont(F.MONO, 7))
         dtu_dept.setStyleSheet(
             f"color: {C.SB_MUTED}; background: transparent;"
@@ -3663,10 +3663,10 @@ class ControlPanel(QFrame):
 
             <p><b>Developed by:</b><br>
             Oliver Lund<br>
-            DTU Environment</p>
+            DTU Sustain</p>
 
             <p><b>Supervised by:</b><br>
             Prof. Poul Løgstrup Bjerg</p>
 
-            <p>© 2025 - DTU Environment</p>
+            <p>© 2025 - DTU Sustain</p>
             <p><em>Press F1 for detailed help topics</em></p>""")

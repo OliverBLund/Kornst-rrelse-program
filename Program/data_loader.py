@@ -5,9 +5,11 @@ Handles CSV file loading and data validation
 
 import csv
 import os
+import sys
 from typing import Dict, List, Tuple, Optional, Any
 from dataclasses import dataclass, field
 from enum import Enum
+from pathlib import Path
 from grain_classification import (
     ClassificationResult, GrainClassificationScheme,
     ISO14688, classify as _gc_classify,
@@ -1196,14 +1198,46 @@ Suitable for empirical K calculations: {'Yes' if d10 is not None and d10 > 0.01 
     return stats_text
 
 
+def resolve_test_data_dir() -> Optional[Path]:
+    """Locate the bundled demo dataset directory in dev and packaged builds."""
+    module_dir = Path(__file__).resolve().parent
+    project_dir = module_dir.parent
+
+    candidates = [
+        project_dir / "test_data",
+        module_dir / "test_data",
+    ]
+
+    if getattr(sys, "frozen", False):
+        bundle_root = Path(getattr(sys, "_MEIPASS", module_dir))
+        exe_dir = Path(sys.executable).resolve().parent
+        candidates = [
+            bundle_root / "Program" / "test_data",
+            exe_dir / "Program" / "test_data",
+            exe_dir / "test_data",
+            *candidates,
+        ]
+
+    seen = set()
+    for candidate in candidates:
+        resolved = candidate.resolve()
+        if resolved in seen:
+            continue
+        seen.add(resolved)
+        if resolved.exists() and resolved.is_dir():
+            return resolved
+    return None
+
+
 def get_test_data_files() -> List[str]:
-    """Get list of available test data files"""
-    test_data_dir = os.path.join(os.path.dirname(__file__), 'test_data')
-    csv_files = []
+    """Get the built-in demo CSV files used by the welcome-screen sample loader."""
+    test_data_dir = resolve_test_data_dir()
+    if test_data_dir is None:
+        return []
 
-    if os.path.exists(test_data_dir):
-        for file in os.listdir(test_data_dir):
-            if file.endswith('.csv'):
-                csv_files.append(os.path.join(test_data_dir, file))
-
-    return sorted(csv_files)
+    csv_files = [
+        str(path)
+        for path in sorted(test_data_dir.glob("*.csv"))
+        if path.is_file()
+    ]
+    return csv_files

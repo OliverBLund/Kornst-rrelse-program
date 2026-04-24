@@ -76,6 +76,17 @@ class TestLoadingDialog(unittest.TestCase):
 
         self.assertFalse(pixmap.isNull())
 
+    def test_progress_ratio_does_not_regress_when_scale_changes(self):
+        rail = self.dialog._progress
+
+        rail.set_progress(3, 10)
+        first_ratio = rail._progress_ratio
+        rail.set_progress(2, 10)
+        rail.set_progress(4, 20)
+
+        self.assertEqual(first_ratio, 0.3)
+        self.assertEqual(rail._progress_ratio, first_ratio)
+
 
 if __name__ == '__main__':
     unittest.main(verbosity=2)

@@ -5,12 +5,12 @@
 
   <div class="callout tip">
     <div class="callout-title">Good first step</div>
-    <p>From the welcome screen, use <strong>Load Batch Files</strong> for your own data or <strong>Open Demo Sample</strong> to inspect a working example before importing real files.</p>
+    <p>From the welcome screen, use <strong>Processed Curve Data</strong> when your file already contains particle size and percent passing, <strong>Raw Sieve Weighings</strong> when the app should calculate percent passing from sieve weights, or <strong>Open Demo Sample</strong> to load the built-in demo dataset set.</p>
   </div>
 
   <h2>First Run</h2>
   <ol>
-    <li>Open files from the welcome screen or the top toolbar.</li>
+    <li>Open files from the welcome screen or from <strong>Add Files</strong> in the top toolbar.</li>
     <li>If the file layout is simple, the dataset loads directly.</li>
     <li>If the workbook has multiple sheets or ambiguous columns, the app opens the sheet selector or column mapper.</li>
     <li>When at least one dataset loads, the welcome screen is replaced by the main workspace and the left sidebar becomes visible.</li>
@@ -22,7 +22,7 @@
     <li><strong>Check status</strong>: confirm whether each item loaded cleanly or needs review.</li>
     <li><strong>Inspect</strong>: open the dataset tab and review the Plot, Results, and Statistics subtabs.</li>
     <li><strong>Calculate</strong>: results are usually calculated automatically; use <strong>Calculate K</strong> if you want to rerun all open datasets.</li>
-    <li><strong>Compare and export</strong>: move to the Comparison or Export top-level tabs when you are ready to work across datasets.</li>
+    <li><strong>Compare and export</strong>: move to the Comparison, Reports, or Export top-level tabs when you are ready to work across datasets.</li>
   </ol>
 
   <h2>What You Should See</h2>
@@ -37,7 +37,7 @@
     </tr>
     <tr>
       <td>Sidebar</td>
-      <td>Loaded file cards, status indicators, filters, and global analysis controls. It is hidden on the welcome screen and shown once datasets are loaded.</td>
+      <td>Loaded file cards, status indicators, dataset selection controls, and global analysis controls. It is hidden on the welcome screen and shown once datasets are loaded.</td>
     </tr>
     <tr>
       <td>Dataset tabs</td>
@@ -52,6 +52,11 @@
   <div class="callout note">
     <div class="callout-title">Automatic calculation</div>
     <p>Loading a dataset usually triggers K-value calculation immediately. Changing temperature or porosity settings recalculates affected datasets again, so there is often no separate manual calculation step after import.</p>
+  </div>
+
+  <div class="callout note">
+    <div class="callout-title">Export now has its own workspace</div>
+    <p>The <strong>Export</strong> tab now lets you choose <strong>All</strong>, <strong>Current</strong>, or <strong>Selected</strong> datasets, preview files before they are created, and export grouped outputs such as tables, workbooks, and per-dataset plots.</p>
   </div>
 
   <h2>Open These Next</h2>

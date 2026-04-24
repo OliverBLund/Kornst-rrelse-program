@@ -10,6 +10,8 @@ from k_calculations import KCalculator
 def _friendly_load_error(error: Exception | str) -> str:
     error_str = str(error)
     lowered = error_str.lower()
+    if "xlrd" in lowered and "xls" in lowered:
+        return "Legacy Excel (.xls) support is unavailable in this build. Rebuild with xlrd included or convert the file to .xlsx/.csv."
     if "requires manual" in lowered or "column mapping" in lowered:
         return "Excel sheet requires manual column mapping"
     if "could not parse" in lowered:

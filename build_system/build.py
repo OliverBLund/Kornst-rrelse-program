@@ -35,9 +35,12 @@ DEFAULT_CONFIG: Dict[str, Any] = {
     "data": [
         {"source": "../Program/help_content", "target": "Program/help_content"},
         {"source": "../Program/resources", "target": "Program/resources"},
-        {"source": "../docs", "target": "docs"}
+        {"source": "../Program/CHANGELOG.md", "target": "Program"},
+        {"source": "../docs", "target": "docs"},
+        {"source": "../test_data", "target": "Program/test_data"}
     ],
     "hidden_imports": [
+        "xlrd",
         "matplotlib.backends.backend_qt5agg",
         "matplotlib.backends.backend_qtagg"
     ],

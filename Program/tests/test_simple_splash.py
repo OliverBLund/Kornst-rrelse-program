@@ -1,5 +1,5 @@
 """
-Regression tests for the custom splash title layout.
+Regression tests for startup splash progress behavior.
 """
 
 import os
@@ -9,7 +9,6 @@ import unittest
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 sys.path.insert(0, "Program")
 
-from PyQt6.QtGui import QFontMetricsF
 from PyQt6.QtWidgets import QApplication
 
 from Splash.simple_splash import SimpleSplash
@@ -26,17 +25,14 @@ class TestSimpleSplash(unittest.TestCase):
         self.splash.close()
         self.splash.deleteLater()
 
-    def test_title_layout_keeps_title_stack_tight(self):
-        title_font, grain_pos, analysis_pos = self.splash._title_layout()
-        metrics = QFontMetricsF(title_font)
-        grain_height = metrics.tightBoundingRect("Grain Size").height()
-        grain_top = grain_pos.y() - metrics.ascent()
-        grain_bottom = grain_top + grain_height
-        analysis_top = analysis_pos.y() - metrics.ascent()
-        gap = analysis_top - grain_bottom
+    def test_progress_target_does_not_regress(self):
+        self.splash.set_progress(40, "Loading data models", "Preparing file loaders.")
+        first_target = self.splash._target_progress
 
-        self.assertGreaterEqual(gap, 0.0)
-        self.assertLessEqual(gap, 4.0)
+        self.splash.set_progress(32, "Loading calculation methods", "Preparing equations.")
+
+        self.assertEqual(first_target, 40)
+        self.assertEqual(self.splash._target_progress, 40)
 
 
 if __name__ == "__main__":

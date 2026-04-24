@@ -30,7 +30,7 @@ from PyQt6.QtWidgets import (
 from .theme import C, F, icon
 
 # Max width of the centred cards (px)
-_CARD_W = 712
+_CARD_W = 1040
 
 
 def _blend(c1: QColor, c2: QColor, amount: float) -> QColor:
@@ -126,6 +126,18 @@ class WelcomeWidget(QWidget):
         self._footer_attr = None
         self._footer_dtu_pill = None
         self._outer_scroll = None
+        self._hero_grid = None
+        self._hero_primary = None
+        self._hero_secondary = None
+        self._main_body_grid = None
+        self._actions_grid = None
+        self._guide_grid = None
+        self._recent_section = None
+        self._whats_new_section = None
+        self._recent_scroll = None
+        self._welcome_whats_new_scroll = None
+        self._action_widgets: list[QWidget] = []
+        self._guide_widgets: list[QWidget] = []
         self._resume_btn = None
         self._resume_hint = None
         self._background_timer = QTimer(self)
@@ -423,7 +435,7 @@ class WelcomeWidget(QWidget):
 
     def resizeEvent(self, event):
         super().resizeEvent(event)
-        self._sync_card_widths()
+        self._sync_card_widths_v2()
         self.update()
 
     def paintEvent(self, event: QPaintEvent):
@@ -465,7 +477,7 @@ class WelcomeWidget(QWidget):
         lay.setAlignment(Qt.AlignmentFlag.AlignHCenter)
 
         self._title_card = self._build_title_card()
-        self._main_card = self._build_main_card()
+        self._main_card = self._build_main_card_concept_v2()
         self._footer = self._build_footer()
 
         lay.addWidget(self._title_card, 0, Qt.AlignmentFlag.AlignHCenter)
@@ -476,12 +488,12 @@ class WelcomeWidget(QWidget):
         scroll.setWidget(content)
         root.addWidget(scroll, 1)
         self._outer_scroll = scroll
-        self._sync_card_widths()
+        self._sync_card_widths_v2()
 
     # ── Title card ───────────────────────────────────────────────
 
     def _build_title_card(self) -> QFrame:
-        return self._build_title_card_concept_v2()
+        return self._build_title_card_concept_v3()
 
     def _build_title_card_concept(self) -> QFrame:
         card = QFrame()
@@ -739,6 +751,642 @@ class WelcomeWidget(QWidget):
         grid.setColumnStretch(1, 1)
         return card
 
+    def _build_title_card_concept_v3(self) -> QFrame:
+        card = QFrame()
+        card.setObjectName("wlc-title-refresh")
+        card.setStyleSheet("""
+            QFrame#wlc-title-refresh {
+                background: qlineargradient(
+                    x1:0, y1:0, x2:1, y2:1,
+                    stop:0 rgba(252,249,243,236),
+                    stop:1 rgba(245,239,229,218)
+                );
+                border: 1px solid rgba(211,195,166,196);
+                border-radius: 14px;
+            }
+        """)
+        card.setMaximumWidth(_CARD_W)
+        card.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
+
+        grid = QGridLayout(card)
+        grid.setContentsMargins(20, 18, 20, 16)
+        grid.setHorizontalSpacing(22)
+        grid.setVerticalSpacing(12)
+        self._hero_grid = grid
+
+        primary = QWidget()
+        primary.setStyleSheet("background: transparent; border: none;")
+        primary_lay = QVBoxLayout(primary)
+        primary_lay.setContentsMargins(0, 0, 0, 0)
+        primary_lay.setSpacing(8)
+
+        eyebrow = QLabel("WELCOME BACK")
+        eyebrow.setStyleSheet(
+            f"color: {C.EARTH}; font-family: '{F.MONO}'; font-size: {F.SZ_XS}pt;"
+            " font-weight: 700; letter-spacing: 0.08em; background: transparent; border: none;"
+        )
+        self._title_eyebrow = eyebrow
+        primary_lay.addWidget(eyebrow)
+
+        title = QLabel("Grain Size Analysis")
+        title.setAlignment(Qt.AlignmentFlag.AlignLeft)
+        title.setStyleSheet(
+            f'color: {C.TEXT}; font-family: "{F.DISP}"; font-size: 23pt;'
+            ' font-weight: 700; letter-spacing: 0.01em; background: transparent; border: none;'
+        )
+        primary_lay.addWidget(title)
+
+        sub = QLabel("Hydraulic Conductivity Calculator")
+        sub.setAlignment(Qt.AlignmentFlag.AlignLeft)
+        sub.setStyleSheet(
+            f"color: {C.TEXT_MID}; font-size: {F.SZ_MD}pt; font-weight: 600;"
+            " background: transparent; border: none;"
+        )
+        primary_lay.addWidget(sub)
+
+        desc = QLabel(
+            "Resume prior workspaces, start a structured import, or open the built-in demo datasets before the next beta testing round."
+        )
+        desc.setWordWrap(True)
+        desc.setStyleSheet(
+            f"color: {C.TEXT_MID}; font-size: {F.SZ_SM}pt; line-height: 1.35;"
+            " background: transparent; border: none;"
+        )
+        self._title_desc = desc
+        primary_lay.addWidget(desc)
+
+        session_count = len(self.recent_sessions)
+        sessions_label = f"{session_count} saved session{'s' if session_count != 1 else ''}"
+        meta_row = QWidget()
+        meta_row.setStyleSheet("background: transparent; border: none;")
+        meta_lay = QHBoxLayout(meta_row)
+        meta_lay.setContentsMargins(0, 2, 0, 0)
+        meta_lay.setSpacing(8)
+        meta_lay.addWidget(self._build_hero_chip("fa6s.clock-rotate-left", sessions_label))
+        meta_lay.addWidget(self._build_hero_chip("fa6s.vial", "Bundled demo datasets"))
+        meta_lay.addWidget(self._build_hero_chip("fa6s.file-export", "Shared plot export and reports"))
+        meta_lay.addStretch()
+        primary_lay.addWidget(meta_row)
+
+        attr = QLabel("Import reliability · shared plot rendering · structured export review")
+        attr.setStyleSheet(
+            f"color: {C.TEXT_MUTED}; font-family: '{F.MONO}'; font-size: {F.SZ_XS}pt;"
+            " background: transparent; border: none;"
+        )
+        self._title_attr = attr
+        primary_lay.addWidget(attr)
+
+        secondary = QWidget()
+        secondary.setStyleSheet("background: transparent; border: none;")
+        secondary_lay = QVBoxLayout(secondary)
+        secondary_lay.setContentsMargins(0, 0, 0, 0)
+        secondary_lay.setSpacing(10)
+        secondary_lay.addWidget(
+            self._build_hero_note(
+                "fa6s.bolt",
+                "Beta focus",
+                "External testing should concentrate on data loading, plot consistency across tabs, reports, and exports, and whether generated outputs are organized in a way that feels predictable.",
+            )
+        )
+        secondary_lay.addWidget(
+            self._build_hero_note(
+                "fa6s.book-open",
+                "Latest build",
+                "The current beta adds a reorganized export workspace, scope-aware export preview, shared renderer alignment for reports and exports, and bundled demo datasets on the welcome screen.",
+                button_text="View Full Changelog",
+                button_icon="fa6s.book-open",
+                button_handler=self._open_full_changelog,
+            )
+        )
+
+        self._hero_primary = primary
+        self._hero_secondary = secondary
+        grid.addWidget(primary, 0, 0)
+        grid.addWidget(secondary, 0, 1)
+        grid.setColumnStretch(0, 11)
+        grid.setColumnStretch(1, 8)
+        return card
+
+    def _build_main_card_concept_v2(self) -> QFrame:
+        card = QFrame()
+        card.setObjectName("wlc-main-refresh")
+        card.setStyleSheet("""
+            QFrame#wlc-main-refresh {
+                background: rgba(249,246,240,244);
+                border: 1px solid rgba(190,171,142,106);
+                border-radius: 14px;
+            }
+        """)
+        card.setMaximumWidth(_CARD_W)
+        card.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Preferred)
+
+        lay = QVBoxLayout(card)
+        lay.setContentsMargins(12, 12, 12, 12)
+        lay.setSpacing(10)
+        lay.addWidget(self._build_actions_strip())
+        lay.addWidget(self._build_guides_strip())
+
+        body = QWidget()
+        body.setStyleSheet("background: transparent; border: none;")
+        grid = QGridLayout(body)
+        grid.setContentsMargins(0, 0, 0, 0)
+        grid.setHorizontalSpacing(10)
+        grid.setVerticalSpacing(10)
+        self._main_body_grid = grid
+
+        recent = self._build_section(
+            "fa6s.clock-rotate-left",
+            "Recent Sessions",
+            self._build_recent(),
+            clear_btn=True,
+            accent=C.EARTH,
+        )
+        whats_new = self._build_section(
+            "fa6s.seedling",
+            "What's New",
+            self._build_welcome_whats_new(),
+            accent=C.OLIVE,
+        )
+        recent.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
+        whats_new.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
+        self._recent_section = recent
+        self._whats_new_section = whats_new
+        grid.addWidget(recent, 0, 0)
+        grid.addWidget(whats_new, 0, 1)
+        grid.setColumnStretch(0, 11)
+        grid.setColumnStretch(1, 8)
+        lay.addWidget(body, 1)
+        return card
+
+    def _build_hero_chip(self, icon_name: str, text: str) -> QFrame:
+        chip = QFrame()
+        chip.setStyleSheet(
+            "background: rgba(255,255,255,166);"
+            " border: 1px solid rgba(192,174,144,176);"
+            " border-radius: 999px;"
+        )
+        chip_lay = QHBoxLayout(chip)
+        chip_lay.setContentsMargins(10, 5, 10, 5)
+        chip_lay.setSpacing(6)
+
+        ico = QLabel()
+        ico.setPixmap(icon(icon_name, C.EARTH).pixmap(QSize(11, 11)))
+        ico.setStyleSheet("background: transparent; border: none;")
+        chip_lay.addWidget(ico, 0, Qt.AlignmentFlag.AlignVCenter)
+
+        label = QLabel(text)
+        label.setStyleSheet(
+            f"color: {C.TEXT_MID}; font-size: {F.SZ_XS + 1}pt; font-weight: 600;"
+            " background: transparent; border: none;"
+        )
+        chip_lay.addWidget(label, 0, Qt.AlignmentFlag.AlignVCenter)
+        return chip
+
+    def _build_hero_note(
+        self,
+        icon_name: str,
+        title: str,
+        body: str,
+        *,
+        button_text: str | None = None,
+        button_icon: str | None = None,
+        button_handler=None,
+    ) -> QFrame:
+        note = QFrame()
+        note.setStyleSheet(
+            "background: rgba(255,255,255,170);"
+            " border: 1px solid rgba(200,183,155,180);"
+            " border-radius: 10px;"
+        )
+        lay = QVBoxLayout(note)
+        lay.setContentsMargins(12, 11, 12, 11)
+        lay.setSpacing(7)
+
+        head = QWidget()
+        head.setStyleSheet("background: transparent; border: none;")
+        head_lay = QHBoxLayout(head)
+        head_lay.setContentsMargins(0, 0, 0, 0)
+        head_lay.setSpacing(7)
+
+        icon_color = C.AMBER if icon_name == "fa6s.book-open" else C.OLIVE
+        ico = QLabel()
+        ico.setPixmap(icon(icon_name, icon_color).pixmap(QSize(12, 12)))
+        ico.setStyleSheet("background: transparent; border: none;")
+        head_lay.addWidget(ico)
+
+        title_lbl = QLabel(title)
+        title_lbl.setStyleSheet(
+            f"color: {C.TEXT}; font-size: {F.SZ_SM}pt; font-weight: 700;"
+            " background: transparent; border: none;"
+        )
+        head_lay.addWidget(title_lbl)
+        head_lay.addStretch()
+        lay.addWidget(head)
+
+        body_lbl = QLabel(body)
+        body_lbl.setWordWrap(True)
+        body_lbl.setStyleSheet(
+            f"color: {C.TEXT_MID}; font-size: {F.SZ_XS + 1}pt; line-height: 1.35;"
+            " background: transparent; border: none;"
+        )
+        lay.addWidget(body_lbl)
+
+        if button_text and button_handler is not None:
+            btn = QPushButton(button_text)
+            if button_icon:
+                btn.setIcon(icon(button_icon, C.OLIVE))
+            btn.setFixedHeight(30)
+            btn.setCursor(QCursor(Qt.CursorShape.PointingHandCursor))
+            btn.setStyleSheet(f"""
+                QPushButton {{
+                    background: rgba(255,255,255,214);
+                    border: 1px solid rgba(107,142,35,95);
+                    border-radius: 999px;
+                    color: {C.OLIVE};
+                    font-size: {F.SZ_SM}pt;
+                    font-weight: 600;
+                    padding: 4px 12px;
+                }}
+                QPushButton:hover {{ background: rgba(107,142,35,18); }}
+            """)
+            btn.clicked.connect(button_handler)
+            lay.addWidget(btn, 0, Qt.AlignmentFlag.AlignLeft)
+        return note
+
+    def _build_actions_strip(self) -> QFrame:
+        wrap = QFrame()
+        wrap.setStyleSheet(
+            "background: rgba(255,255,255,132);"
+            " border: 1px solid rgba(212,196,168,0.84);"
+            " border-radius: 10px;"
+        )
+        wrap.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
+
+        outer = QVBoxLayout(wrap)
+        outer.setContentsMargins(10, 9, 10, 9)
+        outer.setSpacing(8)
+
+        header = QWidget()
+        header.setStyleSheet("background: transparent; border: none;")
+        header_lay = QHBoxLayout(header)
+        header_lay.setContentsMargins(0, 0, 0, 0)
+        header_lay.setSpacing(8)
+
+        hdr_lbl = QLabel("Quick Actions")
+        hdr_lbl.setStyleSheet(
+            f"color: {C.TEXT}; font-size: {F.SZ_SM}pt; font-weight: 700;"
+            " background: transparent; border: none;"
+        )
+        header_lay.addWidget(hdr_lbl)
+        header_lay.addStretch()
+
+        version_chip = QLabel("beta testing build")
+        version_chip.setStyleSheet(
+            f"color: {C.TEXT_MUTED}; font-family: '{F.MONO}'; font-size: {F.SZ_XS}pt;"
+            " background: rgba(255,255,255,154); border: 1px solid rgba(212,196,168,0.86);"
+            " border-radius: 999px; padding: 2px 8px;"
+        )
+        header_lay.addWidget(version_chip)
+        outer.addWidget(header)
+
+        grid_host = QWidget()
+        grid_host.setStyleSheet("background: transparent; border: none;")
+        lay = QGridLayout(grid_host)
+        lay.setContentsMargins(0, 0, 0, 0)
+        lay.setHorizontalSpacing(8)
+        lay.setVerticalSpacing(8)
+        self._actions_grid = lay
+        self._action_widgets = []
+
+        load_btn = QPushButton("Processed Curve Data")
+        load_btn.setIcon(icon("fa6s.folder-open", "#ffffff"))
+        load_btn.setMinimumHeight(36)
+        load_btn.setCursor(QCursor(Qt.CursorShape.PointingHandCursor))
+        load_btn.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
+        load_btn.setStyleSheet(f"""
+            QPushButton {{
+                background: {C.OLIVE};
+                color: white;
+                border: none;
+                border-radius: 8px;
+                padding: 8px 16px;
+                font-size: {F.SZ_BASE + 1}pt;
+                font-weight: 600;
+            }}
+            QPushButton:hover   {{ background: {C.OLIVE_H}; }}
+            QPushButton:pressed {{ background: {C.OLIVE_DK}; }}
+        """)
+        load_btn.setToolTip("Use this when files already contain particle size and cumulative percent passing.")
+        load_btn.clicked.connect(lambda _checked=False: self.load_files_with_mode_requested.emit("processed"))
+        self._action_widgets.append(load_btn)
+
+        raw_btn = QPushButton("Raw Sieve Weighings")
+        raw_btn.setIcon(icon("fa6s.scale-balanced", C.TEXT_MID))
+        raw_btn.setMinimumHeight(34)
+        raw_btn.setCursor(QCursor(Qt.CursorShape.PointingHandCursor))
+        raw_btn.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
+        raw_btn.setToolTip("Use this when files contain sieve size, empty sieve weight, and sieve + sample weight.")
+        raw_btn.setStyleSheet(f"""
+            QPushButton {{
+                background: rgba(255,255,255,170);
+                color: {C.TEXT_MID};
+                border: 1.5px solid {C.BORDER_DK};
+                border-radius: 8px;
+                padding: 7px 14px;
+                font-size: {F.SZ_BASE}pt;
+                font-weight: 600;
+            }}
+            QPushButton:hover {{
+                background: rgba(196,165,116,24);
+                border-color: rgba(196,165,116,160);
+                color: {C.TEXT};
+            }}
+        """)
+        raw_btn.clicked.connect(lambda _checked=False: self.load_files_with_mode_requested.emit("raw_sieve"))
+        self._action_widgets.append(raw_btn)
+
+        resume_btn = QPushButton("Resume Latest Session")
+        resume_btn.setIcon(icon("fa6s.clock-rotate-left", C.TEXT_MID))
+        resume_btn.setMinimumHeight(34)
+        resume_btn.setCursor(QCursor(Qt.CursorShape.PointingHandCursor))
+        resume_btn.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
+        resume_btn.setStyleSheet(f"""
+            QPushButton {{
+                background: rgba(255,255,255,170);
+                color: {C.TEXT_MID};
+                border: 1.5px solid {C.BORDER_DK};
+                border-radius: 8px;
+                padding: 7px 14px;
+                font-size: {F.SZ_BASE}pt;
+                font-weight: 600;
+            }}
+            QPushButton:hover {{
+                border-color: {C.EARTH};
+                color: {C.EARTH};
+                background: rgba(210,180,140,46);
+            }}
+            QPushButton:disabled {{
+                color: {C.TEXT_MUTED};
+                border-color: rgba(212,196,168,0.65);
+                background: rgba(255,255,255,120);
+            }}
+        """)
+        resume_btn.setEnabled(bool(self.recent_sessions))
+        resume_btn.clicked.connect(self._resume_latest_session)
+        self._resume_btn = resume_btn
+        self._action_widgets.append(resume_btn)
+
+        demo_btn = QPushButton("Open Demo Sample")
+        demo_btn.setIcon(icon("fa6s.vial", C.OLIVE_DK))
+        demo_btn.setMinimumHeight(34)
+        demo_btn.setCursor(QCursor(Qt.CursorShape.PointingHandCursor))
+        demo_btn.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
+        demo_btn.setStyleSheet(f"""
+            QPushButton {{
+                background: rgba(255,255,255,142);
+                color: {C.TEXT_MID};
+                border: 1px solid rgba(107,142,35,88);
+                border-radius: 8px;
+                padding: 7px 14px;
+                font-size: {F.SZ_BASE}pt;
+                font-weight: 600;
+            }}
+            QPushButton:hover {{
+                background: rgba(107,142,35,18);
+                color: {C.OLIVE_DK};
+                border-color: rgba(107,142,35,132);
+            }}
+        """)
+        demo_btn.clicked.connect(lambda _checked=False: self.load_sample_data_requested.emit())
+        self._action_widgets.append(demo_btn)
+
+        for col, widget in enumerate(self._action_widgets):
+            lay.addWidget(widget, 0, col)
+            lay.setColumnStretch(col, 1)
+
+        latest_name = self.recent_sessions[0].get("name", "Latest session") if self.recent_sessions else "No saved session yet"
+        note = QLabel(
+            f"Latest workspace: {latest_name}" if self.recent_sessions
+            else "No saved workspace yet. Load files or open the demo sample to begin."
+        )
+        note.setStyleSheet(
+            f"color: {C.TEXT_MUTED}; font-family: '{F.MONO}'; font-size: {F.SZ_XS}pt;"
+            " background: transparent; border: none;"
+        )
+        note.setWordWrap(True)
+        self._resume_hint = note
+
+        outer.addWidget(grid_host)
+        outer.addWidget(note)
+        return wrap
+
+    def _build_guides_strip(self) -> QFrame:
+        wrap = QFrame()
+        wrap.setStyleSheet(
+            "background: rgba(255,255,255,132);"
+            " border: 1px solid rgba(212,196,168,0.84);"
+            " border-radius: 10px;"
+        )
+        wrap.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
+
+        outer = QVBoxLayout(wrap)
+        outer.setContentsMargins(10, 9, 10, 9)
+        outer.setSpacing(8)
+
+        head = QWidget()
+        head.setStyleSheet("background: transparent; border: none;")
+        head_lay = QHBoxLayout(head)
+        head_lay.setContentsMargins(0, 0, 0, 0)
+        head_lay.setSpacing(8)
+
+        lbl = QLabel("Guides")
+        lbl.setStyleSheet(
+            f"color: {C.TEXT_MUTED}; font-family: '{F.MONO}'; font-size: {F.SZ_XS}pt;"
+            " font-weight: 700; letter-spacing: 0.06em; background: transparent; border: none;"
+        )
+        head_lay.addWidget(lbl)
+
+        desc = QLabel("Use the quick references if you are testing import, workbook handling, or mapping recovery.")
+        desc.setWordWrap(True)
+        desc.setStyleSheet(
+            f"color: {C.TEXT_MUTED}; font-size: {F.SZ_XS + 1}pt;"
+            " background: transparent; border: none;"
+        )
+        head_lay.addWidget(desc, 1)
+        outer.addWidget(head)
+
+        grid_host = QWidget()
+        grid_host.setStyleSheet("background: transparent; border: none;")
+        grid = QGridLayout(grid_host)
+        grid.setContentsMargins(0, 0, 0, 0)
+        grid.setHorizontalSpacing(8)
+        grid.setVerticalSpacing(8)
+        self._guide_grid = grid
+        self._guide_widgets = []
+
+        for name, file, ico_name in [
+            ("Getting Started", "start_here.html", "fa6s.circle-play"),
+            ("Data Format", "data_files.html", "fa6s.file-lines"),
+            ("Excel Workbooks", "excel_workbooks.html", "fa6s.file-excel"),
+            ("Mapping & Recovery", "mapping_recovery.html", "fa6s.table-columns"),
+        ]:
+            btn = QPushButton(name)
+            btn.setIcon(icon(ico_name, C.AMBER))
+            btn.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
+            btn.setFixedHeight(30)
+            btn.setCursor(QCursor(Qt.CursorShape.PointingHandCursor))
+            btn.setStyleSheet(f"""
+                QPushButton {{
+                    background: rgba(255,255,255,178);
+                    border: 1px solid rgba(196,165,116,120);
+                    border-radius: 8px;
+                    color: {C.TEXT_MID};
+                    font-size: {F.SZ_SM}pt;
+                    font-weight: 600;
+                    padding: 6px 10px;
+                    text-align: left;
+                }}
+                QPushButton:hover {{
+                    background: rgba(196,165,116,24);
+                    border-color: rgba(196,165,116,160);
+                    color: {C.TEXT};
+                }}
+            """)
+            btn.clicked.connect(lambda _checked=False, f=file: self.open_help_topic_requested.emit(f))
+            self._guide_widgets.append(btn)
+
+        for col, widget in enumerate(self._guide_widgets):
+            grid.addWidget(widget, 0, col)
+            grid.setColumnStretch(col, 1)
+
+        outer.addWidget(grid_host)
+        return wrap
+
+    def _build_welcome_whats_new(self) -> QWidget:
+        w = QWidget()
+        w.setStyleSheet("background: transparent; border: none;")
+        w.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
+        lay = QVBoxLayout(w)
+        lay.setContentsMargins(0, 0, 0, 0)
+        lay.setSpacing(6)
+
+        scroll = QScrollArea()
+        scroll.setWidgetResizable(True)
+        scroll.setFrameShape(QFrame.Shape.NoFrame)
+        scroll.setMaximumHeight(248)
+        self._welcome_whats_new_scroll = scroll
+        scroll.setStyleSheet(f"""
+            QScrollArea {{ background: transparent; border: none; }}
+            QScrollBar:vertical {{ background: transparent; width: 5px; }}
+            QScrollBar::handle:vertical {{ background: {C.BORDER}; border-radius: 2px; min-height: 20px; }}
+            QScrollBar::add-line:vertical, QScrollBar::sub-line:vertical {{ height: 0; }}
+        """)
+
+        sc = QWidget()
+        sc.setStyleSheet("background: transparent; border: none;")
+        sc_lay = QVBoxLayout(sc)
+        sc_lay.setContentsMargins(0, 0, 3, 0)
+        sc_lay.setSpacing(9)
+
+        for index, version in enumerate(self._welcome_release_notes()):
+            blk = QFrame()
+            blk.setStyleSheet(
+                f"background: rgba(107,142,35,14); border: 1px solid rgba(107,142,35,45); border-radius: 8px;"
+                if index == 0
+                else "background: rgba(255,255,255,128); border: 1px solid rgba(212,196,168,0.84); border-radius: 8px;"
+            )
+            blk_lay = QVBoxLayout(blk)
+            blk_lay.setContentsMargins(8, 8, 8, 8)
+            blk_lay.setSpacing(4)
+
+            hdr_row = QWidget()
+            hdr_row.setStyleSheet("background: transparent; border: none;")
+            hr_lay = QHBoxLayout(hdr_row)
+            hr_lay.setContentsMargins(0, 0, 0, 0)
+            hr_lay.setSpacing(5)
+
+            ver_pill = QLabel(str(version["version"]))
+            ver_pill.setStyleSheet(
+                f"color: white; background: {C.OLIVE}; font-size: {F.SZ_XS}pt;"
+                f" font-weight: 700; padding: 1px 7px; border-radius: 99px; border: none;"
+            )
+            date_lbl = QLabel(str(version["date"]))
+            date_lbl.setStyleSheet(
+                f"color: {C.TEXT_MUTED}; font-size: {F.SZ_XS}pt;"
+                " background: transparent; border: none;"
+            )
+
+            hr_lay.addWidget(ver_pill)
+            hr_lay.addWidget(date_lbl)
+            hr_lay.addStretch()
+            blk_lay.addWidget(hdr_row)
+
+            for change in version["changes"]:
+                ch_lbl = QLabel(f"• {change}")
+                ch_lbl.setStyleSheet(
+                    f"color: {C.TEXT_MID}; font-size: {F.SZ_SM}pt; padding-left: 10px;"
+                    " background: transparent; border: none;"
+                )
+                ch_lbl.setWordWrap(True)
+                blk_lay.addWidget(ch_lbl)
+
+            sc_lay.addWidget(blk)
+
+        sc_lay.addStretch()
+        scroll.setWidget(sc)
+        lay.addWidget(scroll, 1)
+
+        btn = QPushButton("View Full Changelog")
+        btn.setIcon(icon("fa6s.book-open", C.OLIVE))
+        btn.setFixedHeight(28)
+        btn.setCursor(QCursor(Qt.CursorShape.PointingHandCursor))
+        btn.setStyleSheet(f"""
+            QPushButton {{
+                background: rgba(255,255,255,122);
+                border: 1px solid rgba(107,142,35,87);
+                border-radius: 99px;
+                color: {C.OLIVE};
+                font-size: {F.SZ_SM}pt;
+                padding: 4px 10px;
+                font-weight: 600;
+            }}
+            QPushButton:hover {{ background: rgba(107,142,35,20); }}
+        """)
+        btn.clicked.connect(self._open_full_changelog)
+        lay.addWidget(btn)
+        return w
+
+    def _welcome_release_notes(self) -> list[dict[str, object]]:
+        return [
+            {
+                "version": "v0.9.1-beta",
+                "date": "2026-04-24",
+                "changes": [
+                    "Export workspace redesigned around scope selection, live preview, and grouped files to create.",
+                    "Report and export plots now follow the shared plotting system more closely, including plot text options and white report-ready export backgrounds.",
+                    "Bundled demo datasets are available directly from the welcome screen for structured onboarding and testing.",
+                ],
+            },
+            {
+                "version": "v0.9.0-beta",
+                "date": "2025-01-15",
+                "changes": [
+                    "Wide CSV export added for statistical analysis outside the program.",
+                    "Comparison workflows expanded for multi-dataset plotting and review.",
+                    "Welcome screen, help links, and export flow received a first beta-ready pass.",
+                ],
+            },
+            {
+                "version": "v0.8.0-alpha",
+                "date": "2024-12-20",
+                "changes": [
+                    "Comparison tab added for side-by-side dataset analysis.",
+                    "Column mapping and validation paths improved for irregular source files.",
+                    "K-value method applicability warnings became easier to interpret.",
+                ],
+            },
+        ]
+
     # ── Section box ──────────────────────────────────────────────
 
     def _build_section(self, icon_name: str, title: str, content: QWidget,
@@ -932,7 +1580,8 @@ class WelcomeWidget(QWidget):
         scroll = QScrollArea()
         scroll.setWidgetResizable(True)
         scroll.setFrameShape(QFrame.Shape.NoFrame)
-        scroll.setMaximumHeight(168)
+        scroll.setMaximumHeight(248)
+        self._recent_scroll = scroll
         scroll.setStyleSheet(f"""
             QScrollArea {{ background: transparent; border: none; }}
             QScrollBar:vertical {{ background: transparent; width: 5px; }}
@@ -1427,6 +2076,103 @@ class WelcomeWidget(QWidget):
             else:
                 self._footer_attr.setText("Batch import · compare selected · export chosen scope")
 
+    def _sync_card_widths_v2(self):
+        if self.width() <= 0:
+            return
+
+        target = min(_CARD_W, max(300, self.width() - 36))
+        compact_height = self.height() < 760
+        narrow = target < 860
+        stacked_actions = target < 640
+        compact_guides = target < 760
+
+        for widget in (self._title_card, self._main_card, self._footer):
+            if widget is not None:
+                widget.setFixedWidth(target)
+
+        if self._hero_grid is not None and self._hero_primary is not None and self._hero_secondary is not None:
+            self._hero_grid.removeWidget(self._hero_primary)
+            self._hero_grid.removeWidget(self._hero_secondary)
+            self._hero_secondary.setVisible(not compact_height)
+            if compact_height:
+                self._hero_grid.addWidget(self._hero_primary, 0, 0)
+                self._hero_grid.setColumnStretch(0, 1)
+                self._hero_grid.setColumnStretch(1, 0)
+            elif narrow:
+                self._hero_grid.addWidget(self._hero_primary, 0, 0)
+                self._hero_grid.addWidget(self._hero_secondary, 1, 0)
+                self._hero_grid.setColumnStretch(0, 1)
+                self._hero_grid.setColumnStretch(1, 0)
+            else:
+                self._hero_grid.addWidget(self._hero_primary, 0, 0)
+                self._hero_grid.addWidget(self._hero_secondary, 0, 1)
+                self._hero_grid.setColumnStretch(0, 11)
+                self._hero_grid.setColumnStretch(1, 8)
+
+        if self._actions_grid is not None and self._action_widgets:
+            for widget in self._action_widgets:
+                self._actions_grid.removeWidget(widget)
+            if stacked_actions:
+                for row, widget in enumerate(self._action_widgets):
+                    self._actions_grid.addWidget(widget, row, 0)
+                self._actions_grid.setColumnStretch(0, 1)
+            elif narrow:
+                positions = [(0, 0), (0, 1), (1, 0), (1, 1)]
+                for widget, (row, col) in zip(self._action_widgets, positions):
+                    self._actions_grid.addWidget(widget, row, col)
+                self._actions_grid.setColumnStretch(0, 1)
+                self._actions_grid.setColumnStretch(1, 1)
+            else:
+                for col, widget in enumerate(self._action_widgets):
+                    self._actions_grid.addWidget(widget, 0, col)
+                    self._actions_grid.setColumnStretch(col, 1)
+
+        if self._guide_grid is not None and self._guide_widgets:
+            for widget in self._guide_widgets:
+                self._guide_grid.removeWidget(widget)
+            if compact_guides:
+                positions = [(0, 0), (0, 1), (1, 0), (1, 1)]
+                for widget, (row, col) in zip(self._guide_widgets, positions):
+                    self._guide_grid.addWidget(widget, row, col)
+                self._guide_grid.setColumnStretch(0, 1)
+                self._guide_grid.setColumnStretch(1, 1)
+            else:
+                for col, widget in enumerate(self._guide_widgets):
+                    self._guide_grid.addWidget(widget, 0, col)
+                    self._guide_grid.setColumnStretch(col, 1)
+
+        if self._main_body_grid is not None and self._recent_section is not None and self._whats_new_section is not None:
+            self._main_body_grid.removeWidget(self._recent_section)
+            self._main_body_grid.removeWidget(self._whats_new_section)
+            if narrow:
+                self._main_body_grid.addWidget(self._recent_section, 0, 0)
+                self._main_body_grid.addWidget(self._whats_new_section, 1, 0)
+                self._main_body_grid.setColumnStretch(0, 1)
+                self._main_body_grid.setColumnStretch(1, 0)
+            else:
+                self._main_body_grid.addWidget(self._recent_section, 0, 0)
+                self._main_body_grid.addWidget(self._whats_new_section, 0, 1)
+                self._main_body_grid.setColumnStretch(0, 11)
+                self._main_body_grid.setColumnStretch(1, 8)
+
+        if self._recent_scroll is not None:
+            self._recent_scroll.setMaximumHeight(120 if compact_height else 248)
+        if self._welcome_whats_new_scroll is not None:
+            self._welcome_whats_new_scroll.setMaximumHeight(120 if compact_height else 248)
+
+        if self._title_desc is not None:
+            self._title_desc.setVisible(not compact_height)
+        if self._title_attr is not None:
+            self._title_attr.setVisible(not compact_height)
+        if self._title_eyebrow is not None:
+            self._title_eyebrow.setVisible(not compact_height)
+        if self._footer_attr is not None:
+            self._footer_attr.setVisible(not compact_height)
+            if target < 620:
+                self._footer_attr.setText("Import · compare · export")
+            else:
+                self._footer_attr.setText("Import · compare selected · export chosen scope")
+
     def _resume_latest_session(self):
         if self.recent_sessions:
             self.open_recent_session_requested.emit(dict(self.recent_sessions[0]))
@@ -1439,7 +2185,11 @@ class WelcomeWidget(QWidget):
                 self.open_recent_file_requested.emit(f)
 
     def _open_full_changelog(self):
-        changelog_path = Path(__file__).resolve().parent.parent / "CHANGELOG.md"
+        if getattr(sys, "frozen", False):
+            base_dir = Path(getattr(sys, "_MEIPASS", Path(__file__).resolve().parent.parent)) / "Program"
+        else:
+            base_dir = Path(__file__).resolve().parent.parent
+        changelog_path = base_dir / "CHANGELOG.md"
         if changelog_path.exists():
             from PyQt6.QtCore import QUrl
             from PyQt6.QtGui import QDesktopServices

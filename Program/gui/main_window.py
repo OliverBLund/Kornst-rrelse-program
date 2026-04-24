@@ -32,7 +32,7 @@ from gui.welcome_widget import WelcomeWidget
 from gui.theme import C, F, SZ, build_stylesheet, icon, apply_matplotlib_style
 from gui.plot_context import build_plot_context_from_tab
 from qt_chrome import FramelessMainWindowMixin
-from data_loader import DataLoader, GrainSizeData
+from data_loader import DataLoader, GrainSizeData, get_test_data_files
 from k_calculations import KCalculator
 from grain_classification import ISO14688
 from load_process_worker import run_external_load
@@ -973,36 +973,38 @@ class MainWindow(FramelessMainWindowMixin, QMainWindow):
             self._show_status_message("Select processed curve files\u2026")
 
     def on_welcome_load_sample(self):
-        test_data_folder = os.path.join(os.path.dirname(os.path.dirname(__file__)), "test_data")
-        if os.path.exists(test_data_folder):
-            for file in os.listdir(test_data_folder):
-                if file.endswith('.csv'):
-                    sample_path = os.path.normpath(os.path.join(test_data_folder, file))
-                    if sample_path in self._get_open_file_paths():
-                        self._save_recent_file(sample_path)
-                        self._update_welcome_recents()
-                        self._switch_to_tab(0)
-                        self._hide_welcome()
-                        self._show_status_message(f"Already open: {file}")
-                        return
-                    self._start_external_load(
-                        [sample_path],
-                        title="Loading Sample Data",
-                        subtitle="Opening the bundled demo dataset",
-                        stage_title="Loading sample data",
-                        context={
-                            "mode": "sample",
-                            "missing_files": [],
-                            "skipped_count": 0,
-                            "session": None,
-                            "requested_label": file,
-                            "failed_files": [],
-                        },
-                    )
-                    return
+        demo_files = [self._normalize_file_key(path) for path in get_test_data_files()]
+        if demo_files:
+            open_paths = self._get_open_file_paths()
+            missing_files = [path for path in demo_files if path not in open_paths]
+
+            if not missing_files:
+                for file_path in demo_files:
+                    self._save_recent_file(file_path)
+                self._update_welcome_recents()
+                self._switch_to_tab(0)
+                self._hide_welcome()
+                self._show_status_message("Bundled demo datasets are already open")
+                return
+
+            self._start_external_load(
+                missing_files,
+                title="Loading Demo Data",
+                subtitle=f"Opening {len(missing_files)} bundled demo dataset{'s' if len(missing_files) != 1 else ''}",
+                stage_title="Loading demo data",
+                context={
+                    "mode": "sample",
+                    "missing_files": [],
+                    "skipped_count": 0,
+                    "session": None,
+                    "requested_label": "Bundled demo datasets",
+                    "failed_files": [],
+                },
+            )
+            return
         QMessageBox.information(
             self, "No Sample Data",
-            "No sample data files found. Use \u2018Add Files\u2019 to load your own data."
+            "No built-in demo datasets were found. Use 'Add Files' to load your own data."
         )
 
     def on_welcome_open_recent(self, file_path: str):

@@ -36,10 +36,10 @@ class SimpleSplash(QWidget):
     _BOUNDARY_FREQUENCIES = (1.00, 0.82, 1.16, 0.94, 0.66)
     _BOUNDARY_SPEEDS = (0.75, -0.52, 0.42, -0.30, 0.18)
     _BAND_COLORS = (
-        QColor(215, 191, 142),  # sand
-        QColor(189, 157, 121),  # silt
-        QColor(153, 163, 171),  # clay
-        QColor(116, 130, 88),   # olive
+        QColor(122, 113, 103),  # dark topsoil
+        QColor(230, 210, 178),  # light cream
+        QColor(229, 189, 137),  # pale sand
+        QColor(206, 158, 120),  # warm tan
     )
 
     def __init__(self, backdrop_path: Optional[str] = None, parent=None):
@@ -186,14 +186,14 @@ class SimpleSplash(QWidget):
         rect = self.rect()
 
         base = QLinearGradient(0, 0, 0, rect.height())
-        base.setColorAt(0.0, QColor(247, 243, 235))
-        base.setColorAt(1.0, QColor(234, 227, 213))
+        base.setColorAt(0.0, QColor(246, 239, 227))
+        base.setColorAt(1.0, QColor(229, 214, 191))
         painter.fillRect(rect, base)
 
         wash = QLinearGradient(0, 0, rect.width(), rect.height())
-        wash.setColorAt(0.0, QColor(255, 255, 255, 65))
+        wash.setColorAt(0.0, QColor(255, 251, 245, 42))
         wash.setColorAt(0.55, QColor(255, 255, 255, 0))
-        wash.setColorAt(1.0, QColor(159, 146, 118, 40))
+        wash.setColorAt(1.0, QColor(170, 133, 100, 26))
         painter.fillRect(rect, wash)
 
         hairline = QPen(QColor(93, 78, 55, 52), 1)
@@ -235,7 +235,7 @@ class SimpleSplash(QWidget):
             painter.drawPath(self._boundary_path(index, 0.34))
             painter.drawPath(self._boundary_path(index, 0.67))
 
-        painter.setPen(QPen(QColor(86, 100, 59, 100), 1.1))
+        painter.setPen(QPen(QColor(118, 94, 70, 100), 1.1))
         painter.drawPath(self._boundary_path(3))
 
     def _title_font(self) -> QFont:
@@ -310,7 +310,7 @@ class SimpleSplash(QWidget):
             self._stage_previous,
             self._stage_text,
             QFont("JetBrains Mono", 10, QFont.Weight.Medium),
-            QColor(63, 73, 45),
+            QColor(82, 67, 50),
         )
         self._draw_transition_text(
             painter,
@@ -320,7 +320,7 @@ class SimpleSplash(QWidget):
             QFont("Source Sans 3", 10),
             QColor(112, 100, 82),
         )
-        painter.setPen(QPen(QColor(107, 142, 35, 125), 1.4))
+        painter.setPen(QPen(QColor(166, 132, 92, 125), 1.4))
         painter.drawLine(QPointF(left, label_top - 7.0), QPointF(left + 26, label_top - 7.0))
 
     def _draw_transition_text(
@@ -350,7 +350,7 @@ class SimpleSplash(QWidget):
         progress_ratio = max(0.0, min(1.0, self._display_progress / 100.0))
         progress_x = rail_x + rail_width * progress_ratio
 
-        track_pen = QPen(QColor(63, 68, 49, 90), 2.0)
+        track_pen = QPen(QColor(116, 100, 79, 90), 2.0)
         track_pen.setCapStyle(Qt.PenCapStyle.RoundCap)
         painter.setPen(track_pen)
         painter.drawLine(QPointF(rail_x, rail_y), QPointF(rail_x + rail_width, rail_y))
@@ -362,21 +362,21 @@ class SimpleSplash(QWidget):
 
         fill_gradient = QLinearGradient(rail_x, rail_y, rail_x + rail_width, rail_y)
         fill_gradient.setColorAt(0.0, QColor(244, 237, 223))
-        fill_gradient.setColorAt(0.55, QColor(233, 228, 204))
-        fill_gradient.setColorAt(1.0, QColor(211, 224, 175))
+        fill_gradient.setColorAt(0.55, QColor(229, 204, 167))
+        fill_gradient.setColorAt(1.0, QColor(198, 156, 118))
         fill_pen = QPen(QBrush(fill_gradient), 3.0)
         fill_pen.setCapStyle(Qt.PenCapStyle.RoundCap)
         painter.setPen(fill_pen)
         painter.drawLine(QPointF(rail_x, rail_y), QPointF(progress_x, rail_y))
 
-        cap_color = _blend(QColor(233, 228, 204), QColor(107, 142, 35), progress_ratio * 0.45)
+        cap_color = _blend(QColor(229, 204, 167), QColor(166, 132, 92), progress_ratio * 0.45)
         painter.setPen(Qt.PenStyle.NoPen)
         painter.setBrush(_with_alpha(cap_color, 235))
         painter.drawEllipse(QPointF(progress_x, rail_y), 3.6, 3.6)
 
         percent_font = QFont("JetBrains Mono", 10, QFont.Weight.Medium)
         painter.setFont(percent_font)
-        painter.setPen(QColor(67, 79, 47))
+        painter.setPen(QColor(95, 77, 58))
         painter.drawText(
             QRectF(self.width() - 74, rail_y - 11, 36, 18),
             Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter,
@@ -409,7 +409,8 @@ class SimpleSplash(QWidget):
         self.update()
 
     def _animate_progress(self, value: int) -> None:
-        self._target_progress = max(0, min(100, int(value)))
+        incoming = max(0, min(100, int(value)))
+        self._target_progress = max(self._target_progress, incoming)
         self._progress_animation.stop()
         self._progress_animation.setStartValue(self._display_progress)
         self._progress_animation.setEndValue(float(self._target_progress))

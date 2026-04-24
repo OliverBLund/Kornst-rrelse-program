@@ -10,7 +10,7 @@ import os
 sys.path.insert(0, "Program")
 
 from data_loader import GrainSizeData
-from load_process_worker import _load_mapped_source, prepare_dataset_for_ui
+from load_process_worker import _friendly_load_error, _load_mapped_source, prepare_dataset_for_ui
 
 
 def build_dataset(name: str = "Sample A") -> GrainSizeData:
@@ -24,6 +24,16 @@ def build_dataset(name: str = "Sample A") -> GrainSizeData:
 
 
 class TestLoadProcessWorker(unittest.TestCase):
+    def test_friendly_load_error_rephrases_missing_xlrd_for_packaged_builds(self):
+        message = _friendly_load_error(
+            "Import xlrd failed. Install xlrd >= 2.0.1 for xls Excel support"
+        )
+
+        self.assertEqual(
+            message,
+            "Legacy Excel (.xls) support is unavailable in this build. Rebuild with xlrd included or convert the file to .xlsx/.csv.",
+        )
+
     def test_prepare_dataset_for_ui_attaches_precomputed_results(self):
         dataset = build_dataset()
 

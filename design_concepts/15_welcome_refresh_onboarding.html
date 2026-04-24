@@ -1,0 +1,377 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>15 - Welcome Refresh Onboarding First</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Playfair+Display:wght@700&family=Source+Sans+3:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/all.min.css">
+<link rel="stylesheet" href="_shared.css">
+<style>
+.wh-host{
+  flex:1;overflow:auto;padding:20px 18px 14px;position:relative;
+  background:
+    linear-gradient(180deg, rgba(255,255,255,.72), rgba(255,255,255,.56)),
+    linear-gradient(180deg, #efe8dd 0%, #f0e4d4 60%, #c79d76 100%);
+}
+.wh-host::before{
+  content:"";position:absolute;inset:0;pointer-events:none;opacity:.18;
+  background-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='260' height='260'%3E%3Cfilter id='g'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.72' numOctaves='4' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='260' height='260' filter='url(%23g)' opacity='.08'/%3E%3C/svg%3E");
+}
+.wh-frame{
+  position:relative;z-index:1;max-width:1020px;margin:0 auto;
+  background:rgba(249,246,240,.96);border:1px solid rgba(192,174,144,.88);
+  border-radius:14px;box-shadow:0 10px 26px rgba(66,46,26,.10);overflow:hidden;
+}
+.wh-top{
+  display:grid;grid-template-columns:1.1fr .9fr;gap:0;
+  border-bottom:1px solid rgba(212,196,168,.76);
+}
+.wh-brand{
+  padding:18px 20px 16px;border-right:1px solid rgba(212,196,168,.76);
+}
+.wh-label{
+  color:var(--earth);font:700 10px var(--fm);letter-spacing:.08em;text-transform:uppercase;
+}
+.wh-title{
+  margin-top:8px;color:var(--text);font:700 31px/1.04 var(--fu);max-width:380px;
+}
+.wh-copy{
+  margin-top:8px;color:var(--text-mid);font-size:15px;line-height:1.4;max-width:500px;
+}
+.wh-guides{
+  margin-top:14px;display:flex;gap:8px;flex-wrap:wrap;
+}
+.guide-chip{
+  height:28px;padding:0 10px;border-radius:999px;
+  background:rgba(255,255,255,.88);border:1px solid rgba(212,196,168,.9);
+  color:var(--text-mid);display:inline-flex;align-items:center;gap:6px;
+  font-size:11px;font-weight:600;text-decoration:none;
+}
+.guide-chip i{color:var(--amber);font-size:11px}
+.wh-start{
+  padding:18px 20px 16px;background:linear-gradient(180deg, rgba(255,255,255,.66), rgba(255,255,255,.36));
+}
+.step-head{
+  display:flex;align-items:center;justify-content:space-between;gap:10px;margin-bottom:8px;
+}
+.step-head h3{
+  color:var(--text);font-size:18px;font-weight:700;
+}
+.step-head a{
+  color:var(--olive);font-size:11px;font-weight:700;text-decoration:none;
+}
+.step-list{
+  display:flex;flex-direction:column;gap:9px;
+}
+.step-row{
+  display:grid;grid-template-columns:auto 1fr auto;gap:10px;align-items:center;
+  min-height:46px;padding:0 10px;border-radius:10px;
+  background:#fff;border:1px solid rgba(212,196,168,.92);
+}
+.step-num{
+  width:22px;height:22px;border-radius:50%;display:flex;align-items:center;justify-content:center;
+  background:rgba(107,142,35,.12);color:var(--olive-dk);font:700 11px var(--fm);
+}
+.step-main{
+  display:flex;flex-direction:column;gap:2px;
+}
+.step-main strong{
+  color:var(--text);font-size:13px;
+}
+.step-main span{
+  color:var(--text-muted);font-size:11px;
+}
+.step-row .tag{
+  color:var(--earth);font:600 10px var(--fm);
+}
+.start-buttons{
+  margin-top:10px;display:grid;grid-template-columns:1fr 1fr;gap:8px;
+}
+.btn-main,.btn-secondary,.btn-alt{
+  min-height:38px;padding:0 14px;border-radius:9px;font-weight:700;
+  display:flex;align-items:center;justify-content:center;gap:8px;
+}
+.btn-main{
+  background:var(--olive);border:none;color:#fff;
+}
+.btn-secondary{
+  background:#fff;border:1px solid rgba(192,174,144,.92);color:var(--text-mid);
+}
+.btn-alt{
+  background:rgba(255,255,255,.76);border:1px solid rgba(212,196,168,.92);color:var(--text-mid);
+}
+.wh-grid{
+  display:grid;grid-template-columns:1.12fr .88fr;min-height:470px;
+}
+.col{
+  padding:16px 20px 18px;
+}
+.col + .col{
+  border-left:1px solid rgba(212,196,168,.72);
+}
+.section-title{
+  display:flex;align-items:center;justify-content:space-between;gap:10px;margin-bottom:12px;
+}
+.section-title h3{
+  display:flex;align-items:center;gap:8px;color:var(--text);font-size:21px;font-weight:700;
+}
+.section-title h3 i{font-size:14px;color:var(--earth)}
+.section-title small{
+  color:var(--text-muted);font:500 11px var(--fm);
+}
+.recent-stack{
+  display:flex;flex-direction:column;gap:10px;
+}
+.recent-row{
+  display:grid;grid-template-columns:auto 1fr auto;gap:10px;align-items:start;
+  padding:11px 11px 11px 10px;border-radius:12px;
+  background:#fff;border:1px solid rgba(212,196,168,.95);border-left:4px solid var(--earth);
+}
+.recent-row.featured{border-left-color:var(--olive)}
+.recent-icon{
+  width:30px;height:30px;border-radius:10px;background:rgba(139,115,85,.08);
+  color:var(--earth);display:flex;align-items:center;justify-content:center;
+}
+.recent-name{
+  color:var(--text);font-size:17px;font-weight:700;
+}
+.recent-meta{
+  margin-top:4px;color:var(--text-mid);font-size:12px;display:flex;gap:10px;flex-wrap:wrap;
+}
+.recent-note{
+  margin-top:6px;color:var(--text-muted);font-size:12px;line-height:1.4;
+}
+.recent-open{
+  color:var(--text-muted);font-size:12px;display:flex;align-items:center;gap:8px;
+}
+.side-stack{
+  display:flex;flex-direction:column;gap:14px;
+}
+.side-panel{
+  padding:12px;border-radius:12px;background:#fff;border:1px solid rgba(212,196,168,.92);
+}
+.side-panel.current{
+  background:linear-gradient(180deg, rgba(107,142,35,.08), rgba(255,255,255,.98));
+  border-color:rgba(107,142,35,.38);
+}
+.side-panel h4{
+  color:var(--text);font-size:13px;font-weight:700;display:flex;align-items:center;gap:8px;
+}
+.side-panel h4 i{color:var(--amber);font-size:12px}
+.side-panel .meta{
+  margin-top:4px;color:var(--text-muted);font:500 11px var(--fm);
+}
+.side-panel ul{
+  margin-top:8px;display:flex;flex-direction:column;gap:6px;list-style:none;
+}
+.side-panel li{
+  padding-left:12px;position:relative;color:var(--text-mid);font-size:12px;line-height:1.4;
+}
+.side-panel li::before{
+  content:"";position:absolute;left:0;top:7px;width:4px;height:4px;border-radius:50%;
+  background:var(--earth);
+}
+.compact-guides{
+  display:grid;grid-template-columns:1fr 1fr;gap:8px;
+}
+.compact-guides a{
+  min-height:36px;padding:0 10px;border-radius:9px;
+  display:flex;align-items:center;gap:8px;text-decoration:none;
+  border:1px solid rgba(212,196,168,.92);background:rgba(255,255,255,.88);
+  color:var(--text-mid);font-size:12px;font-weight:600;
+}
+.compact-guides a i{color:var(--amber);font-size:12px}
+.footer{
+  display:flex;align-items:center;gap:10px;padding:10px 20px 12px;
+  border-top:1px solid rgba(212,196,168,.74);color:var(--text-muted);font-size:11px;
+}
+.footer input{accent-color:var(--earth)}
+.footer .attr{margin-left:auto;font-family:var(--fm)}
+@media (max-width:980px){
+  .wh-top,.wh-grid{grid-template-columns:1fr}
+  .wh-brand{border-right:none;border-bottom:1px solid rgba(212,196,168,.76)}
+  .col + .col{border-left:none;border-top:1px solid rgba(212,196,168,.72)}
+}
+</style>
+</head>
+<body>
+<div class="app">
+  <div class="main">
+    <div class="wh-host">
+      <div class="wh-frame">
+        <section class="wh-top">
+          <div class="wh-brand">
+            <div class="wh-label">Welcome</div>
+            <div class="wh-title">Grain Size Analysis</div>
+            <div class="wh-copy">A more onboarding-focused welcome surface: start with the right import path, then move directly into sessions, guides, and release notes without oversized support blocks.</div>
+            <div class="wh-guides">
+              <a class="guide-chip" href="#"><i class="fa-solid fa-circle-play"></i>Getting Started</a>
+              <a class="guide-chip" href="#"><i class="fa-solid fa-file-lines"></i>Data Format</a>
+              <a class="guide-chip" href="#"><i class="fa-solid fa-file-excel"></i>Excel Workbooks</a>
+              <a class="guide-chip" href="#"><i class="fa-solid fa-table-columns"></i>Mapping Recovery</a>
+            </div>
+          </div>
+          <div class="wh-start">
+            <div class="step-head">
+              <h3>Start a Workspace</h3>
+              <a href="#">View Full Changelog</a>
+            </div>
+            <div class="step-list">
+              <div class="step-row">
+                <div class="step-num">1</div>
+                <div class="step-main">
+                  <strong>Choose the input path</strong>
+                  <span>Processed curve data or raw sieve weighings</span>
+                </div>
+                <div class="tag">import</div>
+              </div>
+              <div class="step-row">
+                <div class="step-num">2</div>
+                <div class="step-main">
+                  <strong>Review mapping when needed</strong>
+                  <span>Especially for Excel sheets and irregular lab files</span>
+                </div>
+                <div class="tag">verify</div>
+              </div>
+              <div class="step-row">
+                <div class="step-num">3</div>
+                <div class="step-main">
+                  <strong>Move into plots, comparison, reports, and export</strong>
+                  <span>Selections and plot state now carry more consistently</span>
+                </div>
+                <div class="tag">analyze</div>
+              </div>
+            </div>
+            <div class="start-buttons">
+              <button class="btn-main"><i class="fa-solid fa-folder-open"></i>Processed Curve Data</button>
+              <button class="btn-secondary"><i class="fa-solid fa-scale-balanced"></i>Raw Sieve Weighings</button>
+              <button class="btn-alt"><i class="fa-solid fa-clock-rotate-left"></i>Resume Latest Session</button>
+              <button class="btn-alt"><i class="fa-solid fa-vial"></i>Open Demo Sample</button>
+            </div>
+          </div>
+        </section>
+
+        <section class="wh-grid">
+          <div class="col">
+            <div class="section-title">
+              <h3><i class="fa-solid fa-clock-rotate-left"></i>Recent Sessions</h3>
+              <small>resume saved work quickly</small>
+            </div>
+            <div class="recent-stack">
+              <div class="recent-row featured">
+                <div class="recent-icon"><i class="fa-solid fa-folder-open"></i></div>
+                <div>
+                  <div class="recent-name">Session 2026-04-24 09:53</div>
+                  <div class="recent-meta">
+                    <span>6 datasets</span>
+                    <span>latest</span>
+                    <span>selected set preserved</span>
+                  </div>
+                  <div class="recent-note">Good return point for current beta testing. Includes export-tab selections and comparison-set work.</div>
+                </div>
+                <div class="recent-open">Open <i class="fa-solid fa-chevron-right"></i></div>
+              </div>
+
+              <div class="recent-row">
+                <div class="recent-icon"><i class="fa-solid fa-folder-open"></i></div>
+                <div>
+                  <div class="recent-name">Session 2026-04-24 09:37</div>
+                  <div class="recent-meta">
+                    <span>7 datasets</span>
+                    <span>report work</span>
+                    <span>export previews reviewed</span>
+                  </div>
+                  <div class="recent-note">Useful for testing report/export consistency and the per-dataset plot preview workflow.</div>
+                </div>
+                <div class="recent-open">Open <i class="fa-solid fa-chevron-right"></i></div>
+              </div>
+
+              <div class="recent-row">
+                <div class="recent-icon"><i class="fa-solid fa-folder-open"></i></div>
+                <div>
+                  <div class="recent-name">Session 2026-04-21 14:05</div>
+                  <div class="recent-meta">
+                    <span>3 datasets</span>
+                    <span>mapping examples</span>
+                    <span>manual review</span>
+                  </div>
+                  <div class="recent-note">Smaller onboarding session focused on Excel and mapping recovery.</div>
+                </div>
+                <div class="recent-open">Open <i class="fa-solid fa-chevron-right"></i></div>
+              </div>
+            </div>
+          </div>
+
+          <aside class="col">
+            <div class="section-title">
+              <h3><i class="fa-solid fa-seedling"></i>What's New</h3>
+              <small>release notes and quick references</small>
+            </div>
+            <div class="side-stack">
+              <div class="side-panel current">
+                <h4><i class="fa-solid fa-asterisk"></i>v0.9.0-beta</h4>
+                <div class="meta">2025-01-15</div>
+                <ul>
+                  <li>New batch export flow with scope selection and selected-set handling.</li>
+                  <li>Wide CSV output fits statistical analysis workflows better.</li>
+                  <li>Plot previews, reports, and exports are more tightly aligned to shared renderer state.</li>
+                  <li>Welcome and export surfaces are now more session-oriented.</li>
+                </ul>
+              </div>
+
+              <div class="side-panel">
+                <h4><i class="fa-solid fa-asterisk"></i>v0.8.0-alpha</h4>
+                <div class="meta">2024-12-20</div>
+                <ul>
+                  <li>Comparison tab expanded for multi-dataset analysis.</li>
+                  <li>Column-mapping and validation workflows received several fixes.</li>
+                </ul>
+              </div>
+
+              <div class="side-panel">
+                <h4><i class="fa-solid fa-book-open"></i>Reference Guides</h4>
+                <div class="compact-guides" style="margin-top:10px">
+                  <a href="#"><i class="fa-solid fa-circle-play"></i><span>Getting Started</span></a>
+                  <a href="#"><i class="fa-solid fa-file-lines"></i><span>Data Files</span></a>
+                  <a href="#"><i class="fa-solid fa-file-excel"></i><span>Excel Workbooks</span></a>
+                  <a href="#"><i class="fa-solid fa-table-columns"></i><span>Mapping Recovery</span></a>
+                </div>
+              </div>
+            </div>
+          </aside>
+        </section>
+
+        <div class="footer">
+          <label><input type="checkbox"> Don't show this welcome screen on startup</label>
+          <span class="attr">import · review mapping · analyze · export</span>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+<script src="_shell.js"></script>
+<script>
+function _onPageInit() {
+  const go = document.querySelector('.sb-btn.go');
+  if (go) { go.disabled = true; go.style.opacity = '.45'; go.title = 'Load data first'; }
+  const compareBtn = document.getElementById('sb-compare-btn');
+  const exportBtn = document.getElementById('sb-export-btn');
+  if (compareBtn) compareBtn.disabled = true;
+  if (exportBtn) exportBtn.disabled = true;
+  const sl = document.getElementById('s-list');
+  if (sl) sl.innerHTML = `
+    <div style="display:flex;flex-direction:column;align-items:center;padding:20px 12px 12px;gap:8px;opacity:.65">
+      <div style="width:36px;height:36px;border-radius:4px;background:rgba(255,255,255,.3);border:1px dashed var(--sb-bdr);display:flex;align-items:center;justify-content:center">
+        <i class="fa-solid fa-inbox" style="font-size:14px;color:var(--sb-muted)"></i>
+      </div>
+      <div style="font-size:10.5px;color:var(--sb-muted);text-align:center;line-height:1.5">No datasets loaded yet.<br>Choose an import path from the onboarding surface.</div>
+    </div>`;
+}
+function _onPageTab() {}
+initShell({ activeTab: 'individual', currentId: 'welcome', showDatasetBar: false });
+</script>
+</body>
+</html>

@@ -6,6 +6,28 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [0.9.1-beta] - 2026-04-24
+
+### Added
+- Built-in demo dataset set on the welcome screen based on the HydrogeoSieveXL2-3-11 inspired reference data in `test_data`
+- Structured export folder layout for tables, workbooks, and per-dataset plot outputs
+- Export scope selection that supports all datasets, current dataset, or selected dataset sets
+- Plot text options shared through the plotting system so titles and axis labels can be adjusted more consistently
+
+### Changed
+- Welcome screen refreshed around recent sessions, compact quick actions, guide links, and current beta notes
+- Export tab reorganized around live preview, grouped "files to create", and clearer dataset/file context
+- Exported report/plot outputs now rely more directly on the shared plot rendering pipeline
+- Export progress now uses the styled loading dialog and counts actual files instead of coarse export steps
+- Exported plots now use white report-ready backgrounds for PNG, SVG, and PDF output
+
+### Fixed
+- CSV long/wide export preview now respects Grain Size Data, K-Value Results, Statistics, percentiles, gradation, and soil classification toggles
+- Report/export plot desync issues where live plot settings were not fully reflected downstream
+- Comparison plot sidebar sizing/toggle behavior and legend placement controls for outside positions
+- Packaged `.xls` loading now includes `xlrd` so legacy Excel workbooks work in the built application
+
+
 ## [0.9.0-beta] - 2025-01-15
 
 ### Added

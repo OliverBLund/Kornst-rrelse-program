@@ -26,6 +26,8 @@ from qt_chrome.frameless_dialog_base import FramelessDialogBase
 def _friendly_load_error(error: Exception | str) -> str:
     error_str = str(error)
     lowered = error_str.lower()
+    if "xlrd" in lowered and "xls" in lowered:
+        return "Legacy Excel (.xls) support is unavailable in this build. Rebuild with xlrd included or convert the file to .xlsx/.csv."
     if "requires manual" in lowered or "column mapping" in lowered:
         return "Excel sheet requires manual column mapping"
     if "could not parse" in lowered:
@@ -51,10 +53,10 @@ class _StratigraphyBackdrop(QWidget):
     """Lightweight animated backdrop that echoes the splash screen sediment bands."""
 
     _BAND_COLORS = (
-        QColor(214, 190, 138),  # warm sand
-        QColor(191, 166, 130),  # silt tan
-        QColor(167, 148, 128),  # gravel taupe
-        QColor(136, 114, 88),   # earth brown
+        QColor(122, 113, 103),  # dark topsoil
+        QColor(230, 210, 178),  # light cream
+        QColor(229, 189, 137),  # pale sand
+        QColor(206, 158, 120),  # warm tan
     )
     _AMPLITUDES = (2.6, 4.0, 3.2, 1.8, 0.8)
     _FREQUENCIES = (0.92, 0.74, 1.08, 0.86, 0.60)
@@ -128,14 +130,14 @@ class _StratigraphyBackdrop(QWidget):
 
         rect = self.rect()
         base = QLinearGradient(0, 0, 0, rect.height())
-        base.setColorAt(0.0, QColor(247, 243, 235))
-        base.setColorAt(1.0, QColor(235, 228, 214))
+        base.setColorAt(0.0, QColor(246, 239, 227))
+        base.setColorAt(1.0, QColor(229, 214, 191))
         painter.fillRect(rect, QBrush(base))
 
         wash = QLinearGradient(0, 0, rect.width(), rect.height())
-        wash.setColorAt(0.0, QColor(255, 255, 255, 50))
+        wash.setColorAt(0.0, QColor(255, 251, 245, 42))
         wash.setColorAt(0.55, QColor(255, 255, 255, 0))
-        wash.setColorAt(1.0, QColor(159, 146, 118, 28))
+        wash.setColorAt(1.0, QColor(170, 133, 100, 26))
         painter.fillRect(rect, QBrush(wash))
 
         painter.setPen(QPen(QColor(93, 78, 55, 44), 1))
@@ -207,6 +209,7 @@ class _LoadingProgressRail(QWidget):
         super().__init__(parent)
         self._current = 0
         self._total = 1
+        self._progress_ratio = 0.0
         self._phase = 0.0
         self._timer = QTimer(self)
         self._timer.setInterval(16)
@@ -225,6 +228,8 @@ class _LoadingProgressRail(QWidget):
     def set_progress(self, current: int, total: int):
         self._total = max(1, total)
         self._current = max(0, min(current, self._total))
+        incoming_ratio = self._current / self._total if self._total else 0.0
+        self._progress_ratio = max(self._progress_ratio, incoming_ratio)
         self.update()
 
     def _tick(self):
@@ -247,7 +252,7 @@ class _LoadingProgressRail(QWidget):
         painter.setBrush(QBrush(track_grad))
         painter.drawPath(track_path)
 
-        progress = self._current / self._total if self._total else 0.0
+        progress = self._progress_ratio
         if self._timer.isActive() and progress <= 0:
             progress = 0.08
 
@@ -258,14 +263,16 @@ class _LoadingProgressRail(QWidget):
             fill_path = QPainterPath()
             fill_path.addRoundedRect(fill_rect, radius, radius)
             fill_grad = QLinearGradient(fill_rect.topLeft(), fill_rect.topRight())
-            fill_grad.setColorAt(0.0, QColor(244, 237, 223))
-            fill_grad.setColorAt(0.55, QColor(233, 228, 204))
-            fill_grad.setColorAt(1.0, QColor(211, 224, 175))
+            fill_grad.setColorAt(0.0, QColor(214, 226, 176))
+            fill_grad.setColorAt(0.55, QColor(C.OLIVE_H))
+            fill_grad.setColorAt(1.0, QColor(C.OLIVE))
             painter.setBrush(QBrush(fill_grad))
             painter.drawPath(fill_path)
+        else:
+            fill_path = track_path
 
         painter.save()
-        painter.setClipPath(track_path)
+        painter.setClipPath(fill_path)
         highlight_w = max(70.0, rect.width() * 0.18)
         highlight_x = rect.x() + (rect.width() + highlight_w) * self._phase - highlight_w
         highlight_rect = QRectF(rect)

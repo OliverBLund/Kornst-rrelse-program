@@ -18,6 +18,10 @@
       "target": "Program/resources"
     },
     {
+      "source": "../Program/CHANGELOG.md",
+      "target": "Program"
+    },
+    {
       "source": "../docs",
       "target": "docs"
     },
@@ -27,6 +31,7 @@
     }
   ],
   "hidden_imports": [
+    "xlrd",
     "matplotlib.backends.backend_qt5agg",
     "matplotlib.backends.backend_qtagg"
   ],

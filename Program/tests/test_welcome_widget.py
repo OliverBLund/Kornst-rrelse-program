@@ -48,6 +48,21 @@ class TestWelcomeWidget(unittest.TestCase):
         self.assertEqual(emitted, ["raw_sieve"])
         widget.deleteLater()
 
+    def test_demo_button_emits_demo_signal_when_clicked(self):
+        widget = WelcomeWidget(recent_files=[], recent_sessions=[])
+        emitted = []
+        widget.load_sample_data_requested.connect(lambda: emitted.append(True))
+
+        demo_btn = next(
+            btn for btn in widget.findChildren(QPushButton)
+            if btn.text() == "Open Demo Sample"
+        )
+        demo_btn.click()
+        APP.processEvents()
+
+        self.assertEqual(emitted, [True])
+        widget.deleteLater()
+
     def test_resume_button_disabled_without_recent_sessions(self):
         widget = WelcomeWidget(recent_files=[], recent_sessions=[])
         self.assertFalse(widget._resume_btn.isEnabled())
