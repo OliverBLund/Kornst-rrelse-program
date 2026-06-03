@@ -16,6 +16,11 @@ import csv
 from typing import Dict, List, Optional, Tuple
 import os
 from data_loader import GrainSizeData
+from excel_import_detection import (
+    ImportCandidate,
+    find_best_import_candidate,
+)
+from import_resolver import resolve_excel_import
 from gui.dialog_chrome import make_dialog_header, make_dialog_footer
 from gui.theme import C, F, SZ, icon as _icon
 from qt_chrome.frameless_dialog_base import FramelessDialogBase
@@ -57,6 +62,7 @@ class ColumnMapperDialog(FramelessDialogBase):
         self.column_mapping = {}
         self.sample_data = []
         self.headers = []
+        self.detected_import_candidate: Optional[ImportCandidate] = None
         self.excel_sheets = []  # Available Excel sheets
         self.sheet_list = None  # Multi-sheet selection widget
         self._excel_file = None  # Cached ExcelFile reference
@@ -70,6 +76,7 @@ class ColumnMapperDialog(FramelessDialogBase):
         self.selected_percent_range = []  # List of (row, col) tuples for percent data
         self.selected_headers = []  # List of (row, col) tuples for header cells
         self.learned_pattern = None  # Stores pattern for batch processing
+        self._batch_apply_committed = False
         self.selection_mode_group = None
         self.selection_mode_help_label = None
         self.pathway_summary_label = None
@@ -143,7 +150,13 @@ class ColumnMapperDialog(FramelessDialogBase):
             self.excel_sheets = excel_sheets
         self.current_sheet = resolved_sheet
         self.headers = self.detect_headers(rows)
-        self.sample_data = rows[:50]
+        self.sample_data = rows
+        self.detected_import_candidate = None
+        if os.path.splitext(self.file_path)[1].lower() in ['.xlsx', '.xls']:
+            self.detected_import_candidate = find_best_import_candidate(
+                self.sample_data,
+                sheet_name=self.current_sheet,
+            )
 
     @staticmethod
     def load_preview_rows(
@@ -178,7 +191,7 @@ class ColumnMapperDialog(FramelessDialogBase):
             if not resolved_sheet or resolved_sheet not in discovered_sheets:
                 resolved_sheet = discovered_sheets[0] if discovered_sheets else None
 
-            df = pd.read_excel(file_path, sheet_name=resolved_sheet, header=None, nrows=100)
+            df = pd.read_excel(file_path, sheet_name=resolved_sheet, header=None)
             rows = df.values.tolist()
             rows = [[str(cell) if pd.notna(cell) else '' for cell in row] for row in rows]
 
@@ -186,6 +199,18 @@ class ColumnMapperDialog(FramelessDialogBase):
             raise ValueError("CSV file is empty")
 
         return rows, discovered_sheets, resolved_sheet
+
+    @staticmethod
+    def headers_from_row(rows: List[List[str]], row_index: int) -> List[str]:
+        max_cols = max((len(row) for row in rows), default=2)
+        source_row = rows[row_index] if 0 <= row_index < len(rows) else []
+        headers: List[str] = []
+        for i in range(max_cols):
+            header = str(source_row[i]).strip() if i < len(source_row) else ""
+            if not header or header.lower() in ['unnamed', 'nan']:
+                header = f"Column {i+1}"
+            headers.append(header)
+        return headers
 
     def detect_headers(self, rows: List[List[str]]) -> List[str]:
         """Try to detect which row contains headers"""
@@ -225,18 +250,7 @@ class ColumnMapperDialog(FramelessDialogBase):
                         best_row = i
 
         self.header_row = best_row
-
-        if best_row < len(rows) and len(rows[best_row]) >= 2:
-            headers = [cell.strip() for cell in rows[best_row]]
-            # Filter out empty headers and replace with generic names
-            for i, header in enumerate(headers):
-                if not header or header.lower() in ['unnamed', 'nan']:
-                    headers[i] = f"Column {i+1}"
-            return headers
-
-        # If no good headers detected, create generic ones
-        max_cols = max(len(row) for row in rows) if rows else 2
-        return [f"Column {i+1}" for i in range(max_cols)]
+        return self.headers_from_row(rows, best_row)
 
     @staticmethod
     def is_numeric(value_or_self, value: Optional[str] = None) -> bool:
@@ -647,11 +661,11 @@ class ColumnMapperDialog(FramelessDialogBase):
         range_controls_layout.setHorizontalSpacing(8)
         range_controls_layout.setVerticalSpacing(8)
 
-        self.mark_size_range_btn = QPushButton("Size Cells\nmark selection")
+        self.mark_size_range_btn = QPushButton("Use Selection\nas Size")
         self.mark_size_range_btn.clicked.connect(lambda: self._mark_current_selection("size"))
         self._style_tool_button(self.mark_size_range_btn, "fa6s.ruler-horizontal")
 
-        self.mark_percent_range_btn = QPushButton("Passing Cells\nmark selection")
+        self.mark_percent_range_btn = QPushButton("Use Selection\nas % Passing")
         self.mark_percent_range_btn.clicked.connect(lambda: self._mark_current_selection("percent"))
         self._style_tool_button(self.mark_percent_range_btn, "fa6s.percent")
 
@@ -659,7 +673,7 @@ class ColumnMapperDialog(FramelessDialogBase):
         self.clear_ranges_btn.clicked.connect(self.clear_range_selection)
         self._style_tool_button(self.clear_ranges_btn, "fa6s.eraser")
 
-        self.smart_selection_btn = QPushButton("Smart Selection\nlearn pattern")
+        self.smart_selection_btn = QPushButton("Detect Area\nfrom selection")
         self.smart_selection_btn.setCheckable(True)
         self.smart_selection_btn.clicked.connect(self.toggle_smart_selection)
         self._style_tool_button(self.smart_selection_btn, "fa6s.wand-magic-sparkles")
@@ -743,7 +757,7 @@ class ColumnMapperDialog(FramelessDialogBase):
         # Add header row selector for Excel files
         if os.path.splitext(self.file_path)[1].lower() in ['.xlsx', '.xls']:
             self.header_row_spin = QSpinBox()
-            self.header_row_spin.setRange(0, min(10, len(self.sample_data) - 1))
+            self.header_row_spin.setRange(0, max(0, len(self.sample_data) - 1))
             self.header_row_spin.setValue(self.header_row)
             self.header_row_spin.valueChanged.connect(self.update_headers)
             mapping_form.addRow("Header Row (0-based):", self.header_row_spin)
@@ -950,7 +964,118 @@ class ColumnMapperDialog(FramelessDialogBase):
             corner_radius=8,
             resize_margin=6,
         )
+        if not self._initial_state:
+            self._apply_detected_import_candidate()
         self._apply_mode_state()
+
+    def _set_header_row_from_candidate(self, candidate: ImportCandidate) -> None:
+        self.header_row = max(0, int(candidate.header_row))
+        self._refresh_column_options_for_header_row(self.header_row, preserve_indices=True)
+        if hasattr(self, 'header_row_spin'):
+            self.header_row_spin.blockSignals(True)
+            self.header_row_spin.setRange(0, max(0, len(self.sample_data) - 1))
+            self.header_row_spin.setValue(min(self.header_row, self.header_row_spin.maximum()))
+            self.header_row_spin.blockSignals(False)
+
+    def _refresh_column_options_for_header_row(
+        self,
+        header_row: int,
+        *,
+        preserve_indices: bool = True,
+    ) -> None:
+        self.headers = self.headers_from_row(self.sample_data, header_row)
+        column_options = ["(Not Used)"] + self.headers
+        combos = [
+            getattr(self, 'size_combo', None),
+            getattr(self, 'passing_combo', None),
+            getattr(self, 'retained_combo', None),
+            getattr(self, 'raw_size_combo', None),
+            getattr(self, 'empty_sieve_combo', None),
+            getattr(self, 'sieve_sample_combo', None),
+        ]
+        for combo in combos:
+            if combo is None:
+                continue
+            previous_index = combo.currentIndex()
+            combo.blockSignals(True)
+            combo.clear()
+            combo.addItems(column_options)
+            if preserve_indices and previous_index >= 0:
+                combo.setCurrentIndex(min(previous_index, combo.count() - 1))
+            combo.blockSignals(False)
+
+        if hasattr(self, 'preview_table') and self.preview_table.columnCount() > 0:
+            if len(self.headers) >= self.preview_table.columnCount():
+                self.preview_table.setHorizontalHeaderLabels(self.headers[:self.preview_table.columnCount()])
+            else:
+                headers = self.headers + [f"Col {i+1}" for i in range(len(self.headers), self.preview_table.columnCount())]
+                self.preview_table.setHorizontalHeaderLabels(headers)
+
+    def _apply_detected_import_candidate(self, prefer_data_type: str = "processed_curve") -> bool:
+        """Apply a backend-detected import candidate to the mapper UI."""
+        if os.path.splitext(self.file_path)[1].lower() not in ['.xlsx', '.xls']:
+            return False
+
+        resolution = resolve_excel_import(
+            self.sample_data,
+            sheet_name=self.current_sheet,
+            intent=prefer_data_type,
+        )
+        candidate = resolution.candidate
+        if candidate is None:
+            candidate = self.detected_import_candidate
+        if candidate is None:
+            candidate = find_best_import_candidate(
+                self.sample_data,
+                sheet_name=self.current_sheet,
+                prefer_data_type=prefer_data_type,
+            )
+
+        if candidate is None:
+            return False
+
+        self._set_header_row_from_candidate(candidate)
+
+        if candidate.data_type == "processed_curve" and candidate.selection_method == "range":
+            self.raw_sieve_mode = False
+            self.calculated_selection_mode = "range"
+            self.selected_size_range = list(candidate.size_cells)
+            self.selected_percent_range = list(candidate.passing_cells)
+            if self.sheet_list is not None and self.current_sheet:
+                for i in range(self.sheet_list.count()):
+                    item = self.sheet_list.item(i)
+                    item.setCheckState(
+                        Qt.CheckState.Checked
+                        if item.text() == self.current_sheet
+                        else Qt.CheckState.Unchecked
+                    )
+            self.selected_headers = []
+            self.learned_pattern = None
+            if hasattr(self, 'pattern_info_label'):
+                self.pattern_info_label.setText(
+                    f"Detected {len(self.selected_size_range)} size cells and "
+                    f"{len(self.selected_percent_range)} percent-passing cells. Review or edit before import."
+                )
+            if hasattr(self, 'batch_apply_btn'):
+                self.batch_apply_btn.setEnabled(False)
+            self.update_table_colors()
+            return True
+
+        if candidate.data_type == "raw_sieve":
+            self.raw_sieve_mode = True
+            column_indices = candidate.column_indices
+            combo_map = {
+                'raw_size': getattr(self, 'raw_size_combo', None),
+                'empty_sieve': getattr(self, 'empty_sieve_combo', None),
+                'sieve_sample': getattr(self, 'sieve_sample_combo', None),
+            }
+            for key, combo in combo_map.items():
+                col_index = column_indices.get(key)
+                if combo is not None and isinstance(col_index, int) and 0 <= col_index + 1 < combo.count():
+                    combo.setCurrentIndex(col_index + 1)
+            return True
+
+        return False
 
     def _apply_mode_state(self):
         """Synchronize the dialog UI with the active data type + selection method."""
@@ -1119,8 +1244,13 @@ class ColumnMapperDialog(FramelessDialogBase):
             )
 
     def _rerun_auto_detection(self):
-        self.auto_detect_columns()
-        self._auto_detect_raw_sieve_columns()
+        applied = self._apply_detected_import_candidate(
+            "raw_sieve" if self.raw_sieve_mode else "processed_curve"
+        )
+        if not applied:
+            self.auto_detect_columns()
+            self._auto_detect_raw_sieve_columns()
+        self._apply_mode_state()
         self.validate_required_fields()
 
     def _update_preview_guidance(self):
@@ -1551,10 +1681,12 @@ class ColumnMapperDialog(FramelessDialogBase):
         if not self.headers or not hasattr(self, 'raw_size_combo'):
             return
 
-        size_keywords     = ['sieve', 'size', 'diameter', 'grain', 'particle', 'mesh', 'mm']
-        empty_keywords    = ['empty', 'tare', 'blank']
+        size_keywords     = ['sieve size', 'size', 'diameter', 'grain', 'particle', 'mesh', 'mash size',
+                             'maskevidde', 'd mm', 'd mmm', 'mm sieve']
+        empty_keywords    = ['empty', 'tare', 'blank', 'sigte tom', 'tom sieve', 'sieve empty']
         full_keywords     = ['sample', 'total', 'full', 'gross', 'sieve + sample', 'sieve+sample',
-                             'sieve and sample', 'filled']
+                             'sieve and sample', 'filled', 'sieve+fraction', 'sieve + fraction',
+                             'sieve and fraction', 'sigte + fraktion', 'fraktion']
 
         size_found  = False
         empty_found = False
@@ -1908,16 +2040,24 @@ class ColumnMapperDialog(FramelessDialogBase):
 
             # Update combo boxes
             column_options = ["(Not Used)"] + self.headers
-            for combo in [self.size_combo, self.passing_combo, self.retained_combo]:
+            for combo in [
+                self.size_combo,
+                self.passing_combo,
+                self.retained_combo,
+                self.raw_size_combo,
+                self.empty_sieve_combo,
+                self.sieve_sample_combo,
+            ]:
                 combo.clear()
                 combo.addItems(column_options)
 
             # Re-run auto detection
             self.auto_detect_columns()
+            self._auto_detect_raw_sieve_columns()
 
             # Update header row spinner if it exists
             if hasattr(self, 'header_row_spin'):
-                self.header_row_spin.setRange(0, min(10, len(self.sample_data) - 1))
+                self.header_row_spin.setRange(0, max(0, len(self.sample_data) - 1))
                 self.header_row_spin.setValue(self.header_row)
 
             # Reset any learned pattern or selections since data changed
@@ -1929,6 +2069,9 @@ class ColumnMapperDialog(FramelessDialogBase):
                 self.batch_apply_btn.setEnabled(False)
             if hasattr(self, 'pattern_info_label'):
                 self.pattern_info_label.setText("Select headers and data together, then apply the learned pattern to similar sheets.")
+            self._apply_detected_import_candidate(
+                "raw_sieve" if self.raw_sieve_mode else "processed_curve"
+            )
             self._apply_mode_state()
 
         except Exception as e:
@@ -1941,43 +2084,13 @@ class ColumnMapperDialog(FramelessDialogBase):
 
         self.header_row = new_header_row
         try:
-            # Update headers from the new row
-            if new_header_row < len(self.sample_data):
-                new_headers = [cell.strip() for cell in self.sample_data[new_header_row]]
-                # Filter out empty headers and replace with generic names
-                for i, header in enumerate(new_headers):
-                    if not header or header.lower() in ['unnamed', 'nan']:
-                        new_headers[i] = f"Column {i+1}"
-                self.headers = new_headers
+            self._refresh_column_options_for_header_row(new_header_row, preserve_indices=False)
 
-                # Update combo boxes
-                column_options = ["(Not Used)"] + self.headers
-                for combo in [self.size_combo, self.passing_combo, self.retained_combo]:
-                    combo.clear()
-                    combo.addItems(column_options)
-
-                # Also update raw sieve combo boxes if they exist
-                for combo in [
-                    getattr(self, 'raw_size_combo', None),
-                    getattr(self, 'empty_sieve_combo', None),
-                    getattr(self, 'sieve_sample_combo', None),
-                ]:
-                    if combo is not None:
-                        combo.clear()
-                        combo.addItems(column_options)
-
-                # Re-run auto detection for both modes
-                self.auto_detect_columns()
-                self._auto_detect_raw_sieve_columns()
-
-                # Update preview table headers
-                if len(self.headers) >= self.preview_table.columnCount():
-                    self.preview_table.setHorizontalHeaderLabels(self.headers[:self.preview_table.columnCount()])
-                else:
-                    headers = self.headers + [f"Col {i+1}" for i in range(len(self.headers), self.preview_table.columnCount())]
-                    self.preview_table.setHorizontalHeaderLabels(headers)
-                self.validate_required_fields()
-                self._update_file_strip()
+            # Re-run auto detection for both modes
+            self.auto_detect_columns()
+            self._auto_detect_raw_sieve_columns()
+            self.validate_required_fields()
+            self._update_file_strip()
 
         except Exception as e:
             QMessageBox.warning(self, "Header Update Error", f"Could not update headers:\n{str(e)}")
@@ -1997,11 +2110,19 @@ class ColumnMapperDialog(FramelessDialogBase):
     def switch_to_raw_sieve_mode(self):
         """Switch to raw sieve weighings input mode."""
         self.raw_sieve_mode = True
+        applied = self._apply_detected_import_candidate("raw_sieve")
+        if not applied and not all(
+            combo.currentIndex() > 0
+            for combo in (self.raw_size_combo, self.empty_sieve_combo, self.sieve_sample_combo)
+        ):
+            self._auto_detect_raw_sieve_columns()
         self._apply_mode_state()
 
     def switch_to_calculated_mode(self):
         """Switch back to the standard calculated-data input mode."""
         self.raw_sieve_mode = False
+        if not self.selected_size_range and not self.selected_percent_range:
+            self._apply_detected_import_candidate("processed_curve")
         self._apply_mode_state()
 
     def _mark_current_selection(self, mode: str) -> None:
@@ -2058,6 +2179,11 @@ class ColumnMapperDialog(FramelessDialogBase):
             raise ValueError("Please select a Weight of Empty Sieve column")
         if full_idx < 0:
             raise ValueError("Please select a Weight of Sieve + Sample column")
+        if len({size_idx, empty_idx, full_idx}) != 3:
+            raise ValueError(
+                "Raw sieve mapping requires three different columns: "
+                "sieve size, empty sieve, and sieve + sample."
+            )
 
         rows = self._load_rows_for_sheet(sheet_name)
         header_row_idx = getattr(self, 'header_row', 0)
@@ -2066,6 +2192,8 @@ class ColumnMapperDialog(FramelessDialogBase):
         sieve_sizes: List[float]   = []
         empty_weights: List[float] = []
         full_weights: List[float]  = []
+        pan_retained_weight = 0.0
+        pan_labels = {"pan", "bund", "bottom"}
 
         max_idx = max(size_idx, empty_idx, full_idx)
         for row in data_rows:
@@ -2076,16 +2204,20 @@ class ColumnMapperDialog(FramelessDialogBase):
                 empty_str = row[empty_idx].strip()
                 full_str  = row[full_idx].strip()
 
-                if not size_str or not self.is_numeric(size_str):
-                    continue
                 if not empty_str or not self.is_numeric(empty_str):
                     continue
                 if not full_str or not self.is_numeric(full_str):
                     continue
 
-                size  = float(size_str)
                 empty = float(empty_str)
                 full  = float(full_str)
+
+                if not size_str or not self.is_numeric(size_str):
+                    if size_str.strip().lower() in pan_labels and full >= empty:
+                        pan_retained_weight += full - empty
+                    continue
+
+                size  = float(size_str)
 
                 if size <= 0:
                     continue  # Skip pan / invalid size rows
@@ -2102,10 +2234,20 @@ class ColumnMapperDialog(FramelessDialogBase):
                 "No valid data rows found. Make sure the correct columns are selected "
                 "and that the Header Row setting points to the actual header row."
             )
+        if len(sieve_sizes) < 3:
+            raise ValueError(
+                f"Raw sieve mapping produced only {len(sieve_sizes)} valid sieve rows. "
+                "Check that the mapped columns point to the actual header row and raw weighing table."
+            )
 
         # Delegate all arithmetic to the utility function in data_loader
         from data_loader import calculate_sieve_percent_passing
-        return calculate_sieve_percent_passing(sieve_sizes, empty_weights, full_weights)
+        return calculate_sieve_percent_passing(
+            sieve_sizes,
+            empty_weights,
+            full_weights,
+            pan_retained_weight=pan_retained_weight,
+        )
 
     def toggle_smart_selection(self):
         """Toggle smart selection mode"""
@@ -2571,105 +2713,116 @@ class ColumnMapperDialog(FramelessDialogBase):
         return self.learned_pattern is not None
 
     def apply_pattern_to_batch(self):
-        """Apply learned pattern to other error tabs with failed Excel files"""
-        # First check if we have ranges selected to learn from
+        """Apply the learned pattern to the current workbook and matching Excel error tabs."""
         if not self.selected_size_range or not self.selected_percent_range:
-            QMessageBox.warning(self, "No Selection",
-                              "Please select size and percent data ranges first before applying to batch.")
+            QMessageBox.warning(
+                self,
+                "No Selection",
+                "Please select size and percent data ranges first before applying to batch.",
+            )
             return
 
-        # Learn pattern from current selection
         pattern = self.learn_pattern_from_selection()
         if not pattern:
-            QMessageBox.warning(self, "Pattern Learning Failed",
-                              "Could not learn pattern from selected ranges. Make sure headers are visible above your data.")
+            QMessageBox.warning(
+                self,
+                "Pattern Learning Failed",
+                "Could not learn pattern from selected ranges. Make sure headers are visible above your data.",
+            )
             return
 
-        # Use direct reference to main window
-        if not self.main_window or not hasattr(self.main_window, 'dataset_tabs_widget'):
+        if not self.main_window or not hasattr(self.main_window, "dataset_tabs_widget"):
             QMessageBox.warning(self, "Error", "Main application window not available for batch processing.")
             return
 
         main_window = self.main_window
+        control_panel = getattr(main_window, "control_panel", None)
         current_file_key = self.file_path
         if self.forced_sheet_name:
             current_file_key = f"{self.file_path}:::{self.forced_sheet_name}"
 
-        # Find other error tabs with Excel files
         from gui.error_tab import ErrorTab
+
         error_tabs = []
         for i in range(main_window.dataset_tabs_widget.count()):
             widget = main_window.dataset_tabs_widget.widget(i)
             actual_file_path = getattr(widget, "actual_file_path", getattr(widget, "file_path", ""))
             if isinstance(widget, ErrorTab) and widget.file_path != current_file_key:
-                # Check if it's an Excel file
-                if actual_file_path.endswith('.xls') or actual_file_path.endswith('.xlsx'):
+                if actual_file_path.endswith(".xls") or actual_file_path.endswith(".xlsx"):
                     error_tabs.append(widget)
 
-        if not error_tabs:
-            QMessageBox.information(self, "No Error Tabs", "No other Excel error tabs found to apply pattern to.")
+        if not error_tabs and (control_panel is None or not hasattr(control_panel, "_apply_mapping_results")):
+            QMessageBox.information(self, "No Batch Targets", "No Excel targets were available for batch processing.")
             return
 
-        # Show confirmation dialog
-        file_list = "\n".join([f"- {os.path.basename(tab.file_path)}" for tab in error_tabs[:5]])
+        target_labels = [f"- {os.path.basename(current_file_key)} (current)"]
+        target_labels.extend(f"- {os.path.basename(tab.file_path)}" for tab in error_tabs[:5])
         if len(error_tabs) > 5:
-            file_list += f"\n... and {len(error_tabs) - 5} more"
+            target_labels.append(f"... and {len(error_tabs) - 5} more")
+        file_list = "\n".join(target_labels)
 
-        reply = QMessageBox.question(self, "Batch Fix Error Tabs",
-                                   f"Found {len(error_tabs)} Excel error tabs to fix.\n\n"
-                                   f"Pattern learned:\n"
-                                   f"- Size header: '{pattern['size_header']}'\n"
-                                   f"- Percent header: '{pattern['percent_header']}'\n"
-                                   f"- Data offset: {pattern['data_offset']} rows below headers\n\n"
-                                   f"Files to fix:\n{file_list}\n\n"
-                                   f"Apply this pattern to fix these error tabs?",
-                                   QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No)
+        reply = QMessageBox.question(
+            self,
+            "Batch Fix Error Tabs",
+            f"Found {len(error_tabs) + 1} Excel workbook target(s) to process.\n\n"
+            f"Pattern learned:\n"
+            f"- Size header: '{pattern['size_header']}'\n"
+            f"- Percent header: '{pattern['percent_header']}'\n"
+            f"- Data offset: {pattern['data_offset']} rows below headers\n\n"
+            f"Targets:\n{file_list}\n\n"
+            f"Apply this pattern now?",
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+        )
 
         if reply != QMessageBox.StandardButton.Yes:
             return
 
-        # Process each error tab
         successful_fixes = []
         failed_fixes = []
-        control_panel = getattr(main_window, "control_panel", None)
         mapping_state = self.get_mapping_state() if hasattr(self, "get_mapping_state") else None
+        current_committed = False
 
-        for error_tab in error_tabs:
+        targets = [(current_file_key, getattr(self, "forced_sheet_name", None), None)]
+        targets.extend((tab.file_path, getattr(tab, "sheet_name", None), tab) for tab in error_tabs)
+
+        for target_file_key, target_sheet_name, error_tab in targets:
             try:
-                # Apply pattern to extract data
-                result = self.apply_pattern_to_file(error_tab.file_path)
+                result = self.apply_pattern_to_file(target_file_key)
 
                 if control_panel is not None and hasattr(control_panel, "_apply_mapping_results"):
                     control_panel._apply_mapping_results(
-                        error_tab.file_path,
+                        target_file_key,
                         [result],
-                        forced_sheet_name=getattr(error_tab, "sheet_name", None),
+                        forced_sheet_name=target_sheet_name,
                         mapping_state=mapping_state,
                     )
                 else:
-                    # Fallback for tests or legacy embedding without a control panel.
+                    if error_tab is None:
+                        raise ValueError("Batch processing requires the main control panel for the current workbook.")
                     dataset = GrainSizeData(
-                        particle_sizes=result['particle_sizes'],
-                        percent_passing=result['percent_passing'],
-                        sample_name=result['sample_name'],
-                        temperature=result['temperature'],
-                        porosity=result['porosity'],
-                        file_path=error_tab.file_path,
+                        particle_sizes=result["particle_sizes"],
+                        percent_passing=result["percent_passing"],
+                        sample_name=result["sample_name"],
+                        temperature=result["temperature"],
+                        porosity=result["porosity"],
+                        file_path=target_file_key,
                     )
-                    error_tab.dataset_fixed.emit(dataset, error_tab.file_path)
-                successful_fixes.append(error_tab.file_path)
+                    error_tab.dataset_fixed.emit(dataset, target_file_key)
+
+                successful_fixes.append(target_file_key)
+                if target_file_key == current_file_key:
+                    current_committed = True
 
             except Exception as e:
-                failed_fixes.append((error_tab.file_path, str(e)))
+                failed_fixes.append((target_file_key, str(e)))
 
-        # Show results
         result_msg = f"Batch fix complete!\n\n"
         result_msg += f"Successfully fixed: {len(successful_fixes)} files\n"
         result_msg += f"Failed to fix: {len(failed_fixes)} files\n\n"
 
         if successful_fixes:
             result_msg += "Successfully fixed:\n"
-            for file_path in successful_fixes[:5]:  # Show first 5
+            for file_path in successful_fixes[:5]:
                 filename = os.path.basename(file_path)
                 result_msg += f"- {filename}\n"
             if len(successful_fixes) > 5:
@@ -2677,8 +2830,11 @@ class ColumnMapperDialog(FramelessDialogBase):
 
         if failed_fixes:
             result_msg += f"\nFailed to fix:\n"
-            for file_path, error in failed_fixes[:3]:  # Show first 3 errors
+            for file_path, error in failed_fixes[:3]:
                 filename = os.path.basename(file_path)
                 result_msg += f"- {filename}: {error[:50]}...\n"
 
         QMessageBox.information(self, "Batch Fix Results", result_msg)
+        if current_committed:
+            self._batch_apply_committed = True
+            self.accept()

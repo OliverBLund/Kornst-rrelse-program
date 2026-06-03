@@ -14,7 +14,7 @@ import pandas as pd
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 sys.path.insert(0, "Program")
 
-from PyQt6.QtWidgets import QApplication, QDialog, QStackedWidget, QTabWidget, QWidget
+from PyQt6.QtWidgets import QApplication, QDialog, QPushButton, QStackedWidget, QTabWidget, QWidget
 
 from gui import column_mapper as column_mapper_module
 from gui import control_panel as control_panel_module
@@ -420,6 +420,8 @@ class _BatchPatternHarness:
         self.file_path = file_path
         self.forced_sheet_name = forced_sheet_name
         self.applied = []
+        self.accepted = False
+        self._batch_apply_committed = False
 
     def learn_pattern_from_selection(self):
         return {
@@ -442,6 +444,9 @@ class _BatchPatternHarness:
 
     def get_mapping_state(self):
         return {"calculated_selection_mode": "range"}
+
+    def accept(self):
+        self.accepted = True
 
 
 class _Tab:
@@ -1015,6 +1020,91 @@ class TestRemapReplacement(unittest.TestCase):
         self.assertEqual(_FakeSheetSelector.calls, [first])
         self.assertEqual(result, [(first, "English"), (second, "English")])
 
+    def test_sample_card_exposes_visible_remap_action(self):
+        card = control_panel_module._SampleCard("sample.csv", "Sample", "loaded")
+        emitted = []
+        card.sig_remap.connect(emitted.append)
+        try:
+            remap_buttons = [
+                button for button in card.findChildren(QPushButton)
+                if button.text() == "Remap"
+            ]
+            self.assertEqual(len(remap_buttons), 1)
+            remap_buttons[0].click()
+            self.assertEqual(emitted, ["sample.csv"])
+        finally:
+            card.close()
+            card.deleteLater()
+            APP.processEvents()
+
+    def test_batch_multisheet_selection_applies_sheet_name_across_mixed_workbooks(self):
+        with tempfile.TemporaryDirectory() as tempdir:
+            first = os.path.join(tempdir, "first.xlsx")
+            second = os.path.join(tempdir, "second.xlsx")
+            third = os.path.join(tempdir, "third.xlsx")
+            with pd.ExcelWriter(first) as writer:
+                pd.DataFrame({"x": [1]}).to_excel(writer, sheet_name="English", index=False)
+                pd.DataFrame({"x": [2]}).to_excel(writer, sheet_name="Danish", index=False)
+            with pd.ExcelWriter(second) as writer:
+                pd.DataFrame({"x": [3]}).to_excel(writer, sheet_name="Notes", index=False)
+                pd.DataFrame({"x": [4]}).to_excel(writer, sheet_name="English", index=False)
+                pd.DataFrame({"x": [5]}).to_excel(writer, sheet_name="Results", index=False)
+            with pd.ExcelWriter(third) as writer:
+                pd.DataFrame({"x": [6]}).to_excel(writer, sheet_name="QC", index=False)
+                pd.DataFrame({"x": [7]}).to_excel(writer, sheet_name="English", index=False)
+
+            class _InfoLabel:
+                def setText(self, text):
+                    self.text = text
+
+            class _FakeSheetSelector:
+                calls = []
+                batch_options = []
+
+                def __init__(self, file_path, parent=None):
+                    self.file_path = file_path
+                    self.parent = parent
+                    self.info_label = _InfoLabel()
+                    _FakeSheetSelector.calls.append(file_path)
+
+                def setWindowTitle(self, title):
+                    self.title = title
+
+                def set_batch_sheet_options(
+                    self,
+                    sheet_names,
+                    sheet_counts,
+                    file_count,
+                    checked_sheet_names,
+                ):
+                    _FakeSheetSelector.batch_options.append(
+                        (sheet_names, sheet_counts, file_count, checked_sheet_names)
+                    )
+
+                def exec(self):
+                    return QDialog.DialogCode.Accepted
+
+                def get_selected_sheets(self):
+                    return ["English"]
+
+            original_selector = sheet_selector_module.SheetSelectorDialog
+            sheet_selector_module.SheetSelectorDialog = _FakeSheetSelector
+            try:
+                result = ControlPanel.handle_batch_multisheet_excel(
+                    _BatchExcelHarness(),
+                    [first, second, third],
+                )
+            finally:
+                sheet_selector_module.SheetSelectorDialog = original_selector
+
+        self.assertEqual(_FakeSheetSelector.calls, [first])
+        self.assertEqual(result, [(first, "English"), (second, "English"), (third, "English")])
+        sheet_names, sheet_counts, file_count, checked_sheet_names = _FakeSheetSelector.batch_options[0]
+        self.assertEqual(file_count, 3)
+        self.assertIn("English", sheet_names)
+        self.assertEqual(sheet_counts["english"], 3)
+        self.assertIn("English", checked_sheet_names)
+
     def test_apply_pattern_to_file_reads_sheet_qualified_excel_key(self):
         with tempfile.TemporaryDirectory() as tempdir:
             workbook = os.path.join(tempdir, "batch.xlsx")
@@ -1039,7 +1129,7 @@ class TestRemapReplacement(unittest.TestCase):
         self.assertEqual(result["particle_sizes"], [2.0, 1.0, 0.5])
         self.assertEqual(result["percent_passing"], [100.0, 60.0, 15.0])
 
-    def test_apply_pattern_to_batch_updates_sheet_specific_error_tabs_via_control_panel(self):
+    def test_apply_pattern_to_batch_updates_current_and_sheet_specific_error_tabs_via_control_panel(self):
         with tempfile.TemporaryDirectory() as tempdir:
             workbook = os.path.join(tempdir, "multisheet.xlsx")
             with pd.ExcelWriter(workbook) as writer:
@@ -1070,13 +1160,21 @@ class TestRemapReplacement(unittest.TestCase):
                 other_tab.deleteLater()
                 APP.processEvents()
 
-        self.assertEqual(harness.applied, [f"{workbook}:::Sheet2"])
-        self.assertEqual(len(recorder.calls), 1)
-        args, kwargs = recorder.calls[0]
-        self.assertEqual(args[0], f"{workbook}:::Sheet2")
-        self.assertEqual(args[1][0]["sheet_name"], "Sheet2")
-        self.assertEqual(kwargs["forced_sheet_name"], "Sheet2")
-        self.assertEqual(kwargs["mapping_state"]["calculated_selection_mode"], "range")
+        self.assertEqual(harness.applied, [f"{workbook}:::Sheet1", f"{workbook}:::Sheet2"])
+        self.assertEqual(len(recorder.calls), 2)
+
+        current_args, current_kwargs = recorder.calls[0]
+        self.assertEqual(current_args[0], f"{workbook}:::Sheet1")
+        self.assertEqual(current_args[1][0]["sheet_name"], "Sheet1")
+        self.assertEqual(current_kwargs["forced_sheet_name"], "Sheet1")
+
+        other_args, other_kwargs = recorder.calls[1]
+        self.assertEqual(other_args[0], f"{workbook}:::Sheet2")
+        self.assertEqual(other_args[1][0]["sheet_name"], "Sheet2")
+        self.assertEqual(other_kwargs["forced_sheet_name"], "Sheet2")
+        self.assertEqual(other_kwargs["mapping_state"]["calculated_selection_mode"], "range")
+        self.assertTrue(harness.accepted)
+        self.assertTrue(harness._batch_apply_committed)
 
 
 if __name__ == "__main__":

@@ -1,7 +1,12 @@
 # Grain Size Analysis Application - Python Dependencies
 
 # GUI Framework
-PyQt6>=6.4.0
+# Keep the PyQt6 stack pinned for packaged releases. Floating Qt versions can
+# bundle a newer Qt6Core.dll than the application was tested with and cause
+# native startup crashes in the PyInstaller executable.
+PyQt6==6.9.1
+PyQt6-Qt6==6.9.1
+PyQt6-sip==13.10.2
 qtawesome>=1.2.0         # Font Awesome icons used throughout the UI (lazy-imported in gui/theme.py)
 
 # Data Processing
@@ -19,5 +24,6 @@ openpyxl>=3.1.0
 dataclasses-json>=0.6.0  # Optional, for enhanced data serialization
 
 # Report rendering and export
-PyQt6-WebEngine>=6.4.0   # Required for HTML preview and PDF export in Reports tab
+PyQt6-WebEngine==6.9.0   # Required for HTML preview and PDF export in Reports tab
+PyQt6-WebEngine-Qt6==6.9.2
 python-docx>=1.0.0       # Required for Word (.docx) export (future)

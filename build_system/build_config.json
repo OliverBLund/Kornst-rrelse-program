@@ -4,7 +4,8 @@
   "icon_path": null,
   "dist_dir": "dist",
   "build_dir": "build",
-  "spec_dir": ".",
+  "spec_dir": "build/spec",
+  "contents_dir": "runtime",
   "extra_paths": [
     "../Program"
   ],

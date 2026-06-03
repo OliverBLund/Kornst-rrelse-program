@@ -741,6 +741,8 @@ class ErrorTab(QWidget):
                 initial_state=mapping_state,
             )
             if dialog.exec() == QDialog.DialogCode.Accepted:
+                if getattr(dialog, "_batch_apply_committed", False):
+                    return
                 mapping_results = dialog.get_mapping_results()
                 if not mapping_results:
                     QMessageBox.warning(self, "No Data", "No sheet data was extracted.")

@@ -1,9 +1,11 @@
 from __future__ import annotations
 
+import logging
 import os
 from typing import Any, Mapping, Sequence
 
 from data_loader import DataLoader, GrainSizeData, calculate_sieve_percent_passing
+from import_resolver import resolve_excel_import
 from k_calculations import KCalculator
 
 
@@ -52,6 +54,113 @@ def _source_display_name(source: object) -> str:
     if sheet_name:
         return f"{os.path.basename(actual_path)} [{sheet_name}]"
     return os.path.basename(actual_path)
+
+
+class _QueueLogHandler(logging.Handler):
+    """Forward warning/error logs from a worker process to the UI queue."""
+
+    def __init__(self, result_queue) -> None:
+        super().__init__(logging.WARNING)
+        self._result_queue = result_queue
+        self._file_key: str | None = None
+        self._context: dict[str, Any] = {}
+
+    def set_context(self, file_key: str | None, context: Mapping[str, Any] | None = None) -> None:
+        self._file_key = file_key
+        self._context = dict(context or {})
+
+    def emit(self, record: logging.LogRecord) -> None:
+        try:
+            event = {
+                "level": record.levelname,
+                "source": record.name,
+                "message": record.getMessage(),
+            }
+            if self._file_key:
+                event["file_key"] = self._file_key
+            if self._context:
+                event["context"] = dict(self._context)
+            self._result_queue.put(
+                (
+                    "log_event",
+                    event,
+                )
+            )
+        except Exception:
+            pass
+
+
+def _human_data_type(data_type: object) -> str:
+    value = str(data_type or "processed_curve")
+    if value == "raw_sieve":
+        return "raw sieve weights"
+    return "processed curve"
+
+
+def _queue_log_event(
+    result_queue,
+    *,
+    level: str,
+    source: str,
+    message: str,
+    file_key: str | None = None,
+    context: Mapping[str, Any] | None = None,
+) -> None:
+    event: dict[str, Any] = {
+        "level": level,
+        "source": source,
+        "message": message,
+    }
+    if file_key:
+        event["file_key"] = file_key
+    if context:
+        event["context"] = dict(context)
+    result_queue.put(("log_event", event))
+
+
+def _queue_dataset_import_event(result_queue, file_key: str, dataset, display_name: str | None = None) -> None:
+    provenance = getattr(dataset, "_source_import_provenance", None) or {}
+    mapping_state = getattr(dataset, "_source_mapping_state", None) or {}
+    data_type = provenance.get("data_type")
+    if not data_type:
+        data_type = "raw_sieve" if mapping_state.get("raw_sieve_mode") else "processed_curve"
+
+    source = provenance.get("source") or "standard_loader"
+    if source == "auto_detected":
+        pathway = "Excel auto-detection"
+    elif source == "manual_mapping":
+        pathway = "manual mapping"
+    else:
+        pathway = "standard file loader"
+
+    context = dict(provenance)
+    context.update(
+        {
+            "file_key": file_key,
+            "sample_name": getattr(dataset, "sample_name", display_name or ""),
+            "pathway": pathway,
+            "data_type": data_type,
+        }
+    )
+
+    sample_label = getattr(dataset, "sample_name", None) or display_name or os.path.basename(file_key)
+    data_label = _human_data_type(data_type)
+    intent = provenance.get("intent")
+    intent_mismatch = bool(intent and not provenance.get("intent_matched", True))
+    if intent_mismatch:
+        requested_label = _human_data_type(intent)
+        message = f"Requested {requested_label}; loaded {sample_label} as {data_label} via {pathway}."
+    else:
+        message = f"Loaded {sample_label} as {data_label} via {pathway}."
+
+    _queue_log_event(
+        result_queue,
+        level="WARNING" if intent_mismatch else "INFO",
+        source="data_loader",
+        message=message,
+        file_key=file_key,
+        context=context,
+    )
 
 
 def _coerce_float(value: Any) -> float:
@@ -184,22 +293,35 @@ def _extract_raw_sieve_from_rows(rows: list[list[str]], mapping_state: Mapping[s
     sieve_sizes: list[float] = []
     empty_weights: list[float] = []
     full_weights: list[float] = []
+    pan_retained_weight = 0.0
+    pan_labels = {"pan", "bund", "bottom"}
     for row in data_rows:
         if len(row) <= max_idx:
             continue
         try:
-            if not (_is_numeric(row[size_idx]) and _is_numeric(row[empty_idx]) and _is_numeric(row[full_idx])):
+            if not (_is_numeric(row[empty_idx]) and _is_numeric(row[full_idx])):
+                continue
+            empty = _coerce_float(row[empty_idx])
+            full = _coerce_float(row[full_idx])
+            if not _is_numeric(row[size_idx]):
+                if str(row[size_idx]).strip().lower() in pan_labels and full >= empty:
+                    pan_retained_weight += full - empty
                 continue
             size = _coerce_float(row[size_idx])
             if size <= 0:
                 continue
             sieve_sizes.append(size)
-            empty_weights.append(_coerce_float(row[empty_idx]))
-            full_weights.append(_coerce_float(row[full_idx]))
+            empty_weights.append(empty)
+            full_weights.append(full)
         except (IndexError, ValueError):
             continue
 
-    return calculate_sieve_percent_passing(sieve_sizes, empty_weights, full_weights)
+    return calculate_sieve_percent_passing(
+        sieve_sizes,
+        empty_weights,
+        full_weights,
+        pan_retained_weight=pan_retained_weight,
+    )
 
 
 def _load_mapped_source(source: Mapping[str, Any]) -> GrainSizeData:
@@ -233,6 +355,58 @@ def _load_mapped_source(source: Mapping[str, Any]) -> GrainSizeData:
     )
     dataset._source_mapping_state = dict(mapping_state)
     dataset._source_descriptor = dict(source)
+    provenance = source.get("import_provenance") or mapping_state.get("import_provenance")
+    if provenance:
+        dataset._source_import_provenance = dict(provenance)
+    return dataset
+
+
+def _load_detected_excel_source(
+    file_path: str,
+    *,
+    sheet_name: str | None = None,
+    sample_name: str | None = None,
+    temperature: float | None = None,
+    porosity: float | None = None,
+    import_intent: str = "processed",
+) -> GrainSizeData:
+    rows = _load_rows(file_path, sheet_name=sheet_name)
+    resolution = resolve_excel_import(rows, sheet_name=sheet_name, intent=import_intent)
+    if resolution.requires_mapping:
+        raise ValueError(resolution.message or "Excel sheet requires manual column mapping")
+
+    source = {
+        "file_key": f"{file_path}:::{sheet_name}" if sheet_name else file_path,
+        "file_path": file_path,
+        "sheet_name": sheet_name,
+        "sample_name": sample_name,
+        "temperature": temperature,
+        "porosity": porosity,
+        "mapping_state": dict(resolution.mapping_state),
+        "import_intent": resolution.intent,
+        "import_provenance": dict(resolution.provenance),
+    }
+    return _load_mapped_source(source)
+
+
+def _load_source_without_mapping(
+    file_path: str,
+    *,
+    sheet_name: str | None = None,
+    loader: DataLoader,
+    temperature: float | None = None,
+    import_intent: str = "processed",
+) -> GrainSizeData:
+    file_ext = os.path.splitext(file_path)[1].lower()
+    if file_ext in {".xlsx", ".xls"}:
+        return _load_detected_excel_source(
+            file_path,
+            sheet_name=sheet_name,
+            temperature=temperature,
+            import_intent=import_intent,
+        )
+    dataset = loader.load_file(file_path)
+    dataset.file_path = f"{file_path}:::{sheet_name}" if sheet_name else file_path
     return dataset
 
 
@@ -285,6 +459,9 @@ def prepare_dataset_for_ui(dataset, *, temperature: float | None = None, calcula
 
 def run_batch_import(file_entries: Sequence[object], result_queue, *, temperature: float | None = None) -> None:
     """Load selected files in a separate process and stream queue events back to the UI."""
+    log_handler = _QueueLogHandler(result_queue)
+    root_logger = logging.getLogger()
+    root_logger.addHandler(log_handler)
     try:
         loader = DataLoader()
         calculator = KCalculator()
@@ -292,25 +469,46 @@ def run_batch_import(file_entries: Sequence[object], result_queue, *, temperatur
         summary = {"total": total, "loaded": 0, "review": 0, "failed": 0, "canceled": False}
 
         for index, file_entry in enumerate(file_entries, start=1):
-            if isinstance(file_entry, tuple):
+            if isinstance(file_entry, Mapping):
+                file_key = _source_file_key(file_entry)
+                file_path, sheet_from_key = _split_file_key(file_key)
+                file_path = str(file_entry.get("file_path") or file_path)
+                sheet_name = file_entry.get("sheet_name") or sheet_from_key
+                import_intent = str(file_entry.get("import_intent") or "processed")
+                display_name = _source_display_name(file_entry)
+            elif isinstance(file_entry, tuple):
                 file_path, sheet_name = file_entry
                 file_key = f"{file_path}:::{sheet_name}"
+                import_intent = "processed"
                 display_name = f"{os.path.basename(file_path)} [{sheet_name}]"
             else:
                 file_path = str(file_entry)
                 sheet_name = None
                 file_key = file_path
+                import_intent = "processed"
                 display_name = os.path.basename(file_path)
 
+            log_handler.set_context(
+                file_key,
+                {
+                    "file_key": file_key,
+                    "pathway": "data loading",
+                    "intent": import_intent,
+                },
+            )
             result_queue.put(("progress", index, total, "Loading selected files", display_name))
 
             try:
-                if sheet_name:
-                    raise ValueError("Excel sheet requires manual column mapping")
-
-                dataset = loader.load_file(file_path)
-                dataset.file_path = file_path
+                dataset = _load_source_without_mapping(
+                    file_path,
+                    sheet_name=sheet_name,
+                    loader=loader,
+                    temperature=temperature,
+                    import_intent=import_intent,
+                )
+                dataset.file_path = file_key
                 sample_name = getattr(dataset, "sample_name", os.path.basename(file_path))
+                _queue_dataset_import_event(result_queue, file_key, dataset, display_name)
 
                 if dataset.has_errors():
                     summary["failed"] += 1
@@ -328,12 +526,30 @@ def run_batch_import(file_entries: Sequence[object], result_queue, *, temperatur
                     summary["loaded"] += 1
                     result_queue.put(("item_loaded", file_key, dataset, "loaded", sample_name))
             except Exception as exc:
+                detail = _friendly_load_error(exc)
                 summary["review"] += 1
-                result_queue.put(("item_failed", file_key, _friendly_load_error(exc)))
+                _queue_log_event(
+                    result_queue,
+                    level="WARNING",
+                    source="data_loader",
+                    message=f"Could not load {display_name}: {detail}",
+                    file_key=file_key,
+                    context={
+                        "file_key": file_key,
+                        "pathway": "import review",
+                        "intent": import_intent,
+                    },
+                )
+                result_queue.put(("item_failed", file_key, detail))
 
         result_queue.put(("finished", summary))
     except Exception as exc:
         result_queue.put(("process_error", str(exc)))
+    finally:
+        try:
+            root_logger.removeHandler(log_handler)
+        except Exception:
+            pass
 
 
 def run_external_load(
@@ -344,6 +560,9 @@ def run_external_load(
     temperature: float | None = None,
 ) -> None:
     """Load external datasets in a separate process and stream queue events back to the UI."""
+    log_handler = _QueueLogHandler(result_queue)
+    root_logger = logging.getLogger()
+    root_logger.addHandler(log_handler)
     try:
         loader = DataLoader()
         calculator = KCalculator()
@@ -354,6 +573,13 @@ def run_external_load(
         for index, source in enumerate(sources, start=1):
             file_key = _source_file_key(source)
             display_name = _source_display_name(source)
+            log_handler.set_context(
+                file_key,
+                {
+                    "file_key": file_key,
+                    "pathway": "external load",
+                },
+            )
             result_queue.put(("progress", index, total, stage_title, display_name))
 
             try:
@@ -363,20 +589,45 @@ def run_external_load(
                     file_key = getattr(dataset, "file_path", file_key)
                 else:
                     actual_path, sheet_name = _split_file_key(file_key)
-                    if sheet_name:
-                        raise ValueError("Excel sheet requires manual column mapping")
-                    dataset = loader.load_file(actual_path)
-                    dataset.file_path = file_key
                     restore_temperature = temperature
+                    import_intent = "processed"
                     if isinstance(source, Mapping) and source.get("temperature") is not None:
                         restore_temperature = float(source["temperature"])
+                    if isinstance(source, Mapping) and source.get("import_intent"):
+                        import_intent = str(source["import_intent"])
+                    dataset = _load_source_without_mapping(
+                        actual_path,
+                        sheet_name=sheet_name,
+                        loader=loader,
+                        temperature=restore_temperature,
+                        import_intent=import_intent,
+                    )
+                    dataset.file_path = file_key
                     prepare_dataset_for_ui(dataset, temperature=restore_temperature, calculator=calculator)
                 summary["loaded"] += 1
+                _queue_dataset_import_event(result_queue, file_key, dataset, display_name)
                 result_queue.put(("file_loaded", file_key, dataset))
             except Exception as exc:
+                detail = _friendly_load_error(exc)
                 summary["failed"] += 1
-                result_queue.put(("file_failed", file_key, _friendly_load_error(exc)))
+                _queue_log_event(
+                    result_queue,
+                    level="WARNING",
+                    source="data_loader",
+                    message=f"Could not load {display_name}: {detail}",
+                    file_key=file_key,
+                    context={
+                        "file_key": file_key,
+                        "pathway": "external load",
+                    },
+                )
+                result_queue.put(("file_failed", file_key, detail))
 
         result_queue.put(("finished", summary))
     except Exception as exc:
         result_queue.put(("process_error", str(exc)))
+    finally:
+        try:
+            root_logger.removeHandler(log_handler)
+        except Exception:
+            pass

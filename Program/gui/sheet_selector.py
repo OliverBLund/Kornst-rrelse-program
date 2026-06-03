@@ -25,6 +25,8 @@ class SheetSelectorDialog(FramelessDialogBase):
         super().__init__(parent, default_mode="auto")
         self.file_path = file_path
         self.selected_sheets: List[str] = []
+        self._file_name_label = None
+        self._file_size_label = None
 
         self.setWindowTitle("Select Sheets to Import")
         self.setModal(True)
@@ -81,6 +83,7 @@ class SheetSelectorDialog(FramelessDialogBase):
         file_ic.setStyleSheet("background: transparent;")
         fr_lay.addWidget(file_ic)
         fname_lbl = QLabel(fname)
+        self._file_name_label = fname_lbl
         fname_lbl.setStyleSheet(
             f"font-weight: 600; color: {C.TEXT}; background: transparent; font-size: {F.SZ_MD}pt;"
         )
@@ -95,6 +98,7 @@ class SheetSelectorDialog(FramelessDialogBase):
             sz_str = ""
         if sz_str:
             sz_lbl = QLabel(sz_str)
+            self._file_size_label = sz_lbl
             sz_lbl.setStyleSheet(
                 f"color: {C.TEXT_MUTED}; background: transparent; font-size: {F.SZ_SM}pt;"
             )
@@ -172,15 +176,7 @@ class SheetSelectorDialog(FramelessDialogBase):
             )
             return
 
-        for name in sheet_names:
-            item = QListWidgetItem(name)
-            item.setCheckState(Qt.CheckState.Checked)
-            item.setFlags(
-                item.flags()
-                | Qt.ItemFlag.ItemIsUserCheckable
-                | Qt.ItemFlag.ItemIsEnabled
-            )
-            self._sheet_list.addItem(item)
+        self._populate_sheets(sheet_names)
 
         n = len(sheet_names)
         if n == 1:
@@ -191,6 +187,29 @@ class SheetSelectorDialog(FramelessDialogBase):
                 "to map all sheets at once."
             )
 
+    def set_batch_sheet_options(
+        self,
+        sheet_names: List[str],
+        sheet_counts: dict[str, int],
+        file_count: int,
+        checked_sheet_names: List[str] | None = None,
+    ):
+        """Show sheet-name choices for a multi-file import batch."""
+        if self._file_name_label is not None:
+            self._file_name_label.setText(f"{file_count} Excel workbooks")
+        if self._file_size_label is not None:
+            self._file_size_label.hide()
+
+        self._populate_sheets(
+            sheet_names,
+            sheet_counts=sheet_counts,
+            file_count=file_count,
+            checked_sheet_names=checked_sheet_names,
+        )
+        self._info_label.setText(
+            "Selected sheet names will be imported from every workbook that contains them."
+        )
+
     # ── Helpers ─────────────────────────────────────────────────────────────
 
     def _set_all(self, checked: bool):
@@ -198,12 +217,48 @@ class SheetSelectorDialog(FramelessDialogBase):
         for i in range(self._sheet_list.count()):
             self._sheet_list.item(i).setCheckState(state)
 
+    @staticmethod
+    def _sheet_key(name: str) -> str:
+        return str(name).strip().casefold()
+
+    def _populate_sheets(
+        self,
+        sheet_names: List[str],
+        sheet_counts: dict[str, int] | None = None,
+        file_count: int | None = None,
+        checked_sheet_names: List[str] | None = None,
+    ):
+        self._sheet_list.clear()
+        checked_keys = None
+        if checked_sheet_names is not None:
+            checked_keys = {self._sheet_key(name) for name in checked_sheet_names}
+
+        for name in sheet_names:
+            key = self._sheet_key(name)
+            count = sheet_counts.get(key) if sheet_counts else None
+            label = name
+            if file_count and count is not None and count != file_count:
+                label = f"{name} ({count}/{file_count} files)"
+
+            item = QListWidgetItem(label)
+            item.setData(Qt.ItemDataRole.UserRole, name)
+            is_checked = checked_keys is None or key in checked_keys
+            item.setCheckState(Qt.CheckState.Checked if is_checked else Qt.CheckState.Unchecked)
+            item.setFlags(
+                item.flags()
+                | Qt.ItemFlag.ItemIsUserCheckable
+                | Qt.ItemFlag.ItemIsEnabled
+            )
+            self._sheet_list.addItem(item)
+
     def get_selected_sheets(self) -> List[str]:
-        return [
-            self._sheet_list.item(i).text()
-            for i in range(self._sheet_list.count())
-            if self._sheet_list.item(i).checkState() == Qt.CheckState.Checked
-        ]
+        selected = []
+        for i in range(self._sheet_list.count()):
+            item = self._sheet_list.item(i)
+            if item.checkState() != Qt.CheckState.Checked:
+                continue
+            selected.append(item.data(Qt.ItemDataRole.UserRole) or item.text())
+        return selected
 
     # ── Accept / reject ─────────────────────────────────────────────────────
 

@@ -1,9 +1,14 @@
 # Grain Size Analysis - build requirements
 
 PyInstaller>=6.0.0
-PyQt6>=6.5.0
-PyQt6-Qt6>=6.5.0
-PyQt6-sip>=13.5.0
+# Keep Qt pinned for packaged releases. Floating versions can bundle a newer
+# Qt6Core.dll than the application was tested with and crash before Python can
+# write a startup log.
+PyQt6==6.9.1
+PyQt6-Qt6==6.9.1
+PyQt6-sip==13.10.2
+PyQt6-WebEngine==6.9.0
+PyQt6-WebEngine-Qt6==6.9.2
 pandas>=2.0.0
 xlrd>=2.0.1
 numpy>=1.24.0

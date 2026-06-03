@@ -27,6 +27,12 @@ from gui.reporting_tab import ReportingTab
 from gui.export_tab import ExportTab
 from gui.error_tab import ErrorTab
 from gui.loading_dialog import LoadingDialog
+from gui.log_overlay import (
+    InAppLogStore,
+    LogDropdownPanel,
+    install_in_app_logging,
+    uninstall_in_app_logging,
+)
 from gui.stack_fade import StackFadeController, TabFadeInController
 from gui.welcome_widget import WelcomeWidget
 from gui.theme import C, F, SZ, build_stylesheet, icon, apply_matplotlib_style
@@ -42,6 +48,21 @@ from load_process_worker import run_external_load
 # _AppToolbar  — matches _shared.css .tb
 # ─────────────────────────────────────────────────────────────────────
 
+WELCOME_SCREEN_PREF_REVISION = 2
+
+
+def _effective_welcome_dont_show(settings) -> bool:
+    """Ignore stale welcome opt-out flags from older UI revisions."""
+    stored_revision = settings.value("welcome_screen/revision", 0, type=int)
+    dont_show = settings.value("welcome_screen/dont_show", False, type=bool)
+    return bool(dont_show) and int(stored_revision) >= WELCOME_SCREEN_PREF_REVISION
+
+
+def _save_welcome_preference(settings, dont_show: bool) -> None:
+    settings.setValue("welcome_screen/dont_show", bool(dont_show))
+    settings.setValue("welcome_screen/revision", WELCOME_SCREEN_PREF_REVISION)
+
+
 class _AppToolbar(QWidget):
     """
     Global toolbar: navigation tabs (left) + action buttons (middle) + help (right).
@@ -51,6 +72,7 @@ class _AppToolbar(QWidget):
     add_files_clicked = pyqtSignal()
     add_files_mode_clicked = pyqtSignal(str)
     calculate_clicked = pyqtSignal()
+    log_clicked = pyqtSignal()
     help_clicked = pyqtSignal()
 
     _TABS = [
@@ -146,6 +168,29 @@ class _AppToolbar(QWidget):
 
         layout.addStretch()
 
+        self._log_btn = QPushButton(" Log")
+        self._log_btn.setObjectName("tb-log")
+        self._log_btn.setProperty("toolaction", True)
+        self._log_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        try:
+            self._log_btn.setIcon(icon("fa6s.clipboard-list", C.TEXT_MID))
+            self._log_btn.setIconSize(self._CHROME_ICON_SIZE)
+        except Exception:
+            pass
+        self._log_btn.clicked.connect(self.log_clicked)
+        layout.addWidget(self._log_btn)
+        layout.addSpacing(4)
+
+        self._log_badge = QLabel(self._log_btn)
+        self._log_badge.setObjectName("toolbar-badge")
+        self._log_badge.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self._log_badge.setAttribute(Qt.WidgetAttribute.WA_StyledBackground, True)
+        self._log_badge.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents, True)
+        self._log_badge.setFont(QFont(F.MONO, F.SZ_XS, QFont.Weight.Bold))
+        self._log_badge.setFixedHeight(16)
+        self._log_badge.setMinimumWidth(16)
+        self._log_badge.hide()
+
         # ── Help — .tb-btn ───────────────────────────────────────────
         self._help_btn = QPushButton(" Help")
         self._help_btn.setObjectName("tb-help")
@@ -172,6 +217,7 @@ class _AppToolbar(QWidget):
             badge = self._badge_lbls[i]
             if badge.isVisible():
                 self._position_badge(btn, badge)
+        self._position_log_badge()
 
     @staticmethod
     def _badge_width(badge: QLabel) -> int:
@@ -233,6 +279,34 @@ class _AppToolbar(QWidget):
                 badge.hide()
             self._update_nav_button_width(tab_index)
             self._refresh_nav_styles()
+
+    def log_button(self) -> QPushButton:
+        return self._log_btn
+
+    def set_log_badge(self, count: int | None) -> None:
+        if count is not None and count > 0:
+            self._log_badge.setText(str(count))
+            self._log_badge.setStyleSheet(
+                f"background: rgba(208,128,32,0.18); color: {C.LED_WARN}; "
+                "border: 1px solid rgba(208,128,32,0.42); border-radius: 8px;"
+            )
+            self._log_badge.show()
+        else:
+            self._log_badge.setText("")
+            self._log_badge.hide()
+        self._position_log_badge()
+
+    def set_log_active(self, active: bool) -> None:
+        self._log_btn.setProperty("active", bool(active))
+        self._log_btn.style().unpolish(self._log_btn)
+        self._log_btn.style().polish(self._log_btn)
+
+    def _position_log_badge(self) -> None:
+        if not hasattr(self, "_log_badge") or not self._log_badge.isVisible():
+            return
+        self._log_badge.setFixedWidth(self._badge_width(self._log_badge))
+        bx = max(6, self._log_btn.width() - self._log_badge.width() - 5)
+        self._log_badge.move(bx, 2)
 
     def _refresh_nav_styles(self) -> None:
         for i, btn in enumerate(self._nav_btns):
@@ -468,6 +542,9 @@ class MainWindow(FramelessMainWindowMixin, QMainWindow):
         self._external_load_ui_timer = QTimer(self)
         self._external_load_ui_timer.setInterval(0)
         self._external_load_ui_timer.timeout.connect(self._process_external_load_ui_slice)
+        self.log_store = InAppLogStore(self)
+        self._qt_log_handler = install_in_app_logging(self.log_store)
+        self._log_overlay = None
 
         # Global stylesheet
         self._emit_startup_progress(
@@ -548,8 +625,13 @@ class MainWindow(FramelessMainWindowMixin, QMainWindow):
         self.app_toolbar.add_files_clicked.connect(self.control_panel.add_files)
         self.app_toolbar.add_files_mode_clicked.connect(self.control_panel.add_files)
         self.app_toolbar.calculate_clicked.connect(self.calculate_all_k_values)
+        self.app_toolbar.log_clicked.connect(self.toggle_log_overlay)
         self.app_toolbar.help_clicked.connect(self.show_help)
         main_layout.addWidget(self.app_toolbar)
+
+        self._log_overlay = LogDropdownPanel(self.log_store, self)
+        self._log_overlay.closed.connect(lambda: self.app_toolbar.set_log_active(False))
+        self.log_store.unread_changed.connect(self.app_toolbar.set_log_badge)
 
         # Content stack (one page per top-level tab)
         self.content_stack = QStackedWidget()
@@ -601,10 +683,11 @@ class MainWindow(FramelessMainWindowMixin, QMainWindow):
         self._samples_stack.addWidget(self.dataset_tabs_widget)
 
         settings_tmp = QSettings("GrainSizeAnalysis", "MainWindow")
-        dont_show = settings_tmp.value("welcome_screen/dont_show", False, type=bool)
+        dont_show = _effective_welcome_dont_show(settings_tmp)
         self._samples_stack.setCurrentIndex(0 if not dont_show else 1)
         # Sidebar is only visible when datasets are shown
         self.control_panel.setVisible(dont_show)
+        self._sync_welcome_preference_state()
 
         self.dataset_tabs_widget.currentChanged.connect(self._on_dataset_tab_changed)
         self._refresh_dataset_tab_icons()
@@ -1107,9 +1190,19 @@ class MainWindow(FramelessMainWindowMixin, QMainWindow):
     def on_welcome_open_help(self, topic_file: str):
         self.open_help_dialog(topic_file)
 
-    def on_welcome_dont_show_again(self, dont_show: bool):
+    def is_welcome_screen_enabled(self) -> bool:
+        """Return whether the welcome screen should be shown on startup."""
         settings = QSettings("GrainSizeAnalysis", "MainWindow")
-        settings.setValue("welcome_screen/dont_show", dont_show)
+        return not _effective_welcome_dont_show(settings)
+
+    def set_welcome_screen_enabled(self, enabled: bool):
+        """Persist the startup welcome-screen preference and sync UI state."""
+        settings = QSettings("GrainSizeAnalysis", "MainWindow")
+        _save_welcome_preference(settings, not bool(enabled))
+        self._sync_welcome_preference_state()
+
+    def on_welcome_dont_show_again(self, dont_show: bool):
+        self.set_welcome_screen_enabled(not bool(dont_show))
 
     def on_clear_sessions(self):
         reply = QMessageBox.question(
@@ -1427,6 +1520,9 @@ class MainWindow(FramelessMainWindowMixin, QMainWindow):
                 if mapping_state.get("raw_sieve_mode")
                 else mapping_state.get("calculated_selection_mode", "column")
             )
+        provenance = getattr(dataset, "_source_import_provenance", None)
+        if provenance:
+            descriptor["import_provenance"] = dict(provenance)
         return descriptor
 
     def _build_current_session(self) -> Optional[dict]:
@@ -1589,6 +1685,8 @@ class MainWindow(FramelessMainWindowMixin, QMainWindow):
 
             if kind == "progress":
                 self._on_external_load_progress(*payload)
+            elif kind == "log_event":
+                self.record_log_event(payload[0])
             elif kind == "file_loaded":
                 self._external_ui_total += 1
                 self._pending_external_ui_events.append((self._on_external_load_file_loaded, payload))
@@ -1797,6 +1895,15 @@ class MainWindow(FramelessMainWindowMixin, QMainWindow):
     def _update_welcome_recents(self):
         self._refresh_welcome_widget(preserve_visibility=True)
 
+    def _sync_welcome_preference_state(self):
+        settings = QSettings("GrainSizeAnalysis", "MainWindow")
+        dont_show = _effective_welcome_dont_show(settings)
+        checkbox = getattr(self.welcome_widget, "dont_show_checkbox", None)
+        if checkbox is not None:
+            checkbox.blockSignals(True)
+            checkbox.setChecked(dont_show)
+            checkbox.blockSignals(False)
+
     def _refresh_welcome_widget(self, preserve_visibility: bool = True):
         current_index = self._samples_stack.currentIndex()
         if preserve_visibility and self.dataset_tabs:
@@ -1814,6 +1921,7 @@ class MainWindow(FramelessMainWindowMixin, QMainWindow):
         )
         self._connect_welcome_signals()
         self._samples_stack.insertWidget(0, self.welcome_widget)
+        self._sync_welcome_preference_state()
         if preserve_visibility:
             self._samples_stack.setCurrentIndex(current_index)
             self.control_panel.setVisible(sidebar_visible)
@@ -2282,6 +2390,26 @@ class MainWindow(FramelessMainWindowMixin, QMainWindow):
     # STATUS BAR HELPERS
     # ──────────────────────────────────────────────────────────────────
 
+    def record_log_event(self, event: Mapping[str, Any] | str, **kwargs) -> None:
+        if isinstance(event, Mapping):
+            self.log_store.add_event(event)
+        else:
+            self.log_store.add_event(message=event, **kwargs)
+
+    def toggle_log_overlay(self) -> None:
+        if self._log_overlay is not None and self._log_overlay.isVisible():
+            self._log_overlay.hide()
+            self.app_toolbar.set_log_active(False)
+            return
+        self.show_log_overlay()
+
+    def show_log_overlay(self, *, file_key: str | None = None) -> None:
+        if self._log_overlay is None:
+            return
+        self._log_overlay.show_near(self.app_toolbar.log_button(), file_key=file_key)
+        self.app_toolbar.set_log_active(True)
+        self.app_toolbar.set_log_badge(self.log_store.unread_important_count)
+
     def _show_status_message(self, message: str, ok: bool = True, timeout: int = 0):
         self.rich_status_bar.set_status(message, ok=ok)
 
@@ -2353,4 +2481,5 @@ class MainWindow(FramelessMainWindowMixin, QMainWindow):
     def closeEvent(self, event):
         if self.dataset_tabs:
             self._save_current_session()
+        uninstall_in_app_logging(getattr(self, "_qt_log_handler", None))
         event.accept()

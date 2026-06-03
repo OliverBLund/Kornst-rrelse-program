@@ -42,8 +42,27 @@ class TestAppToolbar(unittest.TestCase):
     def test_toolbar_uses_explicit_chrome_icon_sizes(self):
         self.assertEqual(self.toolbar._add_btn.iconSize().width(), 13)
         self.assertEqual(self.toolbar._calc_btn.iconSize().width(), 13)
+        self.assertEqual(self.toolbar._log_btn.iconSize().width(), 13)
         self.assertEqual(self.toolbar._help_btn.iconSize().width(), 13)
         self.assertEqual(self.toolbar._nav_btns[0].iconSize().width(), 13)
+
+    def test_log_toolbar_button_emits_and_shows_warning_badge(self):
+        emitted = []
+        self.toolbar.log_clicked.connect(lambda: emitted.append(True))
+
+        self.toolbar._log_btn.click()
+        self.toolbar.set_log_badge(3)
+        APP.processEvents()
+
+        self.assertEqual(emitted, [True])
+        self.assertTrue(self.toolbar._log_badge.isVisible())
+        self.assertLessEqual(
+            self.toolbar._log_badge.x() + self.toolbar._log_badge.width(),
+            self.toolbar._log_btn.width(),
+        )
+
+        self.toolbar.set_log_badge(0)
+        self.assertFalse(self.toolbar._log_badge.isVisible())
 
     def test_add_data_toolbar_exposes_import_path_menu(self):
         emitted = []

@@ -617,6 +617,11 @@ QWidget#app-toolbar QPushButton[toolaction="true"]:pressed {{
     border-color: {C.EARTH};
     color: {C.TEXT};
 }}
+QWidget#app-toolbar QPushButton[toolaction="true"][active="true"] {{
+    background: rgba(107,142,35,0.10);
+    border-color: rgba(107,142,35,0.35);
+    color: {C.OLIVE};
+}}
 /* Primary action in toolbar (Calculate K) */
 QWidget#app-toolbar QPushButton[toolprimary="true"] {{
     background: {C.OLIVE};

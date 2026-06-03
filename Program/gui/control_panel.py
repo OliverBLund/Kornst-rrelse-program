@@ -3,6 +3,7 @@ Control panel widget for data import and analysis controls
 """
 
 from collections import deque
+from collections.abc import Mapping
 from PyQt6.QtWidgets import (QFrame, QVBoxLayout, QHBoxLayout, QGroupBox,
                             QPushButton, QLabel, QLineEdit, QComboBox,
                             QTableWidget, QTableWidgetItem, QTextEdit,
@@ -13,7 +14,7 @@ from PyQt6.QtWidgets import (QFrame, QVBoxLayout, QHBoxLayout, QGroupBox,
                             QToolButton, QSizePolicy, QTabWidget, QToolTip)
 import multiprocessing as mp
 import queue
-from PyQt6.QtCore import QTimer
+from PyQt6.QtCore import QTimer, QSettings
 from data_loader import DataLoader
 from gui.column_mapper import ColumnMapperDialog
 from gui.dataset_inspector_dialog import DataInspectorDialog
@@ -25,6 +26,7 @@ from gui.loading_dialog import LoadingDialog
 from gui.theme import C, F, SZ, icon
 from qt_chrome.frameless_dialog_base import FramelessDialogBase
 from load_process_worker import run_batch_import
+from import_resolver import manual_mapping_provenance
 from grain_classification import (
     ISO14688, GrainClassificationScheme, ClassificationResult,
 )
@@ -160,6 +162,7 @@ class _SampleCard(QWidget):
     sig_ctx = pyqtSignal(str, object)      # file_path, QPoint (global)
     sig_selected = pyqtSignal(str, bool)   # file_path, is_selected
     sig_inspect = pyqtSignal(str)          # file_path
+    sig_remap = pyqtSignal(str)            # file_path
     sig_log = pyqtSignal(str)              # file_path
     sig_props = pyqtSignal(str)            # file_path
     sig_remove = pyqtSignal(str)           # file_path
@@ -302,6 +305,7 @@ class _SampleCard(QWidget):
         act_row.setSpacing(3)
         for btn_text, btn_icon_name, is_danger, sig_attr in [
             ("Inspect", "fa6s.magnifying-glass", False, "sig_inspect"),
+            ("Remap",   "fa6s.table-columns",    False, "sig_remap"),
             ("Log",     "fa6s.clipboard-list",   False, "sig_log"),
             ("Props",   "fa6s.sliders",           False, "sig_props"),
             ("Remove",  "fa6s.trash",             True,  "sig_remove"),
@@ -480,6 +484,7 @@ class _FileListWidget(QScrollArea):
     card_ctx = pyqtSignal(str, object)     # file_path, QPoint (global)
     selection_changed = pyqtSignal()       # emitted when any card's selected state changes
     card_inspect = pyqtSignal(str)         # file_path
+    card_remap = pyqtSignal(str)           # file_path
     card_log = pyqtSignal(str)             # file_path
     card_props = pyqtSignal(str)           # file_path
     card_remove = pyqtSignal(str)          # file_path
@@ -518,6 +523,7 @@ class _FileListWidget(QScrollArea):
         card.sig_ctx.connect(self.card_ctx)
         card.sig_selected.connect(self._on_card_selected)
         card.sig_inspect.connect(self.card_inspect)
+        card.sig_remap.connect(self.card_remap)
         card.sig_log.connect(self.card_log)
         card.sig_props.connect(self.card_props)
         card.sig_remove.connect(self.card_remove)
@@ -1354,6 +1360,100 @@ class _FractionsLine(QWidget):
         painter.end()
 
 
+class ApplicationSettingsDialog(FramelessDialogBase):
+    """Small application settings dialog for persisted UI preferences."""
+
+    def __init__(self, show_welcome_on_startup: bool, parent=None):
+        super().__init__(parent, default_mode="auto")
+        self.setWindowTitle("Settings")
+        self.setMinimumWidth(520)
+        self.setMaximumWidth(640)
+        self._show_welcome_on_startup = bool(show_welcome_on_startup)
+        self.init_ui()
+
+    def init_ui(self):
+        """Build the settings dialog UI."""
+        from gui.dialog_chrome import make_dialog_header, make_dialog_footer
+
+        root = QVBoxLayout(self)
+        root.setContentsMargins(0, 0, 0, 0)
+        root.setSpacing(0)
+
+        self._header_widget = make_dialog_header(
+            "Settings",
+            "Application preferences and startup behavior",
+            fa_icon="fa6s.gear",
+            close_fn=self.reject,
+        )
+        root.addWidget(self._header_widget)
+
+        body = QWidget()
+        body.setStyleSheet(f"background: {C.BG};")
+        body_lay = QVBoxLayout(body)
+        body_lay.setContentsMargins(14, 14, 14, 14)
+        body_lay.setSpacing(12)
+
+        section_card = QFrame()
+        section_card.setStyleSheet(
+            f"QFrame {{ background: {C.BG_RAISED}; border: 1px solid {C.BORDER}; "
+            f"border-radius: 6px; }}"
+        )
+        section_lay = QVBoxLayout(section_card)
+        section_lay.setContentsMargins(14, 12, 14, 12)
+        section_lay.setSpacing(8)
+
+        section_title = QLabel("Startup")
+        section_title.setStyleSheet(
+            f"color: {C.TEXT}; font-size: {F.SZ_LG}pt; font-weight: 600; background: transparent;"
+        )
+        section_lay.addWidget(section_title)
+
+        section_note = QLabel(
+            "Control whether the welcome screen is shown when the program launches."
+        )
+        section_note.setWordWrap(True)
+        section_note.setStyleSheet(
+            f"color: {C.TEXT_MUTED}; font-size: {F.SZ_SM}pt; background: transparent;"
+        )
+        section_lay.addWidget(section_note)
+
+        self.show_welcome_checkbox = QCheckBox("Show welcome screen on startup")
+        self.show_welcome_checkbox.setChecked(self._show_welcome_on_startup)
+        self.show_welcome_checkbox.setStyleSheet(
+            f"QCheckBox {{ color: {C.TEXT}; font-size: {F.SZ_MD}pt; spacing: 8px; background: transparent; }}"
+            f"QCheckBox::indicator {{ width: 16px; height: 16px; }}"
+        )
+        section_lay.addWidget(self.show_welcome_checkbox)
+
+        help_text = QLabel(
+            "This affects startup only. It does not interrupt an active session or overwrite recent-session data."
+        )
+        help_text.setWordWrap(True)
+        help_text.setStyleSheet(
+            f"color: {C.TEXT_MUTED}; font-size: {F.SZ_SM}pt; background: transparent;"
+        )
+        section_lay.addWidget(help_text)
+
+        body_lay.addWidget(section_card)
+        body_lay.addStretch(1)
+
+        root.addWidget(body, 1)
+        root.addWidget(make_dialog_footer([
+            ("Cancel", self.reject, "secondary"),
+            ("Save", self.accept, "primary"),
+        ]))
+
+        self.install_chrome_behavior(
+            header_widget=self._header_widget,
+            corner_radius=8,
+            resize_margin=6,
+        )
+
+    def show_welcome_on_startup(self) -> bool:
+        """Return the current welcome-screen startup preference."""
+        return bool(self.show_welcome_checkbox.isChecked())
+
+
 class ControlPanel(QFrame):
     # Signals for communication with main window
     analysis_requested = pyqtSignal(dict)  # Emitted when analysis is requested
@@ -1426,6 +1526,61 @@ class ControlPanel(QFrame):
             self._handle_dropped_files(file_paths)
             event.acceptProposedAction()
 
+    def _file_entry_parts(self, file_entry) -> tuple[str, str | None, str]:
+        """Return actual path, sheet name, and stable file key for an import entry."""
+        if isinstance(file_entry, Mapping):
+            file_key = str(file_entry.get("file_key") or "")
+            file_path = str(file_entry.get("file_path") or "")
+            sheet_name = file_entry.get("sheet_name")
+            if not file_path and file_key:
+                file_path, sheet_from_key = self._split_sheet_key(file_key)
+                sheet_name = sheet_name or sheet_from_key
+            if not file_key and file_path:
+                file_key = f"{file_path}:::{sheet_name}" if sheet_name else file_path
+            return file_path, sheet_name, file_key
+        if isinstance(file_entry, tuple):
+            file_path, sheet_name = file_entry
+            return str(file_path), str(sheet_name), f"{file_path}:::{sheet_name}"
+        file_path = str(file_entry)
+        return file_path, None, file_path
+
+    def _file_entry_key(self, file_entry) -> str:
+        return self._file_entry_parts(file_entry)[2]
+
+    def _file_entry_display_name(self, file_entry) -> str | None:
+        file_path, sheet_name, _ = self._file_entry_parts(file_entry)
+        if sheet_name:
+            return f"{os.path.basename(file_path)} [{sheet_name}]"
+        return None
+
+    def _file_entry_is_excel(self, file_entry) -> bool:
+        file_path, _, _ = self._file_entry_parts(file_entry)
+        return file_path.lower().endswith((".xlsx", ".xls"))
+
+    def _with_import_intent(self, file_entry, import_intent: str):
+        if not self._file_entry_is_excel(file_entry):
+            return file_entry
+        file_path, sheet_name, file_key = self._file_entry_parts(file_entry)
+        return {
+            "file_key": file_key,
+            "file_path": file_path,
+            "sheet_name": sheet_name,
+            "import_intent": import_intent,
+        }
+
+    def _track_pending_file_entries(self, file_entries: list) -> None:
+        for file_entry in file_entries:
+            file_key = self._file_entry_key(file_entry)
+            self.file_statuses[file_key] = 'pending'
+
+        for file_entry in file_entries:
+            file_key = self._file_entry_key(file_entry)
+            self.add_file_to_table(
+                file_key,
+                'pending',
+                display_name=self._file_entry_display_name(file_entry),
+            )
+
     def _handle_dropped_files(self, file_paths: list):
         """Process files dropped onto the sidebar — same pipeline as add_files."""
         expanded_files = []
@@ -1442,23 +1597,7 @@ class ControlPanel(QFrame):
         expanded_files.extend(other_files)
 
         if expanded_files:
-            for file_entry in expanded_files:
-                if isinstance(file_entry, tuple):
-                    file_path, sheet_name = file_entry
-                    sheet_key = f"{file_path}:::{sheet_name}"
-                    self.file_statuses[sheet_key] = 'pending'
-                else:
-                    self.file_statuses[file_entry] = 'pending'
-
-            for file_entry in expanded_files:
-                if isinstance(file_entry, tuple):
-                    file_path, sheet_name = file_entry
-                    sheet_key = f"{file_path}:::{sheet_name}"
-                    self.add_file_to_table(sheet_key, 'pending',
-                                           display_name=f"{os.path.basename(file_path)} [{sheet_name}]")
-                else:
-                    self.add_file_to_table(file_entry, 'pending')
-
+            self._track_pending_file_entries(expanded_files)
             self.process_files_with_immediate_tabs(expanded_files)
             self.update_ui_state()
 
@@ -1612,6 +1751,7 @@ class ControlPanel(QFrame):
         self._file_list.selection_changed.connect(self._update_inventory_bar)
         self._file_list.selection_changed.connect(self.selection_changed)
         self._file_list.card_inspect.connect(self.show_file_info)
+        self._file_list.card_remap.connect(self.edit_file_mapping)
         self._file_list.card_log.connect(self.show_file_log)
         self._file_list.card_props.connect(self.show_file_props)
         self._file_list.card_remove.connect(self._remove_card_by_path)
@@ -1843,7 +1983,7 @@ class ControlPanel(QFrame):
         for btn_label, btn_icon_name, btn_slot in [
             ("Help", "fa6s.circle-question", self.show_help),
             ("About", "fa6s.circle-info", self.show_about),
-            ("Settings", "fa6s.gear", None),
+            ("Settings", "fa6s.gear", self.show_settings),
         ]:
             btn = QPushButton(btn_label)
             btn.setStyleSheet(_SF_BTN)
@@ -2143,27 +2283,27 @@ class ControlPanel(QFrame):
 
             if expanded_files:
                 if data_mode == "raw_sieve":
-                    self._queue_raw_sieve_files_for_mapping(expanded_files, already_added)
+                    auto_entries = [
+                        entry for entry in expanded_files
+                        if self._file_entry_is_excel(entry)
+                    ]
+                    mapping_entries = [
+                        entry for entry in expanded_files
+                        if not self._file_entry_is_excel(entry)
+                    ]
+                    if mapping_entries:
+                        self._queue_raw_sieve_files_for_mapping(mapping_entries, already_added)
+                    if auto_entries:
+                        self._track_pending_file_entries(auto_entries)
+                        self.process_files_with_immediate_tabs(auto_entries, import_intent="raw_sieve")
+                        self.update_ui_state()
+                        message = f"Processing {len(auto_entries)} raw Excel sheet(s)..."
+                        if mapping_entries:
+                            message += f" {len(mapping_entries)} non-Excel item(s) queued for mapping."
+                        self.sample_info_label.setText(message)
                     return
 
-                # Add files to tracking
-                for file_entry in expanded_files:
-                    if isinstance(file_entry, tuple):
-                        file_path, sheet_name = file_entry
-                        sheet_key = f"{file_path}:::{sheet_name}"
-                        self.file_statuses[sheet_key] = 'pending'
-                    else:
-                        file_path = file_entry
-                        self.file_statuses[file_path] = 'pending'
-
-                # Add files to table
-                for file_entry in expanded_files:
-                    if isinstance(file_entry, tuple):
-                        file_path, sheet_name = file_entry
-                        sheet_key = f"{file_path}:::{sheet_name}"
-                        self.add_file_to_table(sheet_key, 'pending', display_name=f"{os.path.basename(file_path)} [{sheet_name}]")
-                    else:
-                        self.add_file_to_table(file_entry, 'pending')
+                self._track_pending_file_entries(expanded_files)
 
                 # Create tabs immediately for all files, then try to load them
                 self.process_files_with_immediate_tabs(expanded_files)
@@ -2194,19 +2334,20 @@ class ControlPanel(QFrame):
         )
 
         for file_entry in file_entries:
-            if isinstance(file_entry, tuple):
-                file_path, sheet_name = file_entry
-                file_key = f"{file_path}:::{sheet_name}"
-                display_name = f"{os.path.basename(file_path)} [{sheet_name}]"
-            else:
-                file_key = file_entry
-                display_name = None
-
-            self.file_statuses[file_key] = 'mapping'
-            self.file_mapping_states[file_key] = {
+            file_key = self._file_entry_key(file_entry)
+            display_name = self._file_entry_display_name(file_entry)
+            _, sheet_name, _ = self._file_entry_parts(file_entry)
+            mapping_state = {
                 "raw_sieve_mode": True,
                 "calculated_selection_mode": "column",
+                "current_sheet": sheet_name,
+                "checked_sheets": [sheet_name] if sheet_name else [],
+                "import_intent": "raw_sieve",
             }
+            mapping_state["import_provenance"] = manual_mapping_provenance(mapping_state)
+
+            self.file_statuses[file_key] = 'mapping'
+            self.file_mapping_states[file_key] = mapping_state
             self.add_file_to_table(file_key, 'mapping', display_name=display_name)
             self.mapping_required.emit(file_key, mapping_message)
 
@@ -2219,32 +2360,35 @@ class ControlPanel(QFrame):
     def handle_batch_multisheet_excel(self, excel_files: list):
         """
         Smart batch handler for Excel files with multiple sheets.
-        Groups files by sheet structure and shows one dialog per group.
+        For multi-file batches, choose sheet names once and apply those names
+        to every workbook that contains them.
         Returns: List of file entries (paths or tuples), or None if cancelled
         """
         import pandas as pd
-        from collections import defaultdict
 
-        # Group files by their sheet structure
-        sheet_structure_groups = defaultdict(list)
+        def sheet_key(name: str) -> str:
+            return str(name).strip().casefold()
+
         file_sheet_names = {}
         single_sheet_files = []
+        multi_sheet_files = []
         error_files = []
 
         for file_path in excel_files:
             try:
                 excel_file = pd.ExcelFile(file_path)
                 try:
-                    sheet_names = tuple(excel_file.sheet_names)
+                    sheet_names = list(excel_file.sheet_names)
                 finally:
                     excel_file.close()
                 file_sheet_names[file_path] = sheet_names
 
                 if len(sheet_names) == 1:
                     single_sheet_files.append(file_path)
+                elif len(sheet_names) > 1:
+                    multi_sheet_files.append(file_path)
                 else:
-                    sheet_key = tuple(sorted(name.strip().lower() for name in sheet_names))
-                    sheet_structure_groups[sheet_key].append(file_path)
+                    error_files.append(file_path)
             except Exception as e:
                 error_files.append(file_path)
 
@@ -2253,50 +2397,82 @@ class ControlPanel(QFrame):
         # Handle single-sheet files (no dialog needed)
         expanded_files.extend(single_sheet_files)
 
-        # Handle each group of multi-sheet files
-        for sheet_key, group_files in sheet_structure_groups.items():
-            sheet_names = file_sheet_names.get(group_files[0], sheet_key)
-            if len(group_files) == 1:
-                # Only one file with this structure - use individual dialog
-                result = self.handle_multisheet_excel(group_files[0])
-                if result is None:
-                    expanded_files.append(group_files[0])
-                elif result:
-                    expanded_files.extend(result)
-                else:  # User cancelled
-                    return None
+        if len(multi_sheet_files) == 1:
+            result = self.handle_multisheet_excel(multi_sheet_files[0])
+            if result is None:
+                expanded_files.append(multi_sheet_files[0])
+            elif result:
+                expanded_files.extend(result)
             else:
-                # Multiple files with same structure - show batch dialog
-                from gui.sheet_selector import SheetSelectorDialog
+                return None
 
-                # Create dialog with info about the batch
-                first_file = group_files[0]
-                dialog = SheetSelectorDialog(first_file, self)
-                dialog.setWindowTitle(f"Select Sheets for {len(group_files)} Similar Workbooks")
+        elif len(multi_sheet_files) > 1:
+            from gui.sheet_selector import SheetSelectorDialog
 
-                # Update info label to show batch context
+            sheet_labels = {}
+            sheet_order = []
+            sheet_counts = {}
+            file_sheet_lookup = {}
+
+            for file_path in multi_sheet_files:
+                lookup = {}
+                seen_in_file = set()
+                for sheet_name in file_sheet_names.get(file_path, []):
+                    key = sheet_key(sheet_name)
+                    if key not in lookup:
+                        lookup[key] = sheet_name
+                    if key not in sheet_labels:
+                        sheet_labels[key] = sheet_name
+                        sheet_order.append(key)
+                    if key not in seen_in_file:
+                        sheet_counts[key] = sheet_counts.get(key, 0) + 1
+                        seen_in_file.add(key)
+                file_sheet_lookup[file_path] = lookup
+
+            shared_keys = {
+                key for key, count in sheet_counts.items()
+                if count == len(multi_sheet_files)
+            }
+            ordered_keys = (
+                [key for key in sheet_order if key in shared_keys]
+                + [key for key in sheet_order if key not in shared_keys]
+            )
+            batch_sheet_names = [sheet_labels[key] for key in ordered_keys]
+            checked_sheet_names = [
+                sheet_labels[key] for key in ordered_keys if key in shared_keys
+            ]
+
+            first_file = multi_sheet_files[0]
+            dialog = SheetSelectorDialog(first_file, self)
+            dialog.setWindowTitle(f"Select Sheets for {len(multi_sheet_files)} Workbooks")
+
+            set_batch_options = getattr(dialog, "set_batch_sheet_options", None)
+            if callable(set_batch_options):
+                set_batch_options(
+                    batch_sheet_names,
+                    sheet_counts,
+                    len(multi_sheet_files),
+                    checked_sheet_names,
+                )
+            elif hasattr(dialog, "info_label"):
                 dialog.info_label.setText(
-                    f"📊 Found {len(group_files)} workbooks with identical sheet structure.\n"
-                    f"Sheets: {', '.join(sheet_names)}\n\n"
-                    f"💡 Select which sheets to import from ALL {len(group_files)} workbooks.\n"
-                    f"This selection will apply to all files in this batch."
+                    f"Select sheet names to import from {len(multi_sheet_files)} workbooks."
                 )
 
-                if dialog.exec() == QDialog.DialogCode.Accepted:
-                    selected_sheets = dialog.get_selected_sheets()
-                    if not selected_sheets:
-                        return None  # User cancelled
+            if dialog.exec() == QDialog.DialogCode.Accepted:
+                selected_sheets = dialog.get_selected_sheets()
+                if not selected_sheets:
+                    return None
 
-                    # Apply selection to all files in this group
-                    for file_path in group_files:
-                        actual_sheets = file_sheet_names.get(file_path, ())
-                        actual_by_name = {name.strip().lower(): name for name in actual_sheets}
-                        for selected_sheet in selected_sheets:
-                            sheet = actual_by_name.get(selected_sheet.strip().lower())
-                            if sheet:
-                                expanded_files.append((file_path, sheet))
-                else:
-                    return None  # User cancelled
+                selected_keys = [sheet_key(sheet) for sheet in selected_sheets]
+                for file_path in multi_sheet_files:
+                    lookup = file_sheet_lookup.get(file_path, {})
+                    for key in selected_keys:
+                        sheet = lookup.get(key)
+                        if sheet:
+                            expanded_files.append((file_path, sheet))
+            else:
+                return None
 
         # Handle error files (treat as normal)
         expanded_files.extend(error_files)
@@ -2452,6 +2628,8 @@ class ControlPanel(QFrame):
                 initial_state=self.file_mapping_states.get(file_path),
             )
             if dialog.exec() == QDialog.DialogCode.Accepted:
+                if getattr(dialog, "_batch_apply_committed", False):
+                    return
                 mapping_results = dialog.get_mapping_results()
                 if not mapping_results:
                     QMessageBox.warning(self, "No Data", "No sheet data was extracted.")
@@ -2575,6 +2753,11 @@ class ControlPanel(QFrame):
 
     def show_file_log(self, file_path: str):
         """Show the load-time validation log for a dataset."""
+        host_window = self.window()
+        if host_window is not None and hasattr(host_window, "show_log_overlay"):
+            host_window.show_log_overlay(file_key=file_path)
+            return
+
         _, entry = self._find_loaded_entry_by_file(file_path)
         if not entry:
             QMessageBox.information(self, "Log", "Dataset not yet loaded.")
@@ -2721,6 +2904,10 @@ class ControlPanel(QFrame):
     def register_external_file(self, file_path: str, dataset):
         """Register a file that was loaded externally (e.g., from recent files/sessions)"""
         self._remove_loaded_entries_for_file(file_path)
+        mapping_state = getattr(dataset, "_source_mapping_state", None) or self.file_mapping_states.get(file_path)
+        if mapping_state:
+            self.file_mapping_states[file_path] = dict(mapping_state)
+        provenance = getattr(dataset, "_source_import_provenance", None)
         # Check if already in the list
         if file_path in self.file_statuses:
             # Already tracked, just update status
@@ -2740,6 +2927,7 @@ class ControlPanel(QFrame):
             'datasets': [dataset],
             'status': 'loaded',
             'mapping_state': self.file_mapping_states.get(file_path),
+            'import_provenance': provenance,
         }
 
         self._push_card_meta(file_path)
@@ -2785,6 +2973,8 @@ class ControlPanel(QFrame):
                     initial_state=self.file_mapping_states.get(file_path),
                 )
                 if dialog.exec() == QDialog.DialogCode.Accepted:
+                    if getattr(dialog, "_batch_apply_committed", False):
+                        continue
                     mapping_results = dialog.get_mapping_results()
                     if not mapping_results:
                         continue
@@ -2935,6 +3125,34 @@ class ControlPanel(QFrame):
                 return sample_name, entry
         return None, None
 
+    def _record_log_event(self, event: Mapping) -> None:
+        host_window = self.window()
+        if host_window is not None and hasattr(host_window, "record_log_event"):
+            host_window.record_log_event(event)
+
+    def _record_manual_import_event(self, file_path: str, dataset) -> None:
+        provenance = getattr(dataset, "_source_import_provenance", None) or {}
+        data_type = provenance.get("data_type") or "processed_curve"
+        data_label = "raw sieve weights" if data_type == "raw_sieve" else "processed curve"
+        context = dict(provenance)
+        context.update(
+            {
+                "file_key": file_path,
+                "sample_name": getattr(dataset, "sample_name", ""),
+                "pathway": "manual mapping",
+                "data_type": data_type,
+            }
+        )
+        self._record_log_event(
+            {
+                "level": "INFO",
+                "source": "data_loader",
+                "message": f"Loaded {dataset.sample_name} as {data_label} via manual mapping.",
+                "file_key": file_path,
+                "context": context,
+            }
+        )
+
     def _find_dataset_tab_for_dataset(self, dataset):
         if not hasattr(self, 'main_window') or not hasattr(self.main_window, 'dataset_tabs_widget'):
             return None
@@ -2978,15 +3196,24 @@ class ControlPanel(QFrame):
                 percent_passing=mapping['percent_passing'],
                 file_path=file_path
             )
-            dataset._source_mapping_state = mapping_state
+            source_mapping_state = dict(mapping_state or {})
+            if source_mapping_state and not source_mapping_state.get("import_provenance"):
+                source_mapping_state["import_provenance"] = manual_mapping_provenance(source_mapping_state)
+            provenance = (
+                source_mapping_state.get("import_provenance")
+                if source_mapping_state
+                else manual_mapping_provenance({"current_sheet": sheet_name})
+            )
+            dataset._source_mapping_state = source_mapping_state
+            dataset._source_import_provenance = dict(provenance)
             created_datasets.append(dataset)
 
         if not created_datasets:
             return
 
         self._remove_loaded_entries_for_file(file_path)
-        if mapping_state is not None:
-            self.file_mapping_states[file_path] = mapping_state
+        if created_datasets[0]._source_mapping_state:
+            self.file_mapping_states[file_path] = created_datasets[0]._source_mapping_state
 
         sample_key = created_datasets[0].sample_name
         sheet_names = [(mapping.get('sheet_name') or forced_sheet_name or '') for mapping in mapping_results]
@@ -2997,6 +3224,7 @@ class ControlPanel(QFrame):
             'status': 'loaded',
             'sheet_names': sheet_names,
             'mapping_state': self.file_mapping_states.get(file_path),
+            'import_provenance': getattr(created_datasets[0], '_source_import_provenance', None),
         }
         self.loaded_samples[sample_key] = entry
 
@@ -3006,6 +3234,10 @@ class ControlPanel(QFrame):
         self._update_inventory_bar()
 
         self.dataset_loaded_successfully.emit(created_datasets, file_path)
+        record_manual_import = getattr(self, "_record_manual_import_event", None)
+        if callable(record_manual_import):
+            for dataset in created_datasets:
+                record_manual_import(file_path, dataset)
 
         if any(sheet_names):
             summary = ", ".join(name for name in sheet_names if name)
@@ -3313,13 +3545,17 @@ class ControlPanel(QFrame):
         dialog = PorosityDialog(main_window, self)
         dialog.exec()
 
-    def process_files_with_immediate_tabs(self, file_entries: list):
+    def process_files_with_immediate_tabs(self, file_entries: list, import_intent: str = "processed"):
         """Process files by creating tabs immediately, then attempting to load data
 
         Args:
-            file_entries: List of file paths or (file_path, sheet_name) tuples
+            file_entries: List of file paths, (file_path, sheet_name) tuples, or source dicts
         """
-        return self._process_files_with_loading_dialog(file_entries)
+        worker_entries = [
+            self._with_import_intent(entry, import_intent)
+            for entry in file_entries
+        ]
+        return self._process_files_with_loading_dialog(worker_entries)
 
     def _process_files_with_loading_dialog(self, file_entries: list):
         if not file_entries:
@@ -3383,6 +3619,8 @@ class ControlPanel(QFrame):
 
             if kind == 'progress':
                 self._on_import_worker_progress(*payload)
+            elif kind == 'log_event':
+                self._record_log_event(payload[0])
             elif kind == 'item_loaded':
                 self._import_ui_total += 1
                 self._pending_import_ui_events.append((self._on_import_worker_loaded, payload))
@@ -3481,12 +3719,18 @@ class ControlPanel(QFrame):
 
     def _on_import_worker_loaded(self, file_key: str, dataset, status: str, sample_name: str):
         self._remove_loaded_entries_for_file(file_key)
+        mapping_state = getattr(dataset, "_source_mapping_state", None)
+        if mapping_state:
+            self.file_mapping_states[file_key] = dict(mapping_state)
+        provenance = getattr(dataset, "_source_import_provenance", None)
         self.file_statuses[file_key] = status
         self.loaded_samples[sample_name] = {
             'file_path': file_key,
             'data': dataset,
             'datasets': [dataset],
-            'status': status
+            'status': status,
+            'mapping_state': self.file_mapping_states.get(file_key),
+            'import_provenance': provenance,
         }
         self.dataset_loaded_successfully.emit(dataset, file_key)
         self.update_file_in_table(file_key, status)
@@ -3495,12 +3739,18 @@ class ControlPanel(QFrame):
 
     def _on_import_worker_validation_failed(self, file_key: str, dataset, sample_name: str, detail: str):
         self._remove_loaded_entries_for_file(file_key)
+        mapping_state = getattr(dataset, "_source_mapping_state", None)
+        if mapping_state:
+            self.file_mapping_states[file_key] = dict(mapping_state)
+        provenance = getattr(dataset, "_source_import_provenance", None)
         self.file_statuses[file_key] = 'failed'
         self.loaded_samples[sample_name] = {
             'file_path': file_key,
             'data': dataset,
             'datasets': [dataset],
-            'status': 'failed'
+            'status': 'failed',
+            'mapping_state': self.file_mapping_states.get(file_key),
+            'import_provenance': provenance,
         }
         self.update_file_in_table(file_key, 'failed')
         self.update_error_tab_message.emit(file_key, detail)
@@ -3670,3 +3920,37 @@ class ControlPanel(QFrame):
 
             <p>© 2025 - DTU Sustain</p>
             <p><em>Press F1 for detailed help topics</em></p>""")
+
+    def _read_welcome_screen_enabled(self) -> bool:
+        """Read the effective startup preference for the welcome screen."""
+        host_window = self.window()
+        if host_window is not None and hasattr(host_window, "is_welcome_screen_enabled"):
+            return bool(host_window.is_welcome_screen_enabled())
+
+        from gui.main_window import _effective_welcome_dont_show
+
+        settings = QSettings("GrainSizeAnalysis", "MainWindow")
+        return not _effective_welcome_dont_show(settings)
+
+    def _write_welcome_screen_enabled(self, enabled: bool) -> None:
+        """Persist the startup preference for the welcome screen."""
+        host_window = self.window()
+        if host_window is not None and hasattr(host_window, "set_welcome_screen_enabled"):
+            host_window.set_welcome_screen_enabled(bool(enabled))
+            return
+
+        from gui.main_window import _save_welcome_preference
+
+        settings = QSettings("GrainSizeAnalysis", "MainWindow")
+        _save_welcome_preference(settings, not bool(enabled))
+
+    def show_settings(self):
+        """Show application settings dialog."""
+        host_window = self.window()
+        dialog_parent = host_window if isinstance(host_window, QWidget) else self
+        dialog = ApplicationSettingsDialog(
+            show_welcome_on_startup=self._read_welcome_screen_enabled(),
+            parent=dialog_parent,
+        )
+        if dialog.exec() == QDialog.DialogCode.Accepted:
+            self._write_welcome_screen_enabled(dialog.show_welcome_on_startup())

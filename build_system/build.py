@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import argparse
 import ctypes
+from importlib import metadata
 import json
 import os
 import shutil
@@ -28,7 +29,8 @@ DEFAULT_CONFIG: Dict[str, Any] = {
     "icon_path": None,
     "dist_dir": "dist",
     "build_dir": "build",
-    "spec_dir": ".",
+    "spec_dir": "build/spec",
+    "contents_dir": "runtime",
     "extra_paths": [
         "../Program"
     ],
@@ -45,6 +47,14 @@ DEFAULT_CONFIG: Dict[str, Any] = {
         "matplotlib.backends.backend_qtagg"
     ],
     "default_mode": "gui"
+}
+
+EXPECTED_QT_PACKAGES: Dict[str, str] = {
+    "PyQt6": "6.9.1",
+    "PyQt6-Qt6": "6.9.1",
+    "PyQt6-sip": "13.10.2",
+    "PyQt6-WebEngine": "6.9.0",
+    "PyQt6-WebEngine-Qt6": "6.9.2",
 }
 
 
@@ -200,6 +210,7 @@ class BuildEnvironment:
             print("[DEPS] No requirements.txt found, skipping dependency installation.")
 
         self._ensure_pyinstaller()
+        self._verify_qt_runtime()
 
     def clean(self, *, remove_spec: bool = True) -> None:
         """Remove PyInstaller output directories and optional spec file."""
@@ -232,6 +243,7 @@ class BuildEnvironment:
             return BuildResult(False, f"Entry script not found: {entry_script}")
 
         self._ensure_pyinstaller()
+        self._verify_qt_runtime()
 
         if clean_before:
             self.clean(remove_spec=False)
@@ -239,6 +251,7 @@ class BuildEnvironment:
         # Ensure output directories exist so Windows can resolve short paths.
         self.dist_dir.mkdir(parents=True, exist_ok=True)
         self.build_dir.mkdir(parents=True, exist_ok=True)
+        self.spec_dir.mkdir(parents=True, exist_ok=True)
 
         command: List[str] = [
             sys.executable,
@@ -261,6 +274,10 @@ class BuildEnvironment:
 
         command.append("--onefile" if onefile else "--onedir")
         command.append("--console" if console else "--noconsole")
+        if not onefile:
+            contents_dir = str(self.config.get("contents_dir", "")).strip()
+            if contents_dir:
+                command.extend(["--contents-directory", contents_dir])
 
         for extra_path in self.config.get("extra_paths", []):
             path = self._resolve(extra_path)
@@ -322,6 +339,33 @@ class BuildEnvironment:
             subprocess.run(
                 [sys.executable, "-m", "pip", "install", "PyInstaller>=6.0.0"],
                 check=True,
+            )
+
+    def _verify_qt_runtime(self) -> None:
+        """Fail fast if the build environment would bundle an untested Qt stack."""
+        from PyQt6.QtCore import PYQT_VERSION_STR, QT_VERSION_STR
+
+        installed = {
+            package: metadata.version(package)
+            for package in EXPECTED_QT_PACKAGES
+        }
+        mismatches = {
+            package: {"expected": expected, "installed": installed[package]}
+            for package, expected in EXPECTED_QT_PACKAGES.items()
+            if installed[package] != expected
+        }
+
+        if QT_VERSION_STR != "6.9.1" or PYQT_VERSION_STR != "6.9.1" or mismatches:
+            package_details = ", ".join(
+                f"{package} expected {values['expected']} but found {values['installed']}"
+                for package, values in mismatches.items()
+            )
+            runtime_details = f"Qt runtime {QT_VERSION_STR}, PyQt {PYQT_VERSION_STR}"
+            details = f"{runtime_details}; {package_details}" if package_details else runtime_details
+            raise RuntimeError(
+                "Unexpected PyQt/Qt build environment. "
+                "Install build_system/requirements.txt before packaging. "
+                f"{details}"
             )
 
 

@@ -1081,7 +1081,8 @@ class DataLoader:
 def calculate_sieve_percent_passing(
     sieve_sizes: List[float],
     empty_weights: List[float],
-    full_weights: List[float]
+    full_weights: List[float],
+    pan_retained_weight: float = 0.0,
 ) -> Tuple[List[float], List[float]]:
     """
     Convert raw sieve weighing data into (sieve_size, cumulative % passing).
@@ -1092,7 +1093,7 @@ def calculate_sieve_percent_passing(
 
     Calculation:
         retained_weight  = (weight of sieve + sample) - (weight of empty sieve)
-        total_weight     = sum of all retained weights
+        total_weight     = sum of all retained weights, including optional pan mass
         weight_%         = retained_weight / total_weight * 100   (per sieve)
         % passing        = 100 - cumulative sum of weight_%        (coarsest → finest)
 
@@ -1100,6 +1101,8 @@ def calculate_sieve_percent_passing(
         sieve_sizes:   Sieve opening sizes in mm (any order, will be sorted).
         empty_weights: Weight of each empty sieve in grams.
         full_weights:  Weight of each sieve + retained sample in grams.
+        pan_retained_weight: Retained pan/bottom mass in grams. Included in the
+            total sample mass, but not returned as a grain-size point.
 
     Returns:
         (sieve_sizes_sorted, percent_passing) sorted coarsest → finest,
@@ -1137,7 +1140,13 @@ def calculate_sieve_percent_passing(
             "No valid sieve rows found after filtering negative retained weights."
         )
 
-    total_weight = sum(w for _, w in valid_pairs)
+    if pan_retained_weight < 0:
+        logger.warning(
+            f"Negative pan retained weight ({pan_retained_weight:.4f} g) ignored."
+        )
+        pan_retained_weight = 0.0
+
+    total_weight = sum(w for _, w in valid_pairs) + pan_retained_weight
     if total_weight <= 0:
         raise ValueError(
             "Total sample weight is zero or negative.  "

@@ -179,6 +179,17 @@ if "%USE_CLEAN_ENV%"=="2" (
     set PYTHON_CMD=python
 )
 
+echo Verifying pinned Qt runtime...
+%PYTHON_CMD% -c "from importlib import metadata; from PyQt6.QtCore import QT_VERSION_STR, PYQT_VERSION_STR; expected={'PyQt6':'6.9.1','PyQt6-Qt6':'6.9.1','PyQt6-sip':'13.10.2','PyQt6-WebEngine':'6.9.0','PyQt6-WebEngine-Qt6':'6.9.2'}; installed={name: metadata.version(name) for name in expected}; print('Qt runtime:', QT_VERSION_STR, 'PyQt:', PYQT_VERSION_STR); bad={k:(v, installed[k]) for k,v in expected.items() if installed[k] != v}; assert QT_VERSION_STR == '6.9.1' and PYQT_VERSION_STR == '6.9.1' and not bad, f'Unexpected PyQt stack: {bad}'"
+if ERRORLEVEL 1 (
+    echo ERROR: The active Python environment does not match the pinned Qt versions.
+    echo        Rebuild with option 2 ^(clean virtual environment^) or reinstall requirements.txt.
+    pause
+    exit /b 1
+)
+echo Qt runtime verified.
+echo.
+
 REM Create release directory
 echo [2/5] Creating release directory...
 if not exist "%RELEASE_DIR%" mkdir "%RELEASE_DIR%"
@@ -203,9 +214,11 @@ REM Set build type based on mode
 if "%BUILD_MODE%"=="1" (
     set BUILD_TYPE=--onefile
     set DIST_SUBDIR=
+    set EXTRA_LAYOUT_FLAGS=
 ) else (
     set BUILD_TYPE=--onedir
     set DIST_SUBDIR=\%APP_NAME%
+    set EXTRA_LAYOUT_FLAGS=--contents-directory runtime
 )
 
 %PYTHON_CMD% -m PyInstaller ^
@@ -215,6 +228,7 @@ if "%BUILD_MODE%"=="1" (
     --workpath "%TEMP_BUILD_DIR%\build" ^
     --specpath "%TEMP_BUILD_DIR%" ^
     %BUILD_TYPE% ^
+    %EXTRA_LAYOUT_FLAGS% ^
     --noconsole ^
     --noconfirm ^
     --paths "%PROJECT_DIR%\Program" ^
@@ -262,13 +276,10 @@ if "%BUILD_MODE%"=="1" (
     REM Ensure matplotlib stylelib (seaborn styles) is present
     for /f "usebackq delims=" %%p in (`%PYTHON_CMD% -c "import matplotlib, pathlib; print(pathlib.Path(matplotlib.get_data_path())/'stylelib')"`) do set "MPL_STYLE_SRC=%%p"
     if defined MPL_STYLE_SRC if exist "!MPL_STYLE_SRC!" (
-        robocopy "!MPL_STYLE_SRC!" "%RELEASE_DIR%\%APP_NAME%\_internal\matplotlib\mpl-data\stylelib" /E /R:2 /W:2 >nul
+        robocopy "!MPL_STYLE_SRC!" "%RELEASE_DIR%\%APP_NAME%\runtime\matplotlib\mpl-data\stylelib" /E /R:2 /W:2 >nul
     )
     set PACKAGE_PATH=%RELEASE_DIR%\%APP_NAME%
 )
-
-REM Copy spec file for reference
-copy "%TEMP_BUILD_DIR%\%APP_NAME%.spec" "%RELEASE_DIR%\%APP_NAME%.spec" >nul 2>&1
 
 echo Files copied to release directory.
 echo.

@@ -44,6 +44,52 @@ class TestColumnMapperDialog(unittest.TestCase):
         self.dialog = ColumnMapperDialog(self.excel_path)
         APP.processEvents()
 
+    def _write_nbal_style_workbook(self, filename: str = "nbal_like.xlsx") -> str:
+        path = os.path.join(self._tempdir.name, filename)
+        rows = [["" for _ in range(7)] for _ in range(60)]
+        rows[0][0] = "Particle-size analysis"
+        rows[6] = ["Mash size", "sieve+fraction", "sieve", "weight in", "mass", "", "Cumulative mass"]
+        rows[7] = ["d mmm", "(g)", "(g)", "sieve (g)", "procentages", "on curve", "procentages"]
+
+        data_rows = [
+            [2, 137.23, 135.97, 1.26, 1.864181, "", 100.0],
+            [1, 133.33, 118.71, 14.62, 21.630419, 2, 98.1358189081225],
+            [0.6, 137.97, 117.21, 20.76, 30.714603, 1, 76.50540020713122],
+            [0.355, 120.6, 106.85, 13.75, 20.343246, 0.6, 45.79079745524485],
+            [0.25, 116.55, 105.56, 10.99, 16.259802, 0.355, 25.447551412930903],
+            [0.18, 107.85, 104.25, 3.6, 5.326232, 0.25, 9.187749667110527],
+            [0.125, 104.91, 103.56, 1.35, 1.997337, 0.18, 3.861517976031976],
+            [0.09, 102.78, 102.41, 0.37, 0.547418, 0.125, 1.8641810918775248],
+            [0.063, 104.18, 104.02, 0.16, 0.236721, 0.09, 1.3167628347388882],
+            ["Pan", 75.31, 74.58, 0.73, 1.080041, 0.063, 1.0800414262464917],
+        ]
+        for row_index, row in enumerate(data_rows, start=11):
+            rows[row_index] = row
+        rows[52][0] = "Hidden below old 50-row preview"
+
+        with pd.ExcelWriter(path) as writer:
+            pd.DataFrame(rows).to_excel(writer, sheet_name="English", header=False, index=False)
+        return path
+
+    def _write_raw_metadata_workbook(self, filename: str = "raw_metadata.xlsx") -> str:
+        path = os.path.join(self._tempdir.name, filename)
+        rows = [
+            ["Proeve vaegt", "", "341.73", "gram"],
+            ["Sigtetab %", "-1.603051583802746", "", ""],
+            ["Maskevidde-", "Sigte + fraktion", "sigte tom", "vaegt af"],
+            ["d mmm", "(g)", "(g)", "fraktion (g)"],
+            ["", "", "", ""],
+            ["", "", "", "0"],
+            ["", "", "", "0"],
+            [2.0, 381.26, 343.59, 37.67],
+            [1.0, 370.47, 308.41, 62.06],
+            [0.5, 363.29, 274.22, 89.07],
+            [0.25, 350.0, 300.0, 50.0],
+        ]
+        with pd.ExcelWriter(path) as writer:
+            pd.DataFrame(rows).to_excel(writer, sheet_name="English", header=False, index=False)
+        return path
+
     def tearDown(self):
         excel_file = getattr(self.dialog, "_excel_file", None)
         if excel_file is not None and hasattr(excel_file, "close"):
@@ -125,6 +171,82 @@ class TestColumnMapperDialog(unittest.TestCase):
         self.assertEqual(len(self.dialog.selected_percent_range), 3)
         self.assertIn("3 size cells", self.dialog.size_range_count_label.text())
         self.assertIn("3 passing cells", self.dialog.percent_range_count_label.text())
+
+    def test_excel_preview_uses_full_sheet_and_applies_detected_curve(self):
+        path = self._write_nbal_style_workbook()
+        dialog = ColumnMapperDialog(path, sheet_name="English")
+        APP.processEvents()
+        try:
+            self.assertEqual(len(dialog.sample_data), 53)
+            self.assertEqual(dialog.sample_data[52][0], "Hidden below old 50-row preview")
+            self.assertEqual(dialog.calculated_selection_mode, "range")
+            self.assertFalse(dialog.raw_sieve_mode)
+            self.assertEqual(len(dialog.selected_size_range), 9)
+            self.assertEqual(len(dialog.selected_percent_range), 9)
+            self.assertEqual(dialog.selected_size_range[0], (12, 5))
+            self.assertEqual(dialog.selected_percent_range[0], (12, 6))
+
+            sizes, passing = dialog.extract_data()
+            self.assertEqual(sizes[:3], [2.0, 1.0, 0.6])
+            self.assertAlmostEqual(passing[0], 98.1358189081225)
+        finally:
+            dialog.close()
+            dialog.deleteLater()
+            APP.processEvents()
+
+    def test_raw_sieve_detection_includes_pan_mass(self):
+        path = self._write_nbal_style_workbook("nbal_raw_like.xlsx")
+        dialog = ColumnMapperDialog(path, sheet_name="English", initial_state={"raw_sieve_mode": True})
+        APP.processEvents()
+        try:
+            self.assertTrue(dialog.raw_sieve_mode)
+            self.assertEqual(dialog.raw_size_combo.currentIndex(), 1)
+            self.assertEqual(dialog.sieve_sample_combo.currentIndex(), 2)
+            self.assertEqual(dialog.empty_sieve_combo.currentIndex(), 3)
+
+            sizes, passing = dialog.extract_data()
+            self.assertEqual(len(sizes), 9)
+            self.assertAlmostEqual(passing[0], 98.135819, places=5)
+            self.assertAlmostEqual(passing[-1], 1.080041, places=5)
+        finally:
+            dialog.close()
+            dialog.deleteLater()
+            APP.processEvents()
+
+    def test_raw_sieve_detection_refreshes_dropdown_labels_to_detected_header_row(self):
+        path = self._write_raw_metadata_workbook()
+        dialog = ColumnMapperDialog(path, sheet_name="English", initial_state={"raw_sieve_mode": True})
+        APP.processEvents()
+        try:
+            self.assertTrue(dialog.raw_sieve_mode)
+            self.assertEqual(dialog.header_row, 2)
+            self.assertEqual(dialog.raw_size_combo.currentText(), "Maskevidde-")
+            self.assertEqual(dialog.sieve_sample_combo.currentText(), "Sigte + fraktion")
+            self.assertEqual(dialog.empty_sieve_combo.currentText(), "sigte tom")
+            self.assertNotIn("Sigtetab", dialog.raw_size_combo.currentText())
+
+            sizes, passing = dialog.extract_data()
+            self.assertEqual(sizes[:3], [2.0, 1.0, 0.5])
+            self.assertEqual(len(passing), 4)
+        finally:
+            dialog.close()
+            dialog.deleteLater()
+            APP.processEvents()
+
+    def test_raw_sieve_mapping_rejects_duplicate_role_columns(self):
+        dialog = ColumnMapperDialog(self.excel_path, sheet_name="Raw", initial_state={"raw_sieve_mode": True})
+        APP.processEvents()
+        try:
+            dialog.raw_size_combo.setCurrentIndex(1)
+            dialog.empty_sieve_combo.setCurrentIndex(1)
+            dialog.sieve_sample_combo.setCurrentIndex(3)
+
+            with self.assertRaisesRegex(ValueError, "three different columns"):
+                dialog.extract_data()
+        finally:
+            dialog.close()
+            dialog.deleteLater()
+            APP.processEvents()
 
 
 if __name__ == "__main__":
