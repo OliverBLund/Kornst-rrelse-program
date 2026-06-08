@@ -1,0 +1,870 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>18 - Comparison Plot Concept</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Playfair+Display:wght@600;700&family=Source+Sans+3:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.2/css/all.min.css">
+  <style>
+    :root{
+      --bg:#f3eee6;
+      --paper:#fbf8f2;
+      --paper2:#f6f0e7;
+      --line:#d7cbb8;
+      --line2:#bca98e;
+      --text:#34281d;
+      --mid:#665544;
+      --muted:#8a7863;
+      --olive:#6b8e23;
+      --olive2:#556f1c;
+      --earth:#9b6a38;
+      --amber:#bb8c2f;
+      --blue:#3a7ea0;
+      --rust:#b46428;
+      --teal:#2a9d8f;
+      --violet:#6b5ca5;
+      --warn:#bb8c2f;
+      --ui:"Source Sans 3", system-ui, sans-serif;
+      --mono:"IBM Plex Mono", monospace;
+      --disp:"Playfair Display", Georgia, serif;
+      --shadow:0 18px 44px rgba(58,42,26,.08);
+    }
+    *{box-sizing:border-box}
+    html,body{height:100%}
+    body{
+      margin:0;
+      font-family:var(--ui);
+      color:var(--text);
+      background:
+        radial-gradient(circle at top left, rgba(255,255,255,.42), transparent 32%),
+        linear-gradient(180deg, #f8f4ed 0%, var(--bg) 100%);
+    }
+    body::after{
+      content:"";
+      position:fixed;
+      inset:0;
+      pointer-events:none;
+      opacity:.13;
+      background-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='260' height='260'%3E%3Cfilter id='g'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='.72' numOctaves='4' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='260' height='260' filter='url(%23g)' opacity='.07'/%3E%3C/svg%3E");
+    }
+    button,select,input{font-family:inherit}
+    button{cursor:pointer}
+    .stage{
+      min-height:100%;
+      padding:18px;
+      display:flex;
+      align-items:center;
+      justify-content:center;
+    }
+    .app{
+      width:min(1480px, calc(100vw - 36px));
+      height:min(880px, calc(100vh - 36px));
+      min-height:760px;
+      display:flex;
+      flex-direction:column;
+      overflow:hidden;
+      background:rgba(252,249,243,.88);
+      border:1px solid rgba(154,126,95,.14);
+      border-radius:18px;
+      box-shadow:var(--shadow);
+      backdrop-filter:blur(8px);
+    }
+    .top{
+      display:flex;
+      align-items:flex-end;
+      gap:16px;
+      padding:18px 20px 14px;
+      border-bottom:1px solid var(--line);
+      background:linear-gradient(180deg, rgba(255,255,255,.72), rgba(246,239,228,.78));
+      flex-shrink:0;
+    }
+    .eyebrow{
+      display:inline-flex;
+      align-items:center;
+      gap:7px;
+      min-height:26px;
+      padding:0 10px;
+      border-radius:999px;
+      border:1px solid rgba(107,142,35,.22);
+      background:rgba(107,142,35,.08);
+      color:var(--olive2);
+      font-family:var(--mono);
+      font-size:10px;
+      font-weight:800;
+      letter-spacing:.08em;
+      text-transform:uppercase;
+      flex:0 0 auto;
+    }
+    .title{min-width:0}
+    .title h1{
+      margin:0;
+      font-family:var(--disp);
+      font-size:27px;
+      line-height:1.04;
+      font-weight:700;
+    }
+    .title p{
+      margin:4px 0 0;
+      font-size:12px;
+      color:var(--muted);
+    }
+    .top .spacer{flex:1}
+    .state{
+      display:flex;
+      gap:8px;
+      flex-wrap:wrap;
+      justify-content:flex-end;
+    }
+    .pill{
+      display:inline-flex;
+      align-items:center;
+      gap:6px;
+      min-height:28px;
+      padding:0 10px;
+      border-radius:999px;
+      border:1px solid rgba(154,126,95,.18);
+      background:rgba(255,255,255,.62);
+      color:var(--mid);
+      font-size:11px;
+      font-weight:700;
+      white-space:nowrap;
+    }
+    .pill.on{
+      color:var(--olive2);
+      border-color:rgba(107,142,35,.24);
+      background:rgba(107,142,35,.08);
+    }
+    .toolbar{
+      display:flex;
+      align-items:center;
+      gap:9px;
+      padding:12px 20px;
+      border-bottom:1px solid var(--line);
+      background:rgba(246,239,228,.58);
+      flex-wrap:wrap;
+      flex-shrink:0;
+    }
+    .seg{
+      display:inline-flex;
+      align-items:center;
+      gap:3px;
+      padding:3px;
+      border-radius:999px;
+      border:1px solid rgba(154,126,95,.18);
+      background:rgba(255,255,255,.56);
+    }
+    .seg button{
+      min-height:29px;
+      padding:0 12px;
+      border:none;
+      border-radius:999px;
+      background:transparent;
+      color:var(--mid);
+      font-size:12px;
+      font-weight:700;
+      display:flex;
+      align-items:center;
+      gap:7px;
+    }
+    .seg button.on{
+      background:rgba(107,142,35,.12);
+      color:var(--olive2);
+    }
+    .tb-btn{
+      min-height:35px;
+      padding:0 12px;
+      border-radius:999px;
+      border:1px solid rgba(154,126,95,.2);
+      background:rgba(255,255,255,.52);
+      color:var(--mid);
+      font-size:12px;
+      font-weight:700;
+      display:flex;
+      align-items:center;
+      gap:7px;
+    }
+    .tb-btn.primary{
+      background:rgba(107,142,35,.12);
+      border-color:rgba(107,142,35,.28);
+      color:var(--olive2);
+    }
+    .meta{
+      margin-left:auto;
+      display:flex;
+      gap:14px;
+      align-items:center;
+      font:500 11px var(--mono);
+      color:var(--muted);
+      flex-wrap:wrap;
+      justify-content:flex-end;
+    }
+    .meta strong{color:var(--mid)}
+    .scope-strip{
+      display:flex;
+      align-items:center;
+      gap:10px;
+      padding:10px 20px 11px;
+      border-bottom:1px solid var(--line);
+      background:rgba(255,255,255,.34);
+      overflow:auto hidden;
+      scrollbar-width:thin;
+      flex-shrink:0;
+    }
+    .scope-chip{
+      display:inline-flex;
+      align-items:center;
+      gap:8px;
+      flex:0 0 auto;
+      min-height:31px;
+      padding:0 11px;
+      border-radius:999px;
+      border:1px solid rgba(188,169,142,.76);
+      background:var(--paper);
+      color:var(--mid);
+      font-size:12px;
+      font-weight:700;
+    }
+    .scope-chip.overall{
+      background:rgba(107,142,35,.09);
+      border-color:rgba(107,142,35,.24);
+      color:var(--olive2);
+    }
+    .dot{
+      width:8px;
+      height:8px;
+      border-radius:50%;
+      background:currentColor;
+      box-shadow:0 0 0 2px rgba(255,255,255,.82);
+    }
+    .scope-chip span:not(.dot){
+      font-family:var(--mono);
+      color:var(--muted);
+      font-size:10px;
+      font-weight:700;
+    }
+    .body{
+      flex:1;
+      min-height:0;
+      display:grid;
+      grid-template-columns:minmax(0,1fr) 220px;
+      background:rgba(251,248,242,.54);
+    }
+    .main{
+      min-width:0;
+      min-height:0;
+      position:relative;
+      display:flex;
+      border-right:1px solid var(--line);
+    }
+    .plot-panel{
+      min-height:0;
+      flex:1;
+      padding:14px 18px 52px;
+      display:flex;
+      flex-direction:column;
+      gap:10px;
+      overflow:hidden;
+    }
+    .panel-head{
+      display:flex;
+      align-items:flex-start;
+      gap:14px;
+      flex-shrink:0;
+    }
+    .panel-title{min-width:0}
+    .kicker{
+      margin-bottom:2px;
+      color:var(--muted);
+      font:800 10px var(--mono);
+      letter-spacing:.08em;
+      text-transform:uppercase;
+    }
+    .panel-title h2{
+      margin:0;
+      color:var(--text);
+      font-size:18px;
+      line-height:1.15;
+      font-weight:800;
+    }
+    .panel-title p{
+      margin:3px 0 0;
+      color:var(--muted);
+      font-size:12px;
+    }
+    .quick-stats{
+      margin-left:auto;
+      display:flex;
+      gap:8px;
+      flex-wrap:wrap;
+      justify-content:flex-end;
+    }
+    .stat-pill{
+      min-width:112px;
+      padding:7px 9px;
+      border-radius:8px;
+      border:1px solid rgba(188,169,142,.6);
+      background:rgba(255,255,255,.52);
+    }
+    .stat-pill .k{
+      color:var(--muted);
+      font:800 9px var(--mono);
+      letter-spacing:.06em;
+      text-transform:uppercase;
+    }
+    .stat-pill .v{
+      margin-top:2px;
+      color:var(--text);
+      font:800 14px var(--mono);
+      white-space:nowrap;
+    }
+    .plot-wrap{
+      min-height:0;
+      flex:1;
+      position:relative;
+      border:1px solid rgba(188,169,142,.54);
+      border-radius:10px;
+      background:linear-gradient(180deg, rgba(255,255,255,.68), rgba(250,247,241,.72));
+      overflow:hidden;
+    }
+    svg{display:block;width:100%;height:100%}
+    .grid{stroke:#d9cab2;stroke-width:1;opacity:.55}
+    .axis{stroke:#8a7863;stroke-width:1.2}
+    .tick{fill:#7d6a55;font:700 10px var(--mono)}
+    .axis-title{fill:#665544;font:800 11px var(--mono)}
+    .curve{fill:none;stroke-width:2.7;stroke-linecap:round}
+    .curve.overall{stroke:var(--earth);stroke-width:3.2}
+    .fit{fill:none;stroke-width:2.2;stroke-dasharray:7 5;stroke-linecap:round}
+    .point{stroke:#fff;stroke-width:1.6}
+    .geom-line{stroke:#9b6a38;stroke-width:1.3;stroke-dasharray:4 4;opacity:.75}
+    .plot-note{
+      position:absolute;
+      top:12px;
+      right:14px;
+      display:flex;
+      gap:8px;
+      flex-wrap:wrap;
+      justify-content:flex-end;
+      max-width:58%;
+    }
+    .legend-chip{
+      display:inline-flex;
+      align-items:center;
+      gap:6px;
+      min-height:24px;
+      padding:0 8px;
+      border-radius:999px;
+      background:rgba(255,255,255,.72);
+      border:1px solid rgba(188,169,142,.5);
+      color:var(--mid);
+      font-size:11px;
+      font-weight:700;
+    }
+    .legend-line{
+      width:22px;
+      height:3px;
+      border-radius:999px;
+      background:currentColor;
+    }
+    .controls-peek{
+      position:absolute;
+      left:0;
+      top:72px;
+      width:18px;
+      height:88px;
+      border-radius:0 8px 8px 0;
+      border:1px solid rgba(188,169,142,.64);
+      border-left:none;
+      background:rgba(236,228,214,.94);
+      color:var(--mid);
+      display:grid;
+      place-items:center;
+      box-shadow:0 8px 20px rgba(58,42,26,.08);
+      z-index:4;
+    }
+    .controls-peek i{font-size:10px}
+    .data-drawer{
+      position:absolute;
+      left:18px;
+      right:18px;
+      bottom:12px;
+      min-height:0;
+      height:238px;
+      border:1px solid rgba(188,169,142,.68);
+      border-radius:10px;
+      background:rgba(251,248,242,.96);
+      box-shadow:0 -14px 34px rgba(58,42,26,.09);
+      display:grid;
+      grid-template-columns:minmax(0,1fr) 286px;
+      overflow:hidden;
+      z-index:5;
+    }
+    .drawer-head{
+      grid-column:1 / -1;
+      min-height:36px;
+      display:flex;
+      align-items:center;
+      gap:10px;
+      padding:0 12px;
+      border-bottom:1px solid var(--line);
+      background:rgba(236,228,214,.82);
+      color:var(--mid);
+      font-size:12px;
+      font-weight:800;
+    }
+    .drawer-head .label{
+      display:flex;
+      align-items:center;
+      gap:8px;
+      color:var(--text);
+    }
+    .drawer-head .hint{
+      color:var(--muted);
+      font:700 10px var(--mono);
+    }
+    .drawer-head .spacer{flex:1}
+    .drawer-toggle{
+      width:26px;
+      height:24px;
+      border-radius:6px;
+      border:1px solid rgba(154,126,95,.2);
+      background:rgba(255,255,255,.6);
+      color:var(--mid);
+    }
+    .drawer-body{
+      grid-column:1 / -1;
+      min-height:0;
+      display:grid;
+      grid-template-columns:minmax(0,1fr) 286px;
+    }
+    .table-wrap{
+      min-width:0;
+      overflow:auto;
+      padding:10px 14px 14px 14px;
+    }
+    table{
+      width:100%;
+      border-collapse:collapse;
+      min-width:930px;
+      font-size:12px;
+    }
+    th{
+      height:33px;
+      text-align:right;
+      padding:0 10px;
+      border-bottom:1px solid var(--line2);
+      color:var(--mid);
+      background:rgba(236,228,214,.64);
+      font-size:11px;
+      font-weight:800;
+      white-space:nowrap;
+    }
+    th:first-child,td:first-child{text-align:left}
+    td{
+      height:38px;
+      padding:0 10px;
+      border-bottom:1px solid rgba(215,203,184,.78);
+      color:var(--text);
+      text-align:right;
+      font-family:var(--mono);
+      font-size:11px;
+      font-weight:700;
+      white-space:nowrap;
+    }
+    td.scope-name{
+      font-family:var(--ui);
+      color:var(--text);
+      font-weight:800;
+    }
+    .sub{
+      display:block;
+      margin-top:1px;
+      color:var(--muted);
+      font-size:10px;
+      font-weight:600;
+      font-family:var(--ui);
+    }
+    .swatch{
+      display:inline-block;
+      width:8px;
+      height:8px;
+      border-radius:50%;
+      margin-right:7px;
+      vertical-align:1px;
+    }
+    .status{
+      display:inline-flex;
+      align-items:center;
+      min-height:22px;
+      padding:0 8px;
+      border-radius:999px;
+      font:800 10px var(--mono);
+    }
+    .status.ok{color:var(--olive2);background:rgba(107,142,35,.1)}
+    .status.warn{color:#8b5f16;background:rgba(187,140,47,.14)}
+    .small-panel{
+      min-width:0;
+      padding:10px 14px 14px 0;
+      display:flex;
+      flex-direction:column;
+      gap:8px;
+    }
+    .mini-card{
+      flex:1;
+      min-height:0;
+      padding:12px 12px;
+      border-left:1px solid var(--line);
+      background:rgba(251,248,242,.56);
+      display:flex;
+      flex-direction:column;
+      gap:8px;
+    }
+    .mini-title{
+      color:var(--muted);
+      font:800 10px var(--mono);
+      letter-spacing:.08em;
+      text-transform:uppercase;
+    }
+    .view-list{
+      display:grid;
+      gap:7px;
+    }
+    .view-row{
+      display:grid;
+      grid-template-columns:32px minmax(0,1fr) auto;
+      align-items:center;
+      gap:9px;
+      min-height:40px;
+      padding:4px 8px 4px 4px;
+      border-radius:8px;
+      border:1px solid rgba(188,169,142,.5);
+      background:rgba(255,255,255,.48);
+    }
+    .view-row.on{
+      border-color:rgba(107,142,35,.28);
+      background:rgba(107,142,35,.08);
+    }
+    .view-icon{
+      width:28px;
+      height:28px;
+      display:grid;
+      place-items:center;
+      border-radius:7px;
+      background:rgba(236,228,214,.74);
+      color:var(--mid);
+    }
+    .view-row.on .view-icon{
+      background:rgba(107,142,35,.14);
+      color:var(--olive2);
+    }
+    .view-name strong{
+      display:block;
+      color:var(--text);
+      font-size:12px;
+      line-height:1.08;
+    }
+    .view-name span{
+      display:block;
+      margin-top:1px;
+      color:var(--muted);
+      font-size:10.5px;
+      white-space:nowrap;
+      overflow:hidden;
+      text-overflow:ellipsis;
+    }
+    .view-count{
+      color:var(--muted);
+      font:800 10px var(--mono);
+    }
+    .rail{
+      min-width:0;
+      min-height:0;
+      overflow:auto;
+      background:rgba(246,239,228,.72);
+    }
+    .rail-section{
+      padding:14px;
+      border-bottom:1px solid var(--line);
+    }
+    .rail-title{
+      margin-bottom:10px;
+      color:var(--muted);
+      font:800 10px var(--mono);
+      letter-spacing:.10em;
+      text-transform:uppercase;
+    }
+    .mini-grid{
+      display:grid;
+      grid-template-columns:1fr auto;
+      gap:7px 10px;
+      align-items:center;
+    }
+    .mini-grid .k{color:var(--muted);font-weight:700;font-size:12px}
+    .mini-grid .v{font:800 11px var(--mono);color:var(--text);text-align:right}
+    .group-list,.dataset-list{display:flex;flex-direction:column;gap:8px}
+    .group-row,.dataset-row{
+      min-width:0;
+      padding:9px 10px;
+      border-radius:8px;
+      border:1px solid rgba(188,169,142,.52);
+      background:rgba(255,255,255,.42);
+    }
+    .group-row strong,.dataset-row strong{
+      display:flex;
+      align-items:center;
+      gap:7px;
+      color:var(--text);
+      font-size:12px;
+      line-height:1.1;
+    }
+    .group-row span,.dataset-row span{
+      display:block;
+      margin-top:3px;
+      color:var(--muted);
+      font-size:11px;
+      line-height:1.2;
+    }
+    .pin{
+      margin-left:auto;
+      color:var(--olive2);
+      font-size:11px;
+    }
+    .ghost{opacity:.48}
+    @media(max-width:980px){
+      .app{height:auto;min-height:0}
+      .body{grid-template-columns:1fr}
+      .main{min-height:620px}
+      .plot-wrap{min-height:420px}
+      .data-drawer{left:12px;right:12px;grid-template-columns:1fr;height:258px}
+      .drawer-body{grid-template-columns:1fr}
+      .small-panel{padding:0 14px 14px 18px}
+      .rail{max-height:none}
+    }
+  </style>
+</head>
+<body>
+  <div class="stage">
+    <div class="app">
+      <div class="top">
+        <div class="eyebrow"><i class="fa-solid fa-chart-area"></i>Comparison Plots</div>
+        <div class="title">
+          <h1>Plot workspace for grouped samples</h1>
+          <p>10 selected datasets, 3 groups, 7 pinned in view.</p>
+        </div>
+        <div class="spacer"></div>
+        <div class="state">
+          <div class="pill on"><i class="fa-solid fa-layer-group"></i>Grouped</div>
+          <div class="pill"><i class="fa-solid fa-thumbtack"></i>7 pinned</div>
+          <div class="pill"><i class="fa-solid fa-circle-check"></i>OK values</div>
+        </div>
+      </div>
+
+      <div class="toolbar">
+        <div class="seg">
+          <button><i class="fa-solid fa-chart-line"></i>Distribution</button>
+          <button class="on"><i class="fa-solid fa-chart-simple"></i>K distribution</button>
+          <button><i class="fa-solid fa-border-all"></i>Coverage</button>
+          <button><i class="fa-solid fa-chart-column"></i>Histogram</button>
+        </div>
+        <div class="seg">
+          <button class="on"><i class="fa-solid fa-layer-group"></i>Group scope</button>
+          <button><i class="fa-solid fa-table-columns"></i>Dataset scope</button>
+        </div>
+        <div class="seg">
+          <button class="on"><i class="fa-solid fa-circle-check"></i>OK only</button>
+          <button><i class="fa-solid fa-triangle-exclamation"></i>Warnings</button>
+        </div>
+        <button class="tb-btn"><i class="fa-solid fa-magnifying-glass-plus"></i></button>
+        <button class="tb-btn"><i class="fa-solid fa-magnifying-glass-minus"></i></button>
+        <button class="tb-btn"><i class="fa-solid fa-arrows-to-circle"></i>Fit</button>
+        <button class="tb-btn"><i class="fa-solid fa-sliders"></i>Controls</button>
+        <button class="tb-btn primary"><i class="fa-solid fa-layer-group"></i>Scope &amp; Groups</button>
+        <div class="meta"><span><strong>K</strong> m/d</span><span><strong>fit</strong> lognormal</span><span><strong>line</strong> group color</span></div>
+      </div>
+
+      <div class="scope-strip">
+        <div class="scope-chip overall"><i class="fa-solid fa-circle-half-stroke"></i>Overall <span>10 datasets</span></div>
+        <div class="scope-chip" style="color:var(--blue)"><span class="dot"></span>Layer A <span>3</span></div>
+        <div class="scope-chip" style="color:var(--olive)"><span class="dot"></span>Layer B <span>4</span></div>
+        <div class="scope-chip" style="color:var(--rust)"><span class="dot"></span>Layer C <span>3</span></div>
+      </div>
+
+      <div class="body">
+        <div class="main">
+          <div class="controls-peek" title="Existing plot controls sidebar"><i class="fa-solid fa-sliders"></i></div>
+          <section class="plot-panel">
+            <div class="panel-head">
+              <div class="panel-title">
+                <div class="kicker">K distribution function</div>
+                <h2>Empirical CDF and lognormal fit for hydraulic conductivity</h2>
+                <p>Statistics are calculated on ln(K), then reported back as K values in the selected unit.</p>
+              </div>
+              <div class="quick-stats">
+                <div class="stat-pill"><div class="k">Kgeom</div><div class="v">33.85 m/d</div></div>
+                <div class="stat-pill"><div class="k">sigma_lnK</div><div class="v">0.82</div></div>
+                <div class="stat-pill"><div class="k">Var lnK</div><div class="v">0.67</div></div>
+                <div class="stat-pill"><div class="k">Class</div><div class="v">Moderate</div></div>
+              </div>
+            </div>
+
+            <div class="plot-wrap">
+              <div class="plot-note">
+                <div class="legend-chip" style="color:var(--earth)"><span class="legend-line"></span>Overall</div>
+                <div class="legend-chip" style="color:var(--blue)"><span class="legend-line"></span>Layer A</div>
+                <div class="legend-chip" style="color:var(--olive)"><span class="legend-line"></span>Layer B</div>
+                <div class="legend-chip" style="color:var(--rust)"><span class="legend-line"></span>Layer C</div>
+              </div>
+              <svg viewBox="0 0 980 455" role="img" aria-label="K distribution function plot">
+                <defs>
+                  <clipPath id="clip">
+                    <rect x="70" y="34" width="850" height="340" rx="2"></rect>
+                  </clipPath>
+                </defs>
+                <rect x="70" y="34" width="850" height="340" fill="#fffdf8" rx="2"></rect>
+                <line class="grid" x1="70" y1="306" x2="920" y2="306"></line>
+                <line class="grid" x1="70" y1="238" x2="920" y2="238"></line>
+                <line class="grid" x1="70" y1="170" x2="920" y2="170"></line>
+                <line class="grid" x1="70" y1="102" x2="920" y2="102"></line>
+                <line class="grid" x1="198" y1="34" x2="198" y2="374"></line>
+                <line class="grid" x1="347" y1="34" x2="347" y2="374"></line>
+                <line class="grid" x1="496" y1="34" x2="496" y2="374"></line>
+                <line class="grid" x1="645" y1="34" x2="645" y2="374"></line>
+                <line class="grid" x1="794" y1="34" x2="794" y2="374"></line>
+                <line class="axis" x1="70" y1="374" x2="920" y2="374"></line>
+                <line class="axis" x1="70" y1="34" x2="70" y2="374"></line>
+                <text class="tick" x="60" y="378" text-anchor="end">0.0</text>
+                <text class="tick" x="60" y="310" text-anchor="end">0.2</text>
+                <text class="tick" x="60" y="242" text-anchor="end">0.4</text>
+                <text class="tick" x="60" y="174" text-anchor="end">0.6</text>
+                <text class="tick" x="60" y="106" text-anchor="end">0.8</text>
+                <text class="tick" x="60" y="38" text-anchor="end">1.0</text>
+                <text class="tick" x="198" y="396" text-anchor="middle">0.1</text>
+                <text class="tick" x="347" y="396" text-anchor="middle">1</text>
+                <text class="tick" x="496" y="396" text-anchor="middle">10</text>
+                <text class="tick" x="645" y="396" text-anchor="middle">100</text>
+                <text class="tick" x="794" y="396" text-anchor="middle">1000</text>
+                <text class="axis-title" x="496" y="426" text-anchor="middle">Hydraulic conductivity K (m/d, log scale)</text>
+                <text class="axis-title" x="22" y="204" text-anchor="middle" transform="rotate(-90 22 204)">Cumulative probability</text>
+                <line class="geom-line" x1="574" y1="34" x2="574" y2="374"></line>
+                <text class="tick" x="584" y="54">Kgeom 33.85 m/d</text>
+
+                <g clip-path="url(#clip)">
+                  <path class="curve overall" d="M165,355 C220,350 265,330 306,295 C364,245 420,200 480,166 C545,130 614,94 705,62 C778,40 842,35 900,35"></path>
+                  <path class="fit" style="stroke:var(--earth)" d="M150,365 C246,360 312,315 383,246 C453,178 522,124 604,88 C704,44 812,36 916,35"></path>
+
+                  <path class="curve" style="stroke:var(--blue)" d="M220,358 C278,344 337,310 390,258 C455,195 516,140 590,101 C660,66 735,44 842,36"></path>
+                  <path class="fit" style="stroke:var(--blue)" d="M205,365 C290,348 350,304 418,226 C487,153 560,98 645,63 C730,39 823,35 912,35"></path>
+
+                  <path class="curve" style="stroke:var(--olive)" d="M118,360 C177,350 230,319 288,271 C352,218 408,179 462,145 C536,100 610,68 735,40"></path>
+                  <path class="fit" style="stroke:var(--olive)" d="M105,366 C176,357 238,318 303,253 C370,188 435,134 512,92 C607,45 728,36 884,35"></path>
+
+                  <path class="curve" style="stroke:var(--rust)" d="M315,359 C382,345 438,304 498,250 C560,193 625,145 695,98 C758,62 828,43 910,36"></path>
+                  <path class="fit" style="stroke:var(--rust)" d="M290,365 C375,352 446,306 520,230 C590,160 664,102 750,65 C825,42 878,36 918,35"></path>
+
+                  <circle class="point" cx="198" cy="345" r="4" fill="var(--olive)"></circle>
+                  <circle class="point" cx="262" cy="318" r="4" fill="var(--olive)"></circle>
+                  <circle class="point" cx="330" cy="270" r="4" fill="var(--olive)"></circle>
+                  <circle class="point" cx="398" cy="210" r="4" fill="var(--blue)"></circle>
+                  <circle class="point" cx="455" cy="176" r="4" fill="var(--blue)"></circle>
+                  <circle class="point" cx="512" cy="146" r="4" fill="var(--blue)"></circle>
+                  <circle class="point" cx="566" cy="118" r="4" fill="var(--earth)"></circle>
+                  <circle class="point" cx="626" cy="92" r="4" fill="var(--rust)"></circle>
+                  <circle class="point" cx="690" cy="70" r="4" fill="var(--rust)"></circle>
+                  <circle class="point" cx="762" cy="49" r="4" fill="var(--rust)"></circle>
+                </g>
+                <rect x="70" y="34" width="850" height="340" fill="none" stroke="#bca98e" stroke-width="1.1"></rect>
+              </svg>
+            </div>
+          </section>
+
+          <section class="data-drawer">
+            <div class="drawer-head">
+              <div class="label"><i class="fa-solid fa-table"></i> Plot data</div>
+              <div class="hint">active view: K distribution</div>
+              <div class="spacer"></div>
+              <button class="drawer-toggle" title="Collapse plot data"><i class="fa-solid fa-chevron-down"></i></button>
+            </div>
+            <div class="drawer-body">
+              <div class="table-wrap">
+              <table>
+                <thead>
+                  <tr>
+                    <th>Scope</th>
+                    <th>n K</th>
+                    <th>Kgeom</th>
+                    <th>Arithmetic mean</th>
+                    <th>Median</th>
+                    <th>sigma_lnK</th>
+                    <th>Var lnK</th>
+                    <th>Heterogeneity</th>
+                    <th>Included</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  <tr>
+                    <td class="scope-name">Overall<span class="sub">all selected datasets</span></td>
+                    <td>80</td><td>33.85</td><td>54.14</td><td>37.43</td><td>0.82</td><td>0.67</td><td><span class="status ok">Moderate</span></td><td>80 / 160</td>
+                  </tr>
+                  <tr>
+                    <td class="scope-name"><span class="swatch" style="background:var(--blue)"></span>Layer A<span class="sub">upper sampled layer</span></td>
+                    <td>24</td><td>43.67</td><td>61.34</td><td>53.02</td><td>0.58</td><td>0.34</td><td><span class="status ok">Moderate</span></td><td>24 / 48</td>
+                  </tr>
+                  <tr>
+                    <td class="scope-name"><span class="swatch" style="background:var(--olive)"></span>Layer B<span class="sub">middle sampled layer</span></td>
+                    <td>32</td><td>27.27</td><td>54.29</td><td>27.97</td><td>1.13</td><td>1.28</td><td><span class="status warn">High</span></td><td>32 / 64</td>
+                  </tr>
+                  <tr>
+                    <td class="scope-name"><span class="swatch" style="background:var(--rust)"></span>Layer C<span class="sub">lower sampled layer</span></td>
+                    <td>24</td><td>35.01</td><td>46.73</td><td>35.35</td><td>0.44</td><td>0.19</td><td><span class="status ok">Low</span></td><td>24 / 48</td>
+                  </tr>
+                </tbody>
+              </table>
+              </div>
+              <div class="small-panel">
+                <div class="mini-card">
+                  <div class="mini-title">Plot set</div>
+                  <div class="view-list">
+                    <div class="view-row"><div class="view-icon"><i class="fa-solid fa-chart-line"></i></div><div class="view-name"><strong>Distribution</strong><span>grain-size curves</span></div><div class="view-count">10</div></div>
+                    <div class="view-row on"><div class="view-icon"><i class="fa-solid fa-chart-simple"></i></div><div class="view-name"><strong>K distribution</strong><span>lognormal CDF</span></div><div class="view-count">80</div></div>
+                    <div class="view-row"><div class="view-icon"><i class="fa-solid fa-border-all"></i></div><div class="view-name"><strong>Coverage</strong><span>method status matrix</span></div><div class="view-count">16</div></div>
+                    <div class="view-row"><div class="view-icon"><i class="fa-solid fa-chart-column"></i></div><div class="view-name"><strong>Histogram</strong><span>retained fraction bins</span></div><div class="view-count">10</div></div>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </section>
+        </div>
+
+        <aside class="rail">
+          <section class="rail-section">
+            <div class="rail-title">Pinned</div>
+            <div class="mini-grid">
+              <div class="k">Visible</div><div class="v">7 / 10</div>
+              <div class="k">Unpinned</div><div class="v">3 dimmed</div>
+            </div>
+          </section>
+          <section class="rail-section">
+            <div class="rail-title">Group Legend</div>
+            <div class="group-list">
+              <div class="group-row"><strong><span class="dot" style="color:var(--blue)"></span>Layer A</strong><span>same color, varied line style</span></div>
+              <div class="group-row"><strong><span class="dot" style="color:var(--olive)"></span>Layer B</strong><span>same color, varied line style</span></div>
+              <div class="group-row"><strong><span class="dot" style="color:var(--rust)"></span>Layer C</strong><span>same color, varied line style</span></div>
+            </div>
+          </section>
+          <section class="rail-section">
+            <div class="rail-title">Datasets</div>
+            <div class="dataset-list">
+              <div class="dataset-row"><strong><span class="dot" style="color:var(--blue)"></span>NBAL-01 <i class="fa-solid fa-thumbtack pin"></i></strong><span>Layer A, full opacity</span></div>
+              <div class="dataset-row"><strong><span class="dot" style="color:var(--blue)"></span>NBAL-02 <i class="fa-solid fa-thumbtack pin"></i></strong><span>Layer A, dashed line</span></div>
+              <div class="dataset-row"><strong><span class="dot" style="color:var(--rust)"></span>NBAL-05 <i class="fa-solid fa-thumbtack pin"></i></strong><span>Layer C, dotted line</span></div>
+              <div class="dataset-row ghost"><strong><span class="dot" style="color:var(--olive)"></span>NBAL-08 <i class="fa-solid fa-thumbtack"></i></strong><span>Layer B, dimmed</span></div>
+            </div>
+          </section>
+        </aside>
+      </div>
+    </div>
+  </div>
+</body>
+</html>

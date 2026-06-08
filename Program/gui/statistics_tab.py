@@ -834,6 +834,13 @@ class StatisticsTab(QWidget):
             "particle_sizes": list(self.dataset.particle_sizes),
             "percent_passing": list(self.dataset.percent_passing),
         }
+        dmean = (
+            self.dataset.get_arithmetic_mean_grain_size()
+            if hasattr(self.dataset, "get_arithmetic_mean_grain_size")
+            else None
+        )
+        if dmean is not None:
+            grain_data["Dmean_arithmetic"] = dmean
 
         # Calculate all percentiles
         percentiles = {}

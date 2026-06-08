@@ -58,9 +58,12 @@ class GrainSizeData:
     validation_messages: List[ValidationMessage] = field(default_factory=list)
     calculated_porosity: Optional[float] = field(default=None)  # Urumovic calculation
     current_porosity: Optional[float] = field(default=None)  # User can override this
+    group_name: str = "Ungrouped"  # Optional comparison/report grouping label
 
     def __post_init__(self):
         """Validate data after initialization"""
+        self.group_name = str(self.group_name or "Ungrouped").strip() or "Ungrouped"
+
         if len(self.particle_sizes) != len(self.percent_passing):
             raise ValueError("Particle sizes and percent passing must have same length")
 
@@ -249,6 +252,39 @@ class GrainSizeData:
         if d10 and d30 and d60 and d10 > 0 and d60 > 0:
             return (d30 ** 2) / (d10 * d60)
         return None
+
+    def get_arithmetic_mean_grain_size(self) -> Optional[float]:
+        """Calculate mass-fraction weighted arithmetic mean grain size in mm."""
+        if (
+            not self.particle_sizes
+            or not self.percent_passing
+            or len(self.particle_sizes) != len(self.percent_passing)
+            or len(self.particle_sizes) < 2
+        ):
+            return None
+
+        try:
+            sorted_data = sorted(zip(self.particle_sizes, self.percent_passing), reverse=True)
+            weighted_sum = 0.0
+            retained_total = 0.0
+
+            for (coarse_size, coarse_passing), (fine_size, fine_passing) in zip(
+                sorted_data,
+                sorted_data[1:],
+            ):
+                retained_fraction = coarse_passing - fine_passing
+                if retained_fraction <= 0 or coarse_size <= 0 or fine_size <= 0:
+                    continue
+
+                interval_midpoint = (coarse_size + fine_size) / 2.0
+                weighted_sum += retained_fraction * interval_midpoint
+                retained_total += retained_fraction
+
+            if retained_total <= 0:
+                return None
+            return weighted_sum / retained_total
+        except Exception:
+            return None
 
     def _interpolate_grain_size(self, target_percent: float) -> Optional[float]:
         """Interpolate grain size at target percent passing using the VBA path."""

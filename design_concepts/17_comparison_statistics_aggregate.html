@@ -1,0 +1,944 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>17 - Comparison Statistics Aggregate Concept</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Playfair+Display:wght@600;700&family=Source+Sans+3:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.2/css/all.min.css">
+  <style>
+    :root{
+      --bg:#f3eee6;
+      --paper:#fbf8f2;
+      --paper2:#f6f0e7;
+      --line:#d7cbb8;
+      --line2:#bca98e;
+      --text:#34281d;
+      --mid:#665544;
+      --muted:#8a7863;
+      --olive:#6b8e23;
+      --olive2:#556f1c;
+      --earth:#9b6a38;
+      --amber:#bb8c2f;
+      --blue:#3a7ea0;
+      --rust:#b46428;
+      --teal:#2a9d8f;
+      --violet:#6b5ca5;
+      --ui:"Source Sans 3", system-ui, sans-serif;
+      --mono:"IBM Plex Mono", monospace;
+      --disp:"Playfair Display", Georgia, serif;
+      --shadow:0 18px 44px rgba(58,42,26,.08);
+    }
+    *{box-sizing:border-box}
+    html,body{height:100%}
+    body{
+      margin:0;
+      font-family:var(--ui);
+      color:var(--text);
+      background:
+        radial-gradient(circle at top left, rgba(255,255,255,.42), transparent 32%),
+        linear-gradient(180deg, #f8f4ed 0%, var(--bg) 100%);
+    }
+    body::after{
+      content:"";
+      position:fixed;
+      inset:0;
+      pointer-events:none;
+      opacity:.13;
+      background-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='260' height='260'%3E%3Cfilter id='g'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='.72' numOctaves='4' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='260' height='260' filter='url(%23g)' opacity='.07'/%3E%3C/svg%3E");
+    }
+    button,select,input{font-family:inherit}
+    button{cursor:pointer}
+    .stage{
+      min-height:100%;
+      padding:18px;
+      display:flex;
+      align-items:center;
+      justify-content:center;
+    }
+    .app{
+      width:min(1480px, calc(100vw - 36px));
+      height:min(880px, calc(100vh - 36px));
+      min-height:760px;
+      display:flex;
+      flex-direction:column;
+      overflow:hidden;
+      background:rgba(252,249,243,.88);
+      border:1px solid rgba(154,126,95,.14);
+      border-radius:18px;
+      box-shadow:var(--shadow);
+      backdrop-filter:blur(8px);
+    }
+    .top{
+      display:flex;
+      align-items:flex-end;
+      gap:16px;
+      padding:18px 20px 14px;
+      border-bottom:1px solid var(--line);
+      background:linear-gradient(180deg, rgba(255,255,255,.72), rgba(246,239,228,.78));
+      flex-shrink:0;
+    }
+    .eyebrow{
+      display:inline-flex;
+      align-items:center;
+      gap:7px;
+      min-height:26px;
+      padding:0 10px;
+      border-radius:999px;
+      border:1px solid rgba(107,142,35,.22);
+      background:rgba(107,142,35,.08);
+      color:var(--olive2);
+      font-family:var(--mono);
+      font-size:10px;
+      font-weight:800;
+      letter-spacing:.08em;
+      text-transform:uppercase;
+      flex:0 0 auto;
+    }
+    .title{min-width:0}
+    .title h1{
+      margin:0;
+      font-family:var(--disp);
+      font-size:27px;
+      line-height:1.04;
+      font-weight:700;
+      letter-spacing:.01em;
+    }
+    .title p{
+      margin:4px 0 0;
+      font-size:12px;
+      color:var(--muted);
+    }
+    .top .spacer{flex:1}
+    .state{
+      display:flex;
+      gap:8px;
+      flex-wrap:wrap;
+      justify-content:flex-end;
+    }
+    .pill{
+      display:inline-flex;
+      align-items:center;
+      gap:6px;
+      min-height:28px;
+      padding:0 10px;
+      border-radius:999px;
+      border:1px solid rgba(154,126,95,.18);
+      background:rgba(255,255,255,.62);
+      color:var(--mid);
+      font-size:11px;
+      font-weight:700;
+      white-space:nowrap;
+    }
+    .pill.on{
+      color:var(--olive2);
+      border-color:rgba(107,142,35,.24);
+      background:rgba(107,142,35,.08);
+    }
+    .toolbar{
+      display:flex;
+      align-items:center;
+      gap:9px;
+      padding:12px 20px;
+      border-bottom:1px solid var(--line);
+      background:rgba(246,239,228,.58);
+      flex-wrap:wrap;
+      flex-shrink:0;
+    }
+    .seg{
+      display:inline-flex;
+      align-items:center;
+      gap:3px;
+      padding:3px;
+      border-radius:999px;
+      border:1px solid rgba(154,126,95,.18);
+      background:rgba(255,255,255,.56);
+    }
+    .seg button{
+      min-height:29px;
+      padding:0 12px;
+      border:none;
+      border-radius:999px;
+      background:transparent;
+      color:var(--mid);
+      font-size:12px;
+      font-weight:700;
+      display:flex;
+      align-items:center;
+      gap:7px;
+    }
+    .seg button.on{
+      background:rgba(107,142,35,.12);
+      color:var(--olive2);
+    }
+    .meta{
+      margin-left:auto;
+      display:flex;
+      gap:14px;
+      align-items:center;
+      font:500 11px var(--mono);
+      color:var(--muted);
+      flex-wrap:wrap;
+      justify-content:flex-end;
+    }
+    .meta strong{color:var(--mid)}
+    .scope-strip{
+      display:flex;
+      align-items:center;
+      gap:10px;
+      padding:10px 20px 11px;
+      border-bottom:1px solid var(--line);
+      background:rgba(255,255,255,.34);
+      overflow:auto hidden;
+      scrollbar-width:thin;
+      flex-shrink:0;
+    }
+    .scope-chip{
+      display:inline-flex;
+      align-items:center;
+      gap:8px;
+      flex:0 0 auto;
+      min-height:31px;
+      padding:0 11px;
+      border-radius:999px;
+      border:1px solid rgba(188,169,142,.76);
+      background:var(--paper);
+      color:var(--mid);
+      font-size:12px;
+      font-weight:700;
+    }
+    .scope-chip.overall{
+      background:rgba(107,142,35,.09);
+      border-color:rgba(107,142,35,.24);
+      color:var(--olive2);
+    }
+    .dot{
+      width:8px;
+      height:8px;
+      border-radius:50%;
+      flex:0 0 auto;
+      background:currentColor;
+    }
+    .body{
+      flex:1;
+      min-height:0;
+      display:grid;
+      grid-template-columns:minmax(0,1fr) 318px;
+      background:var(--paper);
+    }
+    .workspace{
+      min-width:0;
+      min-height:0;
+      overflow:hidden;
+      border-right:1px solid var(--line);
+      display:flex;
+      flex-direction:column;
+    }
+    .panel{
+      display:none;
+      min-height:0;
+      flex:1;
+      overflow:auto;
+      animation:fade-in .18s ease both;
+    }
+    .panel.on{display:block}
+    @keyframes fade-in{from{opacity:.35;transform:translateY(3px)}to{opacity:1;transform:none}}
+    .content{
+      min-width:1030px;
+      min-height:100%;
+      display:grid;
+      grid-template-rows:minmax(350px, 1fr) minmax(300px, .72fr);
+    }
+    .content.coverage-mode{
+      grid-template-rows:minmax(360px, 1fr) minmax(300px, .72fr);
+    }
+    .section{
+      padding:16px 18px 14px;
+      border-bottom:1px solid rgba(215,203,184,.7);
+      background:var(--paper);
+      min-height:0;
+      display:flex;
+      flex-direction:column;
+      gap:12px;
+    }
+    .section-head{
+      display:flex;
+      align-items:flex-end;
+      gap:14px;
+      flex-shrink:0;
+    }
+    .section-copy{min-width:0;flex:1}
+    .kicker{
+      margin-bottom:4px;
+      font:800 10px var(--mono);
+      letter-spacing:.08em;
+      text-transform:uppercase;
+      color:var(--muted);
+    }
+    .section h2{
+      margin:0;
+      font-size:18px;
+      line-height:1.1;
+      font-weight:800;
+    }
+    .section p{
+      margin:4px 0 0;
+      font-size:12px;
+      color:var(--muted);
+    }
+    .micro{
+      display:flex;
+      gap:8px;
+      flex-wrap:wrap;
+      justify-content:flex-end;
+      font:700 10px var(--mono);
+      color:var(--muted);
+    }
+    .micro span{
+      display:inline-flex;
+      align-items:center;
+      gap:6px;
+      padding:4px 8px;
+      border-radius:999px;
+      background:rgba(246,240,231,.9);
+      border:1px solid rgba(154,126,95,.14);
+      white-space:nowrap;
+    }
+    .chart{
+      position:relative;
+      flex:1;
+      min-height:250px;
+      display:grid;
+      grid-template-columns:58px minmax(0,1fr);
+      grid-template-rows:minmax(0,1fr) 30px;
+      border:1px solid rgba(188,169,142,.64);
+      border-radius:10px;
+      background:
+        repeating-linear-gradient(to bottom, rgba(188,169,142,.22) 0 1px, transparent 1px 54px),
+        rgba(255,255,255,.32);
+      overflow:hidden;
+    }
+    .y-axis{
+      grid-row:1;
+      display:flex;
+      flex-direction:column;
+      justify-content:space-between;
+      padding:13px 8px 9px;
+      border-right:1px solid rgba(188,169,142,.5);
+      color:var(--muted);
+      font:700 10px var(--mono);
+      text-align:right;
+    }
+    .plot-zone{
+      position:relative;
+      grid-row:1;
+      display:grid;
+      grid-template-columns:repeat(4,1fr);
+      gap:32px;
+      align-items:end;
+      padding:22px 46px 18px;
+    }
+    .boxplot{
+      height:100%;
+      min-height:210px;
+      display:flex;
+      align-items:end;
+      justify-content:center;
+      position:relative;
+    }
+    .stem{
+      width:2px;
+      height:var(--stem);
+      background:currentColor;
+      opacity:.46;
+      position:absolute;
+      bottom:var(--bottom);
+    }
+    .box{
+      width:64px;
+      height:var(--box);
+      bottom:var(--box-bottom);
+      position:absolute;
+      border-radius:8px;
+      background:color-mix(in srgb, currentColor 22%, white);
+      border:2px solid color-mix(in srgb, currentColor 75%, #654);
+      box-shadow:0 10px 22px rgba(50,36,20,.08);
+    }
+    .median{
+      width:76px;
+      height:3px;
+      background:var(--text);
+      position:absolute;
+      bottom:var(--median);
+      border-radius:999px;
+    }
+    .cap{
+      width:42px;
+      height:2px;
+      background:currentColor;
+      position:absolute;
+      border-radius:999px;
+      opacity:.72;
+    }
+    .cap.top{bottom:calc(var(--bottom) + var(--stem))}
+    .cap.bot{bottom:var(--bottom)}
+    .mean-dot{
+      width:9px;
+      height:9px;
+      border-radius:50%;
+      position:absolute;
+      bottom:var(--mean);
+      background:var(--paper);
+      border:2px solid currentColor;
+      box-shadow:0 0 0 3px rgba(255,255,255,.6);
+    }
+    .x-axis{
+      grid-column:2;
+      grid-row:2;
+      display:grid;
+      grid-template-columns:repeat(4,1fr);
+      align-items:center;
+      gap:32px;
+      padding:0 46px;
+      border-top:1px solid rgba(188,169,142,.5);
+      font:800 11px var(--mono);
+      color:var(--mid);
+      text-align:center;
+    }
+    .stats-grid{
+      display:grid;
+      grid-template-columns:1.1fr .9fr;
+      gap:14px;
+      min-height:0;
+    }
+    .mini-table,.coverage,.table-wrap{
+      min-height:0;
+      border:1px solid rgba(188,169,142,.64);
+      border-radius:10px;
+      overflow:hidden;
+      background:rgba(255,255,255,.34);
+    }
+    .table-wrap{
+      flex:1;
+      overflow:auto;
+    }
+    table{
+      width:100%;
+      border-collapse:separate;
+      border-spacing:0;
+      table-layout:fixed;
+      font-size:12px;
+    }
+    .scope-table{min-width:1160px}
+    .method-table{min-width:1080px}
+    th{
+      background:rgba(246,240,231,.96);
+      border-bottom:1px solid rgba(188,169,142,.68);
+      color:var(--mid);
+      font-weight:800;
+      text-align:right;
+      padding:8px 9px;
+    }
+    th:first-child{text-align:left}
+    td{
+      padding:8px 9px;
+      border-bottom:1px solid rgba(215,203,184,.5);
+      color:var(--text);
+      text-align:right;
+    }
+    td:first-child{text-align:left;font-weight:700;color:var(--mid)}
+    td.scope-name{
+      color:var(--text);
+      font-weight:800;
+      white-space:nowrap;
+    }
+    td .sub{
+      display:block;
+      margin-top:2px;
+      color:var(--muted);
+      font:700 10px var(--mono);
+    }
+    .status{
+      display:inline-flex;
+      align-items:center;
+      justify-content:center;
+      min-width:44px;
+      min-height:20px;
+      padding:0 7px;
+      border-radius:999px;
+      font:800 9px var(--mono);
+      text-transform:uppercase;
+    }
+    .status.ok{background:rgba(107,142,35,.1);color:var(--olive2);border:1px solid rgba(107,142,35,.2)}
+    .status.warn{background:rgba(187,140,47,.12);color:#8b6418;border:1px solid rgba(187,140,47,.24)}
+    .status.na{background:rgba(188,169,142,.16);color:var(--muted);border:1px solid rgba(188,169,142,.32)}
+    tr:last-child td{border-bottom:none}
+    .coverage-grid{
+      display:grid;
+      grid-template-columns:190px repeat(4, minmax(94px,1fr));
+      min-width:770px;
+      font-size:12px;
+    }
+    .coverage-grid.full{
+      min-width:1020px;
+      height:100%;
+    }
+    .cg-cell{
+      min-height:31px;
+      display:flex;
+      align-items:center;
+      justify-content:center;
+      border-right:1px solid rgba(215,203,184,.55);
+      border-bottom:1px solid rgba(215,203,184,.55);
+      font:800 10px var(--mono);
+      color:var(--mid);
+    }
+    .cg-cell.method{
+      justify-content:flex-start;
+      padding:0 10px;
+      font:700 12px var(--ui);
+      color:var(--text);
+      background:rgba(251,248,242,.88);
+    }
+    .cg-cell.head{
+      min-height:36px;
+      background:rgba(246,240,231,.96);
+      color:var(--muted);
+      font:800 10px var(--mono);
+      letter-spacing:.05em;
+      text-transform:uppercase;
+    }
+    .cg-cell.ok{background:rgba(107,142,35,.12);color:var(--olive2)}
+    .cg-cell.warn{background:rgba(187,140,47,.15);color:#8b6418}
+    .cg-cell.na{background:rgba(188,169,142,.18);color:var(--muted)}
+    .rail{
+      min-width:0;
+      min-height:0;
+      display:flex;
+      flex-direction:column;
+      overflow:auto;
+      background:linear-gradient(180deg, rgba(244,238,228,.98), rgba(236,228,214,.98));
+    }
+    .rail-sec{
+      padding:14px 16px;
+      border-bottom:1px solid rgba(188,169,142,.72);
+    }
+    .rail-sec h3{
+      margin:0 0 10px;
+      font-family:var(--mono);
+      font-size:10px;
+      font-weight:800;
+      letter-spacing:.10em;
+      text-transform:uppercase;
+      color:var(--muted);
+    }
+    .mini-grid{
+      display:grid;
+      grid-template-columns:1fr auto;
+      gap:7px 12px;
+      align-items:center;
+      font-size:12px;
+    }
+    .mini-grid .k{color:var(--muted);font-weight:700}
+    .mini-grid .v{font-family:var(--mono);font-size:11px;color:var(--text);font-weight:700;text-align:right}
+    .filter-list,.group-list{display:flex;flex-direction:column;gap:8px}
+    .filter-row,.group-row{
+      padding:8px 10px;
+      border-radius:9px;
+      border:1px solid rgba(188,169,142,.7);
+      background:rgba(255,255,255,.34);
+    }
+    .filter-row,.group-row{
+      display:flex;
+      align-items:center;
+      justify-content:space-between;
+      gap:10px;
+    }
+    .filter-row strong,.group-row strong{
+      display:block;
+      font-size:12px;
+      color:var(--text);
+      line-height:1.2;
+    }
+    .filter-row span,.group-row span{
+      display:block;
+      margin-top:2px;
+      font-size:11px;
+      color:var(--muted);
+      line-height:1.25;
+    }
+    .badge{
+      display:inline-flex;
+      align-items:center;
+      justify-content:center;
+      min-width:44px;
+      min-height:21px;
+      padding:0 7px;
+      border-radius:999px;
+      font:800 9px var(--mono);
+      letter-spacing:.04em;
+      text-transform:uppercase;
+      white-space:nowrap;
+    }
+    .badge.ok{background:rgba(107,142,35,.09); color:var(--olive2); border:1px solid rgba(107,142,35,.18)}
+    .badge.warn{background:rgba(187,140,47,.11); color:#8b6418; border:1px solid rgba(187,140,47,.2)}
+    .badge.na{background:rgba(188,169,142,.16); color:var(--muted); border:1px solid rgba(188,169,142,.32)}
+    .swatch{
+      width:9px;
+      height:9px;
+      border-radius:50%;
+      display:inline-block;
+      margin-right:7px;
+      vertical-align:-1px;
+    }
+    .rail-foot{
+      margin-top:auto;
+      padding:12px 16px 14px;
+      border-top:1px solid rgba(188,169,142,.72);
+      background:rgba(255,255,255,.18);
+      color:var(--muted);
+      font:600 11px/1.35 var(--mono);
+    }
+    @media (max-width:1180px){
+      .app{height:auto;min-height:calc(100vh - 36px)}
+      .body{grid-template-columns:1fr}
+      .rail{border-top:1px solid var(--line)}
+      .meta{width:100%;margin-left:0;justify-content:flex-start}
+    }
+    @media (max-width:760px){
+      .stage{padding:10px}
+      .app{width:100%;min-height:calc(100vh - 20px)}
+      .top{align-items:flex-start;flex-wrap:wrap}
+      .section-head{align-items:flex-start;flex-direction:column}
+      .micro{justify-content:flex-start}
+    }
+  </style>
+</head>
+<body>
+  <div class="stage">
+    <section class="app">
+      <header class="top">
+        <div class="eyebrow"><i class="fa-solid fa-chart-simple"></i>Comparison Statistics</div>
+        <div class="title">
+          <h1>Group and Method Statistics</h1>
+          <p>10 selected datasets, 3 groups, OK values included.</p>
+        </div>
+        <div class="spacer"></div>
+        <div class="state">
+          <div class="pill on"><i class="fa-solid fa-layer-group"></i>Grouped</div>
+          <div class="pill"><i class="fa-solid fa-table-list"></i>16 methods</div>
+          <div class="pill"><i class="fa-solid fa-filter"></i>OK only</div>
+        </div>
+      </header>
+
+      <div class="toolbar">
+        <div class="seg" aria-label="Statistics view">
+          <button class="on" data-stats-view="spread"><i class="fa-solid fa-chart-column"></i>K spread</button>
+          <button data-stats-view="coverage"><i class="fa-solid fa-border-all"></i>Coverage</button>
+        </div>
+        <div class="seg" aria-label="Metric">
+          <button class="on">Geo. mean</button>
+          <button>Arith. mean</button>
+          <button>Median</button>
+          <button>Range</button>
+        </div>
+        <div class="seg" aria-label="Methods">
+          <button class="on">All methods</button>
+          <button>Valid in all</button>
+          <button><i class="fa-solid fa-sliders"></i>Choose</button>
+        </div>
+        <div class="seg" aria-label="Status filter">
+          <button class="on"><i class="fa-solid fa-circle-check"></i>OK only</button>
+          <button><i class="fa-solid fa-triangle-exclamation"></i>Warnings</button>
+        </div>
+        <div class="meta">
+          <span><strong>46 / 52</strong> K cells included</span>
+          <span>Unit <strong>m/d</strong></span>
+          <span>Sheet <strong>English</strong></span>
+        </div>
+      </div>
+
+      <div class="scope-strip">
+        <div class="scope-chip overall"><i class="fa-solid fa-circle-half-stroke"></i>Overall <span>10 datasets</span></div>
+        <div class="scope-chip" style="color:var(--blue)"><span class="dot"></span>Layer A <span>3</span></div>
+        <div class="scope-chip" style="color:var(--olive)"><span class="dot"></span>Layer B <span>4</span></div>
+        <div class="scope-chip" style="color:var(--rust)"><span class="dot"></span>Layer C <span>3</span></div>
+      </div>
+
+      <div class="body">
+        <main class="workspace">
+          <section class="panel on" id="spreadPanel">
+            <div class="content">
+              <section class="section">
+                <div class="section-head">
+                  <div class="section-copy">
+                    <div class="kicker">K distribution</div>
+                    <h2>K-value spread by overall scope and group</h2>
+                    <p>Box plots use included values after the active method and warning filters.</p>
+                  </div>
+                  <div class="micro">
+                    <span><i class="fa-solid fa-ruler-combined"></i>log scale</span>
+                    <span><i class="fa-solid fa-circle-dot"></i>mean marker</span>
+                    <span><i class="fa-solid fa-layer-group"></i>group colors</span>
+                  </div>
+                </div>
+
+                <div class="chart">
+                  <div class="y-axis">
+                    <span>1000</span>
+                    <span>100</span>
+                    <span>10</span>
+                    <span>1</span>
+                    <span>0.1</span>
+                    <span>0.01</span>
+                  </div>
+                  <div class="plot-zone">
+                    <div class="boxplot" style="color:var(--olive);--stem:78%;--bottom:7%;--box:34%;--box-bottom:28%;--median:45%;--mean:49%">
+                      <div class="stem"></div><div class="cap top"></div><div class="cap bot"></div><div class="box"></div><div class="median"></div><div class="mean-dot"></div>
+                    </div>
+                    <div class="boxplot" style="color:var(--blue);--stem:48%;--bottom:8%;--box:24%;--box-bottom:18%;--median:29%;--mean:32%">
+                      <div class="stem"></div><div class="cap top"></div><div class="cap bot"></div><div class="box"></div><div class="median"></div><div class="mean-dot"></div>
+                    </div>
+                    <div class="boxplot" style="color:var(--olive);--stem:56%;--bottom:18%;--box:25%;--box-bottom:35%;--median:46%;--mean:48%">
+                      <div class="stem"></div><div class="cap top"></div><div class="cap bot"></div><div class="box"></div><div class="median"></div><div class="mean-dot"></div>
+                    </div>
+                    <div class="boxplot" style="color:var(--rust);--stem:54%;--bottom:35%;--box:22%;--box-bottom:52%;--median:62%;--mean:64%">
+                      <div class="stem"></div><div class="cap top"></div><div class="cap bot"></div><div class="box"></div><div class="median"></div><div class="mean-dot"></div>
+                    </div>
+                  </div>
+                  <div class="x-axis">
+                    <span>Overall</span>
+                    <span>Layer A</span>
+                    <span>Layer B</span>
+                    <span>Layer C</span>
+                  </div>
+                </div>
+              </section>
+
+              <section class="section">
+                <div class="section-head">
+                  <div class="section-copy">
+                    <div class="kicker">Scope statistics</div>
+                    <h2>Numerical backing for the distribution view</h2>
+                    <p>Each row is calculated from the same included K cells and grain metrics as the plot.</p>
+                  </div>
+                  <div class="micro">
+                    <span><i class="fa-solid fa-table"></i>aggregate rows</span>
+                    <span><i class="fa-solid fa-wheat-awn"></i>grain context</span>
+                  </div>
+                </div>
+
+                <div class="table-wrap">
+                  <table class="scope-table">
+                    <thead>
+                      <tr>
+                        <th style="width:170px">Scope</th>
+                        <th>Datasets</th>
+                        <th>Included K</th>
+                        <th>Geo. mean K</th>
+                        <th>Arith. mean K</th>
+                        <th>Median K</th>
+                        <th>K range</th>
+                        <th>Log spread</th>
+                        <th>D50 median</th>
+                        <th>Mean grain size</th>
+                        <th>Cu median</th>
+                        <th>Fines median</th>
+                        <th style="width:150px">Dominant class</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      <tr>
+                        <td class="scope-name">Overall<span class="sub">all selected datasets</span></td>
+                        <td>10</td><td>46 / 52</td><td>18.7</td><td>24.9</td><td>16.2</td><td>1.9-91.4</td><td>1.48</td><td>0.44 mm</td><td>0.51 mm</td><td>3.8</td><td>5.6%</td><td>Poorly-graded sand</td>
+                      </tr>
+                      <tr>
+                        <td class="scope-name"><span class="swatch" style="background:var(--blue)"></span>Layer A<span class="sub">upper sampled layer</span></td>
+                        <td>3</td><td>15 / 16</td><td>6.4</td><td>7.1</td><td>5.9</td><td>1.9-11.2</td><td>0.77</td><td>0.18 mm</td><td>0.21 mm</td><td>2.6</td><td>8.4%</td><td>Silty sand</td>
+                      </tr>
+                      <tr>
+                        <td class="scope-name"><span class="swatch" style="background:var(--olive)"></span>Layer B<span class="sub">middle sampled layer</span></td>
+                        <td>4</td><td>19 / 21</td><td>21.8</td><td>23.6</td><td>20.4</td><td>9.4-36.7</td><td>0.59</td><td>0.46 mm</td><td>0.52 mm</td><td>3.4</td><td>4.9%</td><td>Clean sand</td>
+                      </tr>
+                      <tr>
+                        <td class="scope-name"><span class="swatch" style="background:var(--rust)"></span>Layer C<span class="sub">lower sampled layer</span></td>
+                        <td>3</td><td>12 / 15</td><td>52.6</td><td>61.8</td><td>49.1</td><td>28.1-91.4</td><td>0.51</td><td>0.92 mm</td><td>1.04 mm</td><td>4.9</td><td>1.7%</td><td>Clean gravelly sand</td>
+                      </tr>
+                    </tbody>
+                  </table>
+                </div>
+              </section>
+            </div>
+          </section>
+
+          <section class="panel" id="coveragePanel">
+            <div class="content coverage-mode">
+              <section class="section">
+                <div class="section-head">
+                  <div class="section-copy">
+                    <div class="kicker">Method coverage</div>
+                    <h2>Coverage matrix for all methods and groups</h2>
+                    <p>Status by method, overall scope, and group.</p>
+                  </div>
+                  <div class="micro">
+                    <span><i class="fa-solid fa-circle-check"></i>included</span>
+                    <span><i class="fa-solid fa-triangle-exclamation"></i>warned</span>
+                    <span><i class="fa-solid fa-ban"></i>missing</span>
+                  </div>
+                </div>
+
+                <div class="coverage" style="flex:1;overflow:auto">
+                  <div class="coverage-grid full">
+                    <div class="cg-cell head method">Method</div>
+                    <div class="cg-cell head">Overall</div>
+                    <div class="cg-cell head">Layer A</div>
+                    <div class="cg-cell head">Layer B</div>
+                    <div class="cg-cell head">Layer C</div>
+
+                    <div class="cg-cell method">Hazen</div><div class="cg-cell ok">10/10</div><div class="cg-cell ok">3/3</div><div class="cg-cell ok">4/4</div><div class="cg-cell ok">3/3</div>
+                    <div class="cg-cell method">Beyer</div><div class="cg-cell warn">8/10</div><div class="cg-cell warn">2/3</div><div class="cg-cell ok">4/4</div><div class="cg-cell warn">2/3</div>
+                    <div class="cg-cell method">Kozeny-Carman</div><div class="cg-cell ok">10/10</div><div class="cg-cell ok">3/3</div><div class="cg-cell ok">4/4</div><div class="cg-cell ok">3/3</div>
+                    <div class="cg-cell method">Slichter</div><div class="cg-cell ok">9/10</div><div class="cg-cell ok">3/3</div><div class="cg-cell ok">4/4</div><div class="cg-cell warn">2/3</div>
+                    <div class="cg-cell method">Terzaghi</div><div class="cg-cell warn">7/10</div><div class="cg-cell warn">2/3</div><div class="cg-cell ok">4/4</div><div class="cg-cell na">1/3</div>
+                    <div class="cg-cell method">USBR</div><div class="cg-cell na">6/10</div><div class="cg-cell ok">3/3</div><div class="cg-cell warn">3/4</div><div class="cg-cell na">0/3</div>
+                    <div class="cg-cell method">Alyamani-Sen</div><div class="cg-cell ok">10/10</div><div class="cg-cell ok">3/3</div><div class="cg-cell ok">4/4</div><div class="cg-cell ok">3/3</div>
+                    <div class="cg-cell method">Chapuis</div><div class="cg-cell warn">8/10</div><div class="cg-cell warn">2/3</div><div class="cg-cell ok">4/4</div><div class="cg-cell warn">2/3</div>
+                    <div class="cg-cell method">Krumbein-Monk</div><div class="cg-cell na">5/10</div><div class="cg-cell na">1/3</div><div class="cg-cell warn">3/4</div><div class="cg-cell na">1/3</div>
+                    <div class="cg-cell method">Shepherd</div><div class="cg-cell ok">10/10</div><div class="cg-cell ok">3/3</div><div class="cg-cell ok">4/4</div><div class="cg-cell ok">3/3</div>
+                    <div class="cg-cell method">Sauerbrei</div><div class="cg-cell warn">8/10</div><div class="cg-cell warn">2/3</div><div class="cg-cell ok">4/4</div><div class="cg-cell warn">2/3</div>
+                    <div class="cg-cell method">Kruger</div><div class="cg-cell ok">9/10</div><div class="cg-cell ok">3/3</div><div class="cg-cell warn">3/4</div><div class="cg-cell ok">3/3</div>
+                    <div class="cg-cell method">Zunker</div><div class="cg-cell na">6/10</div><div class="cg-cell na">1/3</div><div class="cg-cell ok">4/4</div><div class="cg-cell na">1/3</div>
+                    <div class="cg-cell method">Zamarin</div><div class="cg-cell warn">7/10</div><div class="cg-cell warn">2/3</div><div class="cg-cell ok">4/4</div><div class="cg-cell na">1/3</div>
+                    <div class="cg-cell method">Pavchich</div><div class="cg-cell na">4/10</div><div class="cg-cell na">0/3</div><div class="cg-cell warn">2/4</div><div class="cg-cell warn">2/3</div>
+                    <div class="cg-cell method">Barr</div><div class="cg-cell ok">9/10</div><div class="cg-cell ok">3/3</div><div class="cg-cell ok">4/4</div><div class="cg-cell warn">2/3</div>
+                  </div>
+                </div>
+              </section>
+
+              <section class="section">
+                <div class="section-head">
+                  <div class="section-copy">
+                    <div class="kicker">Method statistics</div>
+                    <h2>Method contribution and reliability</h2>
+                    <p>Method rows show how much each formula contributes after active filters and where warnings or missing values remain.</p>
+                  </div>
+                  <div class="micro">
+                    <span><i class="fa-solid fa-circle-check"></i>included cells</span>
+                    <span><i class="fa-solid fa-triangle-exclamation"></i>warning burden</span>
+                  </div>
+                </div>
+
+                <div class="table-wrap">
+                  <table class="method-table">
+                    <thead>
+                      <tr>
+                        <th style="width:180px">Method</th>
+                        <th>Included</th>
+                        <th>Warnings</th>
+                        <th>Missing / excluded</th>
+                        <th>Valid all datasets</th>
+                        <th>Valid groups</th>
+                        <th>Geo. mean K</th>
+                        <th>Median K</th>
+                        <th>K range</th>
+                        <th>Status</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      <tr><td class="scope-name">Hazen<span class="sub">D10 empirical</span></td><td>10 / 10</td><td>0</td><td>0</td><td>Yes</td><td>3 / 3</td><td>15.4</td><td>14.8</td><td>4.8-42.1</td><td><span class="status ok">OK</span></td></tr>
+                      <tr><td class="scope-name">Beyer<span class="sub">uniformity adjusted</span></td><td>8 / 10</td><td>2</td><td>2</td><td>No</td><td>3 / 3</td><td>22.9</td><td>19.6</td><td>6.3-74.8</td><td><span class="status warn">Warn</span></td></tr>
+                      <tr><td class="scope-name">Kozeny-Carman<span class="sub">pore structure</span></td><td>10 / 10</td><td>0</td><td>0</td><td>Yes</td><td>3 / 3</td><td>31.7</td><td>29.5</td><td>8.9-91.4</td><td><span class="status ok">OK</span></td></tr>
+                      <tr><td class="scope-name">Slichter<span class="sub">uniform sands</span></td><td>9 / 10</td><td>1</td><td>1</td><td>No</td><td>3 / 3</td><td>12.2</td><td>11.4</td><td>2.4-38.6</td><td><span class="status warn">Warn</span></td></tr>
+                      <tr><td class="scope-name">USBR<span class="sub">Bureau of Reclamation</span></td><td>6 / 10</td><td>3</td><td>4</td><td>No</td><td>2 / 3</td><td>8.7</td><td>7.9</td><td>1.9-21.2</td><td><span class="status na">Sparse</span></td></tr>
+                      <tr><td class="scope-name">Barr<span class="sub">grain-size relation</span></td><td>9 / 10</td><td>1</td><td>1</td><td>No</td><td>3 / 3</td><td>26.4</td><td>24.7</td><td>7.2-78.5</td><td><span class="status warn">Warn</span></td></tr>
+                    </tbody>
+                  </table>
+                </div>
+              </section>
+            </div>
+          </section>
+        </main>
+
+        <aside class="rail">
+          <section class="rail-sec">
+            <h3>Current Scope</h3>
+            <div class="mini-grid">
+              <div class="k">Datasets</div><div class="v">10</div>
+              <div class="k">Groups</div><div class="v">3</div>
+              <div class="k">Methods</div><div class="v">16</div>
+              <div class="k">Included K cells</div><div class="v">46 / 52</div>
+              <div class="k">Warnings excluded</div><div class="v">4</div>
+            </div>
+          </section>
+
+          <section class="rail-sec">
+            <h3>Current Filters</h3>
+            <div class="filter-list">
+              <div class="filter-row"><div><strong>Methods</strong><span>All methods</span></div><span class="badge ok">All</span></div>
+              <div class="filter-row"><div><strong>Status</strong><span>OK values only</span></div><span class="badge ok">On</span></div>
+              <div class="filter-row"><div><strong>Metric</strong><span>Geometric mean</span></div><span class="badge na">Geo</span></div>
+            </div>
+          </section>
+
+          <section class="rail-sec">
+            <h3>Distribution Summary</h3>
+            <div class="mini-grid">
+              <div class="k">Overall geo. mean</div><div class="v">18.7 m/d</div>
+              <div class="k">Arithmetic mean</div><div class="v">24.9 m/d</div>
+              <div class="k">Overall median</div><div class="v">16.2 m/d</div>
+              <div class="k">Overall range</div><div class="v">1.9-91.4</div>
+              <div class="k">Log spread</div><div class="v">1.48</div>
+              <div class="k">Max group K</div><div class="v">Layer C</div>
+              <div class="k">Min group K</div><div class="v">Layer A</div>
+            </div>
+          </section>
+
+          <section class="rail-sec">
+            <h3>Grain Summary</h3>
+            <div class="mini-grid">
+              <div class="k">D50 median</div><div class="v">0.44 mm</div>
+              <div class="k">Mean grain size</div><div class="v">0.51 mm</div>
+              <div class="k">Cu median</div><div class="v">3.8</div>
+              <div class="k">Fines median</div><div class="v">5.6%</div>
+            </div>
+          </section>
+
+          <section class="rail-sec">
+            <h3>Method Coverage</h3>
+            <div class="mini-grid">
+              <div class="k">Methods available</div><div class="v">16</div>
+              <div class="k">Valid in all groups</div><div class="v">4</div>
+              <div class="k">With warnings</div><div class="v">7</div>
+              <div class="k">Missing in a group</div><div class="v">5</div>
+            </div>
+          </section>
+
+          <div class="rail-foot">
+            Group rows and method rows live in the main tables. Reports use curated aggregate tables; Export holds full dumps.
+          </div>
+        </aside>
+      </div>
+    </section>
+  </div>
+
+  <script>
+    const viewButtons = document.querySelectorAll("[data-stats-view]");
+    const spreadPanel = document.getElementById("spreadPanel");
+    const coveragePanel = document.getElementById("coveragePanel");
+
+    function setStatsView(view){
+      viewButtons.forEach(button => {
+        button.classList.toggle("on", button.dataset.statsView === view);
+      });
+      spreadPanel.classList.toggle("on", view === "spread");
+      coveragePanel.classList.toggle("on", view === "coverage");
+    }
+
+    viewButtons.forEach(button => {
+      button.addEventListener("click", () => setStatsView(button.dataset.statsView));
+    });
+  </script>
+</body>
+</html>

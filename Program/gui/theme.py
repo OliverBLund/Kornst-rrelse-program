@@ -1199,8 +1199,9 @@ QPushButton[pw-seg="true"]:last-child {{
     border-bottom-right-radius: {r - 1}px;
 }}
 QPushButton[pw-seg="true"][active="true"] {{
-    color: {C.TEXT};
-    font-weight: 500;
+    background: rgba(107,142,35,0.12);
+    color: {C.OLIVE};
+    font-weight: 700;
 }}
 QPushButton[pw-seg="true"]:hover:!checked {{
     background: {C.TAN_H};

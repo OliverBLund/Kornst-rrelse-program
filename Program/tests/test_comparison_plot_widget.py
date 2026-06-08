@@ -60,8 +60,15 @@ def build_results(scale: float, flagged_method: str | None = None) -> list[KCalc
 
 
 class DummyDatasetTab:
-    def __init__(self, name: str, scale: float, flagged_method: str | None = None):
+    def __init__(
+        self,
+        name: str,
+        scale: float,
+        flagged_method: str | None = None,
+        group: str = 'Ungrouped',
+    ):
         self._dataset = build_dataset(name)
+        self._dataset.group_name = group
         self._results = build_results(scale, flagged_method=flagged_method)
 
     def get_dataset(self):
@@ -295,6 +302,21 @@ class TestComparisonPlotWidget(unittest.TestCase):
 
         ax = self.widget.figure.axes[0]
         self.assertEqual(ax.lines[0].get_color().lower(), '#123456')
+
+    def test_distribution_uses_group_color_and_distinct_line_styles(self):
+        self.widget.set_datasets([
+            DummyDatasetTab('Layer A-1', 1.0, group='Layer A'),
+            DummyDatasetTab('Layer A-2', 1.1, group='Layer A'),
+            DummyDatasetTab('Layer B-1', 1.2, group='Layer B'),
+        ])
+        self.widget.on_plot_type_changed('Distribution')
+        self.widget.set_display_mode('overlay')
+        self.widget.refresh_plot()
+
+        ax = self.widget.figure.axes[0]
+        self.assertEqual(ax.lines[0].get_color(), ax.lines[1].get_color())
+        self.assertNotEqual(ax.lines[0].get_linestyle(), ax.lines[1].get_linestyle())
+        self.assertNotEqual(ax.lines[0].get_color(), ax.lines[2].get_color())
 
     def test_k_overlay_uses_dataset_color_override(self):
         self.widget._dataset_color_overrides['Sample A'] = '#123456'

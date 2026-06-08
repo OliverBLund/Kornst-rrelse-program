@@ -56,6 +56,16 @@ def _source_display_name(source: object) -> str:
     return os.path.basename(actual_path)
 
 
+def _source_group_name(source: object, mapping_state: Mapping[str, Any] | None = None) -> str:
+    value = None
+    if isinstance(source, Mapping):
+        value = source.get("group_name")
+    if not value and mapping_state:
+        value = mapping_state.get("group_name")
+    text = str(value or "Ungrouped").strip()
+    return text or "Ungrouped"
+
+
 class _QueueLogHandler(logging.Handler):
     """Forward warning/error logs from a worker process to the UI queue."""
 
@@ -352,6 +362,7 @@ def _load_mapped_source(source: Mapping[str, Any]) -> GrainSizeData:
         particle_sizes=particle_sizes,
         percent_passing=percent_passing,
         file_path=file_key,
+        group_name=_source_group_name(source, mapping_state),
     )
     dataset._source_mapping_state = dict(mapping_state)
     dataset._source_descriptor = dict(source)
@@ -418,6 +429,11 @@ def _build_grain_data(dataset) -> dict:
         "D30": dataset.get_d30(),
         "D50": dataset.get_d50(),
         "D60": dataset.get_d60(),
+        "Dmean_arithmetic": (
+            dataset.get_arithmetic_mean_grain_size()
+            if hasattr(dataset, "get_arithmetic_mean_grain_size")
+            else None
+        ),
     }.items():
         if value is not None:
             grain_data[key] = value
@@ -603,6 +619,8 @@ def run_external_load(
                         import_intent=import_intent,
                     )
                     dataset.file_path = file_key
+                    if isinstance(source, Mapping) and source.get("group_name") is not None:
+                        dataset.group_name = _source_group_name(source)
                     prepare_dataset_for_ui(dataset, temperature=restore_temperature, calculator=calculator)
                 summary["loaded"] += 1
                 _queue_dataset_import_event(result_queue, file_key, dataset, display_name)

@@ -1,0 +1,972 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>16 - Comparison Aggregate Details Concept</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Playfair+Display:wght@600;700&family=Source+Sans+3:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.2/css/all.min.css">
+  <style>
+    :root{
+      --bg:#f3eee6;
+      --bg2:#ece4d6;
+      --paper:#fbf8f2;
+      --paper2:#f6f0e7;
+      --line:#d7cbb8;
+      --line2:#bca98e;
+      --text:#34281d;
+      --mid:#665544;
+      --muted:#8a7863;
+      --olive:#6b8e23;
+      --olive2:#556f1c;
+      --earth:#9b6a38;
+      --amber:#bb8c2f;
+      --blue:#3a7ea0;
+      --rust:#b46428;
+      --teal:#2a9d8f;
+      --violet:#6b5ca5;
+      --shadow:0 18px 44px rgba(58,42,26,.08);
+      --r:10px;
+      --ui:"Source Sans 3", system-ui, sans-serif;
+      --mono:"IBM Plex Mono", monospace;
+      --disp:"Playfair Display", Georgia, serif;
+    }
+    *{box-sizing:border-box}
+    html,body{height:100%}
+    body{
+      margin:0;
+      font-family:var(--ui);
+      color:var(--text);
+      background:
+        radial-gradient(circle at top left, rgba(255,255,255,.42), transparent 32%),
+        linear-gradient(180deg, #f8f4ed 0%, var(--bg) 100%);
+    }
+    body::after{
+      content:"";
+      position:fixed;
+      inset:0;
+      pointer-events:none;
+      opacity:.13;
+      background-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='260' height='260'%3E%3Cfilter id='g'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='.72' numOctaves='4' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='260' height='260' filter='url(%23g)' opacity='.07'/%3E%3C/svg%3E");
+    }
+    button,select,input{font-family:inherit}
+    button{cursor:pointer}
+    .stage{
+      min-height:100%;
+      padding:18px;
+      display:flex;
+      align-items:center;
+      justify-content:center;
+    }
+    .app{
+      width:min(1480px, calc(100vw - 36px));
+      height:min(880px, calc(100vh - 36px));
+      min-height:760px;
+      display:flex;
+      flex-direction:column;
+      overflow:hidden;
+      background:rgba(252,249,243,.88);
+      border:1px solid rgba(154,126,95,.14);
+      border-radius:18px;
+      box-shadow:var(--shadow);
+      backdrop-filter:blur(8px);
+    }
+    .top{
+      display:flex;
+      align-items:flex-end;
+      gap:16px;
+      padding:18px 20px 14px;
+      border-bottom:1px solid var(--line);
+      background:linear-gradient(180deg, rgba(255,255,255,.72), rgba(246,239,228,.78));
+      flex-shrink:0;
+    }
+    .eyebrow{
+      display:inline-flex;
+      align-items:center;
+      gap:7px;
+      min-height:26px;
+      padding:0 10px;
+      border-radius:999px;
+      border:1px solid rgba(107,142,35,.22);
+      background:rgba(107,142,35,.08);
+      color:var(--olive2);
+      font-family:var(--mono);
+      font-size:10px;
+      font-weight:700;
+      letter-spacing:.08em;
+      text-transform:uppercase;
+      flex:0 0 auto;
+    }
+    .title{min-width:0}
+    .title h1{
+      margin:0;
+      font-family:var(--disp);
+      font-size:27px;
+      line-height:1.04;
+      font-weight:700;
+      letter-spacing:.01em;
+    }
+    .title p{
+      margin:4px 0 0;
+      font-size:12px;
+      color:var(--muted);
+    }
+    .top .spacer{flex:1}
+    .state{
+      display:flex;
+      gap:8px;
+      flex-wrap:wrap;
+      justify-content:flex-end;
+    }
+    .pill{
+      display:inline-flex;
+      align-items:center;
+      gap:6px;
+      min-height:28px;
+      padding:0 10px;
+      border-radius:999px;
+      border:1px solid rgba(154,126,95,.18);
+      background:rgba(255,255,255,.62);
+      color:var(--mid);
+      font-size:11px;
+      font-weight:600;
+      white-space:nowrap;
+    }
+    .pill.on{
+      color:var(--olive2);
+      border-color:rgba(107,142,35,.24);
+      background:rgba(107,142,35,.08);
+    }
+    .toolbar{
+      display:flex;
+      align-items:center;
+      gap:9px;
+      padding:12px 20px;
+      border-bottom:1px solid var(--line);
+      background:rgba(246,239,228,.58);
+      flex-wrap:wrap;
+      flex-shrink:0;
+    }
+    .seg{
+      display:inline-flex;
+      align-items:center;
+      gap:3px;
+      padding:3px;
+      border-radius:999px;
+      border:1px solid rgba(154,126,95,.18);
+      background:rgba(255,255,255,.56);
+    }
+    .seg button{
+      min-height:29px;
+      padding:0 12px;
+      border:none;
+      border-radius:999px;
+      background:transparent;
+      color:var(--mid);
+      font-size:12px;
+      font-weight:700;
+      display:flex;
+      align-items:center;
+      gap:7px;
+    }
+    .seg button.on{
+      background:rgba(107,142,35,.12);
+      color:var(--olive2);
+    }
+    .tb-btn{
+      min-height:35px;
+      padding:0 12px;
+      border-radius:999px;
+      border:1px solid rgba(154,126,95,.2);
+      background:rgba(255,255,255,.52);
+      color:var(--mid);
+      font-size:12px;
+      font-weight:700;
+      display:flex;
+      align-items:center;
+      gap:7px;
+    }
+    .tb-btn.primary{
+      background:rgba(107,142,35,.12);
+      border-color:rgba(107,142,35,.28);
+      color:var(--olive2);
+    }
+    .meta{
+      margin-left:auto;
+      display:flex;
+      gap:14px;
+      align-items:center;
+      font:500 11px var(--mono);
+      color:var(--muted);
+      flex-wrap:wrap;
+      justify-content:flex-end;
+    }
+    .meta strong{color:var(--mid)}
+    .scope-strip{
+      display:flex;
+      align-items:center;
+      gap:10px;
+      padding:10px 20px 11px;
+      border-bottom:1px solid var(--line);
+      background:rgba(255,255,255,.34);
+      overflow:auto hidden;
+      scrollbar-width:thin;
+      flex-shrink:0;
+    }
+    .scope-chip{
+      display:inline-flex;
+      align-items:center;
+      gap:8px;
+      flex:0 0 auto;
+      min-height:31px;
+      padding:0 11px;
+      border-radius:999px;
+      border:1px solid rgba(188,169,142,.76);
+      background:var(--paper);
+      color:var(--mid);
+      font-size:12px;
+      font-weight:700;
+    }
+    .scope-chip.overall{
+      background:rgba(107,142,35,.09);
+      border-color:rgba(107,142,35,.24);
+      color:var(--olive2);
+    }
+    .dot{
+      width:8px;
+      height:8px;
+      border-radius:50%;
+      flex:0 0 auto;
+      background:currentColor;
+    }
+    .body{
+      flex:1;
+      min-height:0;
+      display:grid;
+      grid-template-columns:minmax(0,1fr) 318px;
+      background:var(--paper);
+    }
+    .workspace{
+      min-width:0;
+      min-height:0;
+      display:flex;
+      flex-direction:column;
+      border-right:1px solid var(--line);
+      overflow:hidden;
+    }
+    .view-panel{
+      display:none;
+      flex:1;
+      min-height:0;
+      flex-direction:column;
+      animation:fade-in .18s ease both;
+    }
+    .view-panel.on{display:flex}
+    @keyframes fade-in{from{opacity:.35;transform:translateY(3px)}to{opacity:1;transform:none}}
+    .panel-head{
+      display:flex;
+      align-items:flex-end;
+      gap:14px;
+      padding:14px 18px 12px;
+      border-bottom:1px solid rgba(215,203,184,.76);
+      background:rgba(250,247,241,.72);
+      flex-shrink:0;
+    }
+    .panel-copy{min-width:0;flex:1}
+    .kicker{
+      margin-bottom:4px;
+      font:800 10px var(--mono);
+      letter-spacing:.08em;
+      text-transform:uppercase;
+      color:var(--muted);
+    }
+    .panel-head h2{
+      margin:0;
+      font-size:18px;
+      line-height:1.1;
+      font-weight:800;
+    }
+    .panel-head p{
+      margin:4px 0 0;
+      font-size:12px;
+      color:var(--muted);
+    }
+    .micro{
+      display:flex;
+      gap:8px;
+      flex-wrap:wrap;
+      justify-content:flex-end;
+      font:700 10px var(--mono);
+      color:var(--muted);
+    }
+    .micro span{
+      display:inline-flex;
+      align-items:center;
+      gap:6px;
+      padding:4px 8px;
+      border-radius:999px;
+      background:rgba(246,240,231,.9);
+      border:1px solid rgba(154,126,95,.14);
+      white-space:nowrap;
+    }
+    .table-zone{
+      flex:1;
+      min-height:0;
+      overflow:auto;
+      background:var(--paper);
+    }
+    table{
+      width:max(1060px,100%);
+      border-collapse:separate;
+      border-spacing:0;
+      table-layout:fixed;
+      font-size:13px;
+    }
+    thead th{
+      position:sticky;
+      top:0;
+      z-index:3;
+      background:rgba(246,240,231,.96);
+      backdrop-filter:blur(6px);
+      border-bottom:2px solid var(--line2);
+      padding:9px 11px;
+      color:var(--mid);
+      font-weight:800;
+      text-align:right;
+    }
+    thead th:first-child{
+      left:0;
+      z-index:4;
+      text-align:left;
+    }
+    tbody td{
+      padding:9px 11px;
+      border-bottom:1px solid rgba(215,203,184,.54);
+      text-align:right;
+      color:var(--text);
+      vertical-align:middle;
+    }
+    tbody tr.section td{
+      background:rgba(232,224,208,.64);
+      border-bottom:1px solid rgba(188,169,142,.7);
+      color:var(--muted);
+      font:800 10px var(--mono);
+      letter-spacing:.08em;
+      text-transform:uppercase;
+      text-align:left;
+      padding:7px 11px;
+    }
+    tbody td:first-child{
+      position:sticky;
+      left:0;
+      z-index:2;
+      text-align:left;
+      background:rgba(251,248,242,.98);
+      border-right:1px solid rgba(215,203,184,.54);
+    }
+    tbody tr.section td:first-child{
+      background:rgba(232,224,208,.98);
+    }
+    .param{
+      display:flex;
+      flex-direction:column;
+      gap:2px;
+      min-width:0;
+    }
+    .param strong{
+      font-size:13px;
+      color:var(--text);
+    }
+    .param span{
+      font-size:11px;
+      color:var(--muted);
+    }
+    .cell-main{
+      display:flex;
+      flex-direction:column;
+      align-items:flex-end;
+      gap:1px;
+    }
+    .cell-main strong{
+      font-family:var(--mono);
+      font-size:12px;
+      color:var(--text);
+      font-weight:800;
+    }
+    .cell-main span{
+      font:600 10px var(--mono);
+      color:var(--muted);
+    }
+    .overall-col{background:rgba(107,142,35,.055)}
+    .ok-text{color:var(--olive2)}
+    .warn-text{color:#8b6418}
+    .na-text{color:var(--muted)}
+    .soft{
+      display:inline-flex;
+      align-items:center;
+      justify-content:center;
+      min-width:58px;
+      padding:4px 9px;
+      border-radius:999px;
+      border:1px solid rgba(188,169,142,.48);
+      background:rgba(255,255,255,.54);
+      font-size:11px;
+      font-weight:800;
+      color:var(--mid);
+    }
+    .badge{
+      display:inline-flex;
+      align-items:center;
+      justify-content:center;
+      min-width:44px;
+      min-height:21px;
+      padding:0 7px;
+      border-radius:999px;
+      font:800 9px var(--mono);
+      letter-spacing:.04em;
+      text-transform:uppercase;
+      white-space:nowrap;
+    }
+    .badge.ok{background:rgba(107,142,35,.09); color:var(--olive2); border:1px solid rgba(107,142,35,.18)}
+    .badge.warn{background:rgba(187,140,47,.11); color:#8b6418; border:1px solid rgba(187,140,47,.2)}
+    .badge.na{background:rgba(188,169,142,.16); color:var(--muted); border:1px solid rgba(188,169,142,.32)}
+    .rail{
+      min-width:0;
+      min-height:0;
+      display:flex;
+      flex-direction:column;
+      overflow:auto;
+      background:linear-gradient(180deg, rgba(244,238,228,.98), rgba(236,228,214,.98));
+    }
+    .rail-sec{
+      padding:14px 16px;
+      border-bottom:1px solid rgba(188,169,142,.72);
+    }
+    .rail-sec h3{
+      margin:0 0 10px;
+      font-family:var(--mono);
+      font-size:10px;
+      font-weight:800;
+      letter-spacing:.10em;
+      text-transform:uppercase;
+      color:var(--muted);
+    }
+    .mini-grid{
+      display:grid;
+      grid-template-columns:1fr auto;
+      gap:7px 12px;
+      align-items:center;
+      font-size:12px;
+    }
+    .mini-grid .k{color:var(--muted);font-weight:700}
+    .mini-grid .v{font-family:var(--mono);font-size:11px;color:var(--text);font-weight:700;text-align:right}
+    .rule-list,.group-list,.method-list{display:flex;flex-direction:column;gap:8px}
+    .rule,.group-row,.method-row{
+      display:flex;
+      align-items:center;
+      justify-content:space-between;
+      gap:10px;
+      padding:8px 10px;
+      border-radius:9px;
+      border:1px solid rgba(188,169,142,.7);
+      background:rgba(255,255,255,.34);
+      min-width:0;
+    }
+    .rule strong,.group-row strong,.method-row strong{
+      display:block;
+      font-size:12px;
+      color:var(--text);
+      line-height:1.2;
+    }
+    .rule span,.group-row span,.method-row span{
+      display:block;
+      margin-top:2px;
+      font-size:11px;
+      color:var(--muted);
+      line-height:1.25;
+    }
+    .group-dot{
+      width:9px;
+      height:9px;
+      border-radius:50%;
+      flex:0 0 auto;
+    }
+    .assign{
+      display:grid;
+      grid-template-columns:1fr auto;
+      gap:7px;
+      align-items:center;
+    }
+    .select-like{
+      height:30px;
+      display:flex;
+      align-items:center;
+      justify-content:space-between;
+      gap:8px;
+      padding:0 10px;
+      border-radius:8px;
+      border:1px solid rgba(188,169,142,.82);
+      background:rgba(255,255,255,.46);
+      color:var(--mid);
+      font-size:12px;
+      font-weight:700;
+      min-width:0;
+    }
+    .small-btn{
+      height:30px;
+      padding:0 10px;
+      border-radius:8px;
+      border:1px solid rgba(107,142,35,.25);
+      background:rgba(107,142,35,.1);
+      color:var(--olive2);
+      font-size:12px;
+      font-weight:800;
+      display:flex;
+      align-items:center;
+      gap:6px;
+    }
+    .check-list{
+      display:flex;
+      flex-direction:column;
+      gap:1px;
+      margin-top:9px;
+      border-top:1px dashed rgba(188,169,142,.72);
+      padding-top:8px;
+    }
+    .check-row{
+      display:flex;
+      align-items:center;
+      gap:8px;
+      padding:5px 0;
+      font-size:12px;
+      color:var(--mid);
+    }
+    .box{
+      width:15px;
+      height:15px;
+      border-radius:4px;
+      border:1px solid rgba(107,142,35,.34);
+      background:rgba(107,142,35,.11);
+      color:var(--olive2);
+      display:flex;
+      align-items:center;
+      justify-content:center;
+      font-size:9px;
+      flex:0 0 auto;
+    }
+    .box.off{
+      background:rgba(255,255,255,.38);
+      border-color:rgba(188,169,142,.82);
+      color:transparent;
+    }
+    .rail-foot{
+      margin-top:auto;
+      padding:12px 16px 14px;
+      border-top:1px solid rgba(188,169,142,.72);
+      background:rgba(255,255,255,.18);
+      color:var(--muted);
+      font:600 11px/1.35 var(--mono);
+    }
+    .linestyle{
+      width:42px;
+      height:0;
+      border-top:2px solid currentColor;
+      flex:0 0 auto;
+    }
+    .linestyle.dash{border-top-style:dashed}
+    .linestyle.dot{border-top-style:dotted}
+    @media (max-width:1180px){
+      .app{height:auto;min-height:calc(100vh - 36px)}
+      .body{grid-template-columns:1fr}
+      .rail{border-top:1px solid var(--line)}
+      .meta{width:100%;margin-left:0;justify-content:flex-start}
+    }
+    @media (max-width:760px){
+      .stage{padding:10px}
+      .app{width:100%;min-height:calc(100vh - 20px)}
+      .top{align-items:flex-start;flex-wrap:wrap}
+      .panel-head{align-items:flex-start;flex-direction:column}
+      .micro{justify-content:flex-start}
+    }
+  </style>
+</head>
+<body>
+  <div class="stage">
+    <section class="app">
+      <header class="top">
+        <div class="eyebrow"><i class="fa-solid fa-code-compare"></i>Comparison Details</div>
+        <div class="title">
+          <h1>Individual and Aggregate Detail Modes</h1>
+          <p>10 selected datasets, English sheet, grouped by interpreted layer.</p>
+        </div>
+        <div class="spacer"></div>
+        <div class="state">
+          <div class="pill on"><i class="fa-solid fa-layer-group"></i>3 groups</div>
+          <div class="pill"><i class="fa-solid fa-triangle-exclamation"></i>4 warnings</div>
+          <div class="pill"><i class="fa-solid fa-filter"></i>OK only</div>
+        </div>
+      </header>
+
+      <div class="toolbar">
+        <div class="seg" aria-label="Detail mode">
+          <button data-mode="individual"><i class="fa-solid fa-table-columns"></i>Individual</button>
+          <button class="on" data-mode="aggregate"><i class="fa-solid fa-chart-simple"></i>Aggregate</button>
+        </div>
+        <div class="seg" aria-label="Result family">
+          <button><i class="fa-solid fa-ruler"></i>Grain</button>
+          <button class="on"><i class="fa-solid fa-water"></i>K-values</button>
+        </div>
+        <div class="seg" aria-label="Methods">
+          <button class="on">All methods</button>
+          <button>Valid in all</button>
+          <button><i class="fa-solid fa-sliders"></i>Choose</button>
+        </div>
+        <div class="seg" aria-label="Status filter">
+          <button class="on"><i class="fa-solid fa-circle-check"></i>OK only</button>
+          <button><i class="fa-solid fa-triangle-exclamation"></i>Warnings</button>
+        </div>
+        <button class="tb-btn primary"><i class="fa-solid fa-layer-group"></i>Scope &amp; Groups</button>
+        <div class="meta">
+          <span><strong>10 datasets</strong></span>
+          <span>English sheet</span>
+          <span>K unit <strong>m/d</strong></span>
+        </div>
+      </div>
+
+      <div class="scope-strip">
+        <div class="scope-chip overall"><i class="fa-solid fa-circle-half-stroke"></i>Overall <span>10 datasets</span></div>
+        <div class="scope-chip" style="color:var(--blue)"><span class="dot"></span>Layer A <span>3</span></div>
+        <div class="scope-chip" style="color:var(--olive)"><span class="dot"></span>Layer B <span>4</span></div>
+        <div class="scope-chip" style="color:var(--rust)"><span class="dot"></span>Layer C <span>3</span></div>
+      </div>
+
+      <div class="body">
+        <main class="workspace">
+          <section class="view-panel on" id="aggregateView">
+            <div class="panel-head">
+              <div class="panel-copy">
+                <div class="kicker">Aggregate detail mode</div>
+                <h2>Overall and per-group values use the same filters</h2>
+                <p>Scope: all selected datasets. Groups: Layer A, Layer B, Layer C.</p>
+              </div>
+              <div class="micro">
+                <span><i class="fa-solid fa-circle-check"></i>OK values only</span>
+                <span><i class="fa-solid fa-database"></i>46 / 52 cells included</span>
+                <span><i class="fa-solid fa-layer-group"></i>group columns enabled</span>
+              </div>
+            </div>
+
+            <div class="table-zone">
+              <table>
+                <thead>
+                  <tr>
+                    <th style="width:230px">Result</th>
+                    <th class="overall-col">Overall</th>
+                    <th><span class="dot" style="color:var(--blue)"></span> Layer A</th>
+                    <th><span class="dot" style="color:var(--olive)"></span> Layer B</th>
+                    <th><span class="dot" style="color:var(--rust)"></span> Layer C</th>
+                    <th style="width:92px">Coverage</th>
+                    <th style="width:96px">Status</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  <tr class="section"><td colspan="7">K aggregate summaries</td></tr>
+                  <tr>
+                    <td><div class="param"><strong>K geometric mean</strong><span>Included methods across selected datasets</span></div></td>
+                    <td class="overall-col"><div class="cell-main"><strong>18.7</strong><span>m/d</span></div></td>
+                    <td><div class="cell-main"><strong>6.4</strong><span>m/d</span></div></td>
+                    <td><div class="cell-main"><strong>21.8</strong><span>m/d</span></div></td>
+                    <td><div class="cell-main"><strong>52.6</strong><span>m/d</span></div></td>
+                    <td>46 / 52</td>
+                    <td><span class="badge ok">OK</span></td>
+                  </tr>
+                  <tr>
+                    <td><div class="param"><strong>K median</strong><span>Robust center across included values</span></div></td>
+                    <td class="overall-col"><div class="cell-main"><strong>16.2</strong><span>m/d</span></div></td>
+                    <td><div class="cell-main"><strong>5.9</strong><span>m/d</span></div></td>
+                    <td><div class="cell-main"><strong>20.4</strong><span>m/d</span></div></td>
+                    <td><div class="cell-main"><strong>49.1</strong><span>m/d</span></div></td>
+                    <td>46 / 52</td>
+                    <td><span class="badge ok">OK</span></td>
+                  </tr>
+                  <tr>
+                    <td><div class="param"><strong>K arithmetic mean</strong><span>Linear average of included values</span></div></td>
+                    <td class="overall-col"><div class="cell-main"><strong>24.9</strong><span>m/d</span></div></td>
+                    <td><div class="cell-main"><strong>7.1</strong><span>m/d</span></div></td>
+                    <td><div class="cell-main"><strong>23.6</strong><span>m/d</span></div></td>
+                    <td><div class="cell-main"><strong>61.8</strong><span>m/d</span></div></td>
+                    <td>46 / 52</td>
+                    <td><span class="badge ok">OK</span></td>
+                  </tr>
+                  <tr>
+                    <td><div class="param"><strong>K range</strong><span>Minimum to maximum included value</span></div></td>
+                    <td class="overall-col"><div class="cell-main"><strong>1.9-91.4</strong><span>m/d</span></div></td>
+                    <td><div class="cell-main"><strong>1.9-11.2</strong><span>m/d</span></div></td>
+                    <td><div class="cell-main"><strong>9.4-36.7</strong><span>m/d</span></div></td>
+                    <td><div class="cell-main"><strong>28.1-91.4</strong><span>m/d</span></div></td>
+                    <td>46 / 52</td>
+                    <td><span class="badge ok">OK</span></td>
+                  </tr>
+                  <tr>
+                    <td><div class="param"><strong>Permeability class</strong><span>Class from selected aggregate metric</span></div></td>
+                    <td class="overall-col"><span class="soft">High</span></td>
+                    <td><span class="soft">Medium</span></td>
+                    <td><span class="soft">High</span></td>
+                    <td><span class="soft">High</span></td>
+                    <td>10 / 10</td>
+                    <td><span class="badge ok">OK</span></td>
+                  </tr>
+
+                  <tr class="section"><td colspan="7">Method aggregates</td></tr>
+                  <tr>
+                    <td><div class="param"><strong>Hazen</strong><span>Geometric mean per scope</span></div></td>
+                    <td class="overall-col"><div class="cell-main"><strong>14.1</strong><span>m/d</span></div></td>
+                    <td><div class="cell-main"><strong>4.8</strong><span>m/d</span></div></td>
+                    <td><div class="cell-main"><strong>17.6</strong><span>m/d</span></div></td>
+                    <td><div class="cell-main"><strong>42.9</strong><span>m/d</span></div></td>
+                    <td>10 / 10</td>
+                    <td><span class="badge ok">OK</span></td>
+                  </tr>
+                  <tr>
+                    <td><div class="param"><strong>Beyer</strong><span>Geometric mean per scope</span></div></td>
+                    <td class="overall-col"><div class="cell-main"><strong>19.8</strong><span>m/d</span></div></td>
+                    <td><div class="cell-main"><strong>6.0</strong><span>m/d</span></div></td>
+                    <td><div class="cell-main"><strong>22.1</strong><span>m/d</span></div></td>
+                    <td><div class="cell-main"><strong>57.3</strong><span>m/d</span></div></td>
+                    <td>8 / 10</td>
+                    <td><span class="badge warn">Warn</span></td>
+                  </tr>
+                  <tr>
+                    <td><div class="param"><strong>Kozeny-Carman</strong><span>Geometric mean per scope</span></div></td>
+                    <td class="overall-col"><div class="cell-main"><strong>22.5</strong><span>m/d</span></div></td>
+                    <td><div class="cell-main"><strong>8.2</strong><span>m/d</span></div></td>
+                    <td><div class="cell-main"><strong>24.7</strong><span>m/d</span></div></td>
+                    <td><div class="cell-main"><strong>61.0</strong><span>m/d</span></div></td>
+                    <td>10 / 10</td>
+                    <td><span class="badge ok">OK</span></td>
+                  </tr>
+                  <tr>
+                    <td><div class="param"><strong>USBR</strong><span>Geometric mean per scope</span></div></td>
+                    <td class="overall-col"><div class="cell-main"><strong>12.4</strong><span>m/d</span></div></td>
+                    <td><div class="cell-main"><strong>3.5</strong><span>m/d</span></div></td>
+                    <td><div class="cell-main"><strong>15.9</strong><span>m/d</span></div></td>
+                    <td><div class="cell-main"><strong>-</strong><span>missing</span></div></td>
+                    <td>6 / 10</td>
+                    <td><span class="badge na">N/A</span></td>
+                  </tr>
+
+                  <tr class="section"><td colspan="7">Grain aggregate context</td></tr>
+                  <tr>
+                    <td><div class="param"><strong>D50 median</strong><span>Median diameter per scope</span></div></td>
+                    <td class="overall-col"><div class="cell-main"><strong>0.44</strong><span>mm</span></div></td>
+                    <td><div class="cell-main"><strong>0.18</strong><span>mm</span></div></td>
+                    <td><div class="cell-main"><strong>0.46</strong><span>mm</span></div></td>
+                    <td><div class="cell-main"><strong>0.92</strong><span>mm</span></div></td>
+                    <td>10 / 10</td>
+                    <td><span class="badge ok">OK</span></td>
+                  </tr>
+                  <tr>
+                    <td><div class="param"><strong>Mean grain size</strong><span>Arithmetic mean of distribution</span></div></td>
+                    <td class="overall-col"><div class="cell-main"><strong>0.51</strong><span>mm</span></div></td>
+                    <td><div class="cell-main"><strong>0.21</strong><span>mm</span></div></td>
+                    <td><div class="cell-main"><strong>0.52</strong><span>mm</span></div></td>
+                    <td><div class="cell-main"><strong>1.04</strong><span>mm</span></div></td>
+                    <td>10 / 10</td>
+                    <td><span class="badge ok">OK</span></td>
+                  </tr>
+                  <tr>
+                    <td><div class="param"><strong>Fines percent median</strong><span>Passing 0.063 mm</span></div></td>
+                    <td class="overall-col"><div class="cell-main"><strong>5.6</strong><span>%</span></div></td>
+                    <td><div class="cell-main"><strong>8.8</strong><span>%</span></div></td>
+                    <td><div class="cell-main"><strong>4.7</strong><span>%</span></div></td>
+                    <td><div class="cell-main"><strong>1.6</strong><span>%</span></div></td>
+                    <td>10 / 10</td>
+                    <td><span class="badge ok">OK</span></td>
+                  </tr>
+                </tbody>
+              </table>
+            </div>
+          </section>
+
+          <section class="view-panel" id="individualView">
+            <div class="panel-head">
+              <div class="panel-copy">
+                <div class="kicker">Individual detail mode</div>
+                <h2>Per-dataset matrix keeps sample inspection intact</h2>
+                <p>Scope: selected datasets. Rows follow active K-value filters.</p>
+              </div>
+              <div class="micro">
+                <span><i class="fa-solid fa-table-columns"></i>dataset columns</span>
+                <span><i class="fa-solid fa-thumbtack"></i>critical rows pinned</span>
+                <span><i class="fa-solid fa-fire"></i>row heat scale</span>
+              </div>
+            </div>
+
+            <div class="table-zone">
+              <table>
+                <thead>
+                  <tr>
+                    <th style="width:230px">Result</th>
+                    <th><span class="dot" style="color:var(--blue)"></span> NBAL-01</th>
+                    <th><span class="dot" style="color:var(--blue)"></span> NBAL-02</th>
+                    <th><span class="dot" style="color:var(--blue)"></span> NBAL-03</th>
+                    <th><span class="dot" style="color:var(--olive)"></span> NBAL-04</th>
+                    <th><span class="dot" style="color:var(--olive)"></span> NBAL-05</th>
+                    <th><span class="dot" style="color:var(--rust)"></span> NBAL-10</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  <tr class="section"><td colspan="7">K summaries per dataset</td></tr>
+                  <tr>
+                    <td><div class="param"><strong>K geometric mean</strong><span>All included methods</span></div></td>
+                    <td><div class="cell-main"><strong>4.8</strong><span>m/d</span></div></td>
+                    <td><div class="cell-main"><strong>6.9</strong><span>m/d</span></div></td>
+                    <td><div class="cell-main"><strong>8.1</strong><span>m/d</span></div></td>
+                    <td><div class="cell-main"><strong>18.4</strong><span>m/d</span></div></td>
+                    <td><div class="cell-main"><strong>24.2</strong><span>m/d</span></div></td>
+                    <td><div class="cell-main"><strong>52.6</strong><span>m/d</span></div></td>
+                  </tr>
+                  <tr>
+                    <td><div class="param"><strong>Hazen</strong><span>Method result</span></div></td>
+                    <td>4.2</td><td>6.1</td><td>7.5</td><td>16.2</td><td>21.1</td><td>42.9</td>
+                  </tr>
+                  <tr>
+                    <td><div class="param"><strong>Beyer</strong><span>Method result</span></div></td>
+                    <td>5.0</td><td>7.2</td><td><span class="badge warn">Warn</span></td><td>20.3</td><td>23.7</td><td>57.3</td>
+                  </tr>
+                  <tr>
+                    <td><div class="param"><strong>Kozeny-Carman</strong><span>Method result</span></div></td>
+                    <td>6.4</td><td>8.3</td><td>8.0</td><td>22.8</td><td>27.1</td><td>61.0</td>
+                  </tr>
+                  <tr class="section"><td colspan="7">Grain context per dataset</td></tr>
+                  <tr>
+                    <td><div class="param"><strong>D50</strong><span>Median diameter</span></div></td>
+                    <td>0.16</td><td>0.18</td><td>0.22</td><td>0.38</td><td>0.48</td><td>0.92</td>
+                  </tr>
+                  <tr>
+                    <td><div class="param"><strong>Mean grain size</strong><span>Arithmetic mean diameter</span></div></td>
+                    <td>0.19</td><td>0.21</td><td>0.25</td><td>0.44</td><td>0.53</td><td>1.04</td>
+                  </tr>
+                  <tr>
+                    <td><div class="param"><strong>Fines percent</strong><span>Passing 0.063 mm</span></div></td>
+                    <td>9.2</td><td>8.8</td><td>7.9</td><td>5.1</td><td>4.4</td><td>1.6</td>
+                  </tr>
+                  <tr>
+                    <td><div class="param"><strong>Group</strong><span>Current scope assignment</span></div></td>
+                    <td><span class="soft">Layer A</span></td><td><span class="soft">Layer A</span></td><td><span class="soft">Layer A</span></td>
+                    <td><span class="soft">Layer B</span></td><td><span class="soft">Layer B</span></td><td><span class="soft">Layer C</span></td>
+                  </tr>
+                </tbody>
+              </table>
+            </div>
+          </section>
+        </main>
+
+        <aside class="rail">
+          <section class="rail-sec">
+            <h3>Current Scope</h3>
+            <div class="mini-grid">
+              <div class="k">Datasets</div><div class="v">10</div>
+              <div class="k">Groups</div><div class="v">3</div>
+              <div class="k">Methods</div><div class="v">16</div>
+              <div class="k">Included K cells</div><div class="v">46 / 52</div>
+              <div class="k">Warnings excluded</div><div class="v">4</div>
+            </div>
+          </section>
+
+          <section class="rail-sec">
+            <h3>Filters</h3>
+            <div class="rule-list">
+              <div class="rule">
+                <div><strong>Methods</strong><span>All methods</span></div>
+                <span class="badge ok">All</span>
+              </div>
+              <div class="rule">
+                <div><strong>Status</strong><span>OK values only</span></div>
+                <span class="badge ok">On</span>
+              </div>
+              <div class="rule">
+                <div><strong>Unit</strong><span>Hydraulic conductivity</span></div>
+                <span class="badge na">m/d</span>
+              </div>
+            </div>
+          </section>
+
+          <section class="rail-sec">
+            <h3>K Summary</h3>
+            <div class="mini-grid">
+              <div class="k">Geo. mean</div><div class="v">18.7 m/d</div>
+              <div class="k">Median</div><div class="v">16.2 m/d</div>
+              <div class="k">Arithmetic mean</div><div class="v">24.9 m/d</div>
+              <div class="k">Range</div><div class="v">1.9-91.4</div>
+              <div class="k">Perm. class</div><div class="v">High</div>
+            </div>
+          </section>
+
+          <section class="rail-sec">
+            <h3>Grain Summary</h3>
+            <div class="mini-grid">
+              <div class="k">D50 median</div><div class="v">0.44 mm</div>
+              <div class="k">Mean grain size</div><div class="v">0.51 mm</div>
+              <div class="k">Cu median</div><div class="v">3.8</div>
+              <div class="k">Fines median</div><div class="v">5.6%</div>
+              <div class="k">Dominant class</div><div class="v">Sand 8/10</div>
+            </div>
+          </section>
+
+          <section class="rail-sec">
+            <h3>Groups</h3>
+            <div class="group-list">
+              <div class="group-row">
+                <div><strong><span class="group-dot" style="display:inline-block;background:var(--blue)"></span> Layer A</strong><span>3 datasets, K 6.4 m/d, D50 0.18 mm, mean 0.21 mm</span></div>
+                <span class="badge ok">15</span>
+              </div>
+              <div class="group-row">
+                <div><strong><span class="group-dot" style="display:inline-block;background:var(--olive)"></span> Layer B</strong><span>4 datasets, K 21.8 m/d, D50 0.46 mm, mean 0.52 mm</span></div>
+                <span class="badge ok">19</span>
+              </div>
+              <div class="group-row">
+                <div><strong><span class="group-dot" style="display:inline-block;background:var(--rust)"></span> Layer C</strong><span>3 datasets, K 52.6 m/d, D50 0.92 mm, mean 1.04 mm</span></div>
+                <span class="badge warn">12</span>
+              </div>
+            </div>
+          </section>
+
+          <section class="rail-sec">
+            <h3>Actions</h3>
+            <div style="display:flex;flex-direction:column;gap:8px">
+              <button class="small-btn" style="width:100%;justify-content:center"><i class="fa-solid fa-layer-group"></i>Edit Scope &amp; Groups</button>
+              <button class="small-btn" style="width:100%;justify-content:center;background:rgba(255,255,255,.44);border-color:rgba(188,169,142,.82);color:var(--mid)"><i class="fa-solid fa-sliders"></i>Choose Methods</button>
+              <button class="small-btn" style="width:100%;justify-content:center;background:rgba(255,255,255,.44);border-color:rgba(188,169,142,.82);color:var(--mid)"><i class="fa-solid fa-file-export"></i>Export Aggregate Table</button>
+            </div>
+          </section>
+
+          <div class="rail-foot">
+            Details shows values. Export holds the full detail dump and aggregate tables.
+          </div>
+        </aside>
+      </div>
+    </section>
+  </div>
+
+  <script>
+    const modeButtons = document.querySelectorAll("[data-mode]");
+    const aggregateView = document.getElementById("aggregateView");
+    const individualView = document.getElementById("individualView");
+
+    function setMode(mode){
+      modeButtons.forEach(button => {
+        button.classList.toggle("on", button.dataset.mode === mode);
+      });
+      aggregateView.classList.toggle("on", mode === "aggregate");
+      individualView.classList.toggle("on", mode === "individual");
+    }
+
+    modeButtons.forEach(button => {
+      button.addEventListener("click", () => setMode(button.dataset.mode));
+    });
+  </script>
+</body>
+</html>

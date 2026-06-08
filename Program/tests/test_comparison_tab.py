@@ -33,15 +33,15 @@ def build_dataset(name: str, file_key: str) -> GrainSizeData:
     )
 
 
-def build_results(scale: float) -> list[KCalculationResult]:
+def build_results(scale: float, flagged_method: str | None = None) -> list[KCalculationResult]:
     return [
         KCalculationResult(
             method_name='Hazen',
             k_value=1.0e-4 * scale,
             formula_used='',
-            status=CalculationStatus.OK,
+            status=CalculationStatus.WARNING if flagged_method == 'Hazen' else CalculationStatus.OK,
             status_message='',
-            conditions_met=True,
+            conditions_met=flagged_method != 'Hazen',
             temperature=20.0,
             porosity=0.35,
             grain_size_used='D10',
@@ -50,9 +50,9 @@ def build_results(scale: float) -> list[KCalculationResult]:
             method_name='Beyer',
             k_value=1.5e-4 * scale,
             formula_used='',
-            status=CalculationStatus.OK,
+            status=CalculationStatus.WARNING if flagged_method == 'Beyer' else CalculationStatus.OK,
             status_message='',
-            conditions_met=True,
+            conditions_met=flagged_method != 'Beyer',
             temperature=20.0,
             porosity=0.35,
             grain_size_used='D10',
@@ -61,8 +61,9 @@ def build_results(scale: float) -> list[KCalculationResult]:
 
 
 class DummyDatasetTab:
-    def __init__(self, name: str, file_key: str, scale: float):
+    def __init__(self, name: str, file_key: str, scale: float, group: str = 'Ungrouped'):
         self.dataset = build_dataset(name, file_key)
+        self.dataset.group_name = group
         self._results = build_results(scale)
 
     def get_dataset(self):
@@ -108,7 +109,8 @@ class TestComparisonTabSelectionState(unittest.TestCase):
         original_dialog = comparison_tab_module.DatasetSelectionDialog
 
         class FakeDialog:
-            def __init__(self, dataset_tabs, currently_selected=None, parent=None):
+            def __init__(self, dataset_tabs, currently_selected=None, parent=None, **_kwargs):
+                self._tabs = dataset_tabs
                 self._selected = [dataset_tabs[1], dataset_tabs[2]]
 
             def exec(self):
@@ -116,6 +118,12 @@ class TestComparisonTabSelectionState(unittest.TestCase):
 
             def get_selected_tabs(self):
                 return self._selected
+
+            def get_group_assignments(self):
+                return {
+                    self._tabs[1]: 'Layer 1',
+                    self._tabs[2]: 'Layer 2',
+                }
 
         comparison_tab_module.DatasetSelectionDialog = FakeDialog
         try:
@@ -128,6 +136,8 @@ class TestComparisonTabSelectionState(unittest.TestCase):
             [tab.get_dataset_name() for tab in self.widget.selected_datasets],
             ['Sample B', 'Sample C'],
         )
+        self.assertEqual(self.tabs[1].dataset.group_name, 'Layer 1')
+        self.assertEqual(self.tabs[2].dataset.group_name, 'Layer 2')
 
     def test_details_defaults_to_grain_core_and_elides_long_headers(self):
         long_tabs = [
@@ -154,10 +164,42 @@ class TestComparisonTabSelectionState(unittest.TestCase):
 
         self.assertIs(self.widget._details_stack.currentWidget(), self.widget._k_table)
         self.assertEqual(self.widget._details_preset, 'all')
-        self.assertEqual(self.widget._details_preset_context_btn.text(), 'Summary')
+        self.assertEqual(self.widget._details_preset_context_btn.text(), 'Aggregate rows')
         self.assertFalse(self.widget._details_status_section.isHidden())
         self.assertFalse(self.widget._details_unit_lbl.isHidden())
         self.assertFalse(self.widget._details_unit_combo.isHidden())
+
+    def test_details_aggregate_mode_shows_snapshot_table(self):
+        self.tabs[0].dataset.group_name = 'Layer 1'
+        self.tabs[1].dataset.group_name = 'Layer 2'
+        self.widget.set_dataset_state(self.tabs, selected_tabs=self.tabs[:2])
+
+        self.widget._set_details_view_mode('aggregate')
+
+        self.assertIs(self.widget._details_stack.currentWidget(), self.widget._aggregate_table)
+        self.assertFalse(self.widget._aggregate_table.isSortingEnabled())
+        self.assertFalse(self.widget._aggregate_table.horizontalHeader().sectionsClickable())
+        headers = [
+            self.widget._aggregate_table.horizontalHeaderItem(col).text()
+            for col in range(self.widget._aggregate_table.columnCount())
+        ]
+        self.assertIn('Overall', headers)
+        self.assertIn('Layer 1', headers)
+        self.assertIn('Layer 2', headers)
+        group_chip_texts = [
+            self.widget._details_dataset_chips_layout.itemAt(i).widget().layout().itemAt(1).widget().text()
+            for i in range(self.widget._details_dataset_chips_layout.count() - 1)
+        ]
+        self.assertTrue(any('Layer 1' in text for text in group_chip_texts))
+        self.assertTrue(any('Layer 2' in text for text in group_chip_texts))
+        labels = []
+        for row in range(self.widget._aggregate_table.rowCount()):
+            cell_widget = self.widget._aggregate_table.cellWidget(row, 0)
+            if cell_widget is None:
+                continue
+            labels.append(cell_widget.layout().itemAt(0).widget().text())
+        self.assertIn('K arithmetic mean', labels)
+        self.assertIn('Mean grain size', labels)
 
     def test_grain_core_preset_hides_non_core_rows(self):
         self.widget.set_dataset_state(self.tabs, selected_tabs=self.tabs)
@@ -420,6 +462,119 @@ class TestComparisonTabSelectionState(unittest.TestCase):
 
         dataset_labels = [tick.get_text() for tick in self.widget._heat_fig.axes[0].get_xticklabels()]
         self.assertEqual(dataset_labels, ['Sample B', 'Sample C'])
+
+    def test_statistics_group_scope_uses_overall_and_group_labels(self):
+        self.tabs[0].dataset.group_name = 'Layer 1'
+        self.tabs[1].dataset.group_name = 'Layer 1'
+        self.tabs[2].dataset.group_name = 'Layer 2'
+
+        self.widget.set_dataset_state(self.tabs, selected_tabs=self.tabs)
+        self.widget._set_stats_view_mode('coverage')
+
+        self.assertIs(self.widget._stats_stack.currentWidget(), self.widget._stats_coverage_panel)
+        scope_labels = [tick.get_text() for tick in self.widget._heat_fig.axes[0].get_xticklabels()]
+        self.assertEqual(scope_labels, ['Overall', 'Layer 1', 'Layer 2'])
+        chip_texts = [
+            self.widget._stats_dataset_chips_layout.itemAt(i).widget().layout().itemAt(1).widget().text()
+            for i in range(self.widget._stats_dataset_chips_layout.count() - 1)
+        ]
+        self.assertTrue(any('Overall' in text for text in chip_texts))
+        self.assertTrue(any('Layer 1' in text for text in chip_texts))
+        self.assertTrue(any('Layer 2' in text for text in chip_texts))
+        table_scope_labels = [
+            self.widget._stats_scope_table.item(row, 0).text().splitlines()[0]
+            for row in range(self.widget._stats_scope_table.rowCount())
+        ]
+        self.assertEqual(table_scope_labels, ['Overall', 'Layer 1', 'Layer 2'])
+
+    def test_statistics_aggregation_defaults_to_ok_only_and_can_include_warnings(self):
+        self.tabs[0]._results = build_results(1.0, flagged_method='Beyer')
+        self.widget.set_dataset_state(self.tabs, selected_tabs=self.tabs[:2])
+
+        report = self.widget._build_k_aggregation()
+        self.assertEqual(report.by_dataset['Sample A'].included_count, 1)
+        self.assertEqual(report.overall.warning_count, 1)
+        self.assertEqual(report.overall.excluded_count, 1)
+
+        self.widget._stats_include_warnings = True
+        report = self.widget._build_k_aggregation()
+        self.assertEqual(report.by_dataset['Sample A'].included_count, 2)
+        self.assertEqual(report.overall.excluded_count, 0)
+
+    def test_statistics_common_methods_filter_keeps_complete_methods_only(self):
+        self.tabs[0]._results = build_results(1.0, flagged_method='Beyer')
+        self.widget.set_dataset_state(self.tabs, selected_tabs=self.tabs[:2])
+        self.widget._stats_common_methods_only = True
+
+        report = self.widget._build_k_aggregation()
+
+        self.assertEqual(report.complete_methods, frozenset({'Hazen'}))
+        self.assertEqual(report.overall.included_count, 2)
+        self.assertEqual(report.by_method['Beyer'].included_count, 0)
+
+    def test_statistics_summary_shows_group_aggregates_when_groups_exist(self):
+        self.tabs[0].dataset.group_name = 'Layer 1'
+        self.tabs[1].dataset.group_name = 'Layer 1'
+        self.tabs[2].dataset.group_name = 'Layer 2'
+
+        self.widget.set_dataset_state(self.tabs, selected_tabs=self.tabs)
+
+        coverage = {}
+        for i in range(self.widget._stats_summary_layout.count()):
+            row = self.widget._stats_summary_layout.itemAt(i).widget()
+            if row is None:
+                continue
+            labels = row.findChildren(comparison_tab_module.QLabel)
+            if len(labels) >= 2:
+                coverage[labels[0].text()] = labels[1].text()
+
+        groups = {}
+        for i in range(self.widget._stats_group_layout.count()):
+            row = self.widget._stats_group_layout.itemAt(i).widget()
+            if row is None:
+                continue
+            labels = row.findChildren(comparison_tab_module.QLabel)
+            if len(labels) >= 2:
+                groups[labels[0].text()] = labels[1].text()
+
+        self.assertIn('Methods available', coverage)
+        self.assertIn('Layer 1', groups)
+        self.assertIn('Layer 2', groups)
+        self.assertIn('datasets', groups['Layer 1'])
+
+    def test_statistics_tables_show_scope_and_method_summaries(self):
+        self.tabs[0].dataset.group_name = 'Layer 1'
+        self.tabs[1].dataset.group_name = 'Layer 1'
+        self.tabs[2].dataset.group_name = 'Layer 2'
+        self.tabs[0]._results = build_results(1.0, flagged_method='Beyer')
+
+        self.widget.set_dataset_state(self.tabs, selected_tabs=self.tabs)
+
+        scope_headers = [
+            self.widget._stats_scope_table.horizontalHeaderItem(col).text()
+            for col in range(self.widget._stats_scope_table.columnCount())
+        ]
+        self.assertIn('Mean grain size', scope_headers)
+        self.assertIn('Dominant class', scope_headers)
+
+        method_headers = [
+            self.widget._stats_method_table.horizontalHeaderItem(col).text()
+            for col in range(self.widget._stats_method_table.columnCount())
+        ]
+        self.assertIn('Warnings', method_headers)
+        self.assertIn('Valid groups', method_headers)
+        self.assertTrue(any(header.startswith('Median K') for header in method_headers))
+
+        methods = [
+            self.widget._stats_method_table.item(row, 0).text()
+            for row in range(self.widget._stats_method_table.rowCount())
+        ]
+        self.assertIn('Hazen', methods)
+        self.assertIn('Beyer', methods)
+
+        beyer_row = methods.index('Beyer')
+        status_col = method_headers.index('Status')
+        self.assertEqual(self.widget._stats_method_table.item(beyer_row, status_col).text(), 'Warn')
 
 
 if __name__ == '__main__':

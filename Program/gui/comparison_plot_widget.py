@@ -36,6 +36,7 @@ from .sidebar_controls import (
     make_spin_row, make_toggle_row, set_swatch_color,
 )
 from .theme import C, SZ, apply_matplotlib_style, icon
+from k_aggregation import UNGROUPED_LABEL, dataset_group_name
 
 
 def _cmp_sep() -> QFrame:
@@ -121,6 +122,9 @@ class ComparisonPlotWidget(QWidget):
         self.datasets = []
         self.k_results_dict = {}  # dataset_name -> k_results
         self.flagged_methods_dict = {}  # dataset_name -> set(method_name)
+        self._dataset_groups: Dict[str, str] = {}
+        self._group_color_map: Dict[str, str] = {}
+        self._dataset_linestyles: Dict[str, str] = {}
         self.current_ax = None
         self._default_limits = {}
         self._pan_state = None
@@ -647,6 +651,9 @@ class ComparisonPlotWidget(QWidget):
         override = self._dataset_color_overrides.get(sample_name)
         if override:
             return override
+        group_name = self._dataset_groups.get(sample_name, UNGROUPED_LABEL)
+        if group_name != UNGROUPED_LABEL and group_name in self._group_color_map:
+            return self._group_color_map[group_name]
         return self.dataset_colors[index % len(self.dataset_colors)]
 
     def _pick_dataset_color(self, sample_name: str, swatch: QLabel) -> None:
@@ -677,6 +684,40 @@ class ComparisonPlotWidget(QWidget):
             self._effective_color_for(ds.sample_name, i)
             for i, ds in enumerate(self.datasets)
         ]
+
+    def _effective_dataset_linestyles(self) -> List[str]:
+        return [
+            self._dataset_linestyles.get(ds.sample_name, "-")
+            for ds in self.datasets
+        ]
+
+    def _rebuild_group_style_maps(self) -> None:
+        line_cycle = ["-", "--", ":", "-."]
+        group_order: list[str] = []
+        group_member_counts: dict[str, int] = {}
+        self._dataset_groups = {}
+        self._group_color_map = {}
+        self._dataset_linestyles = {}
+
+        for dataset in self.datasets:
+            group_name = dataset_group_name(dataset)
+            self._dataset_groups[dataset.sample_name] = group_name
+            if group_name != UNGROUPED_LABEL and group_name not in group_order:
+                group_order.append(group_name)
+
+        self._group_color_map = {
+            group_name: self.dataset_colors[i % len(self.dataset_colors)]
+            for i, group_name in enumerate(group_order)
+        }
+
+        for i, dataset in enumerate(self.datasets):
+            group_name = self._dataset_groups.get(dataset.sample_name, UNGROUPED_LABEL)
+            if group_name == UNGROUPED_LABEL:
+                self._dataset_linestyles[dataset.sample_name] = "-"
+                continue
+            member_index = group_member_counts.get(group_name, 0)
+            group_member_counts[group_name] = member_index + 1
+            self._dataset_linestyles[dataset.sample_name] = line_cycle[member_index % len(line_cycle)]
 
     def _export_figure(self, fmt: str) -> None:
         """Save the current comparison figure to disk."""
@@ -903,6 +944,7 @@ class ComparisonPlotWidget(QWidget):
             for name, color in self._dataset_color_overrides.items()
             if name in active_names
         }
+        self._rebuild_group_style_maps()
         self._rebuild_dataset_color_rows()
     
     def refresh_plot(self):
@@ -1005,6 +1047,7 @@ class ComparisonPlotWidget(QWidget):
         render_distribution_overlay(
             ax, self.datasets,
             colors=self._effective_dataset_colors(),
+            linestyles=self._effective_dataset_linestyles(),
             style=self.current_style,
             show_grid=self.show_grid,
             show_legend=self.show_legend,
@@ -1014,6 +1057,7 @@ class ComparisonPlotWidget(QWidget):
         """Plot distributions in grid layout"""
         rows, cols = self.grid_layout
         dataset_colors = self._effective_dataset_colors()
+        linestyles = self._effective_dataset_linestyles()
 
         for i, dataset in enumerate(self.datasets):
             if i >= rows * cols:
@@ -1021,9 +1065,10 @@ class ComparisonPlotWidget(QWidget):
 
             ax = self.figure.add_subplot(rows, cols, i + 1)
             color = dataset_colors[i % len(dataset_colors)]
+            linestyle = linestyles[i % len(linestyles)] if linestyles else "-"
             
             ax.semilogx(dataset.particle_sizes, dataset.percent_passing,
-                       linewidth=2, color=color,
+                       linewidth=2, color=color, linestyle=linestyle,
                        marker='o' if len(dataset.particle_sizes) < 20 else None,
                        markersize=3)
             
@@ -1153,6 +1198,7 @@ class ComparisonPlotWidget(QWidget):
         """Plot combined view"""
         rows, cols = self.grid_layout
         dataset_colors = self._effective_dataset_colors()
+        linestyles = self._effective_dataset_linestyles()
 
         for i, dataset in enumerate(self.datasets):
             if i >= rows * cols:
@@ -1163,10 +1209,11 @@ class ComparisonPlotWidget(QWidget):
             ax2 = self.figure.add_subplot(rows, cols*2, i*2 + 2)
             
             color = dataset_colors[i % len(dataset_colors)]
+            linestyle = linestyles[i % len(linestyles)] if linestyles else "-"
             
             # Plot distribution
             ax1.semilogx(dataset.particle_sizes, dataset.percent_passing,
-                        linewidth=1.5, color=color, markersize=2)
+                        linewidth=1.5, color=color, linestyle=linestyle, markersize=2)
             ax1.set_title(f'{dataset.sample_name} - Dist', fontsize=8)
             ax1.set_xlabel('Size (mm)', fontsize=7)
             ax1.set_ylabel('% Pass', fontsize=7)

@@ -23,6 +23,7 @@ from PyQt6.QtWidgets import (
 
 from gui.dialog_chrome import make_dialog_footer, make_dialog_header
 from gui.theme import C, F, SZ, icon as _icon
+from k_aggregation import dataset_group_name, normalize_group_name
 from qt_chrome.frameless_dialog_base import FramelessDialogBase
 
 
@@ -39,6 +40,7 @@ class DatasetSelectionDialog(FramelessDialogBase):
         action_text: str = "Compare Selected",
         action_icon: str = "fa6s.code-compare",
         minimum_selection: int = 2,
+        allow_grouping: bool = False,
         parent=None,
     ):
         super().__init__(parent, default_mode="auto")
@@ -51,11 +53,12 @@ class DatasetSelectionDialog(FramelessDialogBase):
         self._action_text = action_text
         self._action_icon = action_icon
         self._minimum_selection = max(1, int(minimum_selection))
+        self._allow_grouping = bool(allow_grouping)
 
         self.setWindowTitle(self._title)
         self.setModal(True)
-        self.resize(540, 500)
-        self.setMinimumWidth(540)
+        self.resize(680 if self._allow_grouping else 540, 500)
+        self.setMinimumWidth(640 if self._allow_grouping else 540)
 
         self._build_ui()
         self.install_chrome_behavior(
@@ -199,7 +202,7 @@ class DatasetSelectionDialog(FramelessDialogBase):
 
     def _populate(self):
         for tab in self.dataset_tabs:
-            row = _DatasetRow(tab, checked=tab in self.currently_selected)
+            row = _DatasetRow(tab, checked=tab in self.currently_selected, allow_grouping=self._allow_grouping)
             row.toggled.connect(self._on_selection_changed)
             self._rows.append(row)
             self._rows_layout.insertWidget(self._rows_layout.count() - 1, row)
@@ -255,20 +258,25 @@ class DatasetSelectionDialog(FramelessDialogBase):
     def get_selected_tabs(self) -> List:
         return self.selected_tabs
 
+    def get_group_assignments(self) -> dict:
+        return {row.tab: row.group_name() for row in self._rows}
+
 
 class _DatasetRow(QFrame):
     """Concept-style dataset row used in the comparison selection dialog."""
 
     toggled = pyqtSignal()
 
-    def __init__(self, tab, checked: bool = False, parent=None):
+    def __init__(self, tab, checked: bool = False, *, allow_grouping: bool = False, parent=None):
         super().__init__(parent)
         self.tab = tab
         self._checked = False
+        self._allow_grouping = bool(allow_grouping)
+        self._group_edit = None
         self._status_color = _dataset_status_color(tab)
         self._build_ui()
         self._search_text = (
-            f"{self._label.text()} {self._meta.text()}".strip().lower()
+            f"{self._label.text()} {self._meta.text()} {self.group_name()}".strip().lower()
         )
         self._sync_styles()
         if checked:
@@ -320,6 +328,20 @@ class _DatasetRow(QFrame):
         name_col.addWidget(self._meta)
         lay.addLayout(name_col, 1)
 
+        if self._allow_grouping:
+            self._group_edit = QLineEdit()
+            self._group_edit.setPlaceholderText("Group")
+            self._group_edit.setText(dataset_group_name(self.tab.get_dataset()))
+            self._group_edit.setFixedWidth(130)
+            self._group_edit.setFixedHeight(26)
+            self._group_edit.setStyleSheet(
+                f"QLineEdit {{ background: rgba(255,255,255,.70); border: 1px solid {C.BORDER}; "
+                f"border-radius: {SZ.BORDER_RADIUS}px; font-family: '{F.UI}'; "
+                f"font-size: {F.SZ_SM}pt; color: {C.TEXT}; padding: 0 7px; }}"
+                f"QLineEdit:focus {{ border-color: {C.OLIVE}; background: white; }}"
+            )
+            lay.addWidget(self._group_edit, 0, Qt.AlignmentFlag.AlignVCenter)
+
         self._status_dot = QLabel()
         self._status_dot.setFixedSize(7, 7)
         self._status_dot.setStyleSheet(
@@ -338,6 +360,9 @@ class _DatasetRow(QFrame):
         ):
             widget.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents, True)
 
+        if self._group_edit is not None:
+            self._group_edit.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents, False)
+
     def matches_filter(self, text: str) -> bool:
         return not text or text in self._search_text
 
@@ -352,6 +377,11 @@ class _DatasetRow(QFrame):
         self._sync_styles()
         if emit_signal:
             self.toggled.emit()
+
+    def group_name(self) -> str:
+        if self._group_edit is None:
+            return dataset_group_name(self.tab.get_dataset())
+        return normalize_group_name(self._group_edit.text())
 
     def mousePressEvent(self, event):
         if event.button() == Qt.MouseButton.LeftButton:

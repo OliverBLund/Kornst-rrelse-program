@@ -14,7 +14,13 @@ import io
 import os
 import re
 from data_loader import GrainSizeData
+from analysis.comparison_snapshot import (
+    ComparisonSnapshotOptions,
+    DatasetAnalysisInput,
+    build_comparison_snapshot,
+)
 from k_calculations import KCalculationResult
+from k_aggregation import KAggregationOptions
 from grain_classification import (
     ISO14688,
     cu_label as _gc_cu_label,
@@ -2198,11 +2204,30 @@ class ReportGenerator:
             str(item["label"]): list(item.get("k_results") or [])
             for item in sample_details
         }
-        mean_k_by_sample = {}
-        for name, results in plot_results_dict.items():
-            k_values = [r.k_value for r in results if r.k_value is not None and r.k_value > 0]
-            if k_values:
-                mean_k_by_sample[name] = np.mean(k_values)
+        snapshot_inputs = [
+            DatasetAnalysisInput(
+                label=str(item["label"]),
+                dataset=item["dataset"],
+                k_results=tuple(item.get("k_results") or ()),
+                group_name=getattr(item["dataset"], "group_name", "Ungrouped"),
+                temperature=item.get("temperature"),
+                porosity=item.get("porosity"),
+                plot_context=item.get("plot_context"),
+            )
+            for item in sample_details
+        ]
+        comparison_snapshot = build_comparison_snapshot(
+            snapshot_inputs,
+            ComparisonSnapshotOptions(
+                k_options=KAggregationOptions(include_warnings=True),
+                classification_scheme=self._scheme,
+            ),
+        )
+        mean_k_by_sample = {
+            name: stats.arithmetic_mean_m_s
+            for name, stats in comparison_snapshot.k.by_dataset.items()
+            if stats.arithmetic_mean_m_s is not None
+        }
 
         temperature_summary = self._summarize_sample_field(sample_details, "temperature", " °C")
         porosity_summary = self._summarize_sample_field(sample_details, "porosity")

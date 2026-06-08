@@ -1278,7 +1278,7 @@ class MainWindow(FramelessMainWindowMixin, QMainWindow):
                 "file_path": normalized_file_path,
                 "sheet_name": str(sheet_name) if sheet_name else None,
             }
-            for key in ("sample_name", "temperature", "porosity", "data_type", "selection_method"):
+            for key in ("sample_name", "temperature", "porosity", "group_name", "data_type", "selection_method"):
                 if source.get(key) is not None:
                     descriptor[key] = source.get(key)
             if mapping_state:
@@ -1511,6 +1511,7 @@ class MainWindow(FramelessMainWindowMixin, QMainWindow):
             "sample_name": getattr(dataset, "sample_name", ""),
             "temperature": getattr(dataset, "temperature", None),
             "porosity": getattr(dataset, "porosity", None),
+            "group_name": getattr(dataset, "group_name", "Ungrouped"),
         }
         if mapping_state:
             descriptor["mapping_state"] = dict(mapping_state)
