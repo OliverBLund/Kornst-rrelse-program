@@ -2220,7 +2220,7 @@ class ControlPanel(QFrame):
     def _build_add_data_menu(self, parent=None) -> QMenu:
         """Create the shared import-path menu used by sidebar entry points."""
         menu = QMenu(parent or self)
-        processed_action = QAction("Processed Curve Data...", menu)
+        processed_action = QAction("Processed Sieve Data...", menu)
         processed_action.triggered.connect(lambda _checked=False: self.add_files("processed"))
         menu.addAction(processed_action)
 
@@ -2231,7 +2231,7 @@ class ControlPanel(QFrame):
 
     def _install_add_data_menu(self, button: QPushButton) -> None:
         button.setMenu(self._build_add_data_menu(button))
-        button.setToolTip("Choose whether the files contain processed curves or raw sieve weighings")
+        button.setToolTip("Choose whether the files contain processed sieve data or raw sieve weighings")
 
     def _show_add_data_menu_for_drop_zone(self, event) -> None:
         if event.button() != Qt.MouseButton.LeftButton:
@@ -2252,7 +2252,7 @@ class ControlPanel(QFrame):
         title = (
             "Add Raw Sieve Weighing Files"
             if data_mode == "raw_sieve"
-            else "Add Processed Curve Data Files"
+            else "Add Processed Sieve Data Files"
         )
         file_paths, _ = QFileDialog.getOpenFileNames(
             self,

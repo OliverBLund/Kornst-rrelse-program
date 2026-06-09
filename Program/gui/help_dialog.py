@@ -3,6 +3,7 @@ Help dialog with structured navigation and HTML content browser.
 """
 
 from html import escape
+import re
 
 from PyQt6.QtWidgets import (
     QVBoxLayout, QHBoxLayout, QSplitter,
@@ -46,9 +47,12 @@ HELP_TOPIC_SECTIONS = [
             ("Kozeny-Carman", "method_kozeny_carman.html", "fa6s.droplet"),
             ("Shepherd", "method_shepherd.html", "fa6s.droplet"),
             ("About & References", "about_reference.html", "fa6s.book-open"),
+            ("Release Notes", "changelog.html", "fa6s.clock-rotate-left"),
         ],
     ),
 ]
+
+VIRTUAL_HELP_TOPICS = {"changelog.html"}
 
 
 class HelpDialog(FramelessDialogBase):
@@ -74,10 +78,12 @@ class HelpDialog(FramelessDialogBase):
         try:
             # PyInstaller creates a temp folder and stores path in _MEIPASS
             base_path = sys._MEIPASS
-            self.help_dir = os.path.join(base_path, "Program", "help_content")
+            self.program_dir = os.path.join(base_path, "Program")
+            self.help_dir = os.path.join(self.program_dir, "help_content")
         except AttributeError:
             # In dev mode
-            self.help_dir = os.path.join(os.path.dirname(os.path.dirname(__file__)), "help_content")
+            self.program_dir = os.path.dirname(os.path.dirname(__file__))
+            self.help_dir = os.path.join(self.program_dir, "help_content")
 
         self.topic_items = {}
         self.current_help_page = None
@@ -611,10 +617,14 @@ class HelpDialog(FramelessDialogBase):
             "about.html": "about_reference.html",
         }
         file_name = legacy_routes.get(file_name, file_name)
-        file_path = os.path.join(self.help_dir, file_name)
         self.current_help_page = file_name
         self._select_tree_item_for_file(file_name)
 
+        if file_name == "changelog.html":
+            self.show_changelog_page()
+            return
+
+        file_path = os.path.join(self.help_dir, file_name)
         if os.path.exists(file_path):
             try:
                 with open(file_path, 'r', encoding='utf-8') as f:
@@ -628,6 +638,85 @@ class HelpDialog(FramelessDialogBase):
                 self.show_error_page(f"Error loading help page: {exc}")
         else:
             self.show_placeholder_page(file_name)
+
+    def _changelog_path(self) -> str:
+        return os.path.join(self.program_dir, "CHANGELOG.md")
+
+    def show_changelog_page(self):
+        """Render the project changelog inside the help browser."""
+        changelog_path = self._changelog_path()
+        if not os.path.exists(changelog_path):
+            self.show_error_page(f"Changelog not found at {changelog_path}")
+            return
+
+        try:
+            with open(changelog_path, "r", encoding="utf-8") as handle:
+                markdown = handle.read()
+        except Exception as exc:
+            self.show_error_page(f"Error loading changelog: {exc}")
+            return
+
+        self.content_browser.setHtml(self.apply_help_styling(self._render_changelog_markdown(markdown)))
+        self.content_browser.verticalScrollBar().setValue(0)
+
+    def _render_changelog_markdown(self, markdown: str) -> str:
+        """Convert the bundled Markdown changelog into restrained help HTML."""
+        body: list[str] = ['<div class="page changelog-page">']
+        in_list = False
+
+        def close_list() -> None:
+            nonlocal in_list
+            if in_list:
+                body.append("</ul>")
+                in_list = False
+
+        for raw_line in markdown.splitlines():
+            line = raw_line.strip()
+            if not line:
+                close_list()
+                continue
+            if line == "---":
+                close_list()
+                body.append("<hr>")
+                continue
+            if line.startswith("# "):
+                close_list()
+                body.append('<p class="eyebrow">Release Notes</p>')
+                body.append(f"<h1>{self._inline_markdown(line[2:])}</h1>")
+                continue
+            if line.startswith("## "):
+                close_list()
+                body.append(f'<h2 class="release-heading">{self._inline_markdown(line[3:])}</h2>')
+                continue
+            if line.startswith("### "):
+                close_list()
+                body.append(f'<h3 class="change-section">{self._inline_markdown(line[4:])}</h3>')
+                continue
+            if line.startswith("- "):
+                if not in_list:
+                    body.append("<ul>")
+                    in_list = True
+                body.append(f"<li>{self._inline_markdown(line[2:])}</li>")
+                continue
+
+            close_list()
+            body.append(f"<p>{self._inline_markdown(line)}</p>")
+
+        close_list()
+        body.append("</div>")
+        return "\n".join(body)
+
+    @staticmethod
+    def _inline_markdown(text: str) -> str:
+        html = escape(text)
+        html = re.sub(r"`([^`]+)`", r"<code>\1</code>", html)
+        html = re.sub(r"\*\*([^*]+)\*\*", r"<strong>\1</strong>", html)
+        html = re.sub(
+            r"\[([^\]]+)\]\(([^)]+)\)",
+            lambda match: f'<a href="{escape(match.group(2), quote=True)}">{match.group(1)}</a>',
+            html,
+        )
+        return html
 
     def apply_help_styling(self, html_content):
         """Apply consistent CSS styling to help content."""
@@ -668,10 +757,27 @@ class HelpDialog(FramelessDialogBase):
                 color: #584836;
                 font-size: 19px;
             }}
+            h2.release-heading {{
+                margin-top: 26px;
+                color: {C.OLIVE_DK};
+            }}
             h3 {{
                 margin: 18px 0 8px 0;
                 color: {C.OLIVE_DK};
                 font-size: 15px;
+            }}
+            h3.change-section {{
+                color: #6b5b45;
+                font-family: "{F.MONO}", "JetBrains Mono", monospace;
+                font-size: 12px;
+                font-weight: 700;
+                letter-spacing: 0.08em;
+                text-transform: uppercase;
+            }}
+            hr {{
+                border: none;
+                border-top: 1px solid #e3d9ca;
+                margin: 22px 0;
             }}
             p {{
                 margin: 0 0 12px 0;
@@ -845,15 +951,19 @@ class HelpDialog(FramelessDialogBase):
 
         results = []
         for title, filename, _icon_name in self._all_topics():
-            file_path = os.path.join(self.help_dir, filename)
-            if not os.path.exists(file_path):
-                continue
-
             try:
-                with open(file_path, 'r', encoding='utf-8') as f:
-                    content = f.read()
-
-                import re
+                if filename == "changelog.html":
+                    changelog_path = self._changelog_path()
+                    if not os.path.exists(changelog_path):
+                        continue
+                    with open(changelog_path, 'r', encoding='utf-8') as f:
+                        content = f.read()
+                else:
+                    file_path = os.path.join(self.help_dir, filename)
+                    if not os.path.exists(file_path):
+                        continue
+                    with open(file_path, 'r', encoding='utf-8') as f:
+                        content = f.read()
 
                 text_content = re.sub(r'<[^>]+>', ' ', content)
                 text_content = re.sub(r'\s+', ' ', text_content).strip()

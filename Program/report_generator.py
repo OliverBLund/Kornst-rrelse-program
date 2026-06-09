@@ -20,7 +20,7 @@ from analysis.comparison_snapshot import (
     build_comparison_snapshot,
 )
 from k_calculations import KCalculationResult
-from k_aggregation import KAggregationOptions
+from k_aggregation import KAggregationOptions, build_k_result_summary
 from grain_classification import (
     ISO14688,
     cu_label as _gc_cu_label,
@@ -1585,19 +1585,18 @@ class ReportGenerator:
                     'k_statistics': True
                 }
 
-        # Filter valid results
-        valid_results = [r for r in k_results if r.k_value is not None and r.k_value > 0]
+        summary = build_k_result_summary(k_results)
 
-        if not valid_results:
+        if summary.geometric_mean_m_s is None:
             return self._generate_no_results_report(dataset.sample_name)
 
-        # Calculate statistics
-        k_values = [r.k_value for r in valid_results]
-        mean_k = np.mean(k_values)
-        median_k = np.median(k_values)
-        std_k = np.std(k_values)
-        min_k = np.min(k_values)
-        max_k = np.max(k_values)
+        # Shared OK-only K summary.
+        mean_k = summary.geometric_mean_m_s
+        arithmetic_k = summary.arithmetic_mean_m_s
+        median_k = summary.median_m_s
+        std_k = summary.std_dev_m_s or 0.0
+        min_k = summary.min_m_s
+        max_k = summary.max_m_s
         variability_ratio = max_k / min_k if min_k > 0 else 0
 
         # Start HTML report
@@ -1639,7 +1638,7 @@ class ReportGenerator:
         <div class="metadata-label">Methods Evaluated:</div>
         <div class="metadata-value">{len(k_results)} empirical methods</div>
         <div class="metadata-label">Valid Results:</div>
-        <div class="metadata-value"><span class="badge badge-success">{len(valid_results)} / {len(k_results)}</span></div>
+        <div class="metadata-value"><span class="badge badge-success">{summary.included_count} / {summary.total_cells}</span></div>
     </div>
 </div>
 """
@@ -1651,7 +1650,7 @@ class ReportGenerator:
             <h2>Executive Summary</h2>
             <div class="info-box">
                 <p><strong>Sample:</strong> {dataset.sample_name} hydraulic conductivity analysis using {len(k_results)} empirical methods.</p>
-                <p><strong>Mean K-Value:</strong> {mean_k:.2e} m/s (from {len(valid_results)} valid methods)</p>
+                <p><strong>Geometric Mean K:</strong> {mean_k:.2e} m/s (from {summary.included_count} OK methods)</p>
                 <p><strong>Permeability Classification:</strong> {self._classify_permeability(mean_k)}</p>
                 <p><strong>Variability:</strong> {max_k/min_k:.1f}x difference between minimum and maximum estimates</p>
             </div>
@@ -1689,8 +1688,12 @@ class ReportGenerator:
             <h3>Statistical Summary</h3>
             <div class="summary-stats">
                 <div class="stat-card">
-                    <div class="stat-label">Mean K</div>
+                    <div class="stat-label">K Geometric Mean</div>
                     <div class="stat-value">{mean_k:.2e} m/s</div>
+                </div>
+                <div class="stat-card">
+                    <div class="stat-label">K Arithmetic Mean</div>
+                    <div class="stat-value">{arithmetic_k:.2e} m/s</div>
                 </div>
                 <div class="stat-card">
                     <div class="stat-label">Median K</div>
@@ -1904,9 +1907,9 @@ class ReportGenerator:
         # Calculate K-values for summary
         mean_k_by_sample = {}
         for name, results in k_results_dict.items():
-            k_values = [r.k_value for r in results if r.k_value is not None and r.k_value > 0]
-            if k_values:
-                mean_k_by_sample[name] = np.mean(k_values)
+            summary = build_k_result_summary(results, dataset_name=name)
+            if summary.geometric_mean_m_s is not None:
+                mean_k_by_sample[name] = summary.geometric_mean_m_s
 
         # Start HTML report
         html = f"""
@@ -2004,7 +2007,7 @@ class ReportGenerator:
                         <th>D₆₀ (mm)</th>
                         <th>Cu</th>
                         <th>Soil Type</th>
-                        <th>Mean K (m/s)</th>
+                        <th>K geometric mean (m/s)</th>
                     </tr>
                 </thead>
                 <tbody>
@@ -2016,7 +2019,7 @@ class ReportGenerator:
                 d60 = dataset.get_d60()
                 cu = (d60/d10) if (d10 and d60) else None
 
-                # Get mean K if available
+                # Get geometric mean K if available
                 mean_k = "N/A"
                 if dataset.sample_name in mean_k_by_sample:
                     mean_k = f"{mean_k_by_sample[dataset.sample_name]:.2e}"
@@ -2113,7 +2116,7 @@ class ReportGenerator:
                 html += f"""
                 <p><strong>Statistical Overview:</strong></p>
                 <ul>
-                    <li>Mean K-value across all samples: {mean_all:.2e} m/s</li>
+                    <li>Average sample K geometric mean: {mean_all:.2e} m/s</li>
                     <li>Standard deviation: {std_all:.2e} m/s</li>
                     <li>Coefficient of variation: {(std_all/mean_all)*100:.1f}%</li>
                 </ul>
@@ -2219,14 +2222,14 @@ class ReportGenerator:
         comparison_snapshot = build_comparison_snapshot(
             snapshot_inputs,
             ComparisonSnapshotOptions(
-                k_options=KAggregationOptions(include_warnings=True),
+                k_options=KAggregationOptions(include_warnings=False),
                 classification_scheme=self._scheme,
             ),
         )
         mean_k_by_sample = {
-            name: stats.arithmetic_mean_m_s
+            name: stats.geometric_mean_m_s
             for name, stats in comparison_snapshot.k.by_dataset.items()
-            if stats.arithmetic_mean_m_s is not None
+            if stats.geometric_mean_m_s is not None
         }
 
         temperature_summary = self._summarize_sample_field(sample_details, "temperature", " °C")
@@ -2326,7 +2329,7 @@ class ReportGenerator:
                         <th>D60 (mm)</th>
                         <th>Cu</th>
                         <th>Soil Type</th>
-                        <th>Mean K (m/s)</th>
+                        <th>K geometric mean (m/s)</th>
                     </tr>
                 </thead>
                 <tbody>
@@ -2439,7 +2442,7 @@ class ReportGenerator:
                 html += f"""
                 <p><strong>Statistical Overview:</strong></p>
                 <ul>
-                    <li>Mean K-value across all samples: {mean_all:.2e} m/s</li>
+                    <li>Average sample K geometric mean: {mean_all:.2e} m/s</li>
                     <li>Standard deviation: {std_all:.2e} m/s</li>
                     <li>Coefficient of variation: {(std_all/mean_all)*100:.1f}%</li>
                 </ul>
@@ -2741,13 +2744,13 @@ class ReportGenerator:
         return html
 
     def _create_permeability_classification_table(self, k_results_dict: Dict[str, List[KCalculationResult]]) -> str:
-        """Generate HTML table with sample name, mean K-value, classification, and color-coded background"""
+        """Generate HTML table with sample name, K geometric mean, and classification."""
         html = """
         <table>
             <thead>
                 <tr>
                     <th>Sample Name</th>
-                    <th>Mean K-Value (m/s)</th>
+                    <th>K geometric mean (m/s)</th>
                     <th>Classification</th>
                 </tr>
             </thead>
@@ -2755,11 +2758,10 @@ class ReportGenerator:
         """
 
         for sample_name, results in k_results_dict.items():
-            # Calculate mean K-value
-            valid_k = [r.k_value for r in results if r.k_value and r.k_value > 0]
+            summary = build_k_result_summary(results, dataset_name=sample_name)
 
-            if valid_k:
-                mean_k = np.mean(valid_k)
+            if summary.geometric_mean_m_s is not None:
+                mean_k = summary.geometric_mean_m_s
 
                 classification = _gc_perm_class(mean_k)
 

@@ -139,6 +139,18 @@ class TestComparisonTabSelectionState(unittest.TestCase):
         self.assertEqual(self.tabs[1].dataset.group_name, 'Layer 1')
         self.assertEqual(self.tabs[2].dataset.group_name, 'Layer 2')
 
+    def test_plot_pin_filters_visible_plot_datasets(self):
+        self.tabs[0].dataset.group_name = 'Layer 1'
+        self.tabs[1].dataset.group_name = 'Layer 1'
+        self.tabs[2].dataset.group_name = 'Layer 2'
+        self.widget.set_dataset_state(self.tabs, selected_tabs=self.tabs)
+
+        self.widget._toggle_pin('Sample B')
+
+        plotted = [dataset.sample_name for dataset in self.widget._plot_widget.datasets]
+        self.assertEqual(plotted, ['Sample B'])
+        self.assertIn('Pinned subset: 1 of 3 datasets', self.widget._pin_scope_label.text())
+
     def test_details_defaults_to_grain_core_and_elides_long_headers(self):
         long_tabs = [
             DummyDatasetTab('Very Long Borehole Sample Name Alpha', 'A.csv', 1.0),

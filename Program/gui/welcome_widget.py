@@ -852,7 +852,7 @@ class WelcomeWidget(QWidget):
             self._build_hero_note(
                 "fa6s.book-open",
                 "Latest build",
-                "The current beta adds a reorganized export workspace, scope-aware export preview, shared renderer alignment for reports and exports, and bundled demo datasets on the welcome screen.",
+                "The current beta adds grouped comparison summaries, shared K mean calculations across views and exports, and a simpler Excel review path.",
                 button_text="View Full Changelog",
                 button_icon="fa6s.book-open",
                 button_handler=self._open_full_changelog,
@@ -1058,7 +1058,7 @@ class WelcomeWidget(QWidget):
         self._actions_grid = lay
         self._action_widgets = []
 
-        load_btn = QPushButton("Processed Curve Data")
+        load_btn = QPushButton("Processed Sieve Data")
         load_btn.setIcon(icon("fa6s.folder-open", "#ffffff"))
         load_btn.setMinimumHeight(36)
         load_btn.setCursor(QCursor(Qt.CursorShape.PointingHandCursor))
@@ -1076,7 +1076,7 @@ class WelcomeWidget(QWidget):
             QPushButton:hover   {{ background: {C.OLIVE_H}; }}
             QPushButton:pressed {{ background: {C.OLIVE_DK}; }}
         """)
-        load_btn.setToolTip("Use this when files already contain particle size and cumulative percent passing.")
+        load_btn.setToolTip("Use this when files already contain sieve size and cumulative percent passing.")
         load_btn.clicked.connect(lambda _checked=False: self.load_files_with_mode_requested.emit("processed"))
         self._action_widgets.append(load_btn)
 
@@ -1358,6 +1358,15 @@ class WelcomeWidget(QWidget):
 
     def _welcome_release_notes(self) -> list[dict[str, object]]:
         return [
+            {
+                "version": "v0.9.2-beta",
+                "date": "2026-06-08",
+                "changes": [
+                    "Grouped comparison summaries now show overall and per-group K and grain-size results.",
+                    "K geometric and arithmetic means are calculated through the shared aggregation backend across Results, Statistics, exports, and reports.",
+                    "Excel loading, sheet selection, and remapping paths are simpler while preserving manual review when needed.",
+                ],
+            },
             {
                 "version": "v0.9.1-beta",
                 "date": "2026-04-24",
@@ -1890,7 +1899,7 @@ class WelcomeWidget(QWidget):
         lay.setHorizontalSpacing(8)
         lay.setVerticalSpacing(8)
 
-        load_btn = QPushButton("Processed Curve Data")
+        load_btn = QPushButton("Processed Sieve Data")
         load_btn.setIcon(icon("fa6s.folder-open", "#ffffff"))
         load_btn.setMinimumHeight(34)
         load_btn.setCursor(QCursor(Qt.CursorShape.PointingHandCursor))
@@ -1908,7 +1917,7 @@ class WelcomeWidget(QWidget):
             QPushButton:hover   {{ background: {C.OLIVE_H}; }}
             QPushButton:pressed {{ background: {C.OLIVE_DK}; }}
         """)
-        load_btn.setToolTip("Use this when files already contain particle size and cumulative percent passing.")
+        load_btn.setToolTip("Use this when files already contain sieve size and cumulative percent passing.")
         load_btn.clicked.connect(lambda _checked=False: self.load_files_with_mode_requested.emit("processed"))
         lay.addWidget(load_btn, 0, 0)
 
@@ -2185,21 +2194,7 @@ class WelcomeWidget(QWidget):
                 self.open_recent_file_requested.emit(f)
 
     def _open_full_changelog(self):
-        if getattr(sys, "frozen", False):
-            base_dir = Path(getattr(sys, "_MEIPASS", Path(__file__).resolve().parent.parent)) / "Program"
-        else:
-            base_dir = Path(__file__).resolve().parent.parent
-        changelog_path = base_dir / "CHANGELOG.md"
-        if changelog_path.exists():
-            from PyQt6.QtCore import QUrl
-            from PyQt6.QtGui import QDesktopServices
-            QDesktopServices.openUrl(QUrl.fromLocalFile(str(changelog_path)))
-        else:
-            from PyQt6.QtWidgets import QMessageBox
-            QMessageBox.information(
-                self, "Changelog",
-                f"Changelog will be at:\n{changelog_path}\n\nCurrently in development.",
-            )
+        self.open_help_topic_requested.emit("changelog.html")
 
     def update_recent_files(self, recent_files: List[str]):
         """Called by main_window; full refresh is handled by _refresh_welcome_widget."""

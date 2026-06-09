@@ -207,9 +207,12 @@ def render_k_bar_chart(
     # Reference lines ─────────────────────────────────────────────
     positive = [v for v in k_values if v and v > 0]
     if show_reference_lines and positive:
-        mean_k = np.mean(positive)
-        ax.axhline(mean_k, color="red", linestyle="-", alpha=0.5,
-                   label=f"Mean: {mean_k:.2e}")
+        arithmetic_mean = float(np.mean(positive))
+        geometric_mean = float(np.exp(np.mean(np.log(positive))))
+        ax.axhline(arithmetic_mean, color="#b83232", linestyle="-", alpha=0.62,
+                   label=f"Arithmetic mean: {arithmetic_mean:.2e}")
+        ax.axhline(geometric_mean, color="#5c3d8f", linestyle="--", alpha=0.68,
+                   label=f"Geometric mean: {geometric_mean:.2e}")
         ax.axhline(min(positive), color="blue", linestyle=":", alpha=0.5,
                    label=f"Min: {min(positive):.2e}")
         ax.axhline(max(positive), color="green", linestyle=":", alpha=0.5,
@@ -292,6 +295,7 @@ def render_k_overlay(
     show_grid: bool = True,
     show_legend: bool = True,
     show_value_labels: bool = True,
+    y_label: str = "K (m/s)",
     title: str = "Hydraulic Conductivity Comparison",
 ) -> None:
     """Draw grouped K-value bars for multiple samples."""
@@ -335,7 +339,7 @@ def render_k_overlay(
                     label_levels.append(i)
 
     ax.set_xlabel("Method", fontsize=style.label_fontsize, fontfamily=style.font_family)
-    ax.set_ylabel("K (m/s)", fontsize=style.label_fontsize, fontfamily=style.font_family)
+    ax.set_ylabel(y_label, fontsize=style.label_fontsize, fontfamily=style.font_family)
     ax.set_title(title, fontsize=style.title_fontsize,
                  fontweight=style.title_fontweight, fontfamily=style.font_family)
     ax.set_xticks(np.arange(n_methods) + bar_width * (n_datasets - 1) / 2)
@@ -365,6 +369,110 @@ def render_k_overlay(
 # ═══════════════════════════════════════════════════════════════════
 # K-value boxplot (multi-sample)
 # ═══════════════════════════════════════════════════════════════════
+
+def render_k_distribution_function(
+    ax: Axes,
+    scopes: Sequence[dict],
+    *,
+    style: PlotStyle = PROFESSIONAL_STYLE,
+    show_grid: bool = True,
+    show_legend: bool = True,
+    x_label: str = "Hydraulic Conductivity K (m/s)",
+    title: str = "K Distribution Function",
+) -> None:
+    """Draw empirical K-value CDFs for overall/group scopes.
+
+    Each scope dict should contain ``label``, ``values`` and optional ``color``,
+    ``linestyle`` and ``is_overall`` keys. Values must be positive K values in
+    m/s; invalid values are ignored here so callers can share one defensive
+    renderer between GUI, export, and reports.
+    """
+
+    plotted_values: list[float] = []
+    overall_values: list[float] = []
+
+    for scope in scopes:
+        values = sorted(
+            float(value)
+            for value in scope.get("values", ())
+            if value is not None and float(value) > 0
+        )
+        if not values:
+            continue
+
+        plotted_values.extend(values)
+        if scope.get("is_overall"):
+            overall_values = values
+
+        n = len(values)
+        probabilities = ((np.arange(1, n + 1, dtype=float) - 0.5) / n) * 100.0
+        color = scope.get("color") or "#2b5797"
+        linewidth = 2.4 if scope.get("is_overall") else 1.8
+        alpha = 0.95 if scope.get("is_overall") else 0.78
+
+        ax.plot(
+            values,
+            probabilities,
+            color=color,
+            linestyle=scope.get("linestyle", "-"),
+            linewidth=linewidth,
+            alpha=alpha,
+            marker="o" if n <= 12 else None,
+            markersize=3.2,
+            label=scope.get("label", "Scope"),
+        )
+
+    if overall_values and len(overall_values) > 1:
+        log_values = [math.log(value) for value in overall_values]
+        mu = sum(log_values) / len(log_values)
+        sigma = float(np.std(log_values))
+        if sigma > 0:
+            xmin, xmax = min(overall_values), max(overall_values)
+            x_fit = np.logspace(math.log10(xmin), math.log10(xmax), 160)
+            inv_sigma = 1.0 / (sigma * math.sqrt(2.0))
+            y_fit = np.array([
+                0.5 * (1.0 + math.erf((math.log(x) - mu) * inv_sigma)) * 100.0
+                for x in x_fit
+            ])
+            ax.plot(
+                x_fit,
+                y_fit,
+                color="#6a6254",
+                linestyle="--",
+                linewidth=1.2,
+                alpha=0.62,
+                label="Overall lognormal fit",
+            )
+            ax.axvline(
+                math.exp(mu),
+                color="#6b8e23",
+                linestyle=":",
+                linewidth=1.3,
+                alpha=0.78,
+                label="Overall Kgeo",
+            )
+
+    ax.set_xscale("log")
+    ax.set_xlabel(x_label,
+                  fontsize=style.label_fontsize, fontfamily=style.font_family)
+    ax.set_ylabel("Cumulative Probability (%)",
+                  fontsize=style.label_fontsize, fontfamily=style.font_family)
+    ax.set_title(title, fontsize=style.title_fontsize,
+                 fontweight=style.title_fontweight, fontfamily=style.font_family)
+    ax.set_ylim(0, 100)
+
+    if plotted_values:
+        xmin, xmax = min(plotted_values), max(plotted_values)
+        if xmin == xmax:
+            ax.set_xlim(xmin / 3.0, xmax * 3.0)
+        else:
+            ax.set_xlim(xmin / 1.7, xmax * 1.7)
+
+    _apply_grid(ax, style, show_grid, which="both")
+
+    if show_legend:
+        _apply_styled_legend(ax, style)
+
 
 def render_k_boxplot(
     ax: Axes,

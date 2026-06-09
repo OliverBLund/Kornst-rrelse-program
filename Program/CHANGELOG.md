@@ -6,6 +6,29 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [0.9.2-beta] - 2026-06-08
+
+### Added
+- Group-aware comparison summaries for K-values and grain-size metrics across selected datasets
+- Aggregate Details and Statistics views with overall and per-group summaries
+- K distribution plot support for lognormal-style hydraulic-conductivity review, including ln(K) variance and standard deviation
+- Results-tab summary strip showing OK-only K geometric mean, K arithmetic mean, and included method counts per dataset
+- In-app activity/log overlay foundation for data-loading warnings and future program events
+
+### Changed
+- Excel import flow simplified so detected workbook sheets can load directly while still allowing remapping when needed
+- Multi-sheet Excel selection now supports applying a shared sheet name across multiple selected workbooks
+- Comparison plots and tables now use dataset group colors consistently where group context is active
+- K summary calculations are centralized through the shared aggregation backend for Results, Statistics, Comparison, reports, and live exports
+- Export and report wording now distinguishes K geometric mean from K arithmetic mean
+- Full changelog now opens in the in-app Help & Documentation window instead of opening the raw Markdown file
+
+### Fixed
+- Raw sieve auto-detection no longer silently accepts obviously invalid columns without clearer validation pressure
+- HydrogeoSieveXL2 warning parity for DATASET_2: Hazen, Hazen_1892, Kruger, and USBR are warned; Terzaghi and Kozeny-Carman remain included
+- OK-only K geometric and arithmetic means now match the HydrogeoSieveXL2 inclusion philosophy more closely
+
+
 ## [0.9.1-beta] - 2026-04-24
 
 ### Added
@@ -123,36 +146,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
-## Future Enhancements (Planned)
-
-### For Beta Testing Phase
-- [ ] Multi-language support (Danish, English)
-- [ ] Batch processing for multiple files
-- [ ] Export to PDF with plots and tables
-- [ ] Custom calculation method editor
-- [ ] Integration with laboratory database systems
-
-### For v3.0.0 (Post-Beta)
-- [ ] Machine learning-based permeability predictions
-- [ ] 3D visualization of grain size distributions
-- [ ] Cloud sync for project files
-- [ ] Mobile companion app for field data collection
-
-
----
-
 ## Notes for Testers
 
-**Current Status:** 0.9.0-beta - Ready for beta testing
+**Current Status:** 0.9.2-beta - Ready for focused beta testing
 
-**Known Issues:**
-- Export tab may be slow with very large datasets (>10,000 points)
-- Some edge cases in column auto-detection need manual mapping
+**Known Review Areas:**
+- Some irregular Excel layouts may still require manual mapping or remapping
+- Data-loading logs, warning visibility, and remap entry points should be checked during testing
 
-**Feedback:** Please report any bugs or suggestions to [your contact info]
+**Feedback:** Report issues with the file used, selected import path, expected result, and observed result.
 
 **Testing Focus Areas:**
-1. File import reliability across different CSV formats
-2. Accuracy of K-value calculations
-3. Export functionality with various format combinations
-4. UI/UX of the welcome screen and help system
+1. CSV and Excel import reliability, including remapping
+2. HydrogeoSieveXL2 parity for K-values, warnings, and OK-only means
+3. Comparison Details/Statistics behavior for groups and aggregates
+4. Export/report consistency for geometric and arithmetic K summaries

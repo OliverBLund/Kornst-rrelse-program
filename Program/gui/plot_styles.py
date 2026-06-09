@@ -288,8 +288,8 @@ CLASSIC_STYLE = PlotStyle(
     legend_framealpha=0.8,
     legend_edgecolor="#999999",
 
-    # Figure colors - Traditional off-white
-    figure_facecolor="#fafafa",
+    # Figure colors - classic white export surface
+    figure_facecolor="white",
     axes_facecolor="#ffffff",
 
     # K-value bar chart - use colorful method-specific colors (traditional)

@@ -14,7 +14,7 @@ from PyQt6.QtWidgets import (
     QStatusBar, QStackedWidget, QTabWidget, QMessageBox,
     QProgressBar, QLabel, QFrame, QFileDialog,
     QPushButton, QSizePolicy, QToolButton, QMenu, QSplitter,
-    QGraphicsOpacityEffect,
+    QGraphicsOpacityEffect, QApplication,
 )
 from PyQt6.QtCore import Qt, pyqtSignal, QSettings, QSize, QTimer, QEasingCurve, QPropertyAnimation
 from PyQt6.QtGui import QAction, QColor, QFont
@@ -145,7 +145,7 @@ class _AppToolbar(QWidget):
             pass
         self._add_btn.setCursor(Qt.CursorShape.PointingHandCursor)
         add_menu = QMenu(self._add_btn)
-        processed_action = add_menu.addAction("Processed Curve Data...")
+        processed_action = add_menu.addAction("Processed Sieve Data...")
         processed_action.triggered.connect(lambda _checked=False: self.add_files_mode_clicked.emit("processed"))
         raw_action = add_menu.addAction("Raw Sieve Weighings...")
         raw_action.triggered.connect(lambda _checked=False: self.add_files_mode_clicked.emit("raw_sieve"))
@@ -552,7 +552,11 @@ class MainWindow(FramelessMainWindowMixin, QMainWindow):
             "Applying interface theme",
             "Styling the application shell and controls.",
         )
-        self.setStyleSheet(build_stylesheet())
+        stylesheet = build_stylesheet()
+        app = QApplication.instance()
+        if app is not None:
+            app.setStyleSheet(stylesheet)
+        self.setStyleSheet(stylesheet)
 
         self._emit_startup_progress(
             88,
@@ -737,7 +741,7 @@ class MainWindow(FramelessMainWindowMixin, QMainWindow):
 
         # File
         file_menu = QMenu("File", self)
-        open_processed_action = QAction("&Open Processed Curve Data\u2026", self)
+        open_processed_action = QAction("&Open Processed Sieve Data\u2026", self)
         open_processed_action.setShortcut("Ctrl+O")
         open_processed_action.setIcon(icon("fa6s.folder-open", C.TEXT_MUTED))
         open_processed_action.triggered.connect(lambda _checked=False: self.control_panel.add_files("processed"))
@@ -1053,7 +1057,7 @@ class MainWindow(FramelessMainWindowMixin, QMainWindow):
         if data_mode == "raw_sieve":
             self._show_status_message("Select raw sieve weighing files\u2026")
         else:
-            self._show_status_message("Select processed curve files\u2026")
+            self._show_status_message("Select processed sieve data files\u2026")
 
     def on_welcome_load_sample(self):
         demo_files = [self._normalize_file_key(path) for path in get_test_data_files()]

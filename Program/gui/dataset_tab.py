@@ -25,10 +25,13 @@ from PyQt6.QtWidgets import (
 from PyQt6.QtGui import QColor, QFont
 from PyQt6.QtCore import Qt, pyqtSignal, QSize
 from typing import Optional, List, Dict
+import math
 import numpy as np
 
 from data_loader import GrainSizeData
 from k_calculations import KCalculator, KCalculationResult, CalculationStatus
+from k_aggregation import build_k_result_summary
+from unit_conversions import HydraulicConductivityConverter, HydraulicConductivityUnit
 from .stack_fade import TabFadeInController
 
 
@@ -356,6 +359,10 @@ class DatasetTab(QWidget):
         self.results_table.itemSelectionChanged.connect(self.on_result_row_selected)
         tc_layout.addWidget(self.results_table)
 
+        self._mean_summary_bar = self._create_mean_summary_bar()
+        self._mean_summary_bar.setVisible(False)
+        tc_layout.addWidget(self._mean_summary_bar)
+
         # Method detail panel
         self.detail_panel = self._create_detail_panel()
 
@@ -405,6 +412,80 @@ class DatasetTab(QWidget):
 
         parent_layout.addWidget(cell)
         return val_lbl
+
+    def _create_mean_summary_bar(self) -> "QFrame":
+        """Create the bottom Results-tab mean summary strip."""
+        from .theme import C, F
+        bar = QFrame()
+        bar.setObjectName("results-mean-summary")
+        bar.setFixedHeight(64)
+        bar.setStyleSheet(f"""
+            QFrame#results-mean-summary {{
+                background: {C.BG_RAISED};
+                border-top: 1px solid {C.BORDER};
+            }}
+            QFrame#results-mean-summary QLabel {{
+                background: transparent;
+                border: none;
+            }}
+        """)
+        layout = QHBoxLayout(bar)
+        layout.setContentsMargins(0, 0, 0, 0)
+        layout.setSpacing(0)
+
+        self._mean_geo_value, self._mean_geo_sub = self._add_mean_summary_cell(
+            layout,
+            "K geometric mean",
+            C.OLIVE,
+        )
+        self._mean_arith_value, self._mean_arith_sub = self._add_mean_summary_cell(
+            layout,
+            "K arithmetic mean",
+            C.K_BLUE,
+        )
+        self._mean_included_value, self._mean_included_sub = self._add_mean_summary_cell(
+            layout,
+            "Included methods",
+            C.TEXT,
+        )
+        layout.addStretch(1)
+        return bar
+
+    def _add_mean_summary_cell(self, parent_layout, label: str, value_color: str):
+        """Add one compact bottom-summary metric cell."""
+        from .theme import C, F
+        cell = QFrame()
+        cell.setStyleSheet(f"""
+            QFrame {{
+                background: transparent;
+                border-right: 1px solid {C.BORDER};
+            }}
+        """)
+        layout = QVBoxLayout(cell)
+        layout.setContentsMargins(14, 7, 18, 7)
+        layout.setSpacing(1)
+
+        value = QLabel("-")
+        value.setStyleSheet(
+            f"font-family: '{F.MONO}'; font-size: 12pt; font-weight: 700; color: {value_color};"
+        )
+        layout.addWidget(value)
+
+        title = QLabel(label)
+        title.setStyleSheet(
+            f"font-family: '{F.UI}'; font-size: {F.SZ_XS}pt; font-weight: 700; "
+            f"color: {C.TEXT_MUTED}; text-transform: uppercase; letter-spacing: 0.05em;"
+        )
+        layout.addWidget(title)
+
+        sub = QLabel("OK methods only")
+        sub.setStyleSheet(
+            f"font-family: '{F.MONO}'; font-size: {F.SZ_XS}pt; color: {C.TEXT_MUTED};"
+        )
+        layout.addWidget(sub)
+
+        parent_layout.addWidget(cell)
+        return value, sub
 
     def _create_detail_panel(self) -> "QFrame":
         """Create the method detail panel (right side of Results split view)."""
@@ -466,18 +547,21 @@ class DatasetTab(QWidget):
         reference = meta.get("reference", "No reference available.")
 
         status = result.status.value if hasattr(result.status, "value") else str(result.status)
-        if "OK" in status:
+        conditions_met = bool(getattr(result, "conditions_met", True))
+        has_positive_k = result.k_value is not None and result.k_value > 0
+        included_in_mean = "OK" in status and conditions_met and has_positive_k
+        if included_in_mean:
             status_color = C.OLIVE_DK
             status_bg = "rgba(107,142,35,0.08)"
             status_icon = "✓"
-        elif "Warning" in status:
-            status_color = C.LED_WARN
-            status_bg = "rgba(208,128,32,0.08)"
-            status_icon = "⚠"
-        else:
+        elif "Error" in status:
             status_color = C.LED_ERR
             status_bg = "rgba(192,56,40,0.07)"
             status_icon = "✗"
+        else:
+            status_color = C.LED_WARN
+            status_bg = "rgba(208,128,32,0.08)"
+            status_icon = "⚠"
 
         # ── Header section ──────────────────────────────────────────────────────
         header = QFrame()
@@ -531,7 +615,7 @@ class DatasetTab(QWidget):
         self._detail_layout.addWidget(header)
 
         # ── Status alert (if message present) ───────────────────────────────────
-        if result.status_message:
+        if result.status_message or not included_in_mean:
             alert = QFrame()
             alert.setStyleSheet(f"""
                 QFrame {{
@@ -543,7 +627,15 @@ class DatasetTab(QWidget):
             """)
             al = QVBoxLayout(alert)
             al.setContentsMargins(12, 8, 12, 8)
-            msg = QLabel(f"{status_icon}  {result.status_message}")
+            if included_in_mean:
+                detail_message = result.status_message
+            elif result.status_message:
+                detail_message = f"Excluded from K means: {result.status_message}"
+            elif not has_positive_k:
+                detail_message = "Excluded from K means: no positive K-value was produced."
+            else:
+                detail_message = f"Excluded from K means: method status is {status}."
+            msg = QLabel(f"{status_icon}  {detail_message}")
             msg.setStyleSheet(
                 f"font-family: '{F.UI}'; font-size: {F.SZ_SM}pt; color: {status_color}; font-weight: 500;"
             )
@@ -581,11 +673,17 @@ class DatasetTab(QWidget):
         self._detail_layout.addWidget(self._make_detail_section_text("Formula", result.formula_used, monospace=True))
 
         # ── Applicability section ────────────────────────────────────────────────
-        cond_text = (
-            f"{'✓ Conditions met' if result.conditions_met else '✗ Conditions NOT met'}  —  {applicability}"
-            if hasattr(result, 'conditions_met')
-            else applicability
+        mean_policy = (
+            "Included in K mean calculations"
+            if included_in_mean
+            else "Excluded from K mean calculations"
         )
+        condition_policy = (
+            "Applicability conditions met"
+            if conditions_met
+            else "Applicability conditions NOT met"
+        )
+        cond_text = f"{mean_policy}\n{condition_policy} - {applicability}"
         self._detail_layout.addWidget(self._make_detail_section_text("Applicability", cond_text))
 
         # ── Reference section ────────────────────────────────────────────────────
@@ -975,25 +1073,34 @@ class DatasetTab(QWidget):
         """Update the summary stat bar with current calculation results."""
         if not self.current_results:
             self.res_bar.setVisible(False)
+            if hasattr(self, "_mean_summary_bar"):
+                self._mean_summary_bar.setVisible(False)
             return
 
         self.res_bar.setVisible(True)
+        if hasattr(self, "_mean_summary_bar"):
+            self._mean_summary_bar.setVisible(True)
 
-        valid_results = [r for r in self.current_results if r.k_value is not None and r.k_value > 0]
+        summary = build_k_result_summary(
+            self.current_results,
+            dataset_name=self.dataset.sample_name,
+            group_name=getattr(self.dataset, "group_name", "Ungrouped"),
+        )
         total = len(self.current_results)
-        valid_count = len(valid_results)
+        valid_count = summary.included_count
 
         # K̄ geometric mean (m/d)
-        if valid_results:
-            import math
-            log_k_values = [math.log(r.k_value) for r in valid_results]
-            k_geom_ms = math.exp(sum(log_k_values) / len(log_k_values))
+        if summary.geometric_mean_m_s is not None:
+            k_geom_ms = summary.geometric_mean_m_s
+            k_arith_ms = summary.arithmetic_mean_m_s
             k_geom_md = k_geom_ms * 86400.0
             self._stat_k_md.setText(f"{k_geom_md:.2f}")
             self._stat_k_ms.setText(f"{k_geom_ms:.2e}")
+            self._set_mean_summary_values(k_geom_ms, k_arith_ms, valid_count, total)
         else:
             self._stat_k_md.setText("—")
             self._stat_k_ms.setText("—")
+            self._set_mean_summary_values(None, None, valid_count, total)
 
         # Methods valid
         self._stat_valid.setText(f"{valid_count} / {total}")
@@ -1004,6 +1111,46 @@ class DatasetTab(QWidget):
 
         # Temperature (may have been updated)
         self._stat_temp.setText(f"{self.temperature:.1f} °C")
+
+    def _set_mean_summary_values(
+        self,
+        geometric_m_s: Optional[float],
+        arithmetic_m_s: Optional[float],
+        included_count: int,
+        total_count: int,
+    ) -> None:
+        if not hasattr(self, "_mean_geo_value"):
+            return
+        self._mean_geo_value.setText(self._format_result_k_primary(geometric_m_s))
+        self._mean_geo_sub.setText(self._format_result_k_secondary(geometric_m_s))
+        self._mean_arith_value.setText(self._format_result_k_primary(arithmetic_m_s))
+        self._mean_arith_sub.setText(self._format_result_k_secondary(arithmetic_m_s))
+
+        excluded_count = max(0, total_count - included_count)
+        self._mean_included_value.setText(f"{included_count} / {total_count}")
+        if excluded_count == 1:
+            self._mean_included_sub.setText("1 warning/error excluded")
+        else:
+            self._mean_included_sub.setText(f"{excluded_count} warning/error excluded")
+
+    @staticmethod
+    def _format_result_k_primary(value_m_s: Optional[float]) -> str:
+        if value_m_s is None:
+            return "-"
+        value_m_d = HydraulicConductivityConverter.convert_from_m_per_s(
+            value_m_s, HydraulicConductivityUnit.M_PER_DAY
+        )
+        return HydraulicConductivityConverter.format_value(
+            value_m_d, HydraulicConductivityUnit.M_PER_DAY
+        )
+
+    @staticmethod
+    def _format_result_k_secondary(value_m_s: Optional[float]) -> str:
+        if value_m_s is None:
+            return "OK methods only"
+        return HydraulicConductivityConverter.format_value(
+            value_m_s, HydraulicConductivityUnit.M_PER_S
+        )
 
     def on_result_row_selected(self):
         """Handle row selection — update detail panel."""

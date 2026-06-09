@@ -8,6 +8,7 @@ from PyQt6.QtWidgets import (
     QWidget, QHBoxLayout, QVBoxLayout, QFrame, QComboBox,
     QPushButton, QLabel, QFileDialog, QMessageBox, QLineEdit,
     QSizePolicy, QButtonGroup, QSpinBox, QDoubleSpinBox, QScrollArea,
+    QSplitter,
 )
 from PyQt6.QtCore import (
     Qt, pyqtSignal, QPropertyAnimation, QEasingCurve, QSize,
@@ -94,6 +95,40 @@ def _sync_chk(btn: QPushButton, on: bool):
 # PlotWorkspace
 # ─────────────────────────────────────────────────────────────
 
+_ISO_FRACTION_BANDS = (
+    (0.0, 0.002, "Clay"),
+    (0.002, 0.0063, "Fine silt"),
+    (0.0063, 0.02, "Medium silt"),
+    (0.02, 0.063, "Coarse silt"),
+    (0.063, 0.2, "Fine sand"),
+    (0.2, 0.63, "Medium sand"),
+    (0.63, 2.0, "Coarse sand"),
+    (2.0, 6.3, "Fine gravel"),
+    (6.3, 20.0, "Medium gravel"),
+    (20.0, 63.0, "Coarse gravel"),
+    (63.0, 200.0, "Cobble"),
+)
+
+
+def _format_mm(value: float) -> str:
+    if value == 0:
+        return "0"
+    return f"{value:.4g}"
+
+
+def _iso_fraction_label(lower_mm: float, upper_mm: float) -> str:
+    if upper_mm <= 0:
+        return "Unknown"
+    if lower_mm <= 0 and upper_mm <= 0.063:
+        return "Silt / clay"
+    lower = max(lower_mm, 0.0001)
+    midpoint = math.sqrt(lower * upper_mm)
+    for lo, hi, label in _ISO_FRACTION_BANDS:
+        if lo <= midpoint < hi:
+            return label
+    return "Coarser material"
+
+
 class PlotWorkspace(QWidget):
     """Plot workspace: inner toolbar + collapsible sidebar + matplotlib chart."""
 
@@ -117,6 +152,8 @@ class PlotWorkspace(QWidget):
         self.fill_curve = False
         self.fill_zone_labels = False
         self.log_x_scale = True
+        self.show_k_value_labels = True
+        self.k_value_label_fontsize = 8
 
         # Per-workspace custom style — starts as None (preset is authoritative).
         # Populated when the user tweaks any field in the "Legend & Typography"
@@ -196,7 +233,7 @@ class PlotWorkspace(QWidget):
         self._style_sel.setObjectName("pw-style-sel")
         from .plot_styles import get_available_style_names
         self._style_sel.addItems(get_available_style_names())
-        self._style_sel.setCurrentText("Professional")
+        self._style_sel.setCurrentText("Classic")
         self._style_sel.setToolTip("Plot style")
         self._style_sel.currentTextChanged.connect(self._on_style_changed)
         lay.addWidget(self._style_sel)
@@ -280,6 +317,7 @@ class PlotWorkspace(QWidget):
         chart_lay.setSpacing(0)
 
         self.plot_widget = PlotWidget()
+        self.plot_widget.set_style(self._effective_style())
         self.plot_widget.set_display_unit(HydraulicConductivityUnit.M_PER_DAY)
         self.plot_widget.axes_view_changed.connect(self._sync_axis_inputs_from_ax)
         chart_lay.addWidget(self.plot_widget, 1)
@@ -294,14 +332,21 @@ class PlotWorkspace(QWidget):
         self._toggle_handle.clicked.connect(self._toggle_sidebar)
         self._toggle_handle.raise_()  # on top of plot
 
-        body_lay.addWidget(self._sidebar)
-        body_lay.addWidget(self._chart_area, 1)
+        self._body_splitter = QSplitter(Qt.Orientation.Horizontal)
+        self._body_splitter.setChildrenCollapsible(False)
+        self._body_splitter.setHandleWidth(5)
+        self._body_splitter.addWidget(self._sidebar)
+        self._body_splitter.addWidget(self._chart_area)
+        self._body_splitter.setStretchFactor(0, 0)
+        self._body_splitter.setStretchFactor(1, 1)
+        body_lay.addWidget(self._body_splitter, 1)
 
         # Sidebar collapse animation
         self._sidebar_anim = QPropertyAnimation(self._sidebar, b"maximumWidth")
         self._sidebar_anim.setDuration(200)
         self._sidebar_anim.setEasingCurve(QEasingCurve.Type.InOutQuad)
         self._sidebar_anim.valueChanged.connect(lambda _value: self._position_toggle_handle())
+        self._sidebar_anim.finished.connect(self._on_sidebar_animation_finished)
 
         return body
 
@@ -397,6 +442,9 @@ class PlotWorkspace(QWidget):
 
         self._row_markers, self._sw_markers = self._toggle_row("Markers on curve", False)
         self._sect_display.add_widget(self._row_markers)
+
+        self._row_k_labels, self._sw_k_labels = self._toggle_row("K value labels", True)
+        self._sect_display.add_widget(self._row_k_labels)
         lay.addWidget(self._sect_display)
 
         # ── Curve Color ──
@@ -460,6 +508,12 @@ class PlotWorkspace(QWidget):
         self._legend_size_spin.valueChanged.connect(
             lambda v: self._update_style_field("legend_fontsize", int(v)))
         self._sect_advanced.add_widget(self._row_legend_size)
+
+        self._row_k_label_size, self._k_label_size_spin = self._spin_row(
+            "K value label size", 5, 14)
+        self._k_label_size_spin.setValue(self.k_value_label_fontsize)
+        self._k_label_size_spin.valueChanged.connect(self._on_k_label_size_changed)
+        self._sect_advanced.add_widget(self._row_k_label_size)
 
         reset_row = QWidget()
         reset_lay = QHBoxLayout(reset_row)
@@ -549,9 +603,17 @@ class PlotWorkspace(QWidget):
 
     def _toggle_sidebar(self):
         self.sidebar_visible = not self.sidebar_visible
-        target = SZ.PLOT_SIDEBAR_W if self.sidebar_visible else 0
+        target = self._default_sidebar_width() if self.sidebar_visible else 0
         self._sidebar_anim.stop()
-        self._sidebar_anim.setStartValue(self._sidebar.maximumWidth())
+        if self.sidebar_visible:
+            self._sidebar.setMinimumWidth(self._min_sidebar_width())
+            self._sidebar.setMaximumWidth(self._max_sidebar_width())
+            start = max(0, min(self._sidebar.width(), self._max_sidebar_width()))
+        else:
+            self._sidebar.setMinimumWidth(0)
+            start = max(0, self._sidebar.width())
+            self._sidebar.setMaximumWidth(max(start, self._min_sidebar_width()))
+        self._sidebar_anim.setStartValue(start)
         self._sidebar_anim.setEndValue(target)
         self._sidebar_anim.start()
         self._tb_sidebar_btn.blockSignals(True)
@@ -560,6 +622,23 @@ class PlotWorkspace(QWidget):
         # Update handle chevron direction
         chevron = "fa6s.chevron-left" if self.sidebar_visible else "fa6s.chevron-right"
         self._toggle_handle.setIcon(icon(chevron, C.TEXT_MID, 8))
+
+    def _min_sidebar_width(self) -> int:
+        return min(260, max(220, self.width() // 4))
+
+    def _default_sidebar_width(self) -> int:
+        return min(self._max_sidebar_width(), max(300, SZ.PLOT_SIDEBAR_W))
+
+    def _max_sidebar_width(self) -> int:
+        return min(440, max(320, int(max(self.width(), 1) * 0.38)))
+
+    def _on_sidebar_animation_finished(self) -> None:
+        if self.sidebar_visible:
+            self._sidebar.setMinimumWidth(self._min_sidebar_width())
+            self._sidebar.setMaximumWidth(self._max_sidebar_width())
+        else:
+            self._sidebar.setMinimumWidth(0)
+            self._sidebar.setMaximumWidth(0)
 
     # ── Toolbar callbacks ──────────────────────────────────────
 
@@ -747,6 +826,7 @@ class PlotWorkspace(QWidget):
         self.fill_curve = self._sw_fill.isChecked()
         self.fill_zone_labels = self._sw_fill_labels.isChecked()
         self.show_markers = self._sw_markers.isChecked()
+        self.show_k_value_labels = self._sw_k_labels.isChecked()
 
         # Sync toolbar check buttons
         self._chk_grid.blockSignals(True)
@@ -770,6 +850,11 @@ class PlotWorkspace(QWidget):
         self._chk_dlines.style().polish(self._chk_dlines)
         self._chk_dlines.blockSignals(False)
 
+        self._apply_plot_options()
+        self.refresh_plot()
+
+    def _on_k_label_size_changed(self, value: int) -> None:
+        self.k_value_label_fontsize = int(value)
         self._apply_plot_options()
         self.refresh_plot()
 
@@ -841,6 +926,8 @@ class PlotWorkspace(QWidget):
         self._set_context_visibility(self._row_fill, supports_fill)
         self._set_context_visibility(self._row_fill_labels, supports_fill)
         self._set_context_visibility(self._row_markers, supports_markers)
+        self._set_context_visibility(self._row_k_labels, supports_k_units)
+        self._set_context_visibility(self._row_k_label_size, supports_k_units)
 
         self._set_context_visibility(self._sect_curve_color, not is_k_plot)
         self._set_context_visibility(self._color_container, not is_k_plot)
@@ -856,6 +943,7 @@ class PlotWorkspace(QWidget):
                 self._row_fill,
                 self._row_fill_labels,
                 self._row_markers,
+                self._row_k_labels,
             )
         )
         self._set_context_visibility(self._sect_display, display_section_visible)
@@ -877,6 +965,8 @@ class PlotWorkspace(QWidget):
         self.plot_widget.show_markers = self.show_markers
         self.plot_widget.fill_curve = self.fill_curve
         self.plot_widget.fill_zone_labels = self.fill_zone_labels
+        self.plot_widget.show_k_value_labels = self.show_k_value_labels
+        self.plot_widget.k_value_label_fontsize = self.k_value_label_fontsize
 
     # ── Plot logic (preserved from original) ───────────────────
 
@@ -991,30 +1081,52 @@ class PlotWorkspace(QWidget):
         self.plot_widget.canvas.draw()
         self._sync_axis_inputs_from_ax(ax)
 
-    def _plot_histogram(self):
-        if not self.plot_widget:
-            return
-        self.plot_widget.figure.clear()
-        ax = self.plot_widget.figure.add_subplot(111)
+    def _histogram_rows(self) -> list[dict[str, float | str]]:
         pairs = sorted(
             zip(self.dataset.particle_sizes, self.dataset.percent_passing),
             key=lambda pair: pair[0],
             reverse=True,
         )
-        sizes = np.array([size for size, _ in pairs], dtype=float)
-        passing = np.array([passing for _, passing in pairs], dtype=float)
-        next_passing = np.append(passing[1:], 0.0)
-        freq = np.maximum(0.0, passing - next_passing)
+        rows: list[dict[str, float | str]] = []
+        for index, (upper_mm, passing) in enumerate(pairs):
+            lower_mm = pairs[index + 1][0] if index + 1 < len(pairs) else 0.0
+            next_passing = pairs[index + 1][1] if index + 1 < len(pairs) else 0.0
+            weight_pct = max(0.0, float(passing) - float(next_passing))
+            fraction = _iso_fraction_label(float(lower_mm), float(upper_mm))
+            if lower_mm <= 0:
+                interval = f"<{_format_mm(float(upper_mm))} mm"
+            else:
+                interval = f"{_format_mm(float(lower_mm))}-{_format_mm(float(upper_mm))} mm"
+            rows.append(
+                {
+                    "fraction": fraction,
+                    "lower_mm": float(lower_mm),
+                    "upper_mm": float(upper_mm),
+                    "interval": interval,
+                    "weight_pct": weight_pct,
+                    "tick_label": f"{fraction}\n{interval}",
+                }
+            )
+        return rows
+
+    def _plot_histogram(self):
+        if not self.plot_widget:
+            return
+        self.plot_widget.figure.clear()
+        ax = self.plot_widget.figure.add_subplot(111)
+        rows = self._histogram_rows()
+        weights = np.array([row["weight_pct"] for row in rows], dtype=float)
+        tick_labels = [str(row["tick_label"]) for row in rows]
         style = self.plot_widget.current_style if self.plot_widget else None
 
         if style:
-            ax.bar(range(len(sizes)), freq,
-                   tick_label=[f"{s:.3f}" for s in sizes],
+            ax.bar(range(len(rows)), weights,
+                   tick_label=tick_labels,
                    color=style.curve_color, alpha=0.8,
                    edgecolor='black', linewidth=0.8)
-            ax.set_xlabel('Grain Size (mm)', fontsize=style.label_fontsize,
+            ax.set_xlabel('Particle-size fraction (ISO 14688)', fontsize=style.label_fontsize,
                           fontfamily=style.font_family)
-            ax.set_ylabel('Frequency (%)', fontsize=style.label_fontsize,
+            ax.set_ylabel('Weight (%)', fontsize=style.label_fontsize,
                           fontfamily=style.font_family)
             ax.set_title(
                 f'Grain Size Histogram - {self.dataset.sample_name}',
@@ -1030,10 +1142,10 @@ class PlotWorkspace(QWidget):
                         linestyle=style.grid_linestyle,
                         color=style.grid_color, linewidth=style.grid_linewidth)
         else:
-            ax.bar(range(len(sizes)), freq,
-                   tick_label=[f"{s:.3f}" for s in sizes])
-            ax.set_xlabel('Grain Size (mm)')
-            ax.set_ylabel('Frequency (%)')
+            ax.bar(range(len(rows)), weights,
+                   tick_label=tick_labels)
+            ax.set_xlabel('Particle-size fraction (ISO 14688)')
+            ax.set_ylabel('Weight (%)')
             ax.set_title(
                 f'Grain Size Histogram - {self.dataset.sample_name}')
             ax.set_xticklabels(ax.get_xticklabels(), rotation=45,
@@ -1119,23 +1231,35 @@ class PlotWorkspace(QWidget):
         if self.current_plot_type in ["combined", "k-values"]:
             self.refresh_plot()
 
+    @staticmethod
+    def _with_extension(file_path: str, extension: str) -> str:
+        suffix = f".{extension.lower().lstrip('.')}"
+        return file_path if file_path.lower().endswith(suffix) else f"{file_path}{suffix}"
+
     def export_plot(self, format: str):
         if not self.plot_widget:
             return
+        normalized_format = format.lower().lstrip(".")
         file_filter = {
             "png": "PNG Files (*.png)",
             "svg": "SVG Files (*.svg)",
         }
         file_path, _ = QFileDialog.getSaveFileName(
             self,
-            f"Export Plot as {format.upper()}",
-            f"{self.dataset.sample_name}_plot.{format}",
-            file_filter.get(format, "All Files (*)"),
+            f"Export Plot as {normalized_format.upper()}",
+            f"{self.dataset.sample_name}_plot.{normalized_format}",
+            file_filter.get(normalized_format, "All Files (*)"),
         )
         if file_path:
             try:
+                file_path = self._with_extension(file_path, normalized_format)
                 self.plot_widget.figure.savefig(
-                    file_path, dpi=300, bbox_inches='tight')
+                    file_path,
+                    format=normalized_format,
+                    dpi=300,
+                    bbox_inches='tight',
+                    facecolor=self.plot_widget.figure.get_facecolor(),
+                )
                 self.plot_exported.emit(file_path)
                 QMessageBox.information(
                     self, "Export Successful",
@@ -1155,14 +1279,32 @@ class PlotWorkspace(QWidget):
         if file_path:
             try:
                 import csv
+                file_path = self._with_extension(file_path, "csv")
                 with open(file_path, 'w', newline='') as f:
                     writer = csv.writer(f)
-                    writer.writerow(["Grain Size (mm)", "Percent Passing (%)"])
-                    for size, passing in zip(
-                        self.dataset.particle_sizes,
-                        self.dataset.percent_passing,
-                    ):
-                        writer.writerow([size, passing])
+                    if self.current_plot_type == "histogram":
+                        writer.writerow([
+                            "Particle-size fraction",
+                            "Lower size (mm)",
+                            "Upper size (mm)",
+                            "Interval",
+                            "Weight (%)",
+                        ])
+                        for row in self._histogram_rows():
+                            writer.writerow([
+                                row["fraction"],
+                                row["lower_mm"],
+                                row["upper_mm"],
+                                row["interval"],
+                                row["weight_pct"],
+                            ])
+                    else:
+                        writer.writerow(["Grain Size (mm)", "Percent Passing (%)"])
+                        for size, passing in zip(
+                            self.dataset.particle_sizes,
+                            self.dataset.percent_passing,
+                        ):
+                            writer.writerow([size, passing])
                 QMessageBox.information(
                     self, "Export Successful",
                     f"Data exported to:\n{file_path}")

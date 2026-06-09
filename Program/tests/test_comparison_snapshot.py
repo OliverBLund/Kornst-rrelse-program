@@ -72,6 +72,11 @@ class TestComparisonSnapshot(unittest.TestCase):
         self.assertEqual(snapshot.k.overall.included_count, 3)
         expected_k_geo = math.exp(sum(math.log(v) for v in [1.0e-4, 4.0e-4, 1.0e-2]) / 3)
         self.assertAlmostEqual(snapshot.k.overall.geometric_mean_m_s, expected_k_geo)
+        ln_values = [math.log(v) for v in [1.0e-4, 4.0e-4, 1.0e-2]]
+        mean_ln = sum(ln_values) / len(ln_values)
+        expected_sigma = math.sqrt(sum((value - mean_ln) ** 2 for value in ln_values) / len(ln_values))
+        self.assertAlmostEqual(snapshot.k.overall.ln_std_dev, expected_sigma)
+        self.assertAlmostEqual(snapshot.k.overall.ln_variance, expected_sigma ** 2)
         self.assertEqual(snapshot.grain.overall.dataset_count, 2)
         self.assertEqual(snapshot.grain.overall.metrics["Dmean"].value_count, 2)
         self.assertIn("Layer 1", snapshot.grain.by_group)

@@ -4,13 +4,16 @@ Regression tests for plot workspace wiring across plot modes.
 
 import os
 import sys
+import csv
+import tempfile
 import unittest
+from pathlib import Path
 from types import SimpleNamespace
 
 os.environ.setdefault('QT_QPA_PLATFORM', 'offscreen')
 sys.path.insert(0, 'Program')
 
-from PyQt6.QtWidgets import QApplication
+from PyQt6.QtWidgets import QApplication, QFileDialog, QMessageBox
 
 from data_loader import GrainSizeData
 from gui.plot_workspace import PlotWorkspace
@@ -182,6 +185,45 @@ class TestPlotWorkspaceWiring(unittest.TestCase):
 
         self.assertTrue(all(height >= 0 for height in heights))
         self.assertAlmostEqual(sum(heights), 100.0, places=6)
+        self.assertEqual(ax.get_ylabel(), 'Weight (%)')
+        tick_labels = [tick.get_text() for tick in ax.get_xticklabels()]
+        self.assertTrue(any('sand' in label.lower() for label in tick_labels))
+        self.assertTrue(any('gravel' in label.lower() for label in tick_labels))
+
+    def test_histogram_export_data_writes_fraction_weight_rows(self):
+        self.workspace.current_plot_type = 'histogram'
+        self.workspace.refresh_plot()
+
+        original_dialog = QFileDialog.getSaveFileName
+        original_info = QMessageBox.information
+        with tempfile.TemporaryDirectory() as tmp:
+            out_path = Path(tmp) / 'histogram_export'
+            QFileDialog.getSaveFileName = staticmethod(
+                lambda *args, **kwargs: (str(out_path), 'CSV Files (*.csv)')
+            )
+            QMessageBox.information = staticmethod(lambda *args, **kwargs: None)
+            try:
+                self.workspace.export_data()
+            finally:
+                QFileDialog.getSaveFileName = original_dialog
+                QMessageBox.information = original_info
+
+            written = out_path.with_suffix('.csv')
+            with written.open(newline='') as handle:
+                rows = list(csv.reader(handle))
+
+        self.assertEqual(
+            rows[0],
+            [
+                'Particle-size fraction',
+                'Lower size (mm)',
+                'Upper size (mm)',
+                'Interval',
+                'Weight (%)',
+            ],
+        )
+        self.assertTrue(any('sand' in row[0].lower() for row in rows[1:]))
+        self.assertAlmostEqual(sum(float(row[4]) for row in rows[1:]), 100.0, places=6)
 
     def test_k_value_sidebar_context_hides_distribution_specific_controls(self):
         self.workspace.add_k_results({'Hazen': 1.0e-4, 'Beyer': 1.5e-4})
@@ -229,6 +271,26 @@ class TestPlotWorkspaceWiring(unittest.TestCase):
         self.assertTrue(any(line.get_visible() for line in ax.yaxis.get_gridlines()))
         self.assertIn('////', hatches)
 
+    def test_k_value_plot_legend_clarifies_arithmetic_and_geometric_means(self):
+        self.workspace.add_k_results({'Hazen': 1.0e-4, 'Beyer': 1.6e-4})
+        self.workspace.current_plot_type = 'k-values'
+
+        self.workspace.refresh_plot()
+
+        labels = self.workspace.plot_widget.current_ax.get_legend_handles_labels()[1]
+        self.assertTrue(any(label.startswith('Arithmetic mean:') for label in labels))
+        self.assertTrue(any(label.startswith('Geometric mean:') for label in labels))
+
+    def test_k_value_label_toggle_hides_bar_value_labels(self):
+        self.workspace.add_k_results({'Hazen': 1.0e-4, 'Beyer': 1.5e-4})
+        self.workspace.current_plot_type = 'k-values'
+
+        self.workspace._sw_k_labels.setChecked(False, animate=False)
+        self.workspace._on_sidebar_toggle_changed(False)
+
+        ax = self.workspace.plot_widget.current_ax
+        self.assertEqual(len(ax.texts), 0)
+
     def test_k_value_plot_places_value_labels_close_to_bar_tops(self):
         self.workspace.add_k_results({'Hazen': 1.0e-4, 'Beyer': 1.5e-4})
         self.workspace.current_plot_type = 'k-values'
@@ -243,6 +305,32 @@ class TestPlotWorkspaceWiring(unittest.TestCase):
             ratio = text.get_position()[1] / bar.get_height()
             self.assertGreater(ratio, 1.0)
             self.assertLess(ratio, 1.05)
+
+    def test_svg_export_adds_extension_and_uses_requested_format(self):
+        self.workspace.current_plot_type = 'distribution'
+        self.workspace.refresh_plot()
+
+        original_dialog = QFileDialog.getSaveFileName
+        original_info = QMessageBox.information
+        with tempfile.TemporaryDirectory() as tmp:
+            out_path = Path(tmp) / 'plot_without_extension'
+            exported = []
+            self.workspace.plot_exported.connect(exported.append)
+            QFileDialog.getSaveFileName = staticmethod(
+                lambda *args, **kwargs: (str(out_path), 'SVG Files (*.svg)')
+            )
+            QMessageBox.information = staticmethod(lambda *args, **kwargs: None)
+            try:
+                self.workspace.export_plot('svg')
+            finally:
+                QFileDialog.getSaveFileName = original_dialog
+                QMessageBox.information = original_info
+
+            written = out_path.with_suffix('.svg')
+            content = written.read_text(encoding='utf-8', errors='ignore')
+
+        self.assertEqual(exported, [str(written)])
+        self.assertIn('<svg', content[:200].lower())
 
     def test_cumulative_plot_respects_marker_toggle(self):
         self.workspace.current_plot_type = 'cumulative'

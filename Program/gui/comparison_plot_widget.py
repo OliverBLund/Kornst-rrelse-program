@@ -7,7 +7,8 @@ import math
 from PyQt6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QFrame, QPushButton,
     QComboBox, QLabel, QButtonGroup, QSizePolicy, QScrollArea,
-    QColorDialog, QFileDialog, QMessageBox,
+    QColorDialog, QFileDialog, QMessageBox, QTableWidget, QTableWidgetItem,
+    QHeaderView, QAbstractItemView,
 )
 from PyQt6.QtCore import Qt, pyqtSignal, QSize, QPropertyAnimation, QEasingCurve
 from PyQt6.QtGui import QColor
@@ -24,6 +25,7 @@ from .plot_renderers import (
     apply_legend_aware_layout,
     build_legend_kwargs,
     render_distribution_overlay,
+    render_k_distribution_function,
     render_k_overlay,
     _style_k_bar_simple,
     _add_flagged_legend_handle,
@@ -36,7 +38,9 @@ from .sidebar_controls import (
     make_spin_row, make_toggle_row, set_swatch_color,
 )
 from .theme import C, SZ, apply_matplotlib_style, icon
-from k_aggregation import UNGROUPED_LABEL, dataset_group_name
+from analysis.comparison_snapshot import ComparisonSnapshotOptions, build_comparison_snapshot
+from k_aggregation import KAggregationOptions, UNGROUPED_LABEL, dataset_group_name
+from unit_conversions import HydraulicConductivityConverter, HydraulicConductivityUnit, get_default_plot_unit
 
 
 def _cmp_sep() -> QFrame:
@@ -111,6 +115,7 @@ class ComparisonPlotWidget(QWidget):
         self.show_grid = True
         self.show_legend = True
         self.sidebar_visible = False
+        self.display_unit: HydraulicConductivityUnit = get_default_plot_unit()
 
         # Active style — swapped by set_style(). Starts at the Professional preset
         # so the comparison view now honors the preset selector (previously it was
@@ -122,9 +127,11 @@ class ComparisonPlotWidget(QWidget):
         self.datasets = []
         self.k_results_dict = {}  # dataset_name -> k_results
         self.flagged_methods_dict = {}  # dataset_name -> set(method_name)
+        self._comparison_snapshot = None
         self._dataset_groups: Dict[str, str] = {}
         self._group_color_map: Dict[str, str] = {}
         self._dataset_linestyles: Dict[str, str] = {}
+        self.drawer_visible = False
         self.current_ax = None
         self._default_limits = {}
         self._pan_state = None
@@ -193,7 +200,11 @@ class ComparisonPlotWidget(QWidget):
         self.canvas.mpl_connect("scroll_event", self._on_canvas_scroll)
         self.canvas.mpl_connect("motion_notify_event", self._on_canvas_motion)
         self.canvas.mpl_connect("button_release_event", self._on_canvas_release)
+        self.canvas.setMinimumHeight(220)
         chart_lay.addWidget(self.canvas, 1)
+
+        self._drawer = self._build_data_drawer()
+        chart_lay.addWidget(self._drawer, 0)
 
         self._toggle_handle = QPushButton(self._chart_area)
         self._toggle_handle.setObjectName("pw-toggle-handle")
@@ -211,10 +222,94 @@ class ComparisonPlotWidget(QWidget):
         self._sidebar_anim.setEasingCurve(QEasingCurve.Type.InOutQuad)
         self._sidebar_anim.valueChanged.connect(self._on_sidebar_width_changed)
 
+        self._drawer_anim = QPropertyAnimation(self._drawer, b"maximumHeight")
+        self._drawer_anim.setDuration(180)
+        self._drawer_anim.setEasingCurve(QEasingCurve.Type.InOutQuad)
+
         layout.addWidget(body, 1)
 
         # Seed sidebar style widgets with the initial preset's values.
         self._sync_sidebar_style_widgets(self.current_style)
+
+    def _build_data_drawer(self) -> QFrame:
+        """Collapsible table drawer for the data behind the active plot."""
+        drawer = QFrame()
+        drawer.setObjectName("cmp-data-drawer")
+        drawer.setMaximumHeight(32)
+        drawer.setMinimumHeight(0)
+        drawer.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Maximum)
+        drawer.setStyleSheet(f"""
+            QFrame#cmp-data-drawer {{
+                background: {C.BG_RAISED};
+                border-top: 1px solid {C.BORDER};
+            }}
+            QTableWidget#cmp-drawer-table {{
+                background: {C.BG};
+                border: none;
+                gridline-color: transparent;
+                color: {C.TEXT};
+            }}
+            QTableWidget#cmp-drawer-table::item {{
+                border-bottom: 1px solid rgba(212,196,168,0.35);
+                padding: 3px 7px;
+            }}
+            QHeaderView::section {{
+                background: {C.BG_LOW};
+                color: {C.TEXT_MID};
+                border: none;
+                border-bottom: 1px solid {C.BORDER};
+                padding: 5px 7px;
+                font-weight: 600;
+            }}
+        """)
+
+        lay = QVBoxLayout(drawer)
+        lay.setContentsMargins(0, 0, 0, 0)
+        lay.setSpacing(0)
+
+        header = QWidget()
+        header.setFixedHeight(32)
+        header_lay = QHBoxLayout(header)
+        header_lay.setContentsMargins(8, 3, 8, 3)
+        header_lay.setSpacing(6)
+
+        self._drawer_toggle_btn = _cmp_chk(
+            " Table", "Show data for the active plot", False, "fa6s.table"
+        )
+        self._drawer_toggle_btn.clicked.connect(self._toggle_drawer)
+        header_lay.addWidget(self._drawer_toggle_btn)
+
+        self._drawer_title = QLabel("Plot data")
+        self._drawer_title.setStyleSheet(
+            f"color: {C.TEXT_MID}; font-size: 10px; background: transparent;"
+        )
+        header_lay.addWidget(self._drawer_title, 1)
+
+        self._drawer_count = QLabel("")
+        self._drawer_count.setStyleSheet(
+            f"color: {C.TEXT_MUTED}; font-size: 10px; background: transparent;"
+        )
+        header_lay.addWidget(self._drawer_count)
+        lay.addWidget(header)
+
+        self._drawer_table = QTableWidget()
+        self._drawer_table.setObjectName("cmp-drawer-table")
+        self._drawer_table.setEditTriggers(QTableWidget.EditTrigger.NoEditTriggers)
+        self._drawer_table.setSelectionMode(QAbstractItemView.SelectionMode.NoSelection)
+        self._drawer_table.setAlternatingRowColors(False)
+        self._drawer_table.setShowGrid(False)
+        self._drawer_table.verticalHeader().setVisible(False)
+        self._drawer_table.horizontalHeader().setStretchLastSection(True)
+        self._drawer_table.horizontalHeader().setMinimumSectionSize(72)
+        self._drawer_table.horizontalHeader().setSectionResizeMode(QHeaderView.ResizeMode.ResizeToContents)
+        self._drawer_table.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAsNeeded)
+        self._drawer_table.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAsNeeded)
+        self._drawer_table.setHorizontalScrollMode(QAbstractItemView.ScrollMode.ScrollPerPixel)
+        self._drawer_table.setVerticalScrollMode(QAbstractItemView.ScrollMode.ScrollPerPixel)
+        self._drawer_table.setVisible(False)
+        lay.addWidget(self._drawer_table, 1)
+
+        return drawer
     
     def create_toolbar(self):
         """Create the toolbar with plot controls."""
@@ -226,6 +321,7 @@ class ComparisonPlotWidget(QWidget):
 
         plot_label = QLabel("Plot")
         plot_label.setStyleSheet("color: #6a6254;")
+        self._tb_plot_label = plot_label
         row.addWidget(plot_label)
 
         self.plot_selector = QComboBox()
@@ -233,11 +329,12 @@ class ComparisonPlotWidget(QWidget):
         self.plot_selector.addItems([
             "Distribution",
             "K-Values",
+            "K Distribution",
             "Combined",
             "Cumulative",
             "Histogram",
         ])
-        self.plot_selector.setMaximumWidth(118)
+        self.plot_selector.setMaximumWidth(134)
         self.plot_selector.currentTextChanged.connect(self.on_plot_type_changed)
         row.addWidget(self.plot_selector)
 
@@ -245,6 +342,7 @@ class ComparisonPlotWidget(QWidget):
 
         mode_label = QLabel("View")
         mode_label.setStyleSheet("color: #6a6254;")
+        self._tb_mode_label = mode_label
         row.addWidget(mode_label)
 
         mode_frame = QFrame()
@@ -309,6 +407,7 @@ class ComparisonPlotWidget(QWidget):
         # Style preset — drives the PlotStyle used by every render call.
         style_label = QLabel("Style")
         style_label.setStyleSheet("color: #6a6254;")
+        self._tb_style_label = style_label
         row.addWidget(style_label)
 
         self.style_selector = QComboBox()
@@ -320,13 +419,17 @@ class ComparisonPlotWidget(QWidget):
         self.style_selector.currentTextChanged.connect(self._on_style_preset_changed)
         row.addWidget(self.style_selector)
 
-        row.addWidget(_cmp_sep())
-
         self._tb_sidebar_btn = _cmp_chk(
             " Controls", "Toggle controls panel", False, "fa6s.sliders"
         )
         self._tb_sidebar_btn.clicked.connect(self._toggle_sidebar)
         row.addWidget(self._tb_sidebar_btn)
+
+        self._tb_drawer_btn = _cmp_chk(
+            " Table", "Toggle active plot data drawer", False, "fa6s.table"
+        )
+        self._tb_drawer_btn.clicked.connect(self._toggle_drawer)
+        row.addWidget(self._tb_drawer_btn)
 
         row.addWidget(_cmp_sep())
 
@@ -355,6 +458,22 @@ class ComparisonPlotWidget(QWidget):
         """Keep the sidebar toggle handle aligned to the chart edge."""
         super().resizeEvent(event)
         self._position_toggle_handle()
+        self._update_responsive_chrome()
+        if self.drawer_visible and hasattr(self, "_drawer"):
+            self._drawer.setMaximumHeight(self._drawer_open_height())
+
+    def _update_responsive_chrome(self) -> None:
+        width = self.width()
+        if hasattr(self, "_interaction_hint"):
+            self._interaction_hint.setVisible(width >= 900)
+        for label_name in ("_tb_plot_label", "_tb_mode_label", "_tb_style_label"):
+            label = getattr(self, label_name, None)
+            if label is not None:
+                label.setVisible(width >= 760)
+        if hasattr(self, "style_selector"):
+            self.style_selector.setMaximumWidth(118 if width >= 820 else 96)
+        if hasattr(self, "plot_selector"):
+            self.plot_selector.setMaximumWidth(134 if width >= 820 else 114)
 
     def _position_toggle_handle(self) -> None:
         if not hasattr(self, "_toggle_handle") or not hasattr(self, "_chart_area"):
@@ -363,6 +482,33 @@ class ComparisonPlotWidget(QWidget):
         handle_h = 40
         y = max(0, (self._chart_area.height() - handle_h) // 2)
         self._toggle_handle.setGeometry(0, y, handle_w, handle_h)
+
+    def _toggle_drawer(self) -> None:
+        self._set_drawer_visible(not self.drawer_visible)
+
+    def _set_drawer_visible(self, visible: bool) -> None:
+        self.drawer_visible = bool(visible)
+        target = self._drawer_open_height() if self.drawer_visible else 32
+        self._drawer_table.setVisible(self.drawer_visible)
+        self._drawer_anim.stop()
+        self._drawer_anim.setStartValue(self._drawer.height())
+        self._drawer_anim.setEndValue(target)
+        self._drawer_anim.start()
+
+        for button in (
+            getattr(self, "_tb_drawer_btn", None),
+            getattr(self, "_drawer_toggle_btn", None),
+        ):
+            if button is None:
+                continue
+            button.blockSignals(True)
+            button.setChecked(self.drawer_visible)
+            button.blockSignals(False)
+            _sync_cmp_chk(button, self.drawer_visible)
+
+    def _drawer_open_height(self) -> int:
+        available = max(360, self.height())
+        return min(260, max(130, int(available * 0.34)))
 
     def _toggle_sidebar(self) -> None:
         self.sidebar_visible = not self.sidebar_visible
@@ -513,6 +659,26 @@ class ComparisonPlotWidget(QWidget):
         self._sect_advanced.add_widget(reset_row)
         lay.addWidget(self._sect_advanced)
 
+        self._sect_units = CollapsibleSection(
+            "K-Value Units", "fa6s.scale-balanced",
+            CollapsibleSection.EARTH, expanded=False,
+        )
+        self._unit_combo = QComboBox()
+        self._unit_combo.setObjectName("pw-style-sel")
+        all_units = HydraulicConductivityConverter.get_all_units()
+        for unit, symbol in all_units.items():
+            self._unit_combo.addItem(symbol, unit)
+        default_index = self._unit_combo.findData(self.display_unit)
+        if default_index >= 0:
+            self._unit_combo.setCurrentIndex(default_index)
+        self._unit_combo.currentIndexChanged.connect(self._on_unit_changed)
+        self._row_units = QWidget()
+        unit_lay = QHBoxLayout(self._row_units)
+        unit_lay.setContentsMargins(10, 5, 10, 5)
+        unit_lay.addWidget(self._unit_combo)
+        self._sect_units.add_widget(self._row_units)
+        lay.addWidget(self._sect_units)
+
         # ── Export ──
         self._sect_export = CollapsibleSection(
             "Export", "fa6s.download",
@@ -534,6 +700,7 @@ class ComparisonPlotWidget(QWidget):
         lay.addWidget(self._sect_export)
 
         lay.addStretch(1)
+        self._sync_contextual_sidebar_sections()
         return sidebar
 
     # ── Sidebar handlers ───────────────────────────────────────────
@@ -739,6 +906,7 @@ class ComparisonPlotWidget(QWidget):
         plot_map = {
             "Distribution": "distribution",
             "K-Values": "k-values",
+            "K Distribution": "k-distribution",
             "Combined": "combined",
             "Cumulative": "cumulative",
             "Histogram": "histogram"
@@ -775,8 +943,19 @@ class ComparisonPlotWidget(QWidget):
 
         if self.current_plot_type in ["combined", "histogram"] and self.display_mode == "overlay":
             self.display_mode = "grid"
+        if self.current_plot_type == "k-distribution" and self.display_mode != "overlay":
+            self.display_mode = "overlay"
 
         self._sync_mode_radios()
+        self._sync_contextual_sidebar_sections()
+
+    def _sync_contextual_sidebar_sections(self) -> None:
+        if not hasattr(self, "_sect_units"):
+            return
+        show_units = self.current_plot_type in {"k-values", "k-distribution", "combined"}
+        self._sect_units.setVisible(show_units)
+        if hasattr(self, "_row_units"):
+            self._row_units.setVisible(show_units)
 
     def _sync_mode_radios(self):
         """Reflect the active display mode in the radio buttons without re-entering."""
@@ -863,6 +1042,49 @@ class ComparisonPlotWidget(QWidget):
         self._style_is_custom = False
         self.set_style(get_style(preset_name))
 
+    def _on_unit_changed(self) -> None:
+        selected_unit = self._unit_combo.currentData() if hasattr(self, "_unit_combo") else None
+        if selected_unit:
+            self.set_display_unit(selected_unit)
+
+    def set_display_unit(self, unit: HydraulicConductivityUnit) -> None:
+        """Set K-value display unit and refresh K-bearing comparison plots."""
+        self.display_unit = unit
+        if hasattr(self, "_unit_combo"):
+            idx = self._unit_combo.findData(unit)
+            if idx >= 0 and idx != self._unit_combo.currentIndex():
+                self._unit_combo.blockSignals(True)
+                self._unit_combo.setCurrentIndex(idx)
+                self._unit_combo.blockSignals(False)
+        self.refresh_plot()
+
+    def _unit_symbol(self) -> str:
+        return HydraulicConductivityConverter.UNIT_SYMBOLS[self.display_unit]
+
+    def _k_axis_label(self) -> str:
+        return f"Hydraulic Conductivity K ({self._unit_symbol()})"
+
+    def _convert_k_value(self, value_m_s: Optional[float]) -> Optional[float]:
+        if value_m_s is None:
+            return None
+        return HydraulicConductivityConverter.convert_from_m_per_s(
+            value_m_s, self.display_unit
+        )
+
+    def _convert_k_dict(self, k_dict: Dict[str, float]) -> Dict[str, float]:
+        converted: Dict[str, float] = {}
+        for method, value in k_dict.items():
+            display_value = self._convert_k_value(value)
+            if display_value is not None:
+                converted[method] = display_value
+        return converted
+
+    def _display_k_results_dict(self) -> Dict[str, Dict[str, float]]:
+        return {
+            name: self._convert_k_dict(k_dict)
+            for name, k_dict in self.k_results_dict.items()
+        }
+
     def _on_legend_loc_changed(self, index: int) -> None:
         if index < 0 or index >= len(_CMP_LEGEND_LOCATIONS):
             return
@@ -918,6 +1140,16 @@ class ComparisonPlotWidget(QWidget):
         self.datasets = []
         self.k_results_dict = {}
         self.flagged_methods_dict = {}
+        self._comparison_snapshot = build_comparison_snapshot(
+            dataset_tabs,
+            ComparisonSnapshotOptions(
+                k_options=KAggregationOptions(
+                    include_warnings=False,
+                    include_errors=False,
+                    method_order=tuple(DEFAULT_METHOD_ORDER),
+                )
+            ),
+        )
         
         for tab in dataset_tabs:
             dataset = tab.get_dataset()
@@ -959,6 +1191,8 @@ class ComparisonPlotWidget(QWidget):
             self.plot_distribution()
         elif self.current_plot_type == "k-values":
             self.plot_k_values()
+        elif self.current_plot_type == "k-distribution":
+            self.plot_k_distribution()
         elif self.current_plot_type == "combined":
             self.plot_combined()
         elif self.current_plot_type == "cumulative":
@@ -970,6 +1204,7 @@ class ComparisonPlotWidget(QWidget):
         self._capture_default_limits()
         self._apply_active_axes_styling()
         self._apply_figure_layout()
+        self._refresh_drawer()
         self.canvas.draw()
         self.plot_updated.emit()
 
@@ -1100,13 +1335,14 @@ class ComparisonPlotWidget(QWidget):
         ax = self.figure.add_subplot(1, 1, 1)
 
         render_k_overlay(
-            ax, self.k_results_dict,
+            ax, self._display_k_results_dict(),
             flagged_methods_dict=self.flagged_methods_dict,
             colors=self._effective_dataset_colors(),
             style=self.current_style,
             show_grid=self.show_grid,
             show_legend=self.show_legend,
             show_value_labels=True,
+            y_label=f"K ({self._unit_symbol()})",
         )
     
     def plot_k_values_grouped(self):
@@ -1114,12 +1350,13 @@ class ComparisonPlotWidget(QWidget):
         ax = self.figure.add_subplot(1, 1, 1)
         ax.set_axisbelow(True)
         
-        datasets = list(self.k_results_dict.keys())
+        display_results = self._display_k_results_dict()
+        datasets = list(display_results.keys())
         n_datasets = len(datasets)
         
         # Get all methods for each dataset
         all_methods = set()
-        for k_dict in self.k_results_dict.values():
+        for k_dict in display_results.values():
             all_methods.update(k_dict.keys())
         methods = self._ordered_methods(all_methods)
         
@@ -1129,7 +1366,7 @@ class ComparisonPlotWidget(QWidget):
         # Plot grouped by dataset
         has_flagged = False
         for i, method in enumerate(methods):
-            values = [self.k_results_dict[ds].get(method, 0) for ds in datasets]
+            values = [display_results[ds].get(method, 0) for ds in datasets]
             positions = np.arange(n_datasets) + i * bar_width
             color = self.method_colors.get(method, '#888888')
             
@@ -1142,7 +1379,7 @@ class ComparisonPlotWidget(QWidget):
             positive_values.extend(value for value in values if value > 0)
         
         ax.set_xlabel('Dataset', fontsize=10)
-        ax.set_ylabel('K (m/s)', fontsize=10)
+        ax.set_ylabel(f"K ({self._unit_symbol()})", fontsize=10)
         ax.set_title('K-Values by Dataset', fontsize=12, fontweight='bold')
         ax.set_xticks(np.arange(n_datasets) + bar_width * (len(methods) - 1) / 2)
         ax.set_xticklabels(datasets, rotation=45, ha='right', fontsize=8)
@@ -1161,7 +1398,7 @@ class ComparisonPlotWidget(QWidget):
         """Plot K-values in grid layout"""
         rows, cols = self.grid_layout
         
-        for i, (name, k_dict) in enumerate(self.k_results_dict.items()):
+        for i, (name, k_dict) in enumerate(self._display_k_results_dict().items()):
             if i >= rows * cols:
                 break
             
@@ -1180,7 +1417,7 @@ class ComparisonPlotWidget(QWidget):
             
             ax.set_title(name, fontsize=9, fontweight='bold')
             ax.set_xlabel('Method', fontsize=8)
-            ax.set_ylabel('K (m/s)', fontsize=8)
+            ax.set_ylabel(f"K ({self._unit_symbol()})", fontsize=8)
             ax.set_xticks(range(len(methods)))
             ax.set_xticklabels(
                 [format_method_label(method, tiny=True) for method in methods],
@@ -1193,6 +1430,72 @@ class ComparisonPlotWidget(QWidget):
             
             if self.show_grid:
                 ax.grid(True, axis='y', alpha=0.3)
+
+    def plot_k_distribution(self):
+        """Plot aggregate/group empirical distribution functions for K."""
+        if not self._comparison_snapshot or not self._comparison_snapshot.k.included_records:
+            self.show_empty_state("No K-values available for K distribution")
+            return
+
+        scopes = self._k_distribution_scopes()
+        if not scopes:
+            self.show_empty_state("No positive K-values available for K distribution")
+            return
+
+        ax = self.figure.add_subplot(1, 1, 1)
+        render_k_distribution_function(
+            ax,
+            scopes,
+            style=self.current_style,
+            show_grid=self.show_grid,
+            show_legend=self.show_legend,
+            x_label=self._k_axis_label(),
+            title="K Distribution Function",
+        )
+
+    def _k_distribution_scopes(self) -> list[dict]:
+        snapshot = self._comparison_snapshot
+        if snapshot is None:
+            return []
+
+        records = [
+            record for record in snapshot.k.included_records
+            if record.positive_value is not None
+        ]
+        if not records:
+            return []
+
+        scopes: list[dict] = [{
+            "label": "Overall",
+            "values": [self._convert_k_value(record.positive_value) for record in records],
+            "color": "#3d4a1f",
+            "linestyle": "-",
+            "is_overall": True,
+        }]
+
+        named_groups = [
+            group for group in snapshot.k.group_names
+            if group and group != UNGROUPED_LABEL
+        ]
+        for index, group_name in enumerate(named_groups):
+            values = [
+                self._convert_k_value(record.positive_value)
+                for record in records
+                if record.group_name == group_name and record.positive_value is not None
+            ]
+            if not values:
+                continue
+            scopes.append({
+                "label": group_name,
+                "values": values,
+                "color": self._group_color_map.get(
+                    group_name,
+                    self.dataset_colors[index % len(self.dataset_colors)],
+                ),
+                "linestyle": "-",
+                "is_overall": False,
+            })
+        return scopes
     
     def plot_combined(self):
         """Plot combined view"""
@@ -1223,7 +1526,7 @@ class ComparisonPlotWidget(QWidget):
             
             # Plot K-values if available
             if dataset.sample_name in self.k_results_dict:
-                k_dict = self.k_results_dict[dataset.sample_name]
+                k_dict = self._convert_k_dict(self.k_results_dict[dataset.sample_name])
                 methods = self._ordered_methods(k_dict.keys())[:5]  # Limit to 5 methods for space
                 values = [k_dict[m] for m in methods]
                 flagged_methods = self.flagged_methods_dict.get(dataset.sample_name, set())
@@ -1239,6 +1542,7 @@ class ComparisonPlotWidget(QWidget):
                     rotation=45,
                     fontsize=6,
                 )
+                ax2.set_ylabel(f"K ({self._unit_symbol()})", fontsize=7)
                 apply_log_bar_limits(ax2, values)
                 ax2.tick_params(labelsize=6)
                 if self.show_grid:
@@ -1275,7 +1579,7 @@ class ComparisonPlotWidget(QWidget):
             
             ax.set_title(dataset.sample_name, fontsize=9, fontweight='bold')
             ax.set_xlabel('Size class', fontsize=8)
-            ax.set_ylabel('Frequency (%)', fontsize=8)
+            ax.set_ylabel('Weight (%)', fontsize=8)
             ax.set_xticks(range(0, len(sizes), max(1, len(sizes)//5)))
             ax.set_xticklabels([f'{s:.2f}' for s in sizes[::max(1, len(sizes)//5)]], 
                               rotation=45, ha='right', fontsize=6)
@@ -1295,7 +1599,156 @@ class ComparisonPlotWidget(QWidget):
         ax.set_yticks([])
         self._capture_default_limits()
         self._apply_active_axes_styling()
+        if hasattr(self, "_drawer_table"):
+            self._set_drawer_rows("Plot data", ["Status"], [(message,)])
         self.canvas.draw()
+
+    def _refresh_drawer(self) -> None:
+        snapshot = self._comparison_snapshot
+        if snapshot is None:
+            self._set_drawer_rows("Plot data", ["Status"], [("No datasets to compare",)])
+            return
+
+        if self.current_plot_type == "k-distribution":
+            headers, rows = self._k_scope_drawer_rows()
+            self._set_drawer_rows("K distribution summary - OK only", headers, rows)
+        elif self.current_plot_type == "k-values":
+            headers, rows = self._k_method_drawer_rows()
+            self._set_drawer_rows("K method summary - OK only", headers, rows)
+        else:
+            headers, rows = self._grain_drawer_rows()
+            self._set_drawer_rows("Grain summary", headers, rows)
+
+    def _set_drawer_rows(self, title: str, headers: list[str], rows: list[tuple]) -> None:
+        self._drawer_title.setText(title)
+        self._drawer_count.setText(f"{len(rows)} rows" if rows else "No rows")
+        self._drawer_table.clear()
+        self._drawer_table.setColumnCount(len(headers))
+        self._drawer_table.setRowCount(len(rows))
+        self._drawer_table.setHorizontalHeaderLabels(headers)
+
+        for row_index, row in enumerate(rows):
+            for col_index, value in enumerate(row):
+                item = QTableWidgetItem(str(value))
+                if col_index > 0:
+                    item.setTextAlignment(
+                        Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter
+                    )
+                self._drawer_table.setItem(row_index, col_index, item)
+
+        self._drawer_table.resizeColumnsToContents()
+        self._drawer_table.resizeRowsToContents()
+
+    def _grain_drawer_rows(self) -> tuple[list[str], list[tuple]]:
+        grain = self._comparison_snapshot.grain
+        headers = [
+            "Scope", "Datasets", "D50", "Mean size", "Cu", "Fines", "Class",
+        ]
+        rows: list[tuple] = []
+
+        def add_row(label: str, stats) -> None:
+            rows.append((
+                label,
+                str(stats.dataset_count),
+                self._fmt_mm(self._grain_metric(stats, "D50", "median")),
+                self._fmt_mm(self._grain_metric(stats, "Dmean", "arithmetic_mean")),
+                self._fmt_number(self._grain_metric(stats, "Cu", "median"), decimals=2),
+                self._fmt_percent(self._grain_metric(stats, "Fines%", "median")),
+                stats.dominant_class,
+            ))
+
+        add_row("Overall", grain.overall)
+        for group_name in grain.group_names:
+            if group_name in grain.by_group and group_name != UNGROUPED_LABEL:
+                add_row(group_name, grain.by_group[group_name])
+        for dataset_name in grain.dataset_names:
+            if dataset_name in grain.by_dataset:
+                add_row(dataset_name, grain.by_dataset[dataset_name])
+        return headers, rows
+
+    def _k_scope_drawer_rows(self) -> tuple[list[str], list[tuple]]:
+        k_report = self._comparison_snapshot.k
+        unit = self._unit_symbol()
+        headers = [
+            "Scope", "Datasets", f"Kgeo ({unit})", f"Arithmetic ({unit})", f"Median ({unit})",
+            "sigma lnK", "Var lnK", "Included", "Warnings",
+        ]
+        rows: list[tuple] = []
+
+        def add_row(label: str, stats) -> None:
+            rows.append((
+                label,
+                str(stats.dataset_count),
+                self._fmt_k(stats.geometric_mean_m_s),
+                self._fmt_k(stats.arithmetic_mean_m_s),
+                self._fmt_k(stats.median_m_s),
+                self._fmt_number(stats.ln_std_dev, decimals=2),
+                self._fmt_number(stats.ln_variance, decimals=2),
+                f"{stats.included_count} / {stats.total_cells}",
+                str(stats.warning_count),
+            ))
+
+        add_row("Overall", k_report.overall)
+        for group_name in k_report.group_names:
+            if group_name in k_report.by_group and group_name != UNGROUPED_LABEL:
+                add_row(group_name, k_report.by_group[group_name])
+        return headers, rows
+
+    def _k_method_drawer_rows(self) -> tuple[list[str], list[tuple]]:
+        k_report = self._comparison_snapshot.k
+        unit = self._unit_symbol()
+        headers = [
+            "Method", "Included", "OK", "Warnings", f"Kgeo ({unit})", f"Median ({unit})", f"Range ({unit})",
+        ]
+        rows: list[tuple] = []
+        for method_name in self._ordered_methods(k_report.by_method.keys()):
+            stats = k_report.by_method[method_name]
+            rows.append((
+                method_name,
+                f"{stats.included_count} / {stats.total_cells}",
+                str(stats.ok_count),
+                str(stats.warning_count),
+                self._fmt_k(stats.geometric_mean_m_s),
+                self._fmt_k(stats.median_m_s),
+                self._fmt_range(stats.min_m_s, stats.max_m_s),
+            ))
+        return headers, rows
+
+    @staticmethod
+    def _grain_metric(stats, metric_name: str, attr_name: str) -> Optional[float]:
+        metric = stats.metrics.get(metric_name) if stats else None
+        return getattr(metric, attr_name, None) if metric else None
+
+    @staticmethod
+    def _fmt_number(value: Optional[float], *, decimals: int = 2) -> str:
+        if value is None:
+            return "-"
+        return f"{float(value):.{decimals}f}"
+
+    @staticmethod
+    def _fmt_mm(value: Optional[float]) -> str:
+        if value is None:
+            return "-"
+        return f"{float(value):.3g} mm"
+
+    @staticmethod
+    def _fmt_percent(value: Optional[float]) -> str:
+        if value is None:
+            return "-"
+        return f"{float(value):.1f}%"
+
+    def _fmt_k(self, value: Optional[float]) -> str:
+        if value is None:
+            return "-"
+        converted = self._convert_k_value(value)
+        if converted is None:
+            return "-"
+        return HydraulicConductivityConverter.DISPLAY_FORMATS[self.display_unit].format(converted)
+
+    def _fmt_range(self, low: Optional[float], high: Optional[float]) -> str:
+        if low is None or high is None:
+            return "-"
+        return f"{self._fmt_k(low)} - {self._fmt_k(high)}"
     
     def zoom_in(self):
         """Zoom in on the active axes."""

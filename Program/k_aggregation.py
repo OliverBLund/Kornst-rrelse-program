@@ -75,6 +75,8 @@ class AggregateStats:
     min_m_s: Optional[float] = None
     max_m_s: Optional[float] = None
     std_dev_m_s: Optional[float] = None
+    ln_std_dev: Optional[float] = None
+    ln_variance: Optional[float] = None
     log10_std_dev: Optional[float] = None
     dataset_names: tuple[str, ...] = ()
     method_names: tuple[str, ...] = ()
@@ -128,6 +130,22 @@ def _results_from_tab(tab: object) -> Sequence[object]:
     if hasattr(tab, "get_results"):
         return list(tab.get_results() or [])
     return list(getattr(tab, "current_results", []) or getattr(tab, "results", []) or [])
+
+
+@dataclass(frozen=True)
+class _ResultSequenceInput:
+    label: str
+    group_name: str
+    results: tuple[object, ...]
+
+    def get_dataset(self) -> object:
+        return self
+
+    def get_dataset_name(self) -> str:
+        return self.label
+
+    def get_results(self) -> tuple[object, ...]:
+        return self.results
 
 
 def _classify_result_status(result: object) -> str:
@@ -192,6 +210,7 @@ def _stats_for(
 
     log_values = [math.log(value) for value in values if value > 0]
     log10_values = [math.log10(value) for value in values if value > 0]
+    ln_std_dev = statistics.pstdev(log_values) if len(log_values) > 1 else 0.0
     return AggregateStats(
         scope_name=scope_name,
         value_count=len(values),
@@ -210,6 +229,8 @@ def _stats_for(
         min_m_s=min(values),
         max_m_s=max(values),
         std_dev_m_s=statistics.pstdev(values) if len(values) > 1 else 0.0,
+        ln_std_dev=ln_std_dev,
+        ln_variance=ln_std_dev * ln_std_dev,
         log10_std_dev=statistics.pstdev(log10_values) if len(log10_values) > 1 else 0.0,
         dataset_names=tuple(dataset_names),
         method_names=tuple(method_names),
@@ -353,3 +374,37 @@ def build_k_aggregation(dataset_tabs: Sequence[object], options: KAggregationOpt
         by_method=by_method,
         complete_methods=frozenset(complete_methods),
     )
+
+
+def build_k_result_aggregation(
+    results: Sequence[object],
+    options: KAggregationOptions | None = None,
+    *,
+    dataset_name: str = "Dataset",
+    group_name: str = UNGROUPED_LABEL,
+) -> KAggregationReport:
+    """Build a K aggregation report for one dataset's calculation results."""
+
+    source = _ResultSequenceInput(
+        label=str(dataset_name or "Dataset"),
+        group_name=normalize_group_name(group_name),
+        results=tuple(results or ()),
+    )
+    return build_k_aggregation([source], options)
+
+
+def build_k_result_summary(
+    results: Sequence[object],
+    options: KAggregationOptions | None = None,
+    *,
+    dataset_name: str = "Dataset",
+    group_name: str = UNGROUPED_LABEL,
+) -> AggregateStats:
+    """Return the shared per-dataset K summary used by GUI, reports, and exports."""
+
+    return build_k_result_aggregation(
+        results,
+        options,
+        dataset_name=dataset_name,
+        group_name=group_name,
+    ).overall

@@ -12,7 +12,7 @@ sys.path.insert(0, "Program")
 from PyQt6.QtCore import Qt
 from PyQt6.QtWidgets import QApplication
 
-from gui.help_dialog import HelpDialog
+from gui.help_dialog import HelpDialog, VIRTUAL_HELP_TOPICS
 
 
 APP = QApplication.instance() or QApplication([])
@@ -31,11 +31,22 @@ class TestHelpDialog(unittest.TestCase):
     def test_all_configured_help_topics_exist_on_disk(self):
         missing = []
         for _title, filename, _icon_name in self.dialog._all_topics():
+            if filename in VIRTUAL_HELP_TOPICS:
+                continue
             file_path = os.path.join(self.dialog.help_dir, filename)
             if not os.path.exists(file_path):
                 missing.append(filename)
 
         self.assertEqual(missing, [])
+
+    def test_changelog_virtual_topic_loads_markdown_source(self):
+        self.dialog.show_help_page("changelog.html")
+        APP.processEvents()
+
+        self.assertEqual(self.dialog.current_help_page, "changelog.html")
+        text = self.dialog.content_browser.toPlainText()
+        self.assertIn("Changelog", text)
+        self.assertIn("0.9.2-beta", text)
 
     def test_dialog_defaults_to_modeless(self):
         self.assertFalse(self.dialog.isModal())

@@ -32,6 +32,7 @@ import numpy as np
 
 from data_loader import GrainSizeData
 from k_calculations import KCalculationResult
+from k_aggregation import build_k_result_summary
 from .theme import C, F
 from grain_classification import (
     ISO14688,
@@ -105,11 +106,11 @@ class CompactInfoBar(QFrame):
         else:
             parts.append("Cu: N/A")
 
-        # Mean K
+        # K geometric mean
         if mean_k:
-            parts.append(f"Mean K: {mean_k:.2e} m/s")
+            parts.append(f"K geo. mean: {mean_k:.2e} m/s")
         else:
-            parts.append("Mean K: Not calculated")
+            parts.append("K geo. mean: Not calculated")
 
         # Soil type
         parts.append(f"Soil: {soil_type}")
@@ -345,6 +346,52 @@ class DataQualityWidget(QGroupBox):
         )
 
         layout.addWidget(self.quality_text)
+
+    def update_dataset(self, dataset: GrainSizeData) -> None:
+        sizes = [float(v) for v in getattr(dataset, "particle_sizes", []) or [] if v is not None]
+        passing = [float(v) for v in getattr(dataset, "percent_passing", []) or [] if v is not None]
+        pairs = sorted(
+            [(s, p) for s, p in zip(sizes, passing) if s > 0],
+            key=lambda pair: pair[0],
+        )
+        if not pairs:
+            self.quality_text.setPlainText(
+                "Data quality basis:\n"
+                "No valid particle-size / percent-passing pairs were found."
+            )
+            return
+
+        sorted_sizes = [s for s, _ in pairs]
+        sorted_passing = [p for _, p in pairs]
+        reversals = sum(
+            1
+            for i in range(len(sorted_passing) - 1)
+            if sorted_passing[i] > sorted_passing[i + 1] + 1e-9
+        )
+        point_count = len(pairs)
+        min_size = min(sorted_sizes)
+        max_size = max(sorted_sizes)
+        range_ratio = max_size / min_size if min_size > 0 else 0.0
+
+        monotonicity = "OK" if reversals == 0 else f"Check ({reversals} reversal{'s' if reversals != 1 else ''})"
+        coverage = "Broad" if range_ratio >= 100 else "Moderate" if range_ratio >= 20 else "Limited"
+        density = "Good" if point_count >= 10 else "Adequate" if point_count >= 6 else "Sparse"
+        if reversals == 0 and point_count >= 6:
+            overall = "Usable"
+        elif reversals == 0:
+            overall = "Usable, sparse"
+        else:
+            overall = "Needs review"
+
+        self.quality_text.setPlainText(
+            "Data quality basis:\n"
+            "Based on the loaded gradation curve only.\n\n"
+            f"Monotonicity: {monotonicity}\n"
+            f"Size coverage: {coverage} ({min_size:.4g}-{max_size:.4g} mm)\n"
+            f"Point density: {density} ({point_count} points)\n\n"
+            f"Overall assessment: {overall}\n"
+            "This does not validate laboratory procedure or sample representativeness."
+        )
 
 
 class SoilClassificationWidget(QGroupBox):
@@ -693,6 +740,9 @@ class StatisticsTab(QWidget):
         # Update soil classification
         self.update_soil_classification()
 
+        # Update data-quality basis text
+        self.quality_widget.update_dataset(self.dataset)
+
     def update_summary_bar(self):
         """Update the compact info bar at the top"""
         d50 = self.dataset.get_d50()
@@ -704,12 +754,15 @@ class StatisticsTab(QWidget):
         if d10 and d60 and d10 > 0:
             cu = d60 / d10
 
-        # Mean K (if calculated)
+        # K geometric mean (if calculated)
         mean_k = None
         if self.k_results:
-            valid_k = [r.k_value for r in self.k_results if r.k_value and r.k_value > 0]
-            if valid_k:
-                mean_k = np.mean(valid_k)
+            summary = build_k_result_summary(
+                self.k_results,
+                dataset_name=self.dataset.sample_name,
+                group_name=getattr(self.dataset, "group_name", "Ungrouped"),
+            )
+            mean_k = summary.geometric_mean_m_s
 
         soil_type = self.dataset.classify(scheme=self._scheme).label
 
@@ -730,27 +783,30 @@ class StatisticsTab(QWidget):
         if not self.k_results:
             return
 
-        # Get valid results
-        valid_results = [r for r in self.k_results if r.k_value and r.k_value > 0]
-
-        if not valid_results:
+        summary = build_k_result_summary(
+            self.k_results,
+            dataset_name=self.dataset.sample_name,
+            group_name=getattr(self.dataset, "group_name", "Ungrouped"),
+        )
+        if summary.geometric_mean_m_s is None:
             return
-
-        k_values = [r.k_value for r in valid_results]
 
         # Populate summary table
         table = self.k_stats_widget.summary_table
         table.setRowCount(0)
 
         metrics = [
-            ("Mean", np.mean(k_values)),
-            ("Median", np.median(k_values)),
-            ("Std Dev", np.std(k_values)),
-            ("Min", np.min(k_values)),
-            ("Max", np.max(k_values)),
+            ("Geometric Mean", summary.geometric_mean_m_s),
+            ("Arithmetic Mean", summary.arithmetic_mean_m_s),
+            ("Median", summary.median_m_s),
+            ("Std Dev", summary.std_dev_m_s),
+            ("Min", summary.min_m_s),
+            ("Max", summary.max_m_s),
         ]
 
         for metric_name, value in metrics:
+            if value is None:
+                continue
             row = table.rowCount()
             table.insertRow(row)
 
@@ -759,11 +815,20 @@ class StatisticsTab(QWidget):
             table.setItem(row, 2, QTableWidgetItem(f"{value * 100:.3e}"))
             table.setItem(row, 3, QTableWidgetItem(f"{value * 86400:.1f}"))
 
-        # Update classification
-        mean_k = np.mean(k_values)
-        classification = _perm_class(mean_k)
+        # Update classification from the aggregate geometric mean.
+        classification = _perm_class(summary.geometric_mean_m_s)
         self.k_stats_widget.classification_label.setText(
             f"Permeability: {classification}"
+        )
+        self.k_stats_widget.agreement_text.setPlainText(
+            "Method Agreement Analysis:\n"
+            "--------------------------------\n\n"
+            f"Included methods: {summary.included_count} / {summary.total_cells}\n"
+            f"Warnings excluded: {summary.warning_count}\n"
+            f"Errors excluded: {summary.error_count}\n"
+            f"ln(K) standard deviation: {summary.ln_std_dev:.3f}"
+            if summary.ln_std_dev is not None
+            else "Method Agreement Analysis:\n--------------------------------\n\nNo included K-values."
         )
 
     def update_soil_classification(self):

@@ -353,6 +353,54 @@ class TestExportManagerExports(unittest.TestCase):
             self.assertEqual(set(payload['percentiles'].keys()), {'D10', 'D95'})
             self.assertEqual(set(payload['statistics'].keys()), {'median_k_cm_s', 'valid_count'})
 
+    def test_export_statistics_use_shared_ok_only_summary(self):
+        warning_result = KCalculationResult(
+            method_name='Kruger',
+            k_value=1.0e-2,
+            formula_used='',
+            status=CalculationStatus.WARNING,
+            status_message='outside recommended range',
+            conditions_met=False,
+            temperature=20.0,
+            porosity=0.35,
+            grain_size_used='D50',
+        )
+        ok_low = KCalculationResult(
+            method_name='Hazen',
+            k_value=1.0e-4,
+            formula_used='',
+            status=CalculationStatus.OK,
+            status_message='',
+            conditions_met=True,
+            temperature=20.0,
+            porosity=0.35,
+            grain_size_used='D10',
+        )
+        ok_high = KCalculationResult(
+            method_name='USBR',
+            k_value=4.0e-4,
+            formula_used='',
+            status=CalculationStatus.OK,
+            status_message='',
+            conditions_met=True,
+            temperature=20.0,
+            porosity=0.35,
+            grain_size_used='D20',
+        )
+
+        config = self.make_config(
+            tempfile.gettempdir(),
+            selected_statistics=['geometric_mean', 'mean', 'valid_count'],
+        )
+        stats = ExportManager()._calculate_statistics(
+            [ok_low, warning_result, ok_high],
+            config,
+        )
+
+        self.assertAlmostEqual(stats['geometric_mean_k'], 2.0e-4)
+        self.assertAlmostEqual(stats['mean_k'], 2.5e-4)
+        self.assertEqual(stats['valid_count'], 2)
+
     def test_excel_export_honors_metadata_and_stat_selection(self):
         try:
             from openpyxl import load_workbook

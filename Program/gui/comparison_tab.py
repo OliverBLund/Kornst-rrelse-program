@@ -421,7 +421,9 @@ class ComparisonTab(QWidget):
 
         # Right sidebar — fixed 180 px
         sidebar = QFrame()
-        sidebar.setFixedWidth(180)
+        sidebar.setMinimumWidth(164)
+        sidebar.setMaximumWidth(210)
+        sidebar.setSizePolicy(QSizePolicy.Policy.Maximum, QSizePolicy.Policy.Expanding)
         sidebar.setStyleSheet(
             f"background: {C.BG_RAISED}; border-left: 1px solid {C.BORDER};"
         )
@@ -430,7 +432,7 @@ class ComparisonTab(QWidget):
         sb_lay.setSpacing(0)
 
         # "DATASETS" header band
-        hdr = QLabel("DATASETS")
+        hdr = QLabel("PLOT SCOPE")
         hdr.setFixedHeight(30)
         hdr.setAlignment(Qt.AlignmentFlag.AlignVCenter | Qt.AlignmentFlag.AlignLeft)
         hdr.setStyleSheet(
@@ -439,6 +441,15 @@ class ComparisonTab(QWidget):
             f"background: {C.BG_LOW}; border-bottom: 1px solid {C.BORDER};"
         )
         sb_lay.addWidget(hdr)
+
+        self._pin_scope_label = QLabel("All selected datasets")
+        self._pin_scope_label.setWordWrap(True)
+        self._pin_scope_label.setFixedHeight(44)
+        self._pin_scope_label.setStyleSheet(
+            f"padding: 6px 10px; font-size: {F.SZ_XS}pt; color: {C.TEXT_MUTED};"
+            f"background: {C.BG}; border-bottom: 1px solid {C.BORDER};"
+        )
+        sb_lay.addWidget(self._pin_scope_label)
 
         # Scrollable pin list
         scroll = QScrollArea()
@@ -464,15 +475,36 @@ class ComparisonTab(QWidget):
             if item.widget():
                 item.widget().deleteLater()
 
+        plot_tabs = self._plot_dataset_tabs()
+        plotted_names = {tab.get_dataset_name() for tab in plot_tabs}
+        named_groups = list(dict.fromkeys(
+            dataset_group_name(tab.get_dataset())
+            for tab in self.selected_datasets
+            if dataset_group_name(tab.get_dataset()) != UNGROUPED_LABEL
+        ))
+        group_colors = self._group_color_map(named_groups)
+        if hasattr(self, "_pin_scope_label"):
+            pin_text = (
+                f"Pinned subset: {len(plot_tabs)} of {len(self.selected_datasets)} datasets"
+                if self._pinned
+                else f"All selected: {len(self.selected_datasets)} datasets"
+            )
+            if named_groups:
+                pin_text += f" in {len(named_groups)} groups"
+            self._pin_scope_label.setText(pin_text)
+
         for i, tab in enumerate(self.selected_datasets):
             name = tab.get_dataset_name()
-            color = DATASET_COLORS[i % len(DATASET_COLORS)]
+            group_name = dataset_group_name(tab.get_dataset())
+            color = group_colors.get(group_name, DATASET_COLORS[i % len(DATASET_COLORS)])
             pinned = name in self._pinned
+            plotted = name in plotted_names
 
             row = QWidget()
-            row.setFixedHeight(34)
+            row.setFixedHeight(44)
             row.setStyleSheet(
-                f"background: transparent; border-bottom: 1px solid {C.BORDER};"
+                f"background: {'rgba(107,142,35,0.06)' if plotted and self._pinned else 'transparent'};"
+                f"border-bottom: 1px solid {C.BORDER};"
             )
             rl = QHBoxLayout(row)
             rl.setContentsMargins(8, 0, 6, 0)
@@ -486,13 +518,26 @@ class ComparisonTab(QWidget):
             dot.setFixedWidth(14)
             rl.addWidget(dot)
 
-            lbl = QLabel(name)
+            text_box = QWidget()
+            text_lay = QVBoxLayout(text_box)
+            text_lay.setContentsMargins(0, 3, 0, 3)
+            text_lay.setSpacing(0)
+            lbl = QLabel(self._short_dataset_name(name, 118))
             lbl.setStyleSheet(
-                f"font-size: {F.SZ_SM}pt; color: {C.TEXT};"
+                f"font-size: {F.SZ_SM}pt; color: {C.TEXT if plotted else C.TEXT_MUTED};"
                 f"background: transparent; border: none;"
             )
             lbl.setToolTip(name)
-            rl.addWidget(lbl, 1)
+            text_lay.addWidget(lbl)
+            group_text = group_name if group_name != UNGROUPED_LABEL else "No group"
+            group_lbl = QLabel(self._short_dataset_name(group_text, 118))
+            group_lbl.setStyleSheet(
+                f"font-size: {F.SZ_XS}pt; color: {C.TEXT_MUTED};"
+                f"background: transparent; border: none;"
+            )
+            group_lbl.setToolTip(group_text)
+            text_lay.addWidget(group_lbl)
+            rl.addWidget(text_box, 1)
 
             pin_btn = QPushButton()
             pin_btn.setFixedSize(22, 22)
@@ -934,6 +979,7 @@ class ComparisonTab(QWidget):
         else:
             self._pinned.add(name)
         self._refresh_pin_list()
+        self._update_plot()
 
     # ── Details tab ───────────────────────────────────────────────────────────
 
@@ -2281,8 +2327,6 @@ class ComparisonTab(QWidget):
 
         active_names = {tab.get_dataset_name() for tab in self.selected_datasets}
         self._pinned = {name for name in self._pinned if name in active_names}
-        if not self._pinned and active_names:
-            self._pinned = set(active_names)
 
         enabled = len(self.selected_datasets) >= 2
         self._update_btn.setEnabled(enabled)
@@ -2347,10 +2391,11 @@ class ComparisonTab(QWidget):
     def _update_header_count(self) -> None:
         n_loaded = len(self.dataset_tabs)
         n_selected = len(self.selected_datasets)
-        n_pinned = len(self._pinned)
+        n_plotted = len(self._plot_dataset_tabs()) if self.selected_datasets else 0
+        plot_scope = f"{n_plotted} pinned in plot" if self._pinned else "all selected plotted"
         self._count_label.setText(
             "Load datasets to compare" if n_loaded == 0
-            else f"{n_selected} selected  ·  {n_loaded} loaded  ·  {n_pinned} pinned in view"
+            else f"{n_selected} selected  ·  {n_loaded} loaded  ·  {plot_scope}"
         )
         self._manage_btn.setEnabled(n_loaded >= 1)
         if hasattr(self, "_details_scope_btn"):
@@ -2396,13 +2441,23 @@ class ComparisonTab(QWidget):
                 paths.append(file_path)
         return paths
 
+    def _plot_dataset_tabs(self) -> list:
+        """Return the selected datasets currently visible in the plot."""
+        if not self._pinned:
+            return list(self.selected_datasets)
+        pinned_tabs = [
+            tab for tab in self.selected_datasets
+            if tab.get_dataset_name() in self._pinned
+        ]
+        return pinned_tabs or list(self.selected_datasets)
+
     def _update_plot(self) -> None:
         """Push datasets into the comparison plot widget."""
         if not self.selected_datasets:
             if hasattr(self._plot_widget, "show_empty_state"):
                 self._plot_widget.show_empty_state("Select datasets and click Update")
             return
-        self._plot_widget.set_datasets(self.selected_datasets)
+        self._plot_widget.set_datasets(self._plot_dataset_tabs())
         if hasattr(self._plot_widget, "refresh_plot"):
             self._plot_widget.refresh_plot()
 

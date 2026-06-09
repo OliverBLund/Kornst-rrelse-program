@@ -12,6 +12,7 @@ from matplotlib.figure import Figure
 
 from data_loader import GrainSizeData
 from k_calculations_v2 import KCalculationResult
+from k_aggregation import KAggregationOptions, build_k_result_summary
 from grain_classification import ISO14688
 from .plot_renderers import (
     apply_legend_aware_layout,
@@ -53,7 +54,8 @@ class ExportManager:
         ('m_d', 'K (m/d)', 'm/d', 'k_m_d', 86400.0, '.2f'),
     ]
     STAT_SPECS = [
-        ('mean', 'Mean', 'K_Mean', 'mean_k'),
+        ('geometric_mean', 'Geometric Mean', 'K_Geometric_Mean', 'geometric_mean_k'),
+        ('mean', 'Arithmetic Mean', 'K_Arithmetic_Mean', 'mean_k'),
         ('median', 'Median', 'K_Median', 'median_k'),
         ('std_dev', 'Std Dev', 'K_StdDev', 'stdev_k'),
         ('min', 'Min', 'K_Min', 'min_k'),
@@ -212,20 +214,26 @@ class ExportManager:
     def _calculate_statistics(self, results: Optional[List[KCalculationResult]], config: Dict) -> Dict[str, float]:
         """Calculate the selected statistics from the filtered K-results."""
         filtered_results = self._filter_results(results, config)
-        valid_k_values = [result.k_value for result in filtered_results if result.k_value is not None and result.k_value > 0]
+        summary = build_k_result_summary(
+            filtered_results,
+            KAggregationOptions(
+                include_warnings=bool(config.get('include_warning_k_statistics', False)),
+                include_errors=bool(config.get('include_error_k_statistics', False)),
+                method_order=tuple(self.DEFAULT_METHOD_ORDER),
+            ),
+        )
 
-        if not valid_k_values:
+        if summary.geometric_mean_m_s is None:
             return {}
 
-        import statistics
-
         return {
-            'mean_k': statistics.mean(valid_k_values),
-            'median_k': statistics.median(valid_k_values),
-            'stdev_k': statistics.stdev(valid_k_values) if len(valid_k_values) > 1 else 0,
-            'min_k': min(valid_k_values),
-            'max_k': max(valid_k_values),
-            'valid_count': len(valid_k_values),
+            'geometric_mean_k': summary.geometric_mean_m_s,
+            'mean_k': summary.arithmetic_mean_m_s,
+            'median_k': summary.median_m_s,
+            'stdev_k': summary.std_dev_m_s,
+            'min_k': summary.min_m_s,
+            'max_k': summary.max_m_s,
+            'valid_count': summary.included_count,
         }
 
     def _append_dataset_context_columns(

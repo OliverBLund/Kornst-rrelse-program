@@ -17,6 +17,7 @@ from data_loader import GrainSizeData
 from gui.comparison_plot_widget import ComparisonPlotWidget
 from gui.theme import SZ
 from k_calculations_v2 import CalculationStatus, KCalculationResult
+from unit_conversions import HydraulicConductivityUnit
 
 
 APP = QApplication.instance() or QApplication([])
@@ -110,6 +111,7 @@ class TestComparisonPlotWidget(unittest.TestCase):
 
         self.assertTrue(all(height >= 0 for height in heights))
         self.assertAlmostEqual(sum(heights), 100.0, places=6)
+        self.assertEqual(first_ax.get_ylabel(), 'Weight (%)')
         self.assertEqual(self.widget.display_mode, 'grid')
         self.assertTrue(self.widget.grid_radio.isChecked())
 
@@ -124,6 +126,65 @@ class TestComparisonPlotWidget(unittest.TestCase):
 
         self.assertIn('////', hatches)
         self.assertTrue(any(line.get_visible() for line in ax.yaxis.get_gridlines()))
+
+    def test_k_distribution_plots_overall_and_group_cdfs(self):
+        self.widget.set_datasets([
+            DummyDatasetTab('Layer A-1', 1.0, group='Layer A'),
+            DummyDatasetTab('Layer A-2', 1.5, group='Layer A'),
+            DummyDatasetTab('Layer B-1', 3.0, group='Layer B'),
+        ])
+
+        self.widget.on_plot_type_changed('K Distribution')
+        self.widget.refresh_plot()
+
+        ax = self.widget.figure.axes[0]
+        labels = [line.get_label() for line in ax.lines]
+
+        self.assertEqual(self.widget.current_plot_type, 'k-distribution')
+        self.assertEqual(ax.get_xscale(), 'log')
+        self.assertIn('Overall', labels)
+        self.assertIn('Layer A', labels)
+        self.assertIn('Layer B', labels)
+        self.assertIn('Overall Kgeo', labels)
+
+    def test_data_drawer_updates_for_k_distribution(self):
+        self.widget.on_plot_type_changed('K Distribution')
+        self.widget.refresh_plot()
+
+        headers = [
+            self.widget._drawer_table.horizontalHeaderItem(col).text()
+            for col in range(self.widget._drawer_table.columnCount())
+        ]
+
+        self.assertEqual(self.widget._drawer_title.text(), 'K distribution summary - OK only')
+        self.assertIn('sigma lnK', headers)
+        self.assertGreaterEqual(self.widget._drawer_table.rowCount(), 1)
+
+        self.widget._set_drawer_visible(True)
+        self.widget._drawer_anim.setCurrentTime(self.widget._drawer_anim.duration())
+        APP.processEvents()
+
+        self.assertTrue(self.widget.drawer_visible)
+        self.assertFalse(self.widget._drawer_table.isHidden())
+        self.assertLessEqual(self.widget._drawer.maximumHeight(), 260)
+
+    def test_comparison_k_units_use_sidebar_control_and_convert_axis(self):
+        self.assertTrue(hasattr(self.widget, '_sect_units'))
+        self.assertTrue(self.widget._sect_units.isHidden())
+
+        self.widget.on_plot_type_changed('K-Values')
+        self.widget.set_display_unit(HydraulicConductivityUnit.M_PER_DAY)
+        self.widget.refresh_plot()
+
+        ax = self.widget.figure.axes[0]
+        self.assertFalse(self.widget._sect_units.isHidden())
+        self.assertIn('m/d', ax.get_ylabel())
+
+        headers = [
+            self.widget._drawer_table.horizontalHeaderItem(col).text()
+            for col in range(self.widget._drawer_table.columnCount())
+        ]
+        self.assertIn('Kgeo (m/d)', headers)
 
     def test_k_value_overlay_staggers_value_labels_between_datasets(self):
         self.widget.on_plot_type_changed('K-Values')

@@ -259,6 +259,63 @@ class TestReportGeneratorAppendices(unittest.TestCase):
         self.assertEqual(call['y_label'], 'Custom passing')
         self.assertIn('data:image/png;base64,', html)
 
+    def test_k_value_report_uses_ok_only_geometric_summary(self):
+        results = [
+            KCalculationResult(
+                method_name='Hazen',
+                k_value=1.0e-4,
+                formula_used='',
+                status=CalculationStatus.OK,
+                status_message='',
+                conditions_met=True,
+                temperature=20.0,
+                porosity=0.35,
+                grain_size_used='D10',
+            ),
+            KCalculationResult(
+                method_name='Kruger',
+                k_value=1.0e-2,
+                formula_used='',
+                status=CalculationStatus.WARNING,
+                status_message='outside recommended range',
+                conditions_met=False,
+                temperature=20.0,
+                porosity=0.35,
+                grain_size_used='D50',
+            ),
+            KCalculationResult(
+                method_name='USBR',
+                k_value=4.0e-4,
+                formula_used='',
+                status=CalculationStatus.OK,
+                status_message='',
+                conditions_met=True,
+                temperature=20.0,
+                porosity=0.35,
+                grain_size_used='D20',
+            ),
+        ]
+
+        html = self.generator.generate_k_value_report(
+            self.dataset,
+            results,
+            temperature=20.0,
+            porosity=0.35,
+            sections={
+                'cover_page': False,
+                'executive_summary': True,
+                'methodology': False,
+                'results': True,
+                'plots': False,
+                'interpretation': False,
+                'k_statistics': False,
+            },
+        )
+
+        self.assertIn('Geometric Mean K:</strong> 2.00e-04 m/s', html)
+        self.assertIn('from 2 OK methods', html)
+        self.assertIn('K Arithmetic Mean', html)
+
 
 if __name__ == '__main__':
     unittest.main(verbosity=2)

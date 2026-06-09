@@ -56,6 +56,8 @@ class PlotWidget(QWidget):
         self.show_d_lines = False
         self.show_markers = False
         self.fill_curve = False
+        self.show_k_value_labels = True
+        self.k_value_label_fontsize = 8
 
         # Style system
         self.current_style = PROFESSIONAL_STYLE
@@ -281,11 +283,11 @@ class PlotWidget(QWidget):
                 show_grid=self.show_grid,
                 show_legend=self.show_legend,
                 show_reference_lines=True,
-                show_value_labels=True,
+                show_value_labels=self.show_k_value_labels,
                 title="Hydraulic Conductivity",
                 y_label=self._get_k_axis_label(),
                 sample_name=self.sample_name,
-                value_label_fontsize=7.0,
+                value_label_fontsize=max(5.0, float(self.k_value_label_fontsize) - 1.0),
             )
         else:
             ax2.text(0.5, 0.5, 'Calculate K values\nto view comparison',
@@ -336,9 +338,10 @@ class PlotWidget(QWidget):
             show_grid=self.show_grid,
             show_legend=self.show_legend,
             show_reference_lines=True,
-            show_value_labels=True,
+            show_value_labels=self.show_k_value_labels,
             y_label=self._get_k_axis_label(),
             sample_name=self.sample_name,
+            value_label_fontsize=float(self.k_value_label_fontsize),
         )
 
         # Adjust layout and redraw

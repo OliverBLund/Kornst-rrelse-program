@@ -25,7 +25,7 @@ class TestWelcomeWidget(unittest.TestCase):
 
         load_btn = next(
             btn for btn in widget.findChildren(QPushButton)
-            if btn.text() == "Processed Curve Data"
+            if btn.text() == "Processed Sieve Data"
         )
         load_btn.click()
         APP.processEvents()
@@ -96,6 +96,17 @@ class TestWelcomeWidget(unittest.TestCase):
         APP.processEvents()
 
         self.assertEqual(emitted, ["excel_workbooks.html"])
+        widget.deleteLater()
+
+    def test_full_changelog_button_opens_help_topic(self):
+        widget = WelcomeWidget(recent_files=[], recent_sessions=[])
+        emitted = []
+        widget.open_help_topic_requested.connect(emitted.append)
+
+        widget._open_full_changelog()
+        APP.processEvents()
+
+        self.assertEqual(emitted, ["changelog.html"])
         widget.deleteLater()
 
     def test_welcome_screen_fits_720p_without_outer_scroll(self):

@@ -4,6 +4,7 @@ Compares Python implementation against Excel results.
 """
 
 import argparse
+import math
 import sys
 import unittest
 
@@ -72,7 +73,8 @@ DATASET_2 = {
         'Chapuis': 65.605,
         'Krumbein-Monk': 49.690,
         'Shepherd': 187.828,
-    }
+    },
+    'excel_warning_methods': {'Hazen', 'Hazen_1892', 'Kruger', 'USBR'},
 }
 
 DATASET_3 = {
@@ -196,6 +198,21 @@ def _within_reference_tolerance(method_name: str, actual_m_d: float, expected_m_
 
     rel_error_pct = abs_error / abs(expected_m_d) * 100.0
     return rel_error_pct <= _max_error_pct(method_name)
+
+
+def _is_ok_result(result) -> bool:
+    status = result.status.value if hasattr(result.status, "value") else str(result.status)
+    return "OK" in status and getattr(result, "conditions_met", True)
+
+
+def _mean_summary_m_d(values):
+    """Return (geometric_mean, arithmetic_mean) for positive K values in m/d."""
+    positive = [float(value) for value in values if value is not None and value > 0]
+    if not positive:
+        return None, None
+    geometric = math.exp(sum(math.log(value) for value in positive) / len(positive))
+    arithmetic = sum(positive) / len(positive)
+    return geometric, arithmetic
 
 
 def _prepare_grain_data(dataset):
@@ -486,6 +503,81 @@ class TestKCalculationsAgainstKnownResults(unittest.TestCase):
 
         if failures:
             self.fail("Reference calculation mismatches detected:\n" + "\n".join(failures))
+
+    def test_reference_warning_sets_match_excel(self):
+        for dataset in DATASETS:
+            expected_warnings = dataset.get('excel_warning_methods')
+            if expected_warnings is None:
+                continue
+
+            with self.subTest(dataset=dataset['name']):
+                calc, grain_data = _prepare_grain_data(dataset)
+                results = calc.calculate_all_methods(
+                    grain_data,
+                    temperature=dataset['temperature'],
+                    porosity=dataset['porosity'],
+                )
+                actual_warnings = {
+                    result.method_name
+                    for result in results
+                    if not _is_ok_result(result)
+                }
+                self.assertEqual(expected_warnings, actual_warnings)
+
+    def test_ok_only_mean_summaries_match_excel_geomean_and_average(self):
+        failures = []
+
+        for dataset in DATASETS:
+            calc, grain_data = _prepare_grain_data(dataset)
+            results = calc.calculate_all_methods(
+                grain_data,
+                temperature=dataset['temperature'],
+                porosity=dataset['porosity'],
+            )
+            ok_results = [
+                result for result in results
+                if _is_ok_result(result) and result.method_name in dataset['excel_results']
+            ]
+            included_methods = [result.method_name for result in ok_results]
+            expected_warning_methods = dataset.get('excel_warning_methods')
+            if expected_warning_methods is not None:
+                expected_included_methods = set(dataset['excel_results']) - expected_warning_methods
+                if set(included_methods) != expected_included_methods:
+                    failures.append(
+                        f"{dataset['name']} | included methods: expected "
+                        f"{sorted(expected_included_methods)}, got {sorted(included_methods)}"
+                    )
+                    continue
+
+            actual_values_m_d = [result.k_value * 86400 for result in ok_results]
+            expected_values_m_d = [
+                dataset['excel_results'][method_name]
+                for method_name in included_methods
+            ]
+            actual_geo, actual_arith = _mean_summary_m_d(actual_values_m_d)
+            expected_geo, expected_arith = _mean_summary_m_d(expected_values_m_d)
+            if actual_geo is None or expected_geo is None:
+                failures.append(f"{dataset['name']}: no OK methods available for mean summary")
+                continue
+
+            max_error_pct = max(_max_error_pct(method_name) for method_name in included_methods)
+            for label, actual, expected in [
+                ("GEOMEAN", actual_geo, expected_geo),
+                ("AVERAGE", actual_arith, expected_arith),
+            ]:
+                abs_error = abs(actual - expected)
+                rel_error_pct = abs_error / abs(expected) * 100 if expected else 0.0
+                if abs_error <= DISPLAY_ROUNDING_ABS_TOL_M_D:
+                    continue
+                if rel_error_pct > max_error_pct:
+                    failures.append(
+                        f"{dataset['name']} | {label}: expected {expected:.3f} m/d, "
+                        f"got {actual:.3f} m/d ({rel_error_pct:.2f}% > {max_error_pct:.2f}%) "
+                        f"from {len(included_methods)} OK methods"
+                    )
+
+        if failures:
+            self.fail("Reference mean-summary mismatches detected:\n" + "\n".join(failures))
 
 
 # ============================================================================

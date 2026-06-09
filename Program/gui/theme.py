@@ -1121,12 +1121,12 @@ QTabBar QToolButton:hover {{
    TOOL TIP
 ════════════════════════════════════════ */
 QToolTip {{
-    background: {C.BG_RAISED};
-    border: 1px solid {C.BORDER_DK};
+    background: #fffdf7;
+    border: 1px solid {C.OLIVE};
     border-radius: {r}px;
-    color: {C.TEXT_MID};
+    color: {C.TEXT};
     font-size: {F.SZ_BASE}pt;
-    padding: 4px 8px;
+    padding: 6px 9px;
 }}
 
 /* ════════════════════════════════════════

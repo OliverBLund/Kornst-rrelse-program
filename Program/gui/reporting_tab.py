@@ -1895,37 +1895,42 @@ class ReportingTab(QWidget):
             ctx for ctx, on in zip(self._sample_contexts, self._sample_selected) if on
         ]
 
+    def _generation_validation_error(self) -> Optional[tuple[str, str]]:
+        if not self.dataset_tabs:
+            return ("No Data", "Please load datasets first.")
+
+        sel_count = sum(1 for v in self._sample_selected if v)
+        type_id = self._selected_type
+        if type_id == self.TYPE_INDIVIDUAL and sel_count != 1:
+            return (
+                "Select One Sample",
+                "Individual Sample reports require exactly one selected sample.",
+            )
+        if type_id == self.TYPE_COMPARISON and sel_count < 2:
+            return (
+                "Select At Least Two Samples",
+                "Cross-Sample Comparison reports need two or more samples selected.",
+            )
+        if type_id == self.TYPE_KFOCUS and sel_count < 1:
+            return (
+                "Select A Sample",
+                "K-Value Focus reports need at least one sample selected.",
+            )
+        return None
+
     # ══════════════════════════════════════════════════════════
     # Generate report
     # ══════════════════════════════════════════════════════════
 
     def _on_generate(self) -> None:
-        if not self.dataset_tabs:
-            QMessageBox.warning(self, "No Data", "Please load datasets first.")
+        validation_error = self._generation_validation_error()
+        if validation_error is not None:
+            title, message = validation_error
+            self._clear_report_output(message)
+            QMessageBox.warning(self, title, message)
             return
 
-        # Per-type selection validation
-        sel_count = sum(1 for v in self._sample_selected if v)
         type_id = self._selected_type
-        if type_id == self.TYPE_INDIVIDUAL and sel_count != 1:
-            QMessageBox.warning(
-                self, "Select One Sample",
-                "Individual Sample reports require exactly one selected sample.",
-            )
-            return
-        if type_id == self.TYPE_COMPARISON and sel_count < 2:
-            QMessageBox.warning(
-                self, "Select At Least Two Samples",
-                "Cross-Sample Comparison reports need two or more samples selected.",
-            )
-            return
-        if type_id == self.TYPE_KFOCUS and sel_count < 1:
-            QMessageBox.warning(
-                self, "Select A Sample",
-                "K-Value Focus reports need at least one sample selected.",
-            )
-            return
-
         brand = self._collect_brand()
         metadata = self._collect_metadata()
         sections = self._collect_sections()

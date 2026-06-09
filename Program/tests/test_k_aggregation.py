@@ -7,7 +7,12 @@ from types import SimpleNamespace
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 sys.path.insert(0, "Program")
 
-from k_aggregation import KAggregationOptions, build_k_aggregation, dataset_group_name
+from k_aggregation import (
+    KAggregationOptions,
+    build_k_aggregation,
+    build_k_result_summary,
+    dataset_group_name,
+)
 from k_calculations_v2 import CalculationStatus, KCalculationResult
 
 
@@ -109,6 +114,27 @@ class TestKAggregation(unittest.TestCase):
         self.assertEqual(report.by_group["Layer 1"].included_count, 1)
         self.assertEqual(report.by_group["Layer 2"].included_count, 2)
         self.assertEqual(dataset_group_name(SimpleNamespace()), "Ungrouped")
+
+    def test_single_result_summary_uses_same_ok_only_policy(self):
+        results = [
+            result("Hazen", 1.0e-4),
+            result("Beyer", 1.0e-2, CalculationStatus.WARNING, conditions_met=False),
+            result("USBR", 4.0e-4),
+        ]
+
+        summary = build_k_result_summary(results)
+
+        self.assertEqual(summary.included_count, 2)
+        self.assertEqual(summary.total_cells, 3)
+        self.assertEqual(summary.warning_count, 1)
+        self.assertAlmostEqual(summary.geometric_mean_m_s, 2.0e-4)
+        self.assertAlmostEqual(summary.arithmetic_mean_m_s, 2.5e-4)
+
+        with_warnings = build_k_result_summary(
+            results,
+            KAggregationOptions(include_warnings=True),
+        )
+        self.assertEqual(with_warnings.included_count, 3)
 
 
 if __name__ == "__main__":

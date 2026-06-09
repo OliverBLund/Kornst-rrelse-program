@@ -694,14 +694,13 @@ class KCalculator:
 
         note_parts = []
         if temperature != 10.0:
-            note_parts.append(f"Reference 10°C calibration")
-        status = CalculationStatus.OK if not note_parts else CalculationStatus.WARNING
+            note_parts.append("Reference 10°C calibration")
 
         return KCalculationResult(
             method_name="Terzaghi",
             k_value=k_m_s,
             formula_used="K = 11.1×10⁻³ * (ρg/μ)₁₀°C * ((n-0.13)/∛(1-n))² * d₁₀²",
-            status=status,
+            status=CalculationStatus.OK,
             status_message='; '.join(note_parts) or "Smooth-grain coefficient",
             conditions_met=True,
             temperature=temperature,
@@ -873,24 +872,13 @@ class KCalculator:
         k_cm_s = rho_ratio * 8.3e-3 * phi_n * de_cm**2
         k_m_s = k_cm_s / 100.0
 
-        # Check applicability
-        d10 = grain_data.get("D10")
-        conditions_met = True
-        status = CalculationStatus.OK
-        note = ""
-
-        if d10 and d10 < 0.5:
-            conditions_met = False
-            status = CalculationStatus.WARNING
-            note = "D10 < 0.5 mm may be too fine for Kozeny-Carman"
-
         return KCalculationResult(
             method_name="Kozeny-Carman",
             k_value=k_m_s,
             formula_used="K = (ρg/μ) * 8.3×10⁻³ * n³/(1-n)² * dₑ²",
-            status=status,
-            status_message=note,
-            conditions_met=conditions_met,
+            status=CalculationStatus.OK,
+            status_message="",
+            conditions_met=True,
             temperature=temperature,
             porosity=porosity,
             grain_size_used="Harmonic mean",

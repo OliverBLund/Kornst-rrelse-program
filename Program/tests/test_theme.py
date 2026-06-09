@@ -38,6 +38,13 @@ class TestTheme(unittest.TestCase):
         self.assertIn('QPushButton[filterpill="true"]:pressed', stylesheet)
         self.assertIn('QPushButton[sbaction="true"]:pressed', stylesheet)
 
+    def test_stylesheet_uses_readable_tooltips(self):
+        stylesheet = build_stylesheet()
+
+        self.assertIn("QToolTip", stylesheet)
+        self.assertIn("background: #fffdf7;", stylesheet)
+        self.assertIn("color: #2f2f2f;", stylesheet)
+
 
 if __name__ == "__main__":
     unittest.main(verbosity=2)

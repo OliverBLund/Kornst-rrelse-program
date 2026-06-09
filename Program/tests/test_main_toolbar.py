@@ -72,7 +72,7 @@ class TestAppToolbar(unittest.TestCase):
         self.assertIsNotNone(menu)
         self.assertEqual(
             [action.text() for action in menu.actions()],
-            ["Processed Curve Data...", "Raw Sieve Weighings..."],
+            ["Processed Sieve Data...", "Raw Sieve Weighings..."],
         )
 
         menu.actions()[1].trigger()
