@@ -27,6 +27,7 @@ from .plot_renderers import (
 from .plot_context import (
     apply_axis_limits_from_context,
     grain_size_renderer_kwargs_from_context,
+    plot_context_value,
     plot_style_from_context,
 )
 from .theme import apply_matplotlib_style
@@ -608,6 +609,7 @@ class ExportManager:
             style=style,
             show_grid=config.get('plot_include_grid', True),
             show_legend=config.get('plot_include_legend', True),
+            log_y_scale=bool(plot_context_value(context, 'log_k_y_scale', False)),
             sample_name=name,
         )
         apply_legend_aware_layout(figure, style)
@@ -684,6 +686,7 @@ class ExportManager:
                 style=style,
                 show_grid=config.get('plot_include_grid', True),
                 show_legend=config.get('plot_include_legend', True),
+                log_y_scale=bool(plot_context_value(context, 'log_k_y_scale', False)),
             )
             apply_legend_aware_layout(figure, style)
             return figure

@@ -9,6 +9,7 @@ import unittest
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 sys.path.insert(0, "Program")
 
+from PyQt6.QtGui import QPalette
 from PyQt6.QtWidgets import QApplication, QPushButton
 
 from gui.welcome_widget import WelcomeWidget
@@ -107,6 +108,38 @@ class TestWelcomeWidget(unittest.TestCase):
         APP.processEvents()
 
         self.assertEqual(emitted, ["changelog.html"])
+        widget.deleteLater()
+
+    def test_welcome_tooltip_style_is_light_and_readable(self):
+        widget = WelcomeWidget(recent_files=[], recent_sessions=[])
+
+        stylesheet = widget.styleSheet()
+        load_btn = next(
+            btn for btn in widget.findChildren(QPushButton)
+            if btn.text() == "Processed Sieve Data"
+        )
+
+        self.assertIn("QToolTip", stylesheet)
+        self.assertIn("background: #fffdf7", stylesheet)
+        self.assertIn("background-color: #fffdf7", stylesheet)
+        self.assertIn("color:", stylesheet)
+        self.assertEqual(
+            APP.palette().color(QPalette.ColorRole.ToolTipBase).name().lower(),
+            "#fffdf7",
+        )
+        self.assertEqual(load_btn.toolTip(), "")
+        self.assertEqual(
+            load_btn.property("welcomeTooltipText"),
+            "Use this when files already contain sieve size and cumulative percent passing.",
+        )
+
+        widget._show_custom_tooltip(load_btn.property("welcomeTooltipText"))
+        APP.processEvents()
+        self.assertFalse(widget._custom_tooltip_label.isHidden())
+        self.assertEqual(
+            widget._custom_tooltip_label.text(),
+            load_btn.property("welcomeTooltipText"),
+        )
         widget.deleteLater()
 
     def test_welcome_screen_fits_720p_without_outer_scroll(self):

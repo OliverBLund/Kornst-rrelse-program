@@ -97,6 +97,25 @@ def load_fonts() -> None:
             print(f"[theme] Loaded font: {font_file.name} -> {families}")
 
 
+def apply_tooltip_style(app=None) -> None:
+    """Force readable tooltips on platforms that ignore QSS tooltip colors."""
+    try:
+        from PyQt6.QtGui import QPalette
+        from PyQt6.QtWidgets import QApplication, QToolTip
+    except Exception:
+        return
+
+    target = app or QApplication.instance()
+    if target is None:
+        return
+
+    palette = target.palette()
+    palette.setColor(QPalette.ColorRole.ToolTipBase, QColor("#fffdf7"))
+    palette.setColor(QPalette.ColorRole.ToolTipText, QColor(C.TEXT))
+    target.setPalette(palette)
+    QToolTip.setPalette(palette)
+
+
 def default_ui_font_family(platform_name: str | None = None) -> str:
     """Return the primary UI font family for the current platform."""
     platform_name = sys.platform if platform_name is None else platform_name
@@ -1122,6 +1141,7 @@ QTabBar QToolButton:hover {{
 ════════════════════════════════════════ */
 QToolTip {{
     background: #fffdf7;
+    background-color: #fffdf7;
     border: 1px solid {C.OLIVE};
     border-radius: {r}px;
     color: {C.TEXT};

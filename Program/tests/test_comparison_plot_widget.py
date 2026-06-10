@@ -4,14 +4,17 @@ Regression tests for comparison plot widget behavior.
 
 import os
 import sys
+import csv
+import tempfile
 import unittest
+from pathlib import Path
 from types import SimpleNamespace
 
 os.environ.setdefault('QT_QPA_PLATFORM', 'offscreen')
 sys.path.insert(0, 'Program')
 
 from matplotlib.colors import to_hex
-from PyQt6.QtWidgets import QApplication
+from PyQt6.QtWidgets import QApplication, QFileDialog, QMessageBox
 
 from data_loader import GrainSizeData
 from gui.comparison_plot_widget import ComparisonPlotWidget
@@ -127,6 +130,20 @@ class TestComparisonPlotWidget(unittest.TestCase):
         self.assertIn('////', hatches)
         self.assertTrue(any(line.get_visible() for line in ax.yaxis.get_gridlines()))
 
+    def test_k_value_comparison_uses_linear_axis_by_default_and_log_when_enabled(self):
+        self.widget.on_plot_type_changed('K-Values')
+        self.widget.set_display_mode('overlay')
+        self.widget.refresh_plot()
+
+        ax = self.widget.figure.axes[0]
+        self.assertEqual(ax.get_yscale(), 'linear')
+        self.assertFalse(self.widget._row_k_log.isHidden())
+
+        self.widget._sw_k_log.setChecked(True, animate=False)
+        self.widget._on_sidebar_log_k_toggled(True)
+
+        self.assertEqual(self.widget.figure.axes[0].get_yscale(), 'log')
+
     def test_k_distribution_plots_overall_and_group_cdfs(self):
         self.widget.set_datasets([
             DummyDatasetTab('Layer A-1', 1.0, group='Layer A'),
@@ -167,6 +184,34 @@ class TestComparisonPlotWidget(unittest.TestCase):
         self.assertTrue(self.widget.drawer_visible)
         self.assertFalse(self.widget._drawer_table.isHidden())
         self.assertLessEqual(self.widget._drawer.maximumHeight(), 260)
+
+    def test_comparison_drawer_exports_current_rows(self):
+        self.widget.on_plot_type_changed('K-Values')
+        self.widget.refresh_plot()
+
+        original_dialog = QFileDialog.getSaveFileName
+        original_info = QMessageBox.information
+        with tempfile.TemporaryDirectory() as tmp:
+            out_path = Path(tmp) / 'comparison_drawer'
+            QFileDialog.getSaveFileName = staticmethod(
+                lambda *args, **kwargs: (str(out_path), 'CSV Files (*.csv)')
+            )
+            QMessageBox.information = staticmethod(lambda *args, **kwargs: None)
+            try:
+                self.widget._export_drawer_data()
+            finally:
+                QFileDialog.getSaveFileName = original_dialog
+                QMessageBox.information = original_info
+
+            with out_path.with_suffix('.csv').open(newline='') as handle:
+                rows = list(csv.reader(handle))
+
+        headers = [
+            self.widget._drawer_table.horizontalHeaderItem(col).text()
+            for col in range(self.widget._drawer_table.columnCount())
+        ]
+        self.assertEqual(rows[0], headers)
+        self.assertGreater(len(rows), 1)
 
     def test_comparison_k_units_use_sidebar_control_and_convert_axis(self):
         self.assertTrue(hasattr(self.widget, '_sect_units'))

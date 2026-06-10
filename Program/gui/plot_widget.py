@@ -53,11 +53,12 @@ class PlotWidget(QWidget):
         self.show_classification_zones = False
         self.fill_zone_labels = False
         self._scheme = ISO14688
-        self.show_d_lines = False
+        self.show_d_lines = True
         self.show_markers = False
         self.fill_curve = False
         self.show_k_value_labels = True
         self.k_value_label_fontsize = 8
+        self.log_k_y_scale = False
 
         # Style system
         self.current_style = PROFESSIONAL_STYLE
@@ -284,6 +285,7 @@ class PlotWidget(QWidget):
                 show_legend=self.show_legend,
                 show_reference_lines=True,
                 show_value_labels=self.show_k_value_labels,
+                log_y_scale=self.log_k_y_scale,
                 title="Hydraulic Conductivity",
                 y_label=self._get_k_axis_label(),
                 sample_name=self.sample_name,
@@ -339,6 +341,7 @@ class PlotWidget(QWidget):
             show_legend=self.show_legend,
             show_reference_lines=True,
             show_value_labels=self.show_k_value_labels,
+            log_y_scale=self.log_k_y_scale,
             y_label=self._get_k_axis_label(),
             sample_name=self.sample_name,
             value_label_fontsize=float(self.k_value_label_fontsize),

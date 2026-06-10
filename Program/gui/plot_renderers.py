@@ -30,7 +30,9 @@ from .plot_constants import (
     ordered_methods,
 )
 from .k_plot_helpers import (
+    annotate_linear_bars,
     annotate_log_bars,
+    apply_linear_bar_limits,
     apply_log_bar_limits,
     format_method_label,
 )
@@ -148,6 +150,7 @@ def render_k_bar_chart(
     show_legend: bool = True,
     show_reference_lines: bool = True,
     show_value_labels: bool = True,
+    log_y_scale: bool = False,
     title: Optional[str] = None,
     y_label: str = "Hydraulic Conductivity K (m/s)",
     sample_name: str = "Sample",
@@ -197,7 +200,10 @@ def render_k_bar_chart(
     )
     ax.set_facecolor(style.axes_facecolor)
     ax.tick_params(labelsize=tick_fs)
-    apply_log_bar_limits(ax, k_values)
+    if log_y_scale:
+        apply_log_bar_limits(ax, k_values)
+    else:
+        apply_linear_bar_limits(ax, k_values)
 
     if show_grid and style.grid_show:
         ax.grid(True, axis="y", alpha=style.grid_alpha,
@@ -213,15 +219,14 @@ def render_k_bar_chart(
                    label=f"Arithmetic mean: {arithmetic_mean:.2e}")
         ax.axhline(geometric_mean, color="#5c3d8f", linestyle="--", alpha=0.68,
                    label=f"Geometric mean: {geometric_mean:.2e}")
-        ax.axhline(min(positive), color="blue", linestyle=":", alpha=0.5,
-                   label=f"Min: {min(positive):.2e}")
-        ax.axhline(max(positive), color="green", linestyle=":", alpha=0.5,
-                   label=f"Max: {max(positive):.2e}")
 
     # Bar labels ──────────────────────────────────────────────────
     if show_value_labels:
         labels = [f"{v:.1e}" if v and v > 0 else "" for v in k_values]
-        annotate_log_bars(ax, bars, labels, fontsize=value_label_fontsize)
+        if log_y_scale:
+            annotate_log_bars(ax, bars, labels, fontsize=value_label_fontsize)
+        else:
+            annotate_linear_bars(ax, bars, labels, fontsize=value_label_fontsize)
 
     # Legend ───────────────────────────────────────────────────────
     if show_legend:
@@ -295,6 +300,7 @@ def render_k_overlay(
     show_grid: bool = True,
     show_legend: bool = True,
     show_value_labels: bool = True,
+    log_y_scale: bool = False,
     y_label: str = "K (m/s)",
     title: str = "Hydraulic Conductivity Comparison",
 ) -> None:
@@ -347,11 +353,17 @@ def render_k_overlay(
         [format_method_label(m, compact=True) for m in methods],
         rotation=45, ha="right", fontsize=8,
     )
-    apply_log_bar_limits(ax, positive_values,
-                         max_label_level=max(label_levels, default=0))
+    max_label_level = max(label_levels, default=0)
+    if log_y_scale:
+        apply_log_bar_limits(ax, positive_values, max_label_level=max_label_level)
+    else:
+        apply_linear_bar_limits(ax, positive_values, max_label_level=max_label_level)
     if allow_labels:
-        annotate_log_bars(
-            ax, label_bars, label_texts,
+        annotate = annotate_log_bars if log_y_scale else annotate_linear_bars
+        annotate(
+            ax,
+            label_bars,
+            label_texts,
             level_indices=label_levels,
             fontsize=5.75 if n_datasets > 2 else 6.0,
             add_bbox=n_datasets > 1,
@@ -656,26 +668,26 @@ def _distribution_limits(
 def _draw_characteristic_lines(
     ax: Axes, particle_sizes, percent_passing, grain_size_data, style: PlotStyle,
 ) -> None:
-    """Draw D10/D30/D60 guide lines."""
+    """Draw D10/D50/D60 guide lines."""
     if grain_size_data is not None:
         d_values = [
             grain_size_data.get_d10(),
-            grain_size_data.get_d30(),
+            grain_size_data.get_d50(),
             grain_size_data.get_d60(),
         ]
     else:
         d_values = []
         if len(particle_sizes) > 0 and len(percent_passing) > 0:
-            for percentile in (10, 30, 60):
+            for percentile in (10, 50, 60):
                 if min(percent_passing) <= percentile <= max(percent_passing):
                     d_values.append(np.interp(percentile, percent_passing, particle_sizes))
                 else:
                     d_values.append(None)
 
-    names   = ["D10", "D30", "D60"]
+    names   = ["D10", "D50", "D60"]
     colors  = [style.d10_color, style.d30_color, style.d60_color]
     lstyles = [style.d10_line_style, style.d30_line_style, style.d60_line_style]
-    percs   = [10, 30, 60]
+    percs   = [10, 50, 60]
 
     for d_val, perc, color, ls, name in zip(d_values, percs, colors, lstyles, names):
         if d_val is None:

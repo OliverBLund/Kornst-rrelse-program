@@ -47,6 +47,8 @@ class TestHelpDialog(unittest.TestCase):
         text = self.dialog.content_browser.toPlainText()
         self.assertIn("Changelog", text)
         self.assertIn("0.9.2-beta", text)
+        self.assertIn("Manual QA Checklist", text)
+        self.assertIn("plot data drawers", text)
 
     def test_dialog_defaults_to_modeless(self):
         self.assertFalse(self.dialog.isModal())

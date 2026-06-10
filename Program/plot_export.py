@@ -139,6 +139,7 @@ def export_k_bar_chart(
     show_legend: bool = True,
     show_reference_lines: bool = True,
     show_value_labels: bool = True,
+    log_y_scale: bool = False,
     title: Optional[str] = None,
     y_label: str = "Hydraulic Conductivity K (m/s)",
     sample_name: str = "Sample",
@@ -155,6 +156,7 @@ def export_k_bar_chart(
         show_legend=show_legend,
         show_reference_lines=show_reference_lines,
         show_value_labels=show_value_labels,
+        log_y_scale=log_y_scale,
         title=title,
         y_label=y_label,
         sample_name=sample_name,
@@ -204,6 +206,7 @@ def export_k_overlay(
     show_grid: bool = True,
     show_legend: bool = True,
     show_value_labels: bool = True,
+    log_y_scale: bool = False,
     title: str = "Hydraulic Conductivity Comparison",
 ) -> str:
     """Return a base64-encoded PNG of grouped K-value bars."""
@@ -217,6 +220,7 @@ def export_k_overlay(
         show_grid=show_grid,
         show_legend=show_legend,
         show_value_labels=show_value_labels,
+        log_y_scale=log_y_scale,
         title=title,
     )
 

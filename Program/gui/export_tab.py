@@ -436,6 +436,18 @@ class ExportTab(QWidget):
         }
         return labels.get(plot_type, plot_type.replace('_', ' ').title())
 
+    def _plot_data_source_label(self, plot_type: str) -> str:
+        labels = {
+            'grain_size_curve': 'Curve data: particle size + percent passing',
+            'k_value_bar': 'K table: method, K value, warning status',
+            'applicability_heatmap': 'Method status table',
+            'distribution_overlay': 'Curve data from all selected datasets',
+            'k_value_comparison': 'K table from all selected datasets',
+            'statistical_boxplots': 'K-value distributions by dataset',
+            'reliability_matrix': 'Method status matrix',
+        }
+        return labels.get(plot_type, 'Plot source data')
+
     def _plot_file_suffix(self, plot_type: str) -> str:
         suffixes = {
             'grain_size_curve': 'plot',
@@ -2296,7 +2308,7 @@ class ExportTab(QWidget):
         """Maintain a lightweight hidden table for tests and legacy helpers."""
         self._plot_preview_table = QTableWidget(self)
         self._plot_preview_table.setColumnCount(4)
-        self._plot_preview_table.setHorizontalHeaderLabels(["Dataset", "Plot", "Formats", "Source"])
+        self._plot_preview_table.setHorizontalHeaderLabels(["Dataset", "Plot", "Formats", "Data used"])
         self._plot_preview_table.setSelectionBehavior(QAbstractItemView.SelectionBehavior.SelectRows)
         self._plot_preview_table.setSelectionMode(QAbstractItemView.SelectionMode.SingleSelection)
         self._plot_preview_table.setEditTriggers(QTableWidget.EditTrigger.NoEditTriggers)
@@ -2309,7 +2321,7 @@ class ExportTab(QWidget):
             self._plot_preview_table.setItem(row, 0, name_item)
             self._plot_preview_table.setItem(row, 1, QTableWidgetItem(self._plot_type_label(record["plot_type"])))
             self._plot_preview_table.setItem(row, 2, QTableWidgetItem(format_label))
-            self._plot_preview_table.setItem(row, 3, QTableWidgetItem("Shared renderer"))
+            self._plot_preview_table.setItem(row, 3, QTableWidgetItem(self._plot_data_source_label(record["plot_type"])))
         self._plot_preview_table.itemSelectionChanged.connect(self._on_hidden_plot_table_selection_changed)
 
     def _populate_plot_queue(self, preview_rows: List[Dict[str, Any]]) -> None:
@@ -2355,7 +2367,11 @@ class ExportTab(QWidget):
             item = QTreeWidgetItem([text])
             item.setIcon(0, icon(icon_name, C.TEXT_MUTED, 12))
             item.setData(0, Qt.ItemDataRole.UserRole, row)
-            item.setToolTip(0, "Select to preview; double-click single-dataset plots to open the source tab")
+            item.setToolTip(
+                0,
+                f"{self._plot_data_source_label(record['plot_type'])}\n"
+                "Select to preview; double-click single-dataset plots to open the source tab",
+            )
             folder_for_record(record).addChild(item)
 
         if hasattr(self, "plot_queue_section"):
@@ -2892,10 +2908,13 @@ class ExportTab(QWidget):
 
             preview_text.append(f"=== PLOT FILES ({', '.join(plot_formats)}) ===")
             preview_text.append("")
-            preview_text.append("Each dataset will have a grain size distribution plot showing:")
-            preview_text.append("  - Cumulative % passing curve")
-            preview_text.append("  - Sieve sizes and percentiles marked")
-            preview_text.append("  - USCS classification")
+            preview_text.append("Plot files export figures. Numeric data behind the active plot can be exported from that plot's table drawer.")
+            preview_text.append("")
+            preview_text.append("Queued plot types:")
+            for plot_type in self._selected_single_plot_types() + self._selected_collection_plot_types():
+                preview_text.append(
+                    f"  - {self._plot_type_label(plot_type)} - {self._plot_data_source_label(plot_type)}"
+                )
             preview_text.append("")
             total_plots = (
                 len(datasets_to_export) * len(self._selected_single_plot_types())
@@ -2993,6 +3012,10 @@ class ExportTab(QWidget):
                 + len(self._selected_collection_plot_types())
             ) * plot_formats
             preview_lines.append(f"  - Plot files: ~{count} files ({plot_formats} formats × {total_datasets} datasets)")
+            for plot_type in self._selected_single_plot_types() + self._selected_collection_plot_types():
+                preview_lines.append(
+                    f"      {self._plot_type_label(plot_type)} - {self._plot_data_source_label(plot_type)}"
+                )
             file_count += count
 
         preview_lines.append("")
@@ -3017,7 +3040,7 @@ class ExportTab(QWidget):
         if self.content_enabled.get('statistics', True):
             content_items.append("Statistical summaries")
         if self._plot_exports_enabled():
-            content_items.append("Plots/figures")
+            content_items.append("Plots/figures (figure files; active plot data exports from plot table drawers)")
 
         for item in content_items:
             preview_lines.append(f"  - {item}")

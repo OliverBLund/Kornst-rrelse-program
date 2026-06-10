@@ -16,6 +16,7 @@ sys.path.insert(0, 'Program')
 from PyQt6.QtWidgets import QApplication, QFileDialog, QMessageBox
 
 from data_loader import GrainSizeData
+from grain_classification import USCS
 from gui.plot_workspace import PlotWorkspace
 
 
@@ -72,8 +73,20 @@ class TestPlotWorkspaceWiring(unittest.TestCase):
 
         self.assertFalse(any(label.startswith('D10') for label in labels_without))
         self.assertTrue(any(label.startswith('D10') for label in labels_with))
-        self.assertTrue(any(label.startswith('D30') for label in labels_with))
+        self.assertTrue(any(label.startswith('D50') for label in labels_with))
         self.assertTrue(any(label.startswith('D60') for label in labels_with))
+
+    def test_distribution_d_lines_default_to_d10_d50_d60(self):
+        self.workspace.current_plot_type = 'distribution'
+        self.workspace.refresh_plot()
+
+        labels = self.workspace.plot_widget.grain_size_ax.get_legend_handles_labels()[1]
+
+        self.assertTrue(self.workspace.show_dlines)
+        self.assertTrue(any(label.startswith('D10') for label in labels))
+        self.assertTrue(any(label.startswith('D50') for label in labels))
+        self.assertTrue(any(label.startswith('D60') for label in labels))
+        self.assertFalse(any(label.startswith('D30') for label in labels))
 
     def test_zoom_in_uses_current_active_axis(self):
         self.workspace.add_k_results({'Hazen': 1.0e-4, 'Beyer': 1.5e-4})
@@ -176,6 +189,32 @@ class TestPlotWorkspaceWiring(unittest.TestCase):
         self.assertEqual(collapsed_x, 0)
         self.assertEqual(expanded_x, 0)
 
+    def test_collapsed_controls_sidebar_does_not_reserve_splitter_space(self):
+        APP.processEvents()
+
+        self.assertFalse(self.workspace.sidebar_visible)
+        self.assertEqual(self.workspace._body_splitter.handleWidth(), 0)
+        self.assertLessEqual(self.workspace._body_splitter.sizes()[0], 1)
+
+        self.workspace._toggle_sidebar()
+        self.workspace._sidebar_anim.setCurrentTime(self.workspace._sidebar_anim.duration())
+        APP.processEvents()
+
+        self.assertTrue(self.workspace.sidebar_visible)
+        self.assertEqual(self.workspace._body_splitter.handleWidth(), 5)
+        self.assertGreaterEqual(
+            self.workspace._body_splitter.sizes()[0],
+            self.workspace._min_sidebar_width(),
+        )
+
+        self.workspace._toggle_sidebar()
+        self.workspace._sidebar_anim.setCurrentTime(self.workspace._sidebar_anim.duration())
+        APP.processEvents()
+
+        self.assertFalse(self.workspace.sidebar_visible)
+        self.assertEqual(self.workspace._body_splitter.handleWidth(), 0)
+        self.assertLessEqual(self.workspace._body_splitter.sizes()[0], 1)
+
     def test_histogram_uses_retained_percentages(self):
         self.workspace.current_plot_type = 'histogram'
         self.workspace.refresh_plot()
@@ -215,7 +254,7 @@ class TestPlotWorkspaceWiring(unittest.TestCase):
         self.assertEqual(
             rows[0],
             [
-                'Particle-size fraction',
+                'Fraction (ISO 14688)',
                 'Lower size (mm)',
                 'Upper size (mm)',
                 'Interval',
@@ -224,6 +263,18 @@ class TestPlotWorkspaceWiring(unittest.TestCase):
         )
         self.assertTrue(any('sand' in row[0].lower() for row in rows[1:]))
         self.assertAlmostEqual(sum(float(row[4]) for row in rows[1:]), 100.0, places=6)
+
+    def test_histogram_fraction_labels_respect_active_scheme(self):
+        self.workspace.current_plot_type = 'histogram'
+        self.workspace.set_scheme(USCS)
+        self.workspace.refresh_plot()
+
+        ax = self.workspace.plot_widget.current_ax
+        tick_labels = [tick.get_text() for tick in ax.get_xticklabels()]
+
+        self.assertEqual(ax.get_xlabel(), 'Particle-size fraction (USCS)')
+        self.assertTrue(any(label.startswith('Sand') for label in tick_labels))
+        self.assertEqual(self.workspace._drawer_headers[0], 'Fraction (USCS)')
 
     def test_k_value_sidebar_context_hides_distribution_specific_controls(self):
         self.workspace.add_k_results({'Hazen': 1.0e-4, 'Beyer': 1.5e-4})
@@ -270,6 +321,18 @@ class TestPlotWorkspaceWiring(unittest.TestCase):
 
         self.assertTrue(any(line.get_visible() for line in ax.yaxis.get_gridlines()))
         self.assertIn('////', hatches)
+
+    def test_k_value_plot_uses_linear_axis_by_default_and_log_when_enabled(self):
+        self.workspace.add_k_results({'Hazen': 1.0e-6, 'Beyer': 1.5e-4})
+        self.workspace.current_plot_type = 'k-values'
+
+        self.workspace.refresh_plot()
+        self.assertEqual(self.workspace.plot_widget.current_ax.get_yscale(), 'linear')
+
+        self.workspace._sw_k_log.setChecked(True, animate=False)
+        self.workspace._on_sidebar_toggle_changed(True)
+
+        self.assertEqual(self.workspace.plot_widget.current_ax.get_yscale(), 'log')
 
     def test_k_value_plot_legend_clarifies_arithmetic_and_geometric_means(self):
         self.workspace.add_k_results({'Hazen': 1.0e-4, 'Beyer': 1.6e-4})
@@ -331,6 +394,38 @@ class TestPlotWorkspaceWiring(unittest.TestCase):
 
         self.assertEqual(exported, [str(written)])
         self.assertIn('<svg', content[:200].lower())
+
+    def test_single_plot_drawer_tracks_k_values_and_exports_same_rows(self):
+        self.workspace.add_k_results(
+            {'Hazen': 1.0e-4, 'Beyer': 1.5e-4},
+            flagged_methods={'Beyer'},
+        )
+        self.workspace.current_plot_type = 'k-values'
+        self.workspace.refresh_plot()
+
+        self.assertEqual(self.workspace._drawer_title.text(), 'K-value bar chart data')
+        self.assertEqual(self.workspace._drawer_headers, ['Method', 'K (m/d)', 'Status'])
+        self.assertIn(('Beyer', '12.96', 'Warning'), self.workspace._drawer_rows)
+
+        original_dialog = QFileDialog.getSaveFileName
+        original_info = QMessageBox.information
+        with tempfile.TemporaryDirectory() as tmp:
+            out_path = Path(tmp) / 'k_drawer_export'
+            QFileDialog.getSaveFileName = staticmethod(
+                lambda *args, **kwargs: (str(out_path), 'CSV Files (*.csv)')
+            )
+            QMessageBox.information = staticmethod(lambda *args, **kwargs: None)
+            try:
+                self.workspace.export_data()
+            finally:
+                QFileDialog.getSaveFileName = original_dialog
+                QMessageBox.information = original_info
+
+            with out_path.with_suffix('.csv').open(newline='') as handle:
+                rows = list(csv.reader(handle))
+
+        self.assertEqual(rows[0], ['Method', 'K (m/d)', 'Status'])
+        self.assertIn(['Beyer', '12.96', 'Warning'], rows)
 
     def test_cumulative_plot_respects_marker_toggle(self):
         self.workspace.current_plot_type = 'cumulative'

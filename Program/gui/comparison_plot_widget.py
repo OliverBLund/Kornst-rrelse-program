@@ -17,7 +17,7 @@ from matplotlib.patches import Patch
 import numpy as np
 from typing import List, Dict, Optional
 from .collapsible_section import CollapsibleSection
-from .k_plot_helpers import annotate_log_bars, apply_log_bar_limits, format_method_label
+from .k_plot_helpers import apply_linear_bar_limits, apply_log_bar_limits, format_method_label
 from .matplotlib_canvas import FigureCanvas
 from .plot_interactions import AxesInteractionController
 from .plot_constants import METHOD_COLORS, DATASET_COLORS, DEFAULT_METHOD_ORDER, ordered_methods
@@ -116,6 +116,7 @@ class ComparisonPlotWidget(QWidget):
         self.show_legend = True
         self.sidebar_visible = False
         self.display_unit: HydraulicConductivityUnit = get_default_plot_unit()
+        self.log_k_y_scale = False
 
         # Active style — swapped by set_style(). Starts at the Professional preset
         # so the comparison view now honors the preset selector (previously it was
@@ -132,6 +133,9 @@ class ComparisonPlotWidget(QWidget):
         self._group_color_map: Dict[str, str] = {}
         self._dataset_linestyles: Dict[str, str] = {}
         self.drawer_visible = False
+        self._drawer_headers: list[str] = []
+        self._drawer_rows: list[tuple] = []
+        self._drawer_title_text = "Plot data"
         self.current_ax = None
         self._default_limits = {}
         self._pan_state = None
@@ -290,6 +294,11 @@ class ComparisonPlotWidget(QWidget):
             f"color: {C.TEXT_MUTED}; font-size: 10px; background: transparent;"
         )
         header_lay.addWidget(self._drawer_count)
+
+        self._drawer_export_btn = QPushButton("Export CSV")
+        self._drawer_export_btn.setProperty("pw-btn", True)
+        self._drawer_export_btn.clicked.connect(self._export_drawer_data)
+        header_lay.addWidget(self._drawer_export_btn)
         lay.addWidget(header)
 
         self._drawer_table = QTableWidget()
@@ -580,6 +589,10 @@ class ComparisonPlotWidget(QWidget):
         row_legend, self._sw_legend = make_toggle_row("Show legend", self.show_legend)
         self._sw_legend.toggled.connect(self._on_sidebar_legend_toggled)
         self._sect_display.add_widget(row_legend)
+
+        self._row_k_log, self._sw_k_log = make_toggle_row("Log K axis", self.log_k_y_scale)
+        self._sw_k_log.toggled.connect(self._on_sidebar_log_k_toggled)
+        self._sect_display.add_widget(self._row_k_log)
         lay.addWidget(self._sect_display)
 
         # ── Dataset Colors ──
@@ -711,6 +724,10 @@ class ComparisonPlotWidget(QWidget):
 
     def _on_sidebar_legend_toggled(self, on: bool) -> None:
         self.show_legend = on
+        self.refresh_plot()
+
+    def _on_sidebar_log_k_toggled(self, on: bool) -> None:
+        self.log_k_y_scale = bool(on)
         self.refresh_plot()
 
     def _update_style_field(self, field: str, value) -> None:
@@ -897,7 +914,11 @@ class ComparisonPlotWidget(QWidget):
         if not path:
             return
         try:
-            self.figure.savefig(path, dpi=200, bbox_inches="tight")
+            path = self._with_extension(path, fmt)
+            self.figure.savefig(path, format=fmt, dpi=200, bbox_inches="tight")
+            QMessageBox.information(
+                self, "Export Successful", f"Plot exported to:\n{path}"
+            )
         except Exception as exc:  # pragma: no cover — user-facing dialog
             QMessageBox.warning(self, "Export failed", str(exc))
 
@@ -956,6 +977,9 @@ class ComparisonPlotWidget(QWidget):
         self._sect_units.setVisible(show_units)
         if hasattr(self, "_row_units"):
             self._row_units.setVisible(show_units)
+        show_log_axis = self.current_plot_type in {"k-values", "combined"}
+        if hasattr(self, "_row_k_log"):
+            self._row_k_log.setVisible(show_log_axis)
 
     def _sync_mode_radios(self):
         """Reflect the active display mode in the radio buttons without re-entering."""
@@ -1342,6 +1366,7 @@ class ComparisonPlotWidget(QWidget):
             show_grid=self.show_grid,
             show_legend=self.show_legend,
             show_value_labels=True,
+            log_y_scale=self.log_k_y_scale,
             y_label=f"K ({self._unit_symbol()})",
         )
     
@@ -1383,7 +1408,10 @@ class ComparisonPlotWidget(QWidget):
         ax.set_title('K-Values by Dataset', fontsize=12, fontweight='bold')
         ax.set_xticks(np.arange(n_datasets) + bar_width * (len(methods) - 1) / 2)
         ax.set_xticklabels(datasets, rotation=45, ha='right', fontsize=8)
-        apply_log_bar_limits(ax, positive_values)
+        if self.log_k_y_scale:
+            apply_log_bar_limits(ax, positive_values)
+        else:
+            apply_linear_bar_limits(ax, positive_values)
         
         if self.show_grid:
             ax.grid(True, axis='y', alpha=0.3)
@@ -1425,7 +1453,10 @@ class ComparisonPlotWidget(QWidget):
                 ha='right',
                 fontsize=6,
             )
-            apply_log_bar_limits(ax, values)
+            if self.log_k_y_scale:
+                apply_log_bar_limits(ax, values)
+            else:
+                apply_linear_bar_limits(ax, values)
             ax.tick_params(labelsize=7)
             
             if self.show_grid:
@@ -1543,7 +1574,10 @@ class ComparisonPlotWidget(QWidget):
                     fontsize=6,
                 )
                 ax2.set_ylabel(f"K ({self._unit_symbol()})", fontsize=7)
-                apply_log_bar_limits(ax2, values)
+                if self.log_k_y_scale:
+                    apply_log_bar_limits(ax2, values)
+                else:
+                    apply_linear_bar_limits(ax2, values)
                 ax2.tick_params(labelsize=6)
                 if self.show_grid:
                     ax2.grid(True, axis='y', alpha=0.3)
@@ -1620,6 +1654,9 @@ class ComparisonPlotWidget(QWidget):
             self._set_drawer_rows("Grain summary", headers, rows)
 
     def _set_drawer_rows(self, title: str, headers: list[str], rows: list[tuple]) -> None:
+        self._drawer_title_text = title
+        self._drawer_headers = list(headers)
+        self._drawer_rows = [tuple(row) for row in rows]
         self._drawer_title.setText(title)
         self._drawer_count.setText(f"{len(rows)} rows" if rows else "No rows")
         self._drawer_table.clear()
@@ -1638,6 +1675,38 @@ class ComparisonPlotWidget(QWidget):
 
         self._drawer_table.resizeColumnsToContents()
         self._drawer_table.resizeRowsToContents()
+
+    @staticmethod
+    def _with_extension(file_path: str, extension: str) -> str:
+        suffix = f".{extension.lower().lstrip('.')}"
+        return file_path if file_path.lower().endswith(suffix) else f"{file_path}{suffix}"
+
+    def _export_drawer_data(self) -> None:
+        self._refresh_drawer()
+        title = self._drawer_title_text or "Plot data"
+        safe_title = "".join(
+            ch if ch.isalnum() else "_" for ch in title.lower()
+        ).strip("_") or "plot_data"
+        path, _ = QFileDialog.getSaveFileName(
+            self,
+            f"Export {title} as CSV",
+            f"comparison_{safe_title}.csv",
+            "CSV Files (*.csv)",
+        )
+        if not path:
+            return
+        try:
+            import csv
+            path = self._with_extension(path, "csv")
+            with open(path, "w", newline="") as handle:
+                writer = csv.writer(handle)
+                writer.writerow(self._drawer_headers)
+                writer.writerows(self._drawer_rows)
+            QMessageBox.information(
+                self, "Export Successful", f"{title} exported to:\n{path}"
+            )
+        except Exception as exc:  # pragma: no cover - user-facing dialog
+            QMessageBox.warning(self, "Export failed", str(exc))
 
     def _grain_drawer_rows(self) -> tuple[list[str], list[tuple]]:
         grain = self._comparison_snapshot.grain

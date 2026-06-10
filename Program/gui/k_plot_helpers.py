@@ -85,6 +85,23 @@ def apply_log_bar_limits(
     ax.set_ylim(min(positive_values) / bottom_factor, label_top * (10 ** top_margin_decades))
 
 
+def apply_linear_bar_limits(
+    ax,
+    values: Sequence[float],
+    *,
+    max_label_level: int = 0,
+) -> None:
+    """Set readable linear bar limits with room for value labels."""
+    positive_values = [float(value) for value in values if value and value > 0]
+    if not positive_values:
+        return
+
+    highest = max(positive_values)
+    headroom = max(highest * 0.12, highest * (0.08 + max(0, max_label_level) * 0.035))
+    ax.set_yscale("linear")
+    ax.set_ylim(0.0, highest + headroom)
+
+
 def annotate_log_bars(
     ax,
     bars,
@@ -122,6 +139,54 @@ def annotate_log_bars(
                 base_offset_decades=base_offset_decades,
                 level_step_decades=level_step_decades,
             ),
+            label,
+            ha="center",
+            va="bottom",
+            fontsize=fontsize,
+            color=color,
+            clip_on=False,
+            zorder=5,
+            bbox=bbox,
+        )
+
+
+def annotate_linear_bars(
+    ax,
+    bars,
+    labels: Sequence[str],
+    *,
+    level_indices: Sequence[int] | None = None,
+    base_offset_fraction: float = 0.014,
+    level_step_fraction: float = 0.030,
+    fontsize: float = 7.0,
+    color: str = "#2f2419",
+    add_bbox: bool = False,
+) -> None:
+    """Annotate positive linear-scale bars above the tops."""
+    bar_list = list(bars)
+    levels = list(level_indices) if level_indices is not None else [0] * len(bar_list)
+    y0, y1 = ax.get_ylim()
+    span = float(y1) - float(y0)
+    if span <= 0:
+        span = max((bar.get_height() for bar in bar_list if bar.get_height() > 0), default=1.0)
+    bbox = None
+    if add_bbox:
+        bbox = {
+            "boxstyle": "round,pad=0.16",
+            "facecolor": "white",
+            "edgecolor": "none",
+            "alpha": 0.78,
+        }
+
+    for bar, label, level in zip(bar_list, labels, levels):
+        height = bar.get_height()
+        if not label or height <= 0:
+            continue
+        safe_level = max(0, level)
+        y = height + span * (base_offset_fraction + safe_level * level_step_fraction)
+        ax.text(
+            bar.get_x() + bar.get_width() / 2.0,
+            y,
             label,
             ha="center",
             va="bottom",

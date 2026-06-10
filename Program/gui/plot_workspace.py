@@ -8,14 +8,16 @@ from PyQt6.QtWidgets import (
     QWidget, QHBoxLayout, QVBoxLayout, QFrame, QComboBox,
     QPushButton, QLabel, QFileDialog, QMessageBox, QLineEdit,
     QSizePolicy, QButtonGroup, QSpinBox, QDoubleSpinBox, QScrollArea,
-    QSplitter,
+    QSplitter, QTableWidget, QTableWidgetItem, QHeaderView, QAbstractItemView,
 )
 from PyQt6.QtCore import (
     Qt, pyqtSignal, QPropertyAnimation, QEasingCurve, QSize,
 )
 from typing import Optional, Dict, Set
 import dataclasses
+import csv
 import math
+import re
 import numpy as np
 
 from data_loader import GrainSizeData
@@ -129,6 +131,41 @@ def _iso_fraction_label(lower_mm: float, upper_mm: float) -> str:
     return "Coarser material"
 
 
+def _scheme_fraction_label(lower_mm: float, upper_mm: float, scheme) -> str:
+    """Label a retained-size interval using the active classification scheme."""
+    if scheme is None or getattr(scheme, "key", "iso14688") == "iso14688":
+        return _iso_fraction_label(lower_mm, upper_mm)
+    if upper_mm <= 0:
+        return "Unknown"
+
+    lower = max(lower_mm, 0.0001)
+    midpoint = math.sqrt(lower * upper_mm)
+    clay_max = float(getattr(scheme, "clay_max", 0.002))
+    silt_max = float(getattr(scheme, "silt_max", 0.063))
+    sand_max = float(getattr(scheme, "sand_max", 2.0))
+    gravel_max = float(getattr(scheme, "gravel_max", 63.0))
+    bands = (
+        (0.0, clay_max, "Clay"),
+        (clay_max, silt_max, "Silt"),
+        (silt_max, sand_max, "Sand"),
+        (sand_max, gravel_max, "Gravel"),
+        (gravel_max, 300.0, "Cobble"),
+    )
+    for lo, hi, label in bands:
+        if lo <= midpoint < hi:
+            return label
+    return "Coarser material"
+
+
+def _scheme_short_name(scheme) -> str:
+    name = getattr(scheme, "name", None) or "active scheme"
+    if getattr(scheme, "key", "") == "iso14688":
+        return "ISO 14688"
+    if getattr(scheme, "key", "") == "uscs":
+        return "USCS"
+    return str(name)
+
+
 class PlotWorkspace(QWidget):
     """Plot workspace: inner toolbar + collapsible sidebar + matplotlib chart."""
 
@@ -141,6 +178,10 @@ class PlotWorkspace(QWidget):
         self.k_results: Dict[str, float] = {}
         self.flagged_methods: Set[str] = set()
         self.sidebar_visible = False
+        self.drawer_visible = False
+        self._drawer_headers: list[str] = []
+        self._drawer_rows: list[tuple] = []
+        self._drawer_title_text = "Plot data"
 
         # Plot settings
         self.current_plot_type = "distribution"
@@ -148,12 +189,13 @@ class PlotWorkspace(QWidget):
         self.show_legend = True
         self.show_markers = False
         self.show_zones = False
-        self.show_dlines = False
+        self.show_dlines = True
         self.fill_curve = False
         self.fill_zone_labels = False
         self.log_x_scale = True
         self.show_k_value_labels = True
         self.k_value_label_fontsize = 8
+        self.log_k_y_scale = False
 
         # Per-workspace custom style — starts as None (preset is authoritative).
         # Populated when the user tweaks any field in the "Legend & Typography"
@@ -262,13 +304,17 @@ class PlotWorkspace(QWidget):
         self._tb_sidebar_btn.clicked.connect(self._toggle_sidebar)
         lay.addWidget(self._tb_sidebar_btn)
 
+        self._tb_drawer_btn = _pw_chk(" Table", "Toggle active plot data drawer", False, "fa6s.table")
+        self._tb_drawer_btn.clicked.connect(self._toggle_drawer)
+        lay.addWidget(self._tb_drawer_btn)
+
         lay.addWidget(_pw_sep())
 
         # ── Toggle checks ──
         self._chk_grid = _pw_chk("Grid", "Toggle grid", True, "fa6s.hashtag")
         self._chk_legend = _pw_chk("Legend", "Toggle legend", True, "fa6s.list")
         self._chk_zones = _pw_chk("Zones", "Toggle soil zones", False, "fa6s.layer-group")
-        self._chk_dlines = _pw_chk("D-lines", "Show D-value lines", False, "fa6s.crosshairs")
+        self._chk_dlines = _pw_chk("D-lines", "Show D10 / D50 / D60 lines", True, "fa6s.crosshairs")
 
         for chk in (self._chk_grid, self._chk_legend, self._chk_zones, self._chk_dlines):
             chk.toggled.connect(self._update_display_options)
@@ -322,6 +368,9 @@ class PlotWorkspace(QWidget):
         self.plot_widget.axes_view_changed.connect(self._sync_axis_inputs_from_ax)
         chart_lay.addWidget(self.plot_widget, 1)
 
+        self._drawer = self._build_data_drawer()
+        chart_lay.addWidget(self._drawer, 0)
+
         # Toggle handle — absolute overlay at left edge, vertically centered
         self._toggle_handle = QPushButton(self._chart_area)
         self._toggle_handle.setObjectName("pw-toggle-handle")
@@ -333,20 +382,27 @@ class PlotWorkspace(QWidget):
         self._toggle_handle.raise_()  # on top of plot
 
         self._body_splitter = QSplitter(Qt.Orientation.Horizontal)
-        self._body_splitter.setChildrenCollapsible(False)
-        self._body_splitter.setHandleWidth(5)
+        self._body_splitter.setChildrenCollapsible(True)
+        self._body_splitter.setHandleWidth(0)
         self._body_splitter.addWidget(self._sidebar)
         self._body_splitter.addWidget(self._chart_area)
+        self._body_splitter.setCollapsible(0, True)
+        self._body_splitter.setCollapsible(1, False)
         self._body_splitter.setStretchFactor(0, 0)
         self._body_splitter.setStretchFactor(1, 1)
+        self._body_splitter.setSizes([0, 1])
         body_lay.addWidget(self._body_splitter, 1)
 
         # Sidebar collapse animation
         self._sidebar_anim = QPropertyAnimation(self._sidebar, b"maximumWidth")
         self._sidebar_anim.setDuration(200)
         self._sidebar_anim.setEasingCurve(QEasingCurve.Type.InOutQuad)
-        self._sidebar_anim.valueChanged.connect(lambda _value: self._position_toggle_handle())
+        self._sidebar_anim.valueChanged.connect(self._on_sidebar_animation_value_changed)
         self._sidebar_anim.finished.connect(self._on_sidebar_animation_finished)
+
+        self._drawer_anim = QPropertyAnimation(self._drawer, b"maximumHeight")
+        self._drawer_anim.setDuration(180)
+        self._drawer_anim.setEasingCurve(QEasingCurve.Type.InOutQuad)
 
         return body
 
@@ -354,6 +410,8 @@ class PlotWorkspace(QWidget):
         """Reposition the toggle handle when the chart area resizes."""
         super().resizeEvent(event)
         self._position_toggle_handle()
+        if self.drawer_visible and hasattr(self, "_drawer"):
+            self._drawer.setMaximumHeight(self._drawer_open_height())
 
     def _position_toggle_handle(self):
         """Place the toggle handle at the chart edge, vertically centered."""
@@ -365,6 +423,118 @@ class PlotWorkspace(QWidget):
         y = max(0, (h - handle_h) // 2)
         x = 0
         self._toggle_handle.setGeometry(x, y, handle_w, handle_h)
+
+    def _build_data_drawer(self) -> QFrame:
+        """Collapsible table drawer for the data behind the active plot."""
+        drawer = QFrame()
+        drawer.setObjectName("pw-data-drawer")
+        drawer.setMaximumHeight(32)
+        drawer.setMinimumHeight(0)
+        drawer.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Maximum)
+        drawer.setStyleSheet(f"""
+            QFrame#pw-data-drawer {{
+                background: {C.BG_RAISED};
+                border-top: 1px solid {C.BORDER};
+            }}
+            QTableWidget#pw-drawer-table {{
+                background: {C.BG};
+                border: none;
+                gridline-color: transparent;
+                color: {C.TEXT};
+            }}
+            QTableWidget#pw-drawer-table::item {{
+                border-bottom: 1px solid rgba(212,196,168,0.35);
+                padding: 3px 7px;
+            }}
+            QHeaderView::section {{
+                background: {C.BG_LOW};
+                color: {C.TEXT_MID};
+                border: none;
+                border-bottom: 1px solid {C.BORDER};
+                padding: 5px 7px;
+                font-weight: 600;
+            }}
+        """)
+
+        lay = QVBoxLayout(drawer)
+        lay.setContentsMargins(0, 0, 0, 0)
+        lay.setSpacing(0)
+
+        header = QWidget()
+        header.setFixedHeight(32)
+        header_lay = QHBoxLayout(header)
+        header_lay.setContentsMargins(8, 3, 8, 3)
+        header_lay.setSpacing(6)
+
+        self._drawer_toggle_btn = _pw_chk(
+            " Table", "Show data for the active plot", False, "fa6s.table"
+        )
+        self._drawer_toggle_btn.clicked.connect(self._toggle_drawer)
+        header_lay.addWidget(self._drawer_toggle_btn)
+
+        self._drawer_title = QLabel("Plot data")
+        self._drawer_title.setStyleSheet(
+            f"color: {C.TEXT_MID}; font-size: 10px; background: transparent;"
+        )
+        header_lay.addWidget(self._drawer_title, 1)
+
+        self._drawer_count = QLabel("")
+        self._drawer_count.setStyleSheet(
+            f"color: {C.TEXT_MUTED}; font-size: 10px; background: transparent;"
+        )
+        header_lay.addWidget(self._drawer_count)
+
+        self._drawer_export_btn = QPushButton("Export CSV")
+        self._drawer_export_btn.setProperty("pw-btn", True)
+        self._drawer_export_btn.clicked.connect(self.export_data)
+        header_lay.addWidget(self._drawer_export_btn)
+        lay.addWidget(header)
+
+        self._drawer_table = QTableWidget()
+        self._drawer_table.setObjectName("pw-drawer-table")
+        self._drawer_table.setEditTriggers(QTableWidget.EditTrigger.NoEditTriggers)
+        self._drawer_table.setSelectionMode(QAbstractItemView.SelectionMode.NoSelection)
+        self._drawer_table.setAlternatingRowColors(False)
+        self._drawer_table.setShowGrid(False)
+        self._drawer_table.verticalHeader().setVisible(False)
+        self._drawer_table.horizontalHeader().setStretchLastSection(True)
+        self._drawer_table.horizontalHeader().setMinimumSectionSize(72)
+        self._drawer_table.horizontalHeader().setSectionResizeMode(QHeaderView.ResizeMode.ResizeToContents)
+        self._drawer_table.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAsNeeded)
+        self._drawer_table.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAsNeeded)
+        self._drawer_table.setHorizontalScrollMode(QAbstractItemView.ScrollMode.ScrollPerPixel)
+        self._drawer_table.setVerticalScrollMode(QAbstractItemView.ScrollMode.ScrollPerPixel)
+        self._drawer_table.setVisible(False)
+        lay.addWidget(self._drawer_table, 1)
+
+        return drawer
+
+    def _toggle_drawer(self) -> None:
+        self._set_drawer_visible(not self.drawer_visible)
+
+    def _set_drawer_visible(self, visible: bool) -> None:
+        self.drawer_visible = bool(visible)
+        target = self._drawer_open_height() if self.drawer_visible else 32
+        self._drawer_table.setVisible(self.drawer_visible)
+        self._drawer_anim.stop()
+        self._drawer_anim.setStartValue(self._drawer.height())
+        self._drawer_anim.setEndValue(target)
+        self._drawer_anim.start()
+
+        for button in (
+            getattr(self, "_tb_drawer_btn", None),
+            getattr(self, "_drawer_toggle_btn", None),
+        ):
+            if button is None:
+                continue
+            button.blockSignals(True)
+            button.setChecked(self.drawer_visible)
+            button.blockSignals(False)
+            _sync_chk(button, self.drawer_visible)
+
+    def _drawer_open_height(self) -> int:
+        available = max(360, self.height())
+        return min(260, max(130, int(available * 0.34)))
 
     # ── Sidebar ────────────────────────────────────────────────
 
@@ -423,7 +593,7 @@ class PlotWorkspace(QWidget):
         for label_text, checked, row_attr, switch_attr in [
             ("Show grid lines",      True,  "_row_grid",        "_sw_grid"),
             ("Show soil zones",      False, "_row_zones",       "_sw_zones"),
-            ("Show D10 / D30 / D60", False, "_row_dlines",      "_sw_dlines"),
+            ("Show D10 / D50 / D60", True,  "_row_dlines",      "_sw_dlines"),
         ]:
             row_w, sw = self._toggle_row(label_text, checked)
             setattr(self, row_attr, row_w)
@@ -445,6 +615,9 @@ class PlotWorkspace(QWidget):
 
         self._row_k_labels, self._sw_k_labels = self._toggle_row("K value labels", True)
         self._sect_display.add_widget(self._row_k_labels)
+
+        self._row_k_log, self._sw_k_log = self._toggle_row("Log K axis", False)
+        self._sect_display.add_widget(self._row_k_log)
         lay.addWidget(self._sect_display)
 
         # ── Curve Color ──
@@ -560,12 +733,16 @@ class PlotWorkspace(QWidget):
         export_lay = QVBoxLayout(export_w)
         export_lay.setContentsMargins(10, 5, 10, 8)
         export_lay.setSpacing(4)
+        btn_png = QPushButton("Export as PNG")
+        btn_png.setProperty("pw-btn", True)
+        btn_png.clicked.connect(lambda: self.export_plot("png"))
         btn_svg = QPushButton("Export as SVG")
         btn_svg.setProperty("pw-btn", True)
         btn_svg.clicked.connect(lambda: self.export_plot("svg"))
         btn_data = QPushButton("Export Data")
         btn_data.setProperty("pw-btn", True)
         btn_data.clicked.connect(self.export_data)
+        export_lay.addWidget(btn_png)
         export_lay.addWidget(btn_svg)
         export_lay.addWidget(btn_data)
         self._sect_export.add_widget(export_w)
@@ -605,13 +782,16 @@ class PlotWorkspace(QWidget):
         self.sidebar_visible = not self.sidebar_visible
         target = self._default_sidebar_width() if self.sidebar_visible else 0
         self._sidebar_anim.stop()
+        splitter_sizes = self._body_splitter.sizes() if hasattr(self, "_body_splitter") else []
+        splitter_width = splitter_sizes[0] if splitter_sizes else self._sidebar.width()
         if self.sidebar_visible:
-            self._sidebar.setMinimumWidth(self._min_sidebar_width())
+            self._body_splitter.setHandleWidth(5)
+            self._sidebar.setMinimumWidth(0)
             self._sidebar.setMaximumWidth(self._max_sidebar_width())
-            start = max(0, min(self._sidebar.width(), self._max_sidebar_width()))
+            start = max(0, min(splitter_width, self._max_sidebar_width()))
         else:
             self._sidebar.setMinimumWidth(0)
-            start = max(0, self._sidebar.width())
+            start = max(0, splitter_width)
             self._sidebar.setMaximumWidth(max(start, self._min_sidebar_width()))
         self._sidebar_anim.setStartValue(start)
         self._sidebar_anim.setEndValue(target)
@@ -622,6 +802,20 @@ class PlotWorkspace(QWidget):
         # Update handle chevron direction
         chevron = "fa6s.chevron-left" if self.sidebar_visible else "fa6s.chevron-right"
         self._toggle_handle.setIcon(icon(chevron, C.TEXT_MID, 8))
+
+    def _apply_sidebar_splitter_width(self, width: int) -> None:
+        if not hasattr(self, "_body_splitter"):
+            return
+        width = max(0, int(width))
+        total = max(1, self._body_splitter.width())
+        self._body_splitter.setSizes([width, max(1, total - width)])
+        self._body_splitter.setHandleWidth(5 if width > 0 else 0)
+        self._position_toggle_handle()
+
+    def _on_sidebar_animation_value_changed(self, value) -> None:
+        width = int(value)
+        self._sidebar.setMaximumWidth(max(0, width))
+        self._apply_sidebar_splitter_width(width)
 
     def _min_sidebar_width(self) -> int:
         return min(260, max(220, self.width() // 4))
@@ -636,9 +830,13 @@ class PlotWorkspace(QWidget):
         if self.sidebar_visible:
             self._sidebar.setMinimumWidth(self._min_sidebar_width())
             self._sidebar.setMaximumWidth(self._max_sidebar_width())
+            self._apply_sidebar_splitter_width(
+                max(self._min_sidebar_width(), self._default_sidebar_width())
+            )
         else:
             self._sidebar.setMinimumWidth(0)
             self._sidebar.setMaximumWidth(0)
+            self._apply_sidebar_splitter_width(0)
 
     # ── Toolbar callbacks ──────────────────────────────────────
 
@@ -827,6 +1025,7 @@ class PlotWorkspace(QWidget):
         self.fill_zone_labels = self._sw_fill_labels.isChecked()
         self.show_markers = self._sw_markers.isChecked()
         self.show_k_value_labels = self._sw_k_labels.isChecked()
+        self.log_k_y_scale = self._sw_k_log.isChecked()
 
         # Sync toolbar check buttons
         self._chk_grid.blockSignals(True)
@@ -882,6 +1081,7 @@ class PlotWorkspace(QWidget):
             self.plot_widget.set_display_unit(selected_unit)
         self._update_contextual_controls()
         self._sync_axis_inputs_from_ax(getattr(self.plot_widget, 'current_ax', None))
+        self._refresh_drawer()
 
     def _set_context_visibility(self, widget: QWidget, visible: bool):
         widget.setHidden(not visible)
@@ -927,6 +1127,7 @@ class PlotWorkspace(QWidget):
         self._set_context_visibility(self._row_fill_labels, supports_fill)
         self._set_context_visibility(self._row_markers, supports_markers)
         self._set_context_visibility(self._row_k_labels, supports_k_units)
+        self._set_context_visibility(self._row_k_log, supports_k_units)
         self._set_context_visibility(self._row_k_label_size, supports_k_units)
 
         self._set_context_visibility(self._sect_curve_color, not is_k_plot)
@@ -944,6 +1145,7 @@ class PlotWorkspace(QWidget):
                 self._row_fill_labels,
                 self._row_markers,
                 self._row_k_labels,
+                self._row_k_log,
             )
         )
         self._set_context_visibility(self._sect_display, display_section_visible)
@@ -967,6 +1169,7 @@ class PlotWorkspace(QWidget):
         self.plot_widget.fill_zone_labels = self.fill_zone_labels
         self.plot_widget.show_k_value_labels = self.show_k_value_labels
         self.plot_widget.k_value_label_fontsize = self.k_value_label_fontsize
+        self.plot_widget.log_k_y_scale = self.log_k_y_scale
 
     # ── Plot logic (preserved from original) ───────────────────
 
@@ -1016,6 +1219,7 @@ class PlotWorkspace(QWidget):
         elif self.current_plot_type == "histogram":
             self._plot_histogram()
         self._sync_axis_inputs_from_ax(getattr(self.plot_widget, 'current_ax', None))
+        self._refresh_drawer()
 
     def _plot_cumulative_distribution(self):
         if not self.plot_widget:
@@ -1082,6 +1286,7 @@ class PlotWorkspace(QWidget):
         self._sync_axis_inputs_from_ax(ax)
 
     def _histogram_rows(self) -> list[dict[str, float | str]]:
+        scheme = getattr(self.plot_widget, "_scheme", None) if self.plot_widget else None
         pairs = sorted(
             zip(self.dataset.particle_sizes, self.dataset.percent_passing),
             key=lambda pair: pair[0],
@@ -1092,7 +1297,7 @@ class PlotWorkspace(QWidget):
             lower_mm = pairs[index + 1][0] if index + 1 < len(pairs) else 0.0
             next_passing = pairs[index + 1][1] if index + 1 < len(pairs) else 0.0
             weight_pct = max(0.0, float(passing) - float(next_passing))
-            fraction = _iso_fraction_label(float(lower_mm), float(upper_mm))
+            fraction = _scheme_fraction_label(float(lower_mm), float(upper_mm), scheme)
             if lower_mm <= 0:
                 interval = f"<{_format_mm(float(upper_mm))} mm"
             else:
@@ -1124,7 +1329,8 @@ class PlotWorkspace(QWidget):
                    tick_label=tick_labels,
                    color=style.curve_color, alpha=0.8,
                    edgecolor='black', linewidth=0.8)
-            ax.set_xlabel('Particle-size fraction (ISO 14688)', fontsize=style.label_fontsize,
+            scheme = getattr(self.plot_widget, "_scheme", None)
+            ax.set_xlabel(f'Particle-size fraction ({_scheme_short_name(scheme)})', fontsize=style.label_fontsize,
                           fontfamily=style.font_family)
             ax.set_ylabel('Weight (%)', fontsize=style.label_fontsize,
                           fontfamily=style.font_family)
@@ -1144,7 +1350,8 @@ class PlotWorkspace(QWidget):
         else:
             ax.bar(range(len(rows)), weights,
                    tick_label=tick_labels)
-            ax.set_xlabel('Particle-size fraction (ISO 14688)')
+            scheme = getattr(self.plot_widget, "_scheme", None)
+            ax.set_xlabel(f'Particle-size fraction ({_scheme_short_name(scheme)})')
             ax.set_ylabel('Weight (%)')
             ax.set_title(
                 f'Grain Size Histogram - {self.dataset.sample_name}')
@@ -1164,6 +1371,136 @@ class PlotWorkspace(QWidget):
         self._sync_axis_inputs_from_ax(ax)
 
     # ── Zoom ───────────────────────────────────────────────────
+
+    def _refresh_drawer(self) -> None:
+        if not hasattr(self, "_drawer_table"):
+            return
+        title, headers, rows = self._active_plot_table()
+        self._set_drawer_rows(title, headers, rows)
+
+    def _set_drawer_rows(self, title: str, headers: list[str], rows: list[tuple]) -> None:
+        self._drawer_title_text = title
+        self._drawer_headers = list(headers)
+        self._drawer_rows = [tuple(row) for row in rows]
+        self._drawer_title.setText(title)
+        self._drawer_count.setText(f"{len(rows)} rows" if rows else "No rows")
+        self._drawer_table.clear()
+        self._drawer_table.setColumnCount(len(headers))
+        self._drawer_table.setRowCount(len(rows))
+        self._drawer_table.setHorizontalHeaderLabels(headers)
+
+        for row_index, row in enumerate(rows):
+            for col_index, value in enumerate(row):
+                item = QTableWidgetItem(str(value))
+                if col_index > 0:
+                    item.setTextAlignment(
+                        Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter
+                    )
+                self._drawer_table.setItem(row_index, col_index, item)
+
+        self._drawer_table.resizeColumnsToContents()
+        self._drawer_table.resizeRowsToContents()
+
+    def _active_plot_table(self) -> tuple[str, list[str], list[tuple]]:
+        if self.current_plot_type == "histogram":
+            return self._histogram_table()
+        if self.current_plot_type == "k-values":
+            return self._k_values_table()
+        if self.current_plot_type == "combined":
+            return self._combined_table()
+        if self.current_plot_type == "cumulative":
+            return self._distribution_table("Cumulative curve data")
+        return self._distribution_table("Distribution curve data")
+
+    def _distribution_table(self, title: str) -> tuple[str, list[str], list[tuple]]:
+        headers = ["Particle size (mm)", "Percent passing (%)"]
+        rows = [
+            (self._fmt_numeric(size), self._fmt_numeric(passing))
+            for size, passing in zip(self.dataset.particle_sizes, self.dataset.percent_passing)
+        ]
+        return title, headers, rows
+
+    def _histogram_table(self) -> tuple[str, list[str], list[tuple]]:
+        scheme = getattr(self.plot_widget, "_scheme", None) if self.plot_widget else None
+        headers = [
+            f"Fraction ({_scheme_short_name(scheme)})",
+            "Lower size (mm)",
+            "Upper size (mm)",
+            "Interval",
+            "Weight (%)",
+        ]
+        rows = [
+            (
+                row["fraction"],
+                self._fmt_numeric(row["lower_mm"]),
+                self._fmt_numeric(row["upper_mm"]),
+                row["interval"],
+                self._fmt_numeric(row["weight_pct"]),
+            )
+            for row in self._histogram_rows()
+        ]
+        return "Grain-size histogram data", headers, rows
+
+    def _k_values_table(self) -> tuple[str, list[str], list[tuple]]:
+        unit = self._unit_combo.currentData() or HydraulicConductivityUnit.M_PER_DAY
+        symbol = HydraulicConductivityConverter.UNIT_SYMBOLS[unit]
+        headers = ["Method", f"K ({symbol})", "Status"]
+        rows: list[tuple] = []
+        for method, value_m_s in self.k_results.items():
+            display_value = HydraulicConductivityConverter.convert_from_m_per_s(
+                value_m_s, unit
+            )
+            rows.append((
+                method,
+                HydraulicConductivityConverter.DISPLAY_FORMATS[unit].format(display_value),
+                "Warning" if method in self.flagged_methods else "OK",
+            ))
+        if not rows:
+            rows.append(("No K-values calculated", "", ""))
+        return "K-value bar chart data", headers, rows
+
+    def _combined_table(self) -> tuple[str, list[str], list[tuple]]:
+        unit = self._unit_combo.currentData() or HydraulicConductivityUnit.M_PER_DAY
+        symbol = HydraulicConductivityConverter.UNIT_SYMBOLS[unit]
+        headers = [
+            "Panel",
+            "Item",
+            "Particle size (mm)",
+            "Percent passing (%)",
+            f"K ({symbol})",
+            "Status",
+        ]
+        rows: list[tuple] = [
+            (
+                "Distribution",
+                "",
+                self._fmt_numeric(size),
+                self._fmt_numeric(passing),
+                "",
+                "",
+            )
+            for size, passing in zip(self.dataset.particle_sizes, self.dataset.percent_passing)
+        ]
+        for method, value_m_s in self.k_results.items():
+            display_value = HydraulicConductivityConverter.convert_from_m_per_s(
+                value_m_s, unit
+            )
+            rows.append((
+                "K values",
+                method,
+                "",
+                "",
+                HydraulicConductivityConverter.DISPLAY_FORMATS[unit].format(display_value),
+                "Warning" if method in self.flagged_methods else "OK",
+            ))
+        return "Combined plot data", headers, rows
+
+    @staticmethod
+    def _fmt_numeric(value) -> str:
+        try:
+            return f"{float(value):.6g}"
+        except (TypeError, ValueError):
+            return str(value)
 
     def _sync_axis_inputs_from_ax(self, target_ax) -> None:
         """Reflect the active axes limits in the sidebar controls."""
@@ -1214,13 +1551,16 @@ class PlotWorkspace(QWidget):
             self.plot_widget.update_plot(
                 particle_sizes, percent_passing, sample_name, grain_size_data=self.dataset)
             self._sync_axis_inputs_from_ax(getattr(self.plot_widget, 'current_ax', None))
+            self._refresh_drawer()
 
     def set_scheme(self, scheme) -> None:
         """Update classification scheme; redraw via refresh_plot() if zones are visible."""
         if self.plot_widget:
             self.plot_widget._scheme = scheme
-        if self.show_zones:
+        if self.show_zones or self.current_plot_type == "histogram":
             self.refresh_plot()
+        else:
+            self._refresh_drawer()
 
     def add_k_results(self, k_results: Dict[str, float],
                       flagged_methods=None):
@@ -1230,6 +1570,8 @@ class PlotWorkspace(QWidget):
             self.plot_widget.flagged_methods = set(self.flagged_methods)
         if self.current_plot_type in ["combined", "k-values"]:
             self.refresh_plot()
+        else:
+            self._refresh_drawer()
 
     @staticmethod
     def _with_extension(file_path: str, extension: str) -> str:
@@ -1270,44 +1612,26 @@ class PlotWorkspace(QWidget):
                     f"Failed to export plot:\n{str(e)}")
 
     def export_data(self):
+        self._refresh_drawer()
+        title = self._drawer_title_text or "Plot data"
+        filename_title = re.sub(r"[^A-Za-z0-9_]+", "_", title).strip("_").lower()
+        filename_title = filename_title or "plot_data"
         file_path, _ = QFileDialog.getSaveFileName(
             self,
-            "Export Data as CSV",
-            f"{self.dataset.sample_name}_data.csv",
+            f"Export {title} as CSV",
+            f"{self.dataset.sample_name}_{filename_title}.csv",
             "CSV Files (*.csv)",
         )
         if file_path:
             try:
-                import csv
                 file_path = self._with_extension(file_path, "csv")
                 with open(file_path, 'w', newline='') as f:
                     writer = csv.writer(f)
-                    if self.current_plot_type == "histogram":
-                        writer.writerow([
-                            "Particle-size fraction",
-                            "Lower size (mm)",
-                            "Upper size (mm)",
-                            "Interval",
-                            "Weight (%)",
-                        ])
-                        for row in self._histogram_rows():
-                            writer.writerow([
-                                row["fraction"],
-                                row["lower_mm"],
-                                row["upper_mm"],
-                                row["interval"],
-                                row["weight_pct"],
-                            ])
-                    else:
-                        writer.writerow(["Grain Size (mm)", "Percent Passing (%)"])
-                        for size, passing in zip(
-                            self.dataset.particle_sizes,
-                            self.dataset.percent_passing,
-                        ):
-                            writer.writerow([size, passing])
+                    writer.writerow(self._drawer_headers)
+                    writer.writerows(self._drawer_rows)
                 QMessageBox.information(
                     self, "Export Successful",
-                    f"Data exported to:\n{file_path}")
+                    f"{title} exported to:\n{file_path}")
             except Exception as e:
                 QMessageBox.critical(
                     self, "Export Error",

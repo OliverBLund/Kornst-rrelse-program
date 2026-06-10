@@ -12,9 +12,10 @@ import sys
 from pathlib import Path
 from typing import List
 
-from PyQt6.QtCore import QPointF, QRect, QRectF, QSize, Qt, QTimer, pyqtProperty, pyqtSignal, QEasingCurve, QPropertyAnimation
+from PyQt6.QtCore import QEvent, QPoint, QPointF, QRect, QRectF, QSize, Qt, QTimer, pyqtProperty, pyqtSignal, QEasingCurve, QPropertyAnimation
 from PyQt6.QtGui import QBrush, QColor, QCursor, QLinearGradient, QPainter, QPainterPath, QPaintEvent, QPen, QPixmap
 from PyQt6.QtWidgets import (
+    QApplication,
     QCheckBox,
     QFrame,
     QGridLayout,
@@ -27,7 +28,7 @@ from PyQt6.QtWidgets import (
     QWidget,
 )
 
-from .theme import C, F, icon
+from .theme import C, F, apply_tooltip_style, icon
 
 # Max width of the centred cards (px)
 _CARD_W = 1040
@@ -115,6 +116,21 @@ class WelcomeWidget(QWidget):
         self.recent_files = recent_files or []
         self.recent_sessions = recent_sessions or []
         self.setAutoFillBackground(False)
+        tooltip_qss = f"""
+            QToolTip {{
+                background: #fffdf7;
+                background-color: #fffdf7;
+                color: {C.TEXT};
+                border: 1px solid {C.OLIVE};
+                border-radius: 6px;
+                padding: 6px 9px;
+            }}
+        """
+        self.setStyleSheet(tooltip_qss)
+        app = QApplication.instance()
+        if app is not None and "QToolTip" not in app.styleSheet():
+            app.setStyleSheet((app.styleSheet() + "\n" + tooltip_qss).strip())
+        apply_tooltip_style(app)
         self._bg_pixmap = self._load_bg_pixmap()
         self._background_phase = 0.0
         self._title_card = None
@@ -140,12 +156,14 @@ class WelcomeWidget(QWidget):
         self._guide_widgets: list[QWidget] = []
         self._resume_btn = None
         self._resume_hint = None
+        self._custom_tooltip_label = None
         self._background_timer = QTimer(self)
         self._background_timer.setInterval(40)
         self._background_timer.timeout.connect(self._advance_background)
         if self._bg_pixmap.isNull():
             self._background_timer.start()
         self._setup_ui()
+        self._setup_custom_tooltips()
 
     @staticmethod
     def _load_bg_pixmap() -> QPixmap:
@@ -436,7 +454,80 @@ class WelcomeWidget(QWidget):
     def resizeEvent(self, event):
         super().resizeEvent(event)
         self._sync_card_widths_v2()
+        self._hide_custom_tooltip()
         self.update()
+
+    def _setup_custom_tooltips(self) -> None:
+        """Use an in-window tooltip so welcome hover help never falls back to native dark styling."""
+        label = QLabel(self)
+        label.setObjectName("welcomeCustomTooltip")
+        label.setWordWrap(True)
+        label.setMaximumWidth(340)
+        label.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents, True)
+        label.setStyleSheet(f"""
+            QLabel#welcomeCustomTooltip {{
+                background: #fffdf7;
+                color: {C.TEXT};
+                border: 1px solid {C.OLIVE};
+                border-radius: 6px;
+                padding: 7px 10px;
+                font-size: {F.SZ_BASE}pt;
+            }}
+        """)
+        label.hide()
+        self._custom_tooltip_label = label
+
+        for widget in self.findChildren(QWidget):
+            text = widget.toolTip().strip()
+            if not text:
+                continue
+            widget.setProperty("welcomeTooltipText", text)
+            widget.setToolTip("")
+            widget.setMouseTracking(True)
+            widget.installEventFilter(self)
+
+    def eventFilter(self, watched, event):
+        text = watched.property("welcomeTooltipText") if hasattr(watched, "property") else None
+        if text:
+            event_type = event.type()
+            if event_type in (QEvent.Type.Enter, QEvent.Type.MouseMove):
+                self._show_custom_tooltip(str(text), QCursor.pos())
+            elif event_type in (
+                QEvent.Type.Leave,
+                QEvent.Type.Hide,
+                QEvent.Type.MouseButtonPress,
+                QEvent.Type.FocusOut,
+            ):
+                self._hide_custom_tooltip()
+        return super().eventFilter(watched, event)
+
+    def _show_custom_tooltip(self, text: str, global_pos=None) -> None:
+        label = self._custom_tooltip_label
+        if label is None or not text:
+            return
+        label.setText(text)
+        label.adjustSize()
+        self._position_custom_tooltip(global_pos or QCursor.pos())
+        label.show()
+        label.raise_()
+
+    def _position_custom_tooltip(self, global_pos) -> None:
+        label = self._custom_tooltip_label
+        if label is None:
+            return
+        local = self.mapFromGlobal(global_pos) + QPoint(14, 18)
+        label.adjustSize()
+        margin = 8
+        x = min(max(margin, local.x()), max(margin, self.width() - label.width() - margin))
+        y = local.y()
+        if y + label.height() > self.height() - margin:
+            y = local.y() - label.height() - 32
+        y = min(max(margin, y), max(margin, self.height() - label.height() - margin))
+        label.move(x, y)
+
+    def _hide_custom_tooltip(self) -> None:
+        if self._custom_tooltip_label is not None:
+            self._custom_tooltip_label.hide()
 
     def paintEvent(self, event: QPaintEvent):
         painter = QPainter(self)
@@ -852,7 +943,7 @@ class WelcomeWidget(QWidget):
             self._build_hero_note(
                 "fa6s.book-open",
                 "Latest build",
-                "The current beta adds grouped comparison summaries, shared K mean calculations across views and exports, and a simpler Excel review path.",
+                "The current beta tightens Excel loading, shared K summaries, aggregate/group review, plot data drawers, and report/export consistency.",
                 button_text="View Full Changelog",
                 button_icon="fa6s.book-open",
                 button_handler=self._open_full_changelog,
@@ -1360,11 +1451,12 @@ class WelcomeWidget(QWidget):
         return [
             {
                 "version": "v0.9.2-beta",
-                "date": "2026-06-08",
+                "date": "2026-06-09",
                 "changes": [
-                    "Grouped comparison summaries now show overall and per-group K and grain-size results.",
-                    "K geometric and arithmetic means are calculated through the shared aggregation backend across Results, Statistics, exports, and reports.",
-                    "Excel loading, sheet selection, and remapping paths are simpler while preserving manual review when needed.",
+                    "Excel loading, sheet selection, activity logging, and remapping paths are simpler while preserving manual review when needed.",
+                    "Results, Details, Statistics, reports, and exports now share the same K geometric/arithmetic mean backend.",
+                    "Aggregate and group summaries now cover K-values and key grain-size metrics.",
+                    "Plot defaults, data drawers, and PNG/SVG/data exports were tightened across single and comparison plots.",
                 ],
             },
             {
@@ -1754,6 +1846,11 @@ class WelcomeWidget(QWidget):
         sc_lay.setSpacing(9)
 
         for index, v in enumerate([
+            {"version": "v0.9.2-beta",  "date": "2026-06-09", "changes": [
+                "Excel loading, sheet selection, and remapping paths simplified",
+                "Shared K geometric/arithmetic means across UI, reports, and exports",
+                "Aggregate/group summaries and plot data drawers added",
+            ]},
             {"version": "v0.9.0-beta",  "date": "2025-01-15", "changes": [
                 "New batch export flow with scope selection",
                 "Wide format CSV export for statistical analysis",

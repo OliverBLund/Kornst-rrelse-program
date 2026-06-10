@@ -9,7 +9,7 @@ import unittest
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 sys.path.insert(0, "Program")
 
-from PyQt6.QtWidgets import QApplication, QLabel, QHeaderView
+from PyQt6.QtWidgets import QApplication, QLabel, QHeaderView, QTextEdit
 
 from data_loader import GrainSizeData
 from gui.dataset_tab import DatasetTab
@@ -87,6 +87,15 @@ class TestDatasetTabResultsTable(unittest.TestCase):
         self.assertIn("Based on the loaded gradation curve only", text)
         self.assertIn("Monotonicity:", text)
         self.assertIn("Point density:", text)
+
+    def test_statistics_tab_uses_structured_tables_instead_of_text_box_grid(self):
+        stats = self.tab.statistics_tab
+
+        self.assertGreater(stats.percentiles_table.rowCount(), 0)
+        self.assertGreater(stats.gradation_table.rowCount(), 0)
+        self.assertGreater(stats.special_diameter_table.rowCount(), 0)
+        self.assertGreater(stats.percentile_usage_table.rowCount(), 0)
+        self.assertLessEqual(len(stats.findChildren(QTextEdit)), 3)
 
     def test_results_bottom_summary_surfaces_ok_only_geometric_and_arithmetic_means(self):
         self.tab.apply_precomputed_results([

@@ -35,7 +35,7 @@ from gui.log_overlay import (
 )
 from gui.stack_fade import StackFadeController, TabFadeInController
 from gui.welcome_widget import WelcomeWidget
-from gui.theme import C, F, SZ, build_stylesheet, icon, apply_matplotlib_style
+from gui.theme import C, F, SZ, build_stylesheet, icon, apply_matplotlib_style, apply_tooltip_style
 from gui.plot_context import build_plot_context_from_tab
 from qt_chrome import FramelessMainWindowMixin
 from data_loader import DataLoader, GrainSizeData, get_test_data_files
@@ -556,6 +556,7 @@ class MainWindow(FramelessMainWindowMixin, QMainWindow):
         app = QApplication.instance()
         if app is not None:
             app.setStyleSheet(stylesheet)
+            apply_tooltip_style(app)
         self.setStyleSheet(stylesheet)
 
         self._emit_startup_progress(
