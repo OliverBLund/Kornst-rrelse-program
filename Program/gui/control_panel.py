@@ -188,6 +188,7 @@ class _SampleCard(QWidget):
         self._expanded = False
         self._d50 = d50
         self._k_val = k_val
+        self._group_name = ""
 
         self.setAttribute(Qt.WidgetAttribute.WA_StyledBackground)
         self.setCursor(Qt.CursorShape.PointingHandCursor)
@@ -360,8 +361,14 @@ class _SampleCard(QWidget):
         self._k_val = k_val
         self._update_meta_text()
 
+    def set_group(self, group_name: str = ""):
+        self._group_name = group_name or ""
+        self._update_meta_text()
+
     def _update_meta_text(self):
         parts = []
+        if self._group_name and self._group_name != "Ungrouped":
+            parts.append(f"Group: {self._group_name}")
         if self._d50:
             parts.append(f"D50: {self._d50}")
         if self._k_val:
@@ -538,6 +545,10 @@ class _FileListWidget(QScrollArea):
     def update_card_meta(self, file_path: str, d50: str = "", k_val: str = ""):
         if file_path in self._cards:
             self._cards[file_path].set_meta(d50, k_val)
+
+    def update_card_group(self, file_path: str, group_name: str = ""):
+        if file_path in self._cards:
+            self._cards[file_path].set_group(group_name)
 
     def remove_card(self, file_path: str):
         if file_path in self._cards:
@@ -1466,6 +1477,7 @@ class ControlPanel(QFrame):
     dataset_integration_started = pyqtSignal()  # Batched dataset UI integration starts
     dataset_integration_finished = pyqtSignal()  # Batched dataset UI integration finished
     selection_changed = pyqtSignal()  # Emitted when card selected-toggle state changes
+    manage_datasets_requested = pyqtSignal()  # Emitted when the sidebar manager is requested
     scheme_changed = pyqtSignal(object)  # GrainClassificationScheme — emitted when user picks a new scheme
 
     def __init__(self):
@@ -1508,6 +1520,11 @@ class ControlPanel(QFrame):
     def set_selected_paths(self, file_paths: list[str], *, emit_signal: bool = True):
         """Set sidebar-selected sample cards from an external controller."""
         self._file_list.set_selected_paths(file_paths, emit_signal=emit_signal)
+        self._update_inventory_bar()
+
+    def _request_dataset_manager(self, _checked: bool = False) -> None:
+        """Emit a clean zero-argument request from the sidebar Manage button."""
+        self.manage_datasets_requested.emit()
 
     def dragEnterEvent(self, event):
         if event.mimeData().hasUrls():
@@ -1726,6 +1743,12 @@ class ControlPanel(QFrame):
         self._pill_rev = QPushButton("\u26a0 Review")
         self._pill_rev.setCheckable(True)
         self._pill_rev.setStyleSheet(_PILL)
+        self._manage_samples_btn = QPushButton("Manage")
+        self._manage_samples_btn.setStyleSheet(_PILL)
+        self._manage_samples_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        self._manage_samples_btn.setToolTip("Choose active samples and assign groups")
+        self._manage_samples_btn.setEnabled(False)
+        self._manage_samples_btn.clicked.connect(self._request_dataset_manager)
 
         # Exclusive pill logic
         self._pill_all.clicked.connect(lambda: self._set_filter("all"))
@@ -1735,6 +1758,7 @@ class ControlPanel(QFrame):
         pills_h.addWidget(self._pill_all)
         pills_h.addWidget(self._pill_sel)
         pills_h.addWidget(self._pill_rev)
+        pills_h.addWidget(self._manage_samples_btn)
         pills_h.addStretch()
         body_v.addWidget(pills_w)
 
@@ -2110,6 +2134,8 @@ class ControlPanel(QFrame):
 
         self._chip_loaded.setText(f"{loaded} loaded" if total else "0 loaded")
         self._chip_selected.setText(f"{selected} selected")
+        if hasattr(self, "_manage_samples_btn"):
+            self._manage_samples_btn.setEnabled(total > 0)
         if warnings > 0:
             self._chip_warnings.setText(f"\u26a0 {warnings}")
             self._chip_warnings.setVisible(True)
@@ -2151,8 +2177,23 @@ class ControlPanel(QFrame):
         except Exception:
             pass
         self._file_list.update_card_meta(file_path, d50_str, k_str)
+        self._file_list.update_card_group(
+            file_path,
+            getattr(dataset, "group_name", "Ungrouped"),
+        )
         # Also refresh the stratigraphy widget for the active card
         self._refresh_stratigraphy(file_path)
+
+    def update_sample_group(self, file_path: str, group_name: str = "Ungrouped") -> None:
+        """Refresh the visible group label for a loaded sample card."""
+        self._file_list.update_card_group(file_path, group_name)
+        _, entry = self._find_loaded_entry_by_file(file_path)
+        dataset = entry.get("data") if entry else None
+        if dataset is not None:
+            try:
+                dataset.group_name = group_name
+            except Exception:
+                pass
 
     # ── Classification / Stratigraphy ─────────────────────────────────────────
 

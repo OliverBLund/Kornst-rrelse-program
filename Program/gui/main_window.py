@@ -8,6 +8,7 @@ from collections import deque
 import multiprocessing as mp
 import os
 import queue
+import time
 
 from PyQt6.QtWidgets import (
     QMainWindow, QWidget, QHBoxLayout, QVBoxLayout,
@@ -22,6 +23,7 @@ from typing import Any, Callable, List, Mapping, Optional
 
 from gui.control_panel import ControlPanel
 from gui.dataset_tab import DatasetTab
+from gui.dataset_selection_dialog import DatasetSelectionDialog
 from gui.comparison_tab import ComparisonTab
 from gui.reporting_tab import ReportingTab
 from gui.export_tab import ExportTab
@@ -535,6 +537,8 @@ class MainWindow(FramelessMainWindowMixin, QMainWindow):
         self._external_ui_processed = 0
         self._external_load_dialog = None
         self._external_load_context = None
+        self._dataset_group_manager_active = False
+        self._dataset_group_manager_last_closed_at = 0.0
         self._help_dialog = None
         self._external_load_poll_timer = QTimer(self)
         self._external_load_poll_timer.setInterval(25)
@@ -615,6 +619,7 @@ class MainWindow(FramelessMainWindowMixin, QMainWindow):
         self.control_panel.dataset_integration_finished.connect(self._end_bulk_dataset_add)
         self.control_panel.sample_selected.connect(self._on_sidebar_sample_selected)
         self.control_panel.selection_changed.connect(self._on_sidebar_selection_changed)
+        self.control_panel.manage_datasets_requested.connect(self._open_dataset_group_manager)
         self.control_panel.scheme_changed.connect(self._on_scheme_changed)
 
         # ── Main area ──────────────────────────────────────────────
@@ -1951,6 +1956,93 @@ class MainWindow(FramelessMainWindowMixin, QMainWindow):
                     and t.dataset.file_path in path_set]
         return filtered if filtered else self.dataset_tabs
 
+    def _dataset_paths_for_tabs(self, dataset_tabs) -> list[str]:
+        """Return sidebar file-path keys for dataset tabs."""
+        paths: list[str] = []
+        for tab in dataset_tabs:
+            dataset = tab.get_dataset() if hasattr(tab, "get_dataset") else getattr(tab, "dataset", None)
+            file_path = getattr(dataset, "file_path", "") if dataset is not None else ""
+            if file_path:
+                paths.append(file_path)
+        return paths
+
+    def _refresh_sidebar_group_labels(self) -> None:
+        """Refresh sample-card group labels from the current dataset objects."""
+        if not hasattr(self.control_panel, "update_sample_group"):
+            return
+        for tab in self.dataset_tabs:
+            dataset = tab.get_dataset() if hasattr(tab, "get_dataset") else getattr(tab, "dataset", None)
+            if dataset is None:
+                continue
+            file_path = getattr(dataset, "file_path", "")
+            if file_path:
+                self.control_panel.update_sample_group(
+                    file_path,
+                    getattr(dataset, "group_name", "Ungrouped"),
+                )
+
+    def _apply_group_assignments(self, group_assignments: Mapping[object, str]) -> None:
+        """Apply group labels to dataset objects and sidebar cards."""
+        for tab, group_name in group_assignments.items():
+            try:
+                dataset = tab.get_dataset()
+            except Exception:
+                dataset = getattr(tab, "dataset", None)
+            if dataset is None:
+                continue
+            try:
+                dataset.group_name = group_name
+            except Exception:
+                pass
+        self._refresh_sidebar_group_labels()
+
+    def _sync_scope_outputs(self) -> None:
+        """Push current loaded/selected/group state into comparison, reports, and export."""
+        self._sync_comparison_dataset_state()
+        if hasattr(self, "reporting_tab"):
+            self.reporting_tab.set_dataset_tabs(self.dataset_tabs)
+        if hasattr(self, "export_tab"):
+            self._update_export_tab()
+
+    def _open_dataset_group_manager(self) -> None:
+        """Open the shared sidebar Dataset & Group Manager."""
+        if not self.dataset_tabs:
+            self._show_status_message("Load datasets before managing scope and groups", ok=False)
+            return
+        now = time.monotonic()
+        if (
+            self._dataset_group_manager_active
+            or now - self._dataset_group_manager_last_closed_at < 0.35
+        ):
+            return
+
+        self._dataset_group_manager_active = True
+        try:
+            selected_tabs = self._get_selected_dataset_tabs()
+            dialog = DatasetSelectionDialog(
+                self.dataset_tabs,
+                currently_selected=selected_tabs,
+                title="Dataset & Group Manager",
+                subtitle="Choose active samples, assign groups, and apply the shared workspace scope",
+                action_text="Apply",
+                action_icon="fa6s.check",
+                minimum_selection=1,
+                allow_grouping=True,
+                parent=self,
+            )
+            if not dialog.exec():
+                return
+
+            self._apply_group_assignments(dialog.get_group_assignments())
+            selected_tabs = dialog.get_selected_tabs()
+            selected_paths = self._dataset_paths_for_tabs(selected_tabs)
+            self.control_panel.set_selected_paths(selected_paths, emit_signal=False)
+            self._sync_scope_outputs()
+            self._show_status_message(f"Dataset scope updated: {len(selected_tabs)} selected")
+        finally:
+            self._dataset_group_manager_active = False
+            self._dataset_group_manager_last_closed_at = time.monotonic()
+
     def _sync_comparison_dataset_state(self) -> None:
         """Keep comparison loaded/selected dataset state aligned with the sidebar."""
         self.comparison_tab.set_dataset_state(
@@ -1960,20 +2052,19 @@ class MainWindow(FramelessMainWindowMixin, QMainWindow):
 
     def _on_sidebar_selection_changed(self):
         """Push the current selected-tab subset to the comparison tab."""
-        self._sync_comparison_dataset_state()
-        if hasattr(self, "export_tab"):
-            self.export_tab.set_dataset_selection_state(
-                self.dataset_tabs,
-                selected_tabs=self._get_selected_dataset_tabs(),
-            )
+        self._sync_scope_outputs()
 
     def _on_comparison_selection_requested(self, file_paths: list[str]) -> None:
         """Apply comparison-dialog selections back onto the sidebar cards."""
-        self.control_panel.set_selected_paths(file_paths)
+        self._refresh_sidebar_group_labels()
+        self.control_panel.set_selected_paths(file_paths, emit_signal=False)
+        self._sync_scope_outputs()
 
     def _on_export_selection_requested(self, file_paths: list[str]) -> None:
         """Apply export-dialog selections back onto the sidebar cards."""
-        self.control_panel.set_selected_paths(file_paths)
+        self._refresh_sidebar_group_labels()
+        self.control_panel.set_selected_paths(file_paths, emit_signal=False)
+        self._sync_scope_outputs()
 
     def _on_scheme_changed(self, scheme):
         """Propagate a new classification scheme to all open dataset tabs and output tabs."""

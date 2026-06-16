@@ -1898,14 +1898,21 @@ class ExportTab(QWidget):
         dialog = DatasetSelectionDialog(
             self.dataset_tabs,
             currently_selected=current_tabs,
-            title="Select Datasets for Export",
-            subtitle="Choose which samples to include when the export scope is Selected",
+            title="Export Scope & Groups",
+            subtitle="Choose which samples to export and assign group labels if needed",
             action_text="Use Selected",
             action_icon="fa6s.check",
             minimum_selection=1,
+            allow_grouping=True,
             parent=self,
         )
         if dialog.exec():
+            if hasattr(dialog, "get_group_assignments"):
+                for tab, group_name in dialog.get_group_assignments().items():
+                    try:
+                        tab.get_dataset().group_name = group_name
+                    except Exception:
+                        pass
             selected_tabs = dialog.get_selected_tabs()
             self._set_selected_tabs(selected_tabs)
             self.scope_selected.setChecked(True)

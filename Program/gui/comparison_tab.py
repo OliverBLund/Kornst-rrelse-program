@@ -255,6 +255,7 @@ class ComparisonTab(QWidget):
         self.dataset_tabs: list = []
         self.selected_datasets: list = []
         self._pinned: set[str] = set()
+        self._plot_hidden: set[str] = set()
         self._heat_on: bool = True
         self._active_scheme = ISO14688
         self._details_mode: str = "grain"
@@ -419,11 +420,10 @@ class ComparisonTab(QWidget):
         self._plot_widget.dataset_colors = DATASET_COLORS
         h.addWidget(self._plot_widget, 1)
 
-        # Right sidebar — fixed 180 px
+        # Right sidebar: plot-only visibility/focus controls.
         sidebar = QFrame()
-        sidebar.setMinimumWidth(164)
-        sidebar.setMaximumWidth(210)
-        sidebar.setSizePolicy(QSizePolicy.Policy.Maximum, QSizePolicy.Policy.Expanding)
+        sidebar.setFixedWidth(252)
+        sidebar.setSizePolicy(QSizePolicy.Policy.Fixed, QSizePolicy.Policy.Expanding)
         sidebar.setStyleSheet(
             f"background: {C.BG_RAISED}; border-left: 1px solid {C.BORDER};"
         )
@@ -431,25 +431,59 @@ class ComparisonTab(QWidget):
         sb_lay.setContentsMargins(0, 0, 0, 0)
         sb_lay.setSpacing(0)
 
-        # "DATASETS" header band
-        hdr = QLabel("PLOT SCOPE")
+        hdr = QLabel("PLOT VISIBILITY")
         hdr.setFixedHeight(30)
         hdr.setAlignment(Qt.AlignmentFlag.AlignVCenter | Qt.AlignmentFlag.AlignLeft)
         hdr.setStyleSheet(
             f"padding-left: 10px; font-size: {F.SZ_XS}pt; font-weight: 700;"
             f"letter-spacing: 0.10em; color: {C.TEXT_MUTED};"
-            f"background: {C.BG_LOW}; border-bottom: 1px solid {C.BORDER};"
+            f"background: {C.BG_LOW}; border: none;"
         )
         sb_lay.addWidget(hdr)
 
         self._pin_scope_label = QLabel("All selected datasets")
         self._pin_scope_label.setWordWrap(True)
-        self._pin_scope_label.setFixedHeight(44)
+        self._pin_scope_label.setFixedHeight(54)
         self._pin_scope_label.setStyleSheet(
             f"padding: 6px 10px; font-size: {F.SZ_XS}pt; color: {C.TEXT_MUTED};"
-            f"background: {C.BG}; border-bottom: 1px solid {C.BORDER};"
+            f"background: {C.BG}; border: none;"
         )
         sb_lay.addWidget(self._pin_scope_label)
+
+        actions = QWidget()
+        actions.setStyleSheet(f"background: {C.BG}; border: none;")
+        actions_lay = QHBoxLayout(actions)
+        actions_lay.setContentsMargins(8, 6, 8, 6)
+        actions_lay.setSpacing(6)
+
+        self._plot_scope_edit_btn = QPushButton("Scope")
+        self._plot_scope_edit_btn.setToolTip("Edit comparison scope and group labels")
+        self._plot_scope_edit_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        self._plot_scope_edit_btn.clicked.connect(self._on_manage_datasets)
+
+        self._plot_show_all_btn = QPushButton("Show all")
+        self._plot_show_all_btn.setToolTip("Clear plot focus and hidden datasets")
+        self._plot_show_all_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        self._plot_show_all_btn.clicked.connect(self._show_all_plot_datasets)
+
+        for btn in (self._plot_scope_edit_btn, self._plot_show_all_btn):
+            btn.setFixedHeight(24)
+            btn.setStyleSheet(
+                f"QPushButton {{ background: rgba(255,255,255,0.48); border: 1px solid {C.BORDER}; "
+                f"border-radius: 4px; color: {C.TEXT_MID}; font-size: {F.SZ_XS}pt; padding: 2px 7px; }}"
+                f"QPushButton:hover {{ background: rgba(107,142,35,0.08); color: {C.TEXT}; }}"
+                f"QPushButton:disabled {{ color: {C.TEXT_MUTED}; background: transparent; }}"
+            )
+        try:
+            self._plot_scope_edit_btn.setIcon(theme_icon("fa6s.layer-group", C.TEXT_MID, size=10))
+            self._plot_show_all_btn.setIcon(theme_icon("fa6s.eye", C.TEXT_MID, size=10))
+            self._plot_scope_edit_btn.setIconSize(QSize(10, 10))
+            self._plot_show_all_btn.setIconSize(QSize(10, 10))
+        except Exception:
+            pass
+        actions_lay.addWidget(self._plot_scope_edit_btn)
+        actions_lay.addWidget(self._plot_show_all_btn)
+        sb_lay.addWidget(actions)
 
         # Scrollable pin list
         scroll = QScrollArea()
@@ -458,8 +492,8 @@ class ComparisonTab(QWidget):
         scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
         self._pin_list_widget = QWidget()
         self._pin_list_layout = QVBoxLayout(self._pin_list_widget)
-        self._pin_list_layout.setContentsMargins(0, 0, 0, 0)
-        self._pin_list_layout.setSpacing(0)
+        self._pin_list_layout.setContentsMargins(8, 4, 8, 0)
+        self._pin_list_layout.setSpacing(2)
         self._pin_list_layout.addStretch(1)
         scroll.setWidget(self._pin_list_widget)
         sb_lay.addWidget(scroll, 1)
@@ -468,8 +502,7 @@ class ComparisonTab(QWidget):
         return page
 
     def _refresh_pin_list(self) -> None:
-        """Rebuild the pin-list rows from the currently selected datasets."""
-        # Remove all except the trailing stretch
+        """Rebuild plot-only visibility/focus controls from selected datasets."""
         while self._pin_list_layout.count() > 1:
             item = self._pin_list_layout.takeAt(0)
             if item.widget():
@@ -477,90 +510,221 @@ class ComparisonTab(QWidget):
 
         plot_tabs = self._plot_dataset_tabs()
         plotted_names = {tab.get_dataset_name() for tab in plot_tabs}
-        named_groups = list(dict.fromkeys(
-            dataset_group_name(tab.get_dataset())
-            for tab in self.selected_datasets
-            if dataset_group_name(tab.get_dataset()) != UNGROUPED_LABEL
-        ))
+        grouped_tabs = self._plot_grouped_selected_tabs()
+        named_groups = [group for group, _tabs in grouped_tabs if group != UNGROUPED_LABEL]
         group_colors = self._group_color_map(named_groups)
+
         if hasattr(self, "_pin_scope_label"):
-            pin_text = (
-                f"Pinned subset: {len(plot_tabs)} of {len(self.selected_datasets)} datasets"
-                if self._pinned
-                else f"All selected: {len(self.selected_datasets)} datasets"
-            )
-            if named_groups:
-                pin_text += f" in {len(named_groups)} groups"
+            total = len(self.selected_datasets)
+            visible = len(plot_tabs)
+            group_text = f" | {len(named_groups)} groups" if named_groups else ""
+            if self._pinned:
+                pin_text = f"Focused: {visible} visible of {total} scoped{group_text}"
+            elif self._plot_hidden:
+                pin_text = f"Visible: {visible} of {total} scoped{group_text}"
+            else:
+                pin_text = f"All scoped datasets visible: {total}{group_text}"
             self._pin_scope_label.setText(pin_text)
 
-        for i, tab in enumerate(self.selected_datasets):
-            name = tab.get_dataset_name()
+        if not self.selected_datasets:
+            hint = QLabel("No datasets in comparison scope.")
+            hint.setWordWrap(True)
+            hint.setStyleSheet(
+                f"padding: 12px 10px; color: {C.TEXT_MUTED}; font-size: {F.SZ_SM}pt;"
+                "background: transparent;"
+            )
+            self._pin_list_layout.insertWidget(self._pin_list_layout.count() - 1, hint)
+            return
+
+        for group_index, (group_name, tabs) in enumerate(grouped_tabs):
+            color = group_colors.get(group_name, DATASET_COLORS[group_index % len(DATASET_COLORS)])
+            names = [tab.get_dataset_name() for tab in tabs]
+            visible_count = sum(1 for name in names if name in plotted_names)
+            hidden_all = bool(names) and all(name in self._plot_hidden for name in names)
+            focused_all = bool(names) and all(name in self._pinned for name in names)
+
+            group_row = self._make_plot_group_row(
+                group_name=group_name,
+                color=color,
+                dataset_count=len(tabs),
+                visible_count=visible_count,
+                hidden=hidden_all,
+                focused=focused_all,
+            )
+            self._pin_list_layout.insertWidget(self._pin_list_layout.count() - 1, group_row)
+
+            for tab in tabs:
+                name = tab.get_dataset_name()
+                hidden = name in self._plot_hidden
+                focused = name in self._pinned
+                plotted = name in plotted_names
+                row = self._make_plot_dataset_row(
+                    name=name,
+                    group_name=group_name,
+                    color=color,
+                    hidden=hidden,
+                    focused=focused,
+                    plotted=plotted,
+                )
+                self._pin_list_layout.insertWidget(self._pin_list_layout.count() - 1, row)
+
+    def _plot_grouped_selected_tabs(self) -> list[tuple[str, list]]:
+        grouped: dict[str, list] = {}
+        for tab in self.selected_datasets:
             group_name = dataset_group_name(tab.get_dataset())
-            color = group_colors.get(group_name, DATASET_COLORS[i % len(DATASET_COLORS)])
-            pinned = name in self._pinned
-            plotted = name in plotted_names
+            grouped.setdefault(group_name, []).append(tab)
+        return list(grouped.items())
 
-            row = QWidget()
-            row.setFixedHeight(44)
-            row.setStyleSheet(
-                f"background: {'rgba(107,142,35,0.06)' if plotted and self._pinned else 'transparent'};"
-                f"border-bottom: 1px solid {C.BORDER};"
-            )
-            rl = QHBoxLayout(row)
-            rl.setContentsMargins(8, 0, 6, 0)
-            rl.setSpacing(6)
+    def _make_plot_action_button(
+        self,
+        icon_name: str,
+        tooltip: str,
+        *,
+        active: bool = False,
+        color: str | None = None,
+    ) -> QPushButton:
+        btn = QPushButton()
+        btn.setFixedSize(24, 24)
+        btn.setToolTip(tooltip)
+        btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        tint = color or (C.OLIVE if active else C.TEXT_MUTED)
+        btn.setStyleSheet(
+            f"QPushButton {{ border: none; border-radius: 4px; padding: 0;"
+            f"  background: {'rgba(107,142,35,0.15)' if active else 'transparent'}; }}"
+            f"QPushButton:hover {{ background: rgba(107,142,35,0.10); }}"
+        )
+        try:
+            btn.setIcon(theme_icon(icon_name, tint, size=10))
+            btn.setIconSize(QSize(10, 10))
+        except Exception:
+            btn.setText("*" if active else "")
+        return btn
 
-            dot = QLabel("●")
-            dot.setStyleSheet(
-                f"color: {color}; font-size: 10pt;"
-                f"background: transparent; border: none;"
-            )
-            dot.setFixedWidth(14)
-            rl.addWidget(dot)
+    def _make_plot_group_row(
+        self,
+        *,
+        group_name: str,
+        color: str,
+        dataset_count: int,
+        visible_count: int,
+        hidden: bool,
+        focused: bool,
+    ) -> QWidget:
+        row = QWidget()
+        row.setFixedHeight(40)
+        row.setStyleSheet(f"background: {C.BG_LOW}; border: none; border-radius: 4px;")
+        layout = QHBoxLayout(row)
+        layout.setContentsMargins(7, 0, 6, 0)
+        layout.setSpacing(6)
 
-            text_box = QWidget()
-            text_lay = QVBoxLayout(text_box)
-            text_lay.setContentsMargins(0, 3, 0, 3)
-            text_lay.setSpacing(0)
-            lbl = QLabel(self._short_dataset_name(name, 118))
-            lbl.setStyleSheet(
-                f"font-size: {F.SZ_SM}pt; color: {C.TEXT if plotted else C.TEXT_MUTED};"
-                f"background: transparent; border: none;"
-            )
-            lbl.setToolTip(name)
-            text_lay.addWidget(lbl)
-            group_text = group_name if group_name != UNGROUPED_LABEL else "No group"
-            group_lbl = QLabel(self._short_dataset_name(group_text, 118))
-            group_lbl.setStyleSheet(
-                f"font-size: {F.SZ_XS}pt; color: {C.TEXT_MUTED};"
-                f"background: transparent; border: none;"
-            )
-            group_lbl.setToolTip(group_text)
-            text_lay.addWidget(group_lbl)
-            rl.addWidget(text_box, 1)
+        swatch = QFrame()
+        swatch.setFixedSize(8, 18)
+        swatch.setStyleSheet(f"background: {color}; border-radius: 3px; border: none;")
+        layout.addWidget(swatch, 0, Qt.AlignmentFlag.AlignVCenter)
 
-            pin_btn = QPushButton()
-            pin_btn.setFixedSize(22, 22)
-            pin_btn.setToolTip("Unpin from view" if pinned else "Pin to view")
-            pin_btn.setStyleSheet(
-                f"QPushButton {{ border: none; border-radius: 3px; padding: 0;"
-                f"  background: {'rgba(107,142,35,0.15)' if pinned else 'transparent'}; }}"
-                f"QPushButton:hover {{ background: rgba(0,0,0,0.07); }}"
-            )
-            try:
-                pin_btn.setIcon(theme_icon(
-                    "fa6s.thumbtack", color if pinned else C.TEXT_MUTED
-                ))
-                pin_btn.setIconSize(QSize(10, 10))
-            except Exception:
-                pin_btn.setText("📌" if pinned else "○")
-            pin_btn.clicked.connect(lambda _checked, n=name: self._toggle_pin(n))
-            rl.addWidget(pin_btn)
+        text_box = QWidget()
+        text_lay = QVBoxLayout(text_box)
+        text_lay.setContentsMargins(0, 2, 0, 2)
+        text_lay.setSpacing(0)
+        title = "Ungrouped" if group_name == UNGROUPED_LABEL else group_name
+        title_lbl = QLabel(self._short_dataset_name(title, 118))
+        title_lbl.setToolTip(title)
+        title_lbl.setStyleSheet(
+            f"font-size: {F.SZ_SM}pt; font-weight: 700; color: {C.TEXT}; background: transparent;"
+        )
+        meta_lbl = QLabel(f"{visible_count}/{dataset_count} visible")
+        meta_lbl.setStyleSheet(
+            f"font-size: {F.SZ_XS}pt; color: {C.TEXT_MUTED}; background: transparent;"
+        )
+        text_lay.addWidget(title_lbl)
+        text_lay.addWidget(meta_lbl)
+        layout.addWidget(text_box, 1)
 
-            # Insert before the stretch (last item)
-            self._pin_list_layout.insertWidget(
-                self._pin_list_layout.count() - 1, row
+        visible_btn = self._make_plot_action_button(
+            "fa6s.eye-slash" if hidden else "fa6s.eye",
+            "Show group in plot" if hidden else "Hide group in plot",
+            active=not hidden,
+            color=color if not hidden else C.TEXT_MUTED,
+        )
+        visible_btn.clicked.connect(lambda _checked=False, g=group_name: self._toggle_group_visibility(g))
+        layout.addWidget(visible_btn)
+
+        focus_btn = self._make_plot_action_button(
+            "fa6s.thumbtack",
+            "Clear group focus" if focused else "Focus this group in plot",
+            active=focused,
+            color=color if focused else C.TEXT_MUTED,
+        )
+        focus_btn.clicked.connect(lambda _checked=False, g=group_name: self._toggle_group_pin(g))
+        layout.addWidget(focus_btn)
+        return row
+
+    def _make_plot_dataset_row(
+        self,
+        *,
+        name: str,
+        group_name: str,
+        color: str,
+        hidden: bool,
+        focused: bool,
+        plotted: bool,
+    ) -> QWidget:
+        row = QWidget()
+        row.setFixedHeight(34 if plotted and not focused else 38)
+        row.setStyleSheet(
+            f"background: {'rgba(107,142,35,0.06)' if plotted and self._pinned else 'transparent'};"
+            "border: none;"
+        )
+        layout = QHBoxLayout(row)
+        layout.setContentsMargins(12, 0, 6, 0)
+        layout.setSpacing(6)
+
+        dot = QFrame()
+        dot.setFixedSize(7, 7)
+        dot.setStyleSheet(
+            f"background: {color if not hidden else C.TEXT_MUTED}; border-radius: 3px; border: none;"
+        )
+        layout.addWidget(dot, 0, Qt.AlignmentFlag.AlignVCenter)
+
+        text_box = QWidget()
+        text_lay = QVBoxLayout(text_box)
+        text_lay.setContentsMargins(0, 2, 0, 2)
+        text_lay.setSpacing(0)
+        lbl = QLabel(self._short_dataset_name(name, 146))
+        lbl.setStyleSheet(
+            f"font-size: {F.SZ_SM}pt; color: {C.TEXT if plotted else C.TEXT_MUTED};"
+            "background: transparent; border: none;"
+        )
+        lbl.setToolTip(name)
+        text_lay.addWidget(lbl)
+        status_text = "Hidden" if hidden else ("Focused" if focused else ("" if plotted else "Outside focus"))
+        if status_text:
+            status_lbl = QLabel(status_text)
+            status_lbl.setStyleSheet(
+                f"font-size: {F.SZ_XS}pt; color: {C.TEXT_MUTED}; background: transparent; border: none;"
             )
+            status_lbl.setToolTip(group_name if group_name != UNGROUPED_LABEL else "No group")
+            text_lay.addWidget(status_lbl)
+        layout.addWidget(text_box, 1)
+
+        visible_btn = self._make_plot_action_button(
+            "fa6s.eye-slash" if hidden else "fa6s.eye",
+            "Show dataset in plot" if hidden else "Hide dataset in plot",
+            active=not hidden,
+            color=color if not hidden else C.TEXT_MUTED,
+        )
+        visible_btn.clicked.connect(lambda _checked=False, n=name: self._toggle_plot_visibility(n))
+        layout.addWidget(visible_btn)
+
+        focus_btn = self._make_plot_action_button(
+            "fa6s.thumbtack",
+            "Clear dataset focus" if focused else "Focus this dataset in plot",
+            active=focused,
+            color=color if focused else C.TEXT_MUTED,
+        )
+        focus_btn.clicked.connect(lambda _checked=False, n=name: self._toggle_pin(n))
+        layout.addWidget(focus_btn)
+        return row
 
     def _build_details_tab_v2(self) -> QWidget:
         page = QWidget()
@@ -804,7 +968,8 @@ class ComparisonTab(QWidget):
 
     def _build_details_rail(self) -> QWidget:
         rail = QFrame()
-        rail.setFixedWidth(272)
+        rail.setFixedWidth(360)
+        rail.setSizePolicy(QSizePolicy.Policy.Fixed, QSizePolicy.Policy.Expanding)
         rail.setStyleSheet(
             f"background: {C.BG_RAISED}; border-left: 1px solid {C.BORDER};"
         )
@@ -812,20 +977,32 @@ class ComparisonTab(QWidget):
         v.setContentsMargins(0, 0, 0, 0)
         v.setSpacing(0)
 
+        rail_scroll = QScrollArea()
+        rail_scroll.setWidgetResizable(True)
+        rail_scroll.setFrameShape(QFrame.Shape.NoFrame)
+        rail_scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+        rail_scroll.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAsNeeded)
+        rail_scroll.setStyleSheet("background: transparent; border: none;")
+        rail_content = QWidget()
+        rail_content.setStyleSheet("background: transparent;")
+        rail_content_layout = QVBoxLayout(rail_content)
+        rail_content_layout.setContentsMargins(8, 8, 8, 8)
+        rail_content_layout.setSpacing(8)
+
         self._details_focus_section, self._details_focus_layout = self._build_details_rail_section("Current Scope")
-        v.addWidget(self._details_focus_section)
+        rail_content_layout.addWidget(self._details_focus_section)
 
         self._details_insight_section, self._details_insights_layout = self._build_details_rail_section("Filters")
-        v.addWidget(self._details_insight_section)
+        rail_content_layout.addWidget(self._details_insight_section)
 
         self._details_status_section, self._details_status_layout = self._build_details_rail_section("K Summary")
-        v.addWidget(self._details_status_section)
+        rail_content_layout.addWidget(self._details_status_section)
 
         self._details_grain_summary_section, self._details_grain_summary_layout = self._build_details_rail_section("Grain Summary")
-        v.addWidget(self._details_grain_summary_section)
+        rail_content_layout.addWidget(self._details_grain_summary_section)
 
         self._details_groups_section, self._details_groups_layout = self._build_details_rail_section("Groups")
-        v.addWidget(self._details_groups_section)
+        rail_content_layout.addWidget(self._details_groups_section)
 
         self._details_legend_section, legend_layout = self._build_details_rail_section("Heat Legend")
         for label, color in [
@@ -834,20 +1011,22 @@ class ComparisonTab(QWidget):
             ("Higher range", _heat_color(1.0).name()),
         ]:
             legend_layout.addWidget(self._make_stats_legend_row(label, color))
-        v.addWidget(self._details_legend_section)
-        v.addStretch(1)
+        rail_content_layout.addWidget(self._details_legend_section)
+        rail_content_layout.addStretch(1)
+        rail_scroll.setWidget(rail_content)
+        v.addWidget(rail_scroll, 1)
         return rail
 
     def _build_details_rail_section(self, title: str):
         section = QWidget()
         section.setObjectName("detailsRailSection")
         section.setStyleSheet(
-            f"QWidget#detailsRailSection {{ background: transparent; border-bottom: 1px solid {C.BORDER}; }}"
+            "QWidget#detailsRailSection { background: transparent; border: none; }"
             "QWidget#detailsRailSection QLabel { border: none; }"
         )
         v = QVBoxLayout(section)
-        v.setContentsMargins(14, 14, 14, 14)
-        v.setSpacing(10)
+        v.setContentsMargins(6, 7, 6, 7)
+        v.setSpacing(7)
 
         hdr = QLabel(title.upper())
         hdr.setStyleSheet(
@@ -857,7 +1036,7 @@ class ComparisonTab(QWidget):
         v.addWidget(hdr)
 
         content = QVBoxLayout()
-        content.setSpacing(8)
+        content.setSpacing(5)
         v.addLayout(content)
         return section, content
 
@@ -978,8 +1157,67 @@ class ComparisonTab(QWidget):
             self._pinned.discard(name)
         else:
             self._pinned.add(name)
+            self._plot_hidden.discard(name)
         self._refresh_pin_list()
         self._update_plot()
+        self._update_header_count()
+
+    def _selected_names_for_group(self, group_name: str) -> list[str]:
+        """Return selected dataset names for a comparison group."""
+        names: list[str] = []
+        for tab in self.selected_datasets:
+            if dataset_group_name(tab.get_dataset()) == group_name:
+                names.append(tab.get_dataset_name())
+        return names
+
+    def _toggle_plot_visibility(self, name: str) -> None:
+        """Hide/show one selected dataset in the plot without changing scope."""
+        if name in self._plot_hidden:
+            self._plot_hidden.discard(name)
+        else:
+            self._plot_hidden.add(name)
+            self._pinned.discard(name)
+        self._refresh_pin_list()
+        self._update_plot()
+        self._update_header_count()
+
+    def _toggle_group_visibility(self, group_name: str) -> None:
+        """Hide/show a whole selected group in the plot without changing scope."""
+        names = self._selected_names_for_group(group_name)
+        if not names:
+            return
+        if all(name in self._plot_hidden for name in names):
+            self._plot_hidden.difference_update(names)
+        else:
+            self._plot_hidden.update(names)
+            self._pinned.difference_update(names)
+        self._refresh_pin_list()
+        self._update_plot()
+        self._update_header_count()
+
+    def _toggle_group_pin(self, group_name: str) -> None:
+        """Focus/clear focus for all selected datasets in a group."""
+        names = self._selected_names_for_group(group_name)
+        if not names:
+            return
+        if all(name in self._pinned for name in names):
+            self._pinned.difference_update(names)
+        else:
+            self._pinned.update(names)
+            self._plot_hidden.difference_update(names)
+        self._refresh_pin_list()
+        self._update_plot()
+        self._update_header_count()
+
+    def _show_all_plot_datasets(self) -> None:
+        """Clear plot-only hidden/focused state and redraw all scoped datasets."""
+        if not self._pinned and not self._plot_hidden:
+            return
+        self._pinned.clear()
+        self._plot_hidden.clear()
+        self._refresh_pin_list()
+        self._update_plot()
+        self._update_header_count()
 
     # ── Details tab ───────────────────────────────────────────────────────────
 
@@ -1366,7 +1604,7 @@ class ComparisonTab(QWidget):
         grain = snapshot.grain if snapshot is not None else None
 
         preset_label = {
-            ("grain", "core"): "Summary grain rows",
+            ("grain", "core"): "Summary rows",
             ("grain", "all"): "All grain rows",
             ("grain", "context"): "Classification rows",
             ("k", "core"): "All K methods",
@@ -1389,14 +1627,14 @@ class ComparisonTab(QWidget):
         ]:
             self._details_focus_layout.addWidget(self._make_stats_summary_row(label, value))
 
-        status_text = "OK + warnings" if self._stats_include_warnings else "OK values only"
+        status_text = "OK + warnings" if self._stats_include_warnings else "OK only"
         method_text = "Valid in all" if self._stats_method_scope == "valid_all" or self._stats_common_methods_only else "All methods"
         for label, value in [
             ("View", "Aggregate" if self._details_view_mode == "aggregate" else ("Grain" if self._details_mode == "grain" else "K-values")),
             ("Rows", preset_label),
             ("Methods", method_text),
             ("Status", status_text),
-            ("Unit", self._details_unit_symbol() if self._details_mode == "k" else "mm / %"),
+            ("Unit", self._details_unit_symbol() if self._details_mode == "k" else "mm/%"),
         ]:
             self._details_insights_layout.addWidget(self._make_stats_summary_row(label, value))
 
@@ -1656,7 +1894,7 @@ class ComparisonTab(QWidget):
 
         main = QWidget()
         main.setMinimumWidth(0)
-        main.setStyleSheet(f"background: {C.BG}; border-right: 1px solid {C.BORDER};")
+        main.setStyleSheet(f"background: {C.BG}; border: none;")
         mv = QVBoxLayout(main)
         mv.setContentsMargins(0, 0, 0, 0)
         mv.setSpacing(0)
@@ -1700,9 +1938,10 @@ class ComparisonTab(QWidget):
         mv.addWidget(self._stats_stack, 1)
 
         rail = QFrame()
-        rail.setFixedWidth(286)
+        rail.setFixedWidth(360)
+        rail.setSizePolicy(QSizePolicy.Policy.Fixed, QSizePolicy.Policy.Expanding)
         rail.setStyleSheet(
-            f"background: {C.BG_RAISED};"
+            f"background: {C.BG_RAISED}; border-left: 1px solid {C.BORDER};"
         )
         rv = QVBoxLayout(rail)
         rv.setContentsMargins(0, 0, 0, 0)
@@ -1718,8 +1957,8 @@ class ComparisonTab(QWidget):
         rail_content.setStyleSheet("background: transparent;")
         rail_content.setMinimumWidth(0)
         rail_content_layout = QVBoxLayout(rail_content)
-        rail_content_layout.setContentsMargins(0, 0, 0, 0)
-        rail_content_layout.setSpacing(0)
+        rail_content_layout.setContentsMargins(8, 8, 8, 8)
+        rail_content_layout.setSpacing(8)
 
         self._stats_scope_section, self._stats_scope_layout = self._build_stats_rail_section("Current Scope")
         rail_content_layout.addWidget(self._stats_scope_section)
@@ -1870,12 +2109,12 @@ class ComparisonTab(QWidget):
         section = QWidget()
         section.setObjectName("statsRailSection")
         section.setStyleSheet(
-            f"QWidget#statsRailSection {{ background: transparent; border-bottom: 1px solid {C.BORDER}; }}"
+            "QWidget#statsRailSection { background: transparent; border: none; }"
             "QWidget#statsRailSection QLabel { border: none; }"
         )
         v = QVBoxLayout(section)
-        v.setContentsMargins(14, 12, 14, 6)
-        v.setSpacing(8)
+        v.setContentsMargins(6, 7, 6, 7)
+        v.setSpacing(7)
 
         hdr = QLabel(title.upper())
         hdr.setStyleSheet(
@@ -1885,7 +2124,7 @@ class ComparisonTab(QWidget):
         v.addWidget(hdr)
 
         content = QVBoxLayout()
-        content.setSpacing(4)
+        content.setSpacing(5)
         v.addLayout(content)
         return section, content
 
@@ -2071,22 +2310,25 @@ class ComparisonTab(QWidget):
         row.setObjectName("statsSummaryRow")
         row.setStyleSheet("QWidget#statsSummaryRow { background: transparent; border: none; }")
         h = QHBoxLayout(row)
-        h.setContentsMargins(0, 4, 0, 4)
-        h.setSpacing(8)
+        h.setContentsMargins(0, 3, 0, 3)
+        h.setSpacing(10)
         key_lbl = QLabel(label)
         key_lbl.setMinimumWidth(0)
+        key_lbl.setMaximumWidth(132)
+        key_lbl.setWordWrap(True)
         key_lbl.setStyleSheet(
             f"font-size: {F.SZ_SM}pt; color: {C.TEXT_MUTED}; background: transparent; border: none; font-weight: 600;"
         )
         val_lbl = QLabel(value)
         val_lbl.setMinimumWidth(0)
+        val_lbl.setMaximumWidth(188)
         val_lbl.setWordWrap(True)
         val_lbl.setAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
         val_lbl.setStyleSheet(
             f"font-family: '{F.MONO}'; font-size: {F.SZ_SM}pt; color: {C.TEXT_MID}; background: transparent; border: none; font-weight: 600;"
         )
         h.addWidget(key_lbl, 1)
-        h.addWidget(val_lbl, 0, Qt.AlignmentFlag.AlignRight)
+        h.addWidget(val_lbl, 1, Qt.AlignmentFlag.AlignRight)
         return row
 
     def _clear_stats_tables(self) -> None:
@@ -2327,6 +2569,7 @@ class ComparisonTab(QWidget):
 
         active_names = {tab.get_dataset_name() for tab in self.selected_datasets}
         self._pinned = {name for name in self._pinned if name in active_names}
+        self._plot_hidden = {name for name in self._plot_hidden if name in active_names}
 
         enabled = len(self.selected_datasets) >= 2
         self._update_btn.setEnabled(enabled)
@@ -2392,7 +2635,14 @@ class ComparisonTab(QWidget):
         n_loaded = len(self.dataset_tabs)
         n_selected = len(self.selected_datasets)
         n_plotted = len(self._plot_dataset_tabs()) if self.selected_datasets else 0
-        plot_scope = f"{n_plotted} pinned in plot" if self._pinned else "all selected plotted"
+        if not self.selected_datasets:
+            plot_scope = "no plot scope"
+        elif self._pinned:
+            plot_scope = f"{n_plotted} focused in plot"
+        elif self._plot_hidden:
+            plot_scope = f"{n_plotted} visible in plot"
+        else:
+            plot_scope = "all scoped visible"
         self._count_label.setText(
             "Load datasets to compare" if n_loaded == 0
             else f"{n_selected} selected  ·  {n_loaded} loaded  ·  {plot_scope}"
@@ -2402,6 +2652,10 @@ class ComparisonTab(QWidget):
             self._details_scope_btn.setEnabled(n_loaded >= 1)
         if hasattr(self, "_stats_scope_btn"):
             self._stats_scope_btn.setEnabled(n_loaded >= 1)
+        if hasattr(self, "_plot_scope_edit_btn"):
+            self._plot_scope_edit_btn.setEnabled(n_loaded >= 1)
+        if hasattr(self, "_plot_show_all_btn"):
+            self._plot_show_all_btn.setEnabled(bool(self._pinned or self._plot_hidden))
 
     def _on_manage_datasets(self) -> None:
         """Open dataset-selection dialog and sync the result back to the sidebar."""
@@ -2443,13 +2697,16 @@ class ComparisonTab(QWidget):
 
     def _plot_dataset_tabs(self) -> list:
         """Return the selected datasets currently visible in the plot."""
-        if not self._pinned:
-            return list(self.selected_datasets)
-        pinned_tabs = [
+        visible_tabs = [
             tab for tab in self.selected_datasets
+            if tab.get_dataset_name() not in self._plot_hidden
+        ]
+        if not self._pinned:
+            return visible_tabs
+        return [
+            tab for tab in visible_tabs
             if tab.get_dataset_name() in self._pinned
         ]
-        return pinned_tabs or list(self.selected_datasets)
 
     def _update_plot(self) -> None:
         """Push datasets into the comparison plot widget."""
@@ -2457,7 +2714,13 @@ class ComparisonTab(QWidget):
             if hasattr(self._plot_widget, "show_empty_state"):
                 self._plot_widget.show_empty_state("Select datasets and click Update")
             return
-        self._plot_widget.set_datasets(self._plot_dataset_tabs())
+        plot_tabs = self._plot_dataset_tabs()
+        if not plot_tabs:
+            self._plot_widget.set_datasets([])
+            if hasattr(self._plot_widget, "show_empty_state"):
+                self._plot_widget.show_empty_state("No datasets visible in this plot")
+            return
+        self._plot_widget.set_datasets(plot_tabs)
         if hasattr(self._plot_widget, "refresh_plot"):
             self._plot_widget.refresh_plot()
 
@@ -3409,7 +3672,7 @@ class ComparisonTab(QWidget):
                 ("View", "Coverage" if self._stats_view_mode == "coverage" else "K spread"),
                 ("Metric", metric_label),
                 ("Methods", method_text),
-                ("Status", "OK + warnings" if self._stats_include_warnings else "OK values only"),
+                ("Status", "OK + warnings" if self._stats_include_warnings else "OK only"),
                 ("Unit", self._stats_unit_symbol()),
             ]:
                 self._stats_filter_layout.addWidget(self._make_stats_summary_row(label, value))

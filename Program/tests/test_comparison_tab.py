@@ -149,7 +149,66 @@ class TestComparisonTabSelectionState(unittest.TestCase):
 
         plotted = [dataset.sample_name for dataset in self.widget._plot_widget.datasets]
         self.assertEqual(plotted, ['Sample B'])
-        self.assertIn('Pinned subset: 1 of 3 datasets', self.widget._pin_scope_label.text())
+        self.assertIn('Focused: 1 visible of 3 scoped', self.widget._pin_scope_label.text())
+
+    def test_plot_dataset_visibility_hides_without_changing_scope(self):
+        self.widget.set_dataset_state(self.tabs, selected_tabs=self.tabs)
+
+        self.widget._toggle_plot_visibility('Sample B')
+
+        plotted = [dataset.sample_name for dataset in self.widget._plot_widget.datasets]
+        self.assertEqual(plotted, ['Sample A', 'Sample C'])
+        self.assertEqual(
+            [tab.get_dataset_name() for tab in self.widget.selected_datasets],
+            ['Sample A', 'Sample B', 'Sample C'],
+        )
+        self.assertIn('Visible: 2 of 3 scoped', self.widget._pin_scope_label.text())
+
+        self.widget._toggle_plot_visibility('Sample B')
+
+        plotted = [dataset.sample_name for dataset in self.widget._plot_widget.datasets]
+        self.assertEqual(plotted, ['Sample A', 'Sample B', 'Sample C'])
+
+    def test_plot_group_visibility_hides_group_without_changing_scope(self):
+        self.tabs[0].dataset.group_name = 'Layer 1'
+        self.tabs[1].dataset.group_name = 'Layer 1'
+        self.tabs[2].dataset.group_name = 'Layer 2'
+        self.widget.set_dataset_state(self.tabs, selected_tabs=self.tabs)
+
+        self.widget._toggle_group_visibility('Layer 1')
+
+        plotted = [dataset.sample_name for dataset in self.widget._plot_widget.datasets]
+        self.assertEqual(plotted, ['Sample C'])
+        self.assertEqual(
+            [tab.get_dataset_name() for tab in self.widget.selected_datasets],
+            ['Sample A', 'Sample B', 'Sample C'],
+        )
+        self.assertIn('Visible: 1 of 3 scoped', self.widget._pin_scope_label.text())
+
+        self.widget._toggle_group_visibility('Layer 1')
+
+        plotted = [dataset.sample_name for dataset in self.widget._plot_widget.datasets]
+        self.assertEqual(plotted, ['Sample A', 'Sample B', 'Sample C'])
+
+    def test_plot_group_pin_focuses_group_and_show_all_resets(self):
+        self.tabs[0].dataset.group_name = 'Layer 1'
+        self.tabs[1].dataset.group_name = 'Layer 1'
+        self.tabs[2].dataset.group_name = 'Layer 2'
+        self.widget.set_dataset_state(self.tabs, selected_tabs=self.tabs)
+
+        self.widget._toggle_group_pin('Layer 1')
+
+        plotted = [dataset.sample_name for dataset in self.widget._plot_widget.datasets]
+        self.assertEqual(plotted, ['Sample A', 'Sample B'])
+        self.assertEqual(self.widget._pinned, {'Sample A', 'Sample B'})
+        self.assertIn('Focused: 2 visible of 3 scoped', self.widget._pin_scope_label.text())
+
+        self.widget._show_all_plot_datasets()
+
+        plotted = [dataset.sample_name for dataset in self.widget._plot_widget.datasets]
+        self.assertEqual(plotted, ['Sample A', 'Sample B', 'Sample C'])
+        self.assertFalse(self.widget._pinned)
+        self.assertFalse(self.widget._plot_hidden)
 
     def test_details_defaults_to_grain_core_and_elides_long_headers(self):
         long_tabs = [

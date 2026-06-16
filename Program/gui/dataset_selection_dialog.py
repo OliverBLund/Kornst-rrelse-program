@@ -54,11 +54,15 @@ class DatasetSelectionDialog(FramelessDialogBase):
         self._action_icon = action_icon
         self._minimum_selection = max(1, int(minimum_selection))
         self._allow_grouping = bool(allow_grouping)
+        self._active_filter = ""
+        self._group_headers: list[QWidget] = []
+        self._rebuilding_rows = False
+        self._suppress_group_changed = False
 
         self.setWindowTitle(self._title)
         self.setModal(True)
-        self.resize(680 if self._allow_grouping else 540, 500)
-        self.setMinimumWidth(640 if self._allow_grouping else 540)
+        self.resize(820 if self._allow_grouping else 540, 540)
+        self.setMinimumWidth(760 if self._allow_grouping else 540)
 
         self._build_ui()
         self.install_chrome_behavior(
@@ -126,6 +130,24 @@ class DatasetSelectionDialog(FramelessDialogBase):
                           ("Invert", self._invert)]:
             btn = _qs_btn(label, fn)
             tb_lay.addWidget(btn)
+
+        if self._allow_grouping:
+            self._group_box = QLineEdit()
+            self._group_box.setPlaceholderText("Group for checked...")
+            self._group_box.setFixedWidth(165)
+            self._group_box.setFixedHeight(26)
+            self._group_box.setStyleSheet(
+                f"QLineEdit {{ background: rgba(255,255,255,.7); border: 1px solid {C.BORDER}; "
+                f"border-radius: {SZ.BORDER_RADIUS}px; font-family: '{F.UI}'; "
+                f"font-size: {F.SZ_SM}pt; color: {C.TEXT}; padding: 0 8px; }}"
+                f"QLineEdit:focus {{ border-color: {C.OLIVE}; background: white; }}"
+            )
+            self._group_box.returnPressed.connect(self._assign_group_to_checked)
+            tb_lay.addWidget(self._group_box)
+
+            apply_group_btn = _qs_btn("Apply Group", self._assign_group_to_checked)
+            apply_group_btn.setToolTip("Assign this group label to checked datasets")
+            tb_lay.addWidget(apply_group_btn)
 
         root.addWidget(toolbar)
 
@@ -202,42 +224,163 @@ class DatasetSelectionDialog(FramelessDialogBase):
 
     def _populate(self):
         for tab in self.dataset_tabs:
-            row = _DatasetRow(tab, checked=tab in self.currently_selected, allow_grouping=self._allow_grouping)
+            row = _DatasetRow(
+                tab,
+                checked=tab in self.currently_selected,
+                allow_grouping=self._allow_grouping,
+                parent=self._list_host,
+            )
             row.toggled.connect(self._on_selection_changed)
+            if self._allow_grouping:
+                row.group_changed.connect(self._on_group_changed)
             self._rows.append(row)
-            self._rows_layout.insertWidget(self._rows_layout.count() - 1, row)
+        self._rebuild_rows_layout()
         self._on_selection_changed()
 
     # ── Filtering ───────────────────────────────────────────────────────────
 
     def _filter(self, text: str):
-        text = text.lower().strip()
-        for row in self._rows:
-            row.setVisible(row.matches_filter(text))
+        self._active_filter = text.lower().strip()
+        self._rebuild_rows_layout()
+
+    def _visible_rows(self) -> list:
+        return [row for row in self._rows if row.matches_filter(self._active_filter)]
+
+    def _clear_rows_layout(self) -> None:
+        while self._rows_layout.count():
+            item = self._rows_layout.takeAt(0)
+            widget = item.widget()
+            if widget is not None:
+                widget.hide()
+                if any(widget is row for row in self._rows):
+                    continue
+                widget.setParent(None)
+                widget.deleteLater()
+        self._group_headers = []
+
+    def _rebuild_rows_layout(self) -> None:
+        if self._rebuilding_rows:
+            return
+        self._rebuilding_rows = True
+        try:
+            self._clear_rows_layout()
+            visible_rows = self._visible_rows()
+
+            if not self._allow_grouping:
+                for row in visible_rows:
+                    row.setVisible(True)
+                    self._rows_layout.addWidget(row)
+                self._rows_layout.addStretch(1)
+                return
+
+            grouped: dict[str, list[_DatasetRow]] = {}
+            group_order: list[str] = []
+            for row in visible_rows:
+                group_name = row.group_name()
+                if group_name not in grouped:
+                    grouped[group_name] = []
+                    group_order.append(group_name)
+                grouped[group_name].append(row)
+
+            for group_name in group_order:
+                rows = grouped[group_name]
+                header = self._make_group_header(group_name, rows)
+                self._group_headers.append(header)
+                self._rows_layout.addWidget(header)
+                for row in rows:
+                    row.setVisible(True)
+                    self._rows_layout.addWidget(row)
+
+            self._rows_layout.addStretch(1)
+        finally:
+            self._rebuilding_rows = False
+
+    def _make_group_header(self, group_name: str, rows: list) -> QWidget:
+        header = QFrame(self._list_host)
+        header.setObjectName("datasetGroupHeader")
+        header.setFixedHeight(34)
+        header.setStyleSheet(
+            f"QFrame#datasetGroupHeader {{ background: {C.BG_LOW}; border: none; }}"
+        )
+        lay = QHBoxLayout(header)
+        lay.setContentsMargins(14, 5, 12, 5)
+        lay.setSpacing(8)
+
+        title = QLabel(group_name)
+        title.setFont(QFont(F.UI, F.SZ_SM, QFont.Weight.DemiBold))
+        title.setStyleSheet(f"color: {C.TEXT}; background: transparent;")
+        lay.addWidget(title)
+
+        selected = sum(1 for row in rows if row.is_checked())
+        count = QLabel(f"{selected}/{len(rows)} selected")
+        count.setFont(QFont(F.MONO, F.SZ_XS))
+        count.setStyleSheet(f"color: {C.TEXT_MUTED}; background: transparent;")
+        lay.addWidget(count)
+        lay.addStretch(1)
+
+        rows_for_buttons = list(rows)
+        all_btn = _qs_btn("All", lambda _checked=False, rows=rows_for_buttons: self._set_rows_checked(rows, True))
+        none_btn = _qs_btn("None", lambda _checked=False, rows=rows_for_buttons: self._set_rows_checked(rows, False))
+        all_btn.setFixedHeight(22)
+        none_btn.setFixedHeight(22)
+        lay.addWidget(all_btn)
+        lay.addWidget(none_btn)
+        return header
+
+    def _set_rows_checked(self, rows: list, checked: bool) -> None:
+        for row in rows:
+            row.set_checked(checked, emit_signal=False)
+        self._on_selection_changed()
+        self._rebuild_rows_layout()
+
+    def _assign_group_to_checked(self) -> None:
+        if not self._allow_grouping:
+            return
+        group_name = normalize_group_name(self._group_box.text())
+        selected_rows = [row for row in self._rows if row.is_checked()]
+        if not selected_rows:
+            return
+        self._suppress_group_changed = True
+        try:
+            for row in selected_rows:
+                row.set_group_name(group_name)
+        finally:
+            self._suppress_group_changed = False
+        self._rebuild_rows_layout()
+        self._on_selection_changed()
+
+    def _on_group_changed(self) -> None:
+        if self._rebuilding_rows or self._suppress_group_changed:
+            return
+        self._rebuild_rows_layout()
+        self._on_selection_changed()
 
     # ── Selection helpers ───────────────────────────────────────────────────
 
     def _select_all(self):
-        for row in self._rows:
-            if row.isVisible():
-                row.set_checked(True, emit_signal=False)
+        for row in self._visible_rows():
+            row.set_checked(True, emit_signal=False)
         self._on_selection_changed()
+        self._rebuild_rows_layout()
 
     def _select_none(self):
-        for row in self._rows:
-            if row.isVisible():
-                row.set_checked(False, emit_signal=False)
+        for row in self._visible_rows():
+            row.set_checked(False, emit_signal=False)
         self._on_selection_changed()
+        self._rebuild_rows_layout()
 
     def _invert(self):
-        for row in self._rows:
-            if row.isVisible():
-                row.set_checked(not row.is_checked(), emit_signal=False)
+        for row in self._visible_rows():
+            row.set_checked(not row.is_checked(), emit_signal=False)
         self._on_selection_changed()
+        self._rebuild_rows_layout()
 
     def _on_selection_changed(self):
         count = len([row for row in self._rows if row.is_checked()])
         self._sel_count_badge.setText(f"{count} selected")
+        if self._allow_grouping:
+            group_count = len({row.group_name() for row in self._rows})
+            self._sel_hint.setText(f"of {len(self.dataset_tabs)} datasets / {group_count} groups")
         if self._compare_btn:
             self._compare_btn.setEnabled(count >= self._minimum_selection)
 
@@ -266,6 +409,7 @@ class _DatasetRow(QFrame):
     """Concept-style dataset row used in the comparison selection dialog."""
 
     toggled = pyqtSignal()
+    group_changed = pyqtSignal()
 
     def __init__(self, tab, checked: bool = False, *, allow_grouping: bool = False, parent=None):
         super().__init__(parent)
@@ -275,9 +419,7 @@ class _DatasetRow(QFrame):
         self._group_edit = None
         self._status_color = _dataset_status_color(tab)
         self._build_ui()
-        self._search_text = (
-            f"{self._label.text()} {self._meta.text()} {self.group_name()}".strip().lower()
-        )
+        self._refresh_search_text()
         self._sync_styles()
         if checked:
             self.set_checked(True, emit_signal=False)
@@ -340,6 +482,7 @@ class _DatasetRow(QFrame):
                 f"font-size: {F.SZ_SM}pt; color: {C.TEXT}; padding: 0 7px; }}"
                 f"QLineEdit:focus {{ border-color: {C.OLIVE}; background: white; }}"
             )
+            self._group_edit.editingFinished.connect(self._on_group_edit_finished)
             lay.addWidget(self._group_edit, 0, Qt.AlignmentFlag.AlignVCenter)
 
         self._status_dot = QLabel()
@@ -383,6 +526,21 @@ class _DatasetRow(QFrame):
             return dataset_group_name(self.tab.get_dataset())
         return normalize_group_name(self._group_edit.text())
 
+    def set_group_name(self, group_name: str) -> None:
+        if self._group_edit is None:
+            return
+        self._group_edit.setText(normalize_group_name(group_name))
+        self._refresh_search_text()
+
+    def _refresh_search_text(self) -> None:
+        self._search_text = (
+            f"{self._label.text()} {self._meta.text()} {self.group_name()}".strip().lower()
+        )
+
+    def _on_group_edit_finished(self) -> None:
+        self._refresh_search_text()
+        self.group_changed.emit()
+
     def mousePressEvent(self, event):
         if event.button() == Qt.MouseButton.LeftButton:
             self.set_checked(not self._checked)
@@ -397,7 +555,6 @@ class _DatasetRow(QFrame):
             f"QFrame#datasetSelectionRow {{"
             f"background: {row_bg};"
             "border: none;"
-            "border-bottom: 1px solid rgba(212,196,168,.35);"
             "}"
             f"QFrame#datasetSelectionRow:hover {{ background: {row_hover}; }}"
         )
