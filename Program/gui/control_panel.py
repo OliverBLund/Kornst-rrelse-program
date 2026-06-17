@@ -154,13 +154,13 @@ class _SampleCard(QWidget):
     """Expandable sample card — matches _shared.css .s-item.
 
     Two states: collapsed (main row only) / expanded (row + detail section).
-    Row: icon container + name/meta + status LED + selected toggle + expand chevron.
+    Row: icon container + name/meta + status LED + included toggle + expand chevron.
     Active card: sb-act background + 3px olive left accent bar.
     """
 
     sig_clicked = pyqtSignal(str)          # file_path
     sig_ctx = pyqtSignal(str, object)      # file_path, QPoint (global)
-    sig_selected = pyqtSignal(str, bool)   # file_path, is_selected
+    sig_selected = pyqtSignal(str, bool)   # file_path, is_included
     sig_inspect = pyqtSignal(str)          # file_path
     sig_remap = pyqtSignal(str)            # file_path
     sig_log = pyqtSignal(str)              # file_path
@@ -262,7 +262,7 @@ class _SampleCard(QWidget):
         self._sel_btn.setObjectName("card-pick")
         self._sel_btn.setFixedSize(20, 20)
         self._sel_btn.setCursor(Qt.CursorShape.PointingHandCursor)
-        self._sel_btn.setToolTip("Toggle selection")
+        self._sel_btn.setToolTip("Included in comparison/export scope")
         self._sel_btn.clicked.connect(self._toggle_selected)
         row.addWidget(self._sel_btn)
 
@@ -393,6 +393,7 @@ class _SampleCard(QWidget):
 
     def _refresh_sel_btn(self):
         if self._selected:
+            self._sel_btn.setToolTip("Included in comparison/export scope")
             self._sel_btn.setStyleSheet(
                 f"QPushButton#card-pick {{ background: rgba(107,142,35,0.12); "
                 f"border: 1px solid rgba(107,142,35,0.34); border-radius: 4px; "
@@ -403,6 +404,7 @@ class _SampleCard(QWidget):
             except Exception:
                 self._sel_btn.setText("\u2713")
         else:
+            self._sel_btn.setToolTip("Excluded from comparison/export scope")
             self._sel_btn.setStyleSheet(
                 f"QPushButton#card-pick {{ background: rgba(255,255,255,0.42); "
                 f"border: 1px solid {C.SB_BDR}; border-radius: 4px; padding: 0; }}"
@@ -526,6 +528,7 @@ class _FileListWidget(QScrollArea):
         if file_path in self._cards:
             return
         card = _SampleCard(file_path, display_name, status)
+        card.set_selected(True)
         card.sig_clicked.connect(self._on_card_clicked)
         card.sig_ctx.connect(self.card_ctx)
         card.sig_selected.connect(self._on_card_selected)
@@ -577,7 +580,7 @@ class _FileListWidget(QScrollArea):
         return self._active_path
 
     def get_selected_paths(self) -> list[str]:
-        """Return file paths of all selected cards."""
+        """Return file paths of all included cards."""
         return [fp for fp, card in self._cards.items() if card.is_selected]
 
     def set_selected_paths(self, file_paths: list[str], *, emit_signal: bool = True):
@@ -1514,13 +1517,17 @@ class ControlPanel(QFrame):
         self.setup_validation()
 
     def get_selected_paths(self) -> list[str]:
-        """Return file paths of all sidebar-selected sample cards."""
+        """Return file paths of all sidebar-included sample cards."""
         return self._file_list.get_selected_paths()
 
     def set_selected_paths(self, file_paths: list[str], *, emit_signal: bool = True):
-        """Set sidebar-selected sample cards from an external controller."""
+        """Set sidebar-included sample cards from an external controller."""
         self._file_list.set_selected_paths(file_paths, emit_signal=emit_signal)
         self._update_inventory_bar()
+
+    def get_scope_card_count(self) -> int:
+        """Return the number of sample cards that can express included scope."""
+        return self._file_list.get_loaded_count()
 
     def _request_dataset_manager(self, _checked: bool = False) -> None:
         """Emit a clean zero-argument request from the sidebar Manage button."""
@@ -1737,7 +1744,7 @@ class ControlPanel(QFrame):
         self._pill_all.setCheckable(True)
         self._pill_all.setChecked(True)
         self._pill_all.setStyleSheet(_PILL)
-        self._pill_sel = QPushButton("Selected")
+        self._pill_sel = QPushButton("Included")
         self._pill_sel.setCheckable(True)
         self._pill_sel.setStyleSheet(_PILL)
         self._pill_rev = QPushButton("\u26a0 Review")
@@ -1746,7 +1753,7 @@ class ControlPanel(QFrame):
         self._manage_samples_btn = QPushButton("Manage")
         self._manage_samples_btn.setStyleSheet(_PILL)
         self._manage_samples_btn.setCursor(Qt.CursorShape.PointingHandCursor)
-        self._manage_samples_btn.setToolTip("Choose active samples and assign groups")
+        self._manage_samples_btn.setToolTip("Choose included samples and assign groups")
         self._manage_samples_btn.setEnabled(False)
         self._manage_samples_btn.clicked.connect(self._request_dataset_manager)
 
@@ -1813,7 +1820,7 @@ class ControlPanel(QFrame):
 
         self._chip_loaded = QLabel("0 loaded")
         self._chip_loaded.setStyleSheet(_CHIP)
-        self._chip_selected = QLabel("0 selected")
+        self._chip_selected = QLabel("0 included")
         self._chip_selected.setStyleSheet(_CHIP_SEL)
         self._chip_warnings = QLabel("")
         self._chip_warnings.setStyleSheet(_CHIP_WARN)
@@ -2133,7 +2140,7 @@ class ControlPanel(QFrame):
                        if s in ('mapping', 'review', 'failed'))
 
         self._chip_loaded.setText(f"{loaded} loaded" if total else "0 loaded")
-        self._chip_selected.setText(f"{selected} selected")
+        self._chip_selected.setText(f"{selected} included")
         if hasattr(self, "_manage_samples_btn"):
             self._manage_samples_btn.setEnabled(total > 0)
         if warnings > 0:

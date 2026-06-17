@@ -125,15 +125,23 @@ class DatasetSelectionDialog(FramelessDialogBase):
         sw_lay.addWidget(self._search_box)
         tb_lay.addWidget(search_wrap, 1)
 
-        # Quick selection buttons
-        for label, fn in [("All", self._select_all), ("None", self._select_none),
-                          ("Invert", self._invert)]:
+        # Quick scope buttons
+        scope_buttons = (
+            [("Include All", self._select_all), ("Include None", self._select_none), ("Invert", self._invert)]
+            if self._allow_grouping
+            else [("All", self._select_all), ("None", self._select_none), ("Invert", self._invert)]
+        )
+        for label, fn in scope_buttons:
             btn = _qs_btn(label, fn)
             tb_lay.addWidget(btn)
 
         if self._allow_grouping:
+            clear_selection_btn = _qs_btn("Clear Selection", self._clear_row_selection)
+            clear_selection_btn.setToolTip("Clear selected rows without changing included scope")
+            tb_lay.addWidget(clear_selection_btn)
+
             self._group_box = QLineEdit()
-            self._group_box.setPlaceholderText("Group for checked...")
+            self._group_box.setPlaceholderText("Group for selected rows...")
             self._group_box.setFixedWidth(165)
             self._group_box.setFixedHeight(26)
             self._group_box.setStyleSheet(
@@ -142,11 +150,11 @@ class DatasetSelectionDialog(FramelessDialogBase):
                 f"font-size: {F.SZ_SM}pt; color: {C.TEXT}; padding: 0 8px; }}"
                 f"QLineEdit:focus {{ border-color: {C.OLIVE}; background: white; }}"
             )
-            self._group_box.returnPressed.connect(self._assign_group_to_checked)
+            self._group_box.returnPressed.connect(self._assign_group_to_selected)
             tb_lay.addWidget(self._group_box)
 
-            apply_group_btn = _qs_btn("Apply Group", self._assign_group_to_checked)
-            apply_group_btn.setToolTip("Assign this group label to checked datasets")
+            apply_group_btn = _qs_btn("Apply Group", self._assign_group_to_selected)
+            apply_group_btn.setToolTip("Assign this group label to selected rows")
             tb_lay.addWidget(apply_group_btn)
 
         root.addWidget(toolbar)
@@ -183,7 +191,7 @@ class DatasetSelectionDialog(FramelessDialogBase):
         sb_lay.setContentsMargins(14, 7, 14, 7)
         sb_lay.setSpacing(8)
 
-        self._sel_count_badge = QLabel("0 selected")
+        self._sel_count_badge = QLabel("0 included")
         self._sel_count_badge.setStyleSheet(
             f"background: rgba(107,142,35,.1); color: {C.OLIVE}; "
             f"border: 1px solid rgba(107,142,35,.25); border-radius: 99px; "
@@ -233,6 +241,7 @@ class DatasetSelectionDialog(FramelessDialogBase):
             row.toggled.connect(self._on_selection_changed)
             if self._allow_grouping:
                 row.group_changed.connect(self._on_group_changed)
+                row.selection_changed.connect(self._on_selection_changed)
             self._rows.append(row)
         self._rebuild_rows_layout()
         self._on_selection_changed()
@@ -312,7 +321,7 @@ class DatasetSelectionDialog(FramelessDialogBase):
         lay.addWidget(title)
 
         selected = sum(1 for row in rows if row.is_checked())
-        count = QLabel(f"{selected}/{len(rows)} selected")
+        count = QLabel(f"{selected}/{len(rows)} included")
         count.setFont(QFont(F.MONO, F.SZ_XS))
         count.setStyleSheet(f"color: {C.TEXT_MUTED}; background: transparent;")
         lay.addWidget(count)
@@ -321,6 +330,8 @@ class DatasetSelectionDialog(FramelessDialogBase):
         rows_for_buttons = list(rows)
         all_btn = _qs_btn("All", lambda _checked=False, rows=rows_for_buttons: self._set_rows_checked(rows, True))
         none_btn = _qs_btn("None", lambda _checked=False, rows=rows_for_buttons: self._set_rows_checked(rows, False))
+        all_btn.setToolTip("Include every dataset in this group")
+        none_btn.setToolTip("Exclude every dataset in this group")
         all_btn.setFixedHeight(22)
         none_btn.setFixedHeight(22)
         lay.addWidget(all_btn)
@@ -333,21 +344,32 @@ class DatasetSelectionDialog(FramelessDialogBase):
         self._on_selection_changed()
         self._rebuild_rows_layout()
 
-    def _assign_group_to_checked(self) -> None:
+    def _clear_row_selection(self) -> None:
+        for row in self._rows:
+            row.set_selected(False, emit_signal=False)
+        self._on_selection_changed()
+        self._rebuild_rows_layout()
+
+    def _assign_group_to_selected(self) -> None:
         if not self._allow_grouping:
             return
         group_name = normalize_group_name(self._group_box.text())
-        selected_rows = [row for row in self._rows if row.is_checked()]
+        selected_rows = [row for row in self._rows if row.is_selected()]
         if not selected_rows:
             return
         self._suppress_group_changed = True
         try:
             for row in selected_rows:
                 row.set_group_name(group_name)
+                row.set_selected(False, emit_signal=False)
         finally:
             self._suppress_group_changed = False
         self._rebuild_rows_layout()
         self._on_selection_changed()
+
+    def _assign_group_to_checked(self) -> None:
+        """Backward-compatible internal alias for older tests/helpers."""
+        self._assign_group_to_selected()
 
     def _on_group_changed(self) -> None:
         if self._rebuilding_rows or self._suppress_group_changed:
@@ -377,10 +399,15 @@ class DatasetSelectionDialog(FramelessDialogBase):
 
     def _on_selection_changed(self):
         count = len([row for row in self._rows if row.is_checked()])
-        self._sel_count_badge.setText(f"{count} selected")
         if self._allow_grouping:
+            selected_count = len([row for row in self._rows if row.is_selected()])
             group_count = len({row.group_name() for row in self._rows})
-            self._sel_hint.setText(f"of {len(self.dataset_tabs)} datasets / {group_count} groups")
+            self._sel_count_badge.setText(f"{count} included")
+            self._sel_hint.setText(
+                f"of {len(self.dataset_tabs)} datasets / {selected_count} rows selected / {group_count} groups"
+            )
+        else:
+            self._sel_count_badge.setText(f"{count} included")
         if self._compare_btn:
             self._compare_btn.setEnabled(count >= self._minimum_selection)
 
@@ -410,11 +437,13 @@ class _DatasetRow(QFrame):
 
     toggled = pyqtSignal()
     group_changed = pyqtSignal()
+    selection_changed = pyqtSignal()
 
     def __init__(self, tab, checked: bool = False, *, allow_grouping: bool = False, parent=None):
         super().__init__(parent)
         self.tab = tab
         self._checked = False
+        self._selected = False
         self._allow_grouping = bool(allow_grouping)
         self._group_edit = None
         self._status_color = _dataset_status_color(tab)
@@ -434,6 +463,7 @@ class _DatasetRow(QFrame):
 
         self._checkbox = QFrame()
         self._checkbox.setFixedSize(15, 15)
+        self._checkbox.setToolTip("Included in shared scope")
         cb_lay = QHBoxLayout(self._checkbox)
         cb_lay.setContentsMargins(0, 0, 0, 0)
         self._checkmark = QLabel("✓")
@@ -505,6 +535,7 @@ class _DatasetRow(QFrame):
 
         if self._group_edit is not None:
             self._group_edit.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents, False)
+        self.setToolTip("Checkmark includes the dataset. Row body selects it for group assignment.")
 
     def matches_filter(self, text: str) -> bool:
         return not text or text in self._search_text
@@ -520,6 +551,21 @@ class _DatasetRow(QFrame):
         self._sync_styles()
         if emit_signal:
             self.toggled.emit()
+
+    def is_selected(self) -> bool:
+        return self._selected
+
+    def set_selected(self, selected: bool, *, emit_signal: bool = True):
+        selected = bool(selected)
+        if self._selected == selected:
+            return
+        self._selected = selected
+        self._sync_styles()
+        if emit_signal:
+            self.selection_changed.emit()
+
+    def _toggle_selected(self) -> None:
+        self.set_selected(not self._selected)
 
     def group_name(self) -> str:
         if self._group_edit is None:
@@ -543,14 +589,25 @@ class _DatasetRow(QFrame):
 
     def mousePressEvent(self, event):
         if event.button() == Qt.MouseButton.LeftButton:
-            self.set_checked(not self._checked)
+            if self._allow_grouping and event.position().x() > 34:
+                self._toggle_selected()
+            else:
+                self.set_checked(not self._checked)
             event.accept()
             return
         super().mousePressEvent(event)
 
     def _sync_styles(self):
-        row_bg = "rgba(107,142,35,.05)" if self._checked else "transparent"
-        row_hover = "rgba(107,142,35,.07)" if self._checked else "rgba(107,142,35,.04)"
+        row_bg = (
+            "rgba(78,121,167,.08)" if self._selected
+            else "rgba(107,142,35,.05)" if self._checked
+            else "transparent"
+        )
+        row_hover = (
+            "rgba(78,121,167,.12)" if self._selected
+            else "rgba(107,142,35,.07)" if self._checked
+            else "rgba(107,142,35,.04)"
+        )
         self.setStyleSheet(
             f"QFrame#datasetSelectionRow {{"
             f"background: {row_bg};"
@@ -584,7 +641,6 @@ class _DatasetRow(QFrame):
             self._icon_label.setStyleSheet(
                 f"background: transparent; color: {icon_color};"
             )
-
 
 def _dataset_meta_text(tab) -> str:
     dataset = tab.get_dataset() if hasattr(tab, "get_dataset") else getattr(tab, "dataset", None)
@@ -654,11 +710,12 @@ def _qs_btn(label: str, fn) -> QPushButton:
     btn = QPushButton(label)
     btn.setFixedHeight(24)
     btn.setStyleSheet(
-        f"QPushButton {{ border: 1px solid {C.BORDER}; "
-        f"border-radius: {SZ.BORDER_RADIUS}px; background: transparent; "
-        f"color: {C.TEXT_MUTED}; padding: 3px 8px; font-size: {F.SZ_SM}pt; }}"
-        f"QPushButton:hover {{ background: {C.BG_RAISED}; border-color: {C.BORDER_DK}; "
+        f"QPushButton {{ border: 1px solid {C.BORDER_DK}; "
+        f"border-radius: {SZ.BORDER_RADIUS}px; background: #FFFDF8; "
+        f"color: {C.TEXT_MID}; padding: 3px 8px; font-size: {F.SZ_SM}pt; }}"
+        f"QPushButton:hover {{ background: #FFFFFF; border-color: {C.EARTH}; "
         f"color: {C.TEXT}; }}"
+        f"QPushButton:pressed {{ background: {C.BG_RAISED}; border-color: {C.EARTH}; }}"
     )
     btn.clicked.connect(fn)
     return btn

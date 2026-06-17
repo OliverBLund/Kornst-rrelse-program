@@ -128,6 +128,11 @@ class TestMainWindowDatasetTabFade(unittest.TestCase):
         self.assertIn("self._dataset_tab_fader = TabFadeInController(", setup_ui_source)
         self.assertIn("self.dataset_tabs_widget", setup_ui_source)
 
+    def test_dataset_tab_bar_is_hidden_because_sidebar_owns_navigation(self):
+        source = inspect.getsource(MainWindow._configure_dataset_tab_bar)
+
+        self.assertIn("tab_bar.hide()", source)
+
 
 if __name__ == '__main__':
     unittest.main(verbosity=2)

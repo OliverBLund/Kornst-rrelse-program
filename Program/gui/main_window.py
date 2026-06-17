@@ -610,7 +610,7 @@ class MainWindow(FramelessMainWindowMixin, QMainWindow):
 
         # ── Sidebar (resizable via splitter) ───────────────────────
         self.control_panel = ControlPanel()
-        self.control_panel.setMinimumWidth(280)
+        self.control_panel.setMinimumWidth(318)
         self.control_panel.error_dataset.connect(self.add_error_tab)
         self.control_panel.mapping_required.connect(self.add_mapping_required_tab)
         self.control_panel.dataset_loaded_successfully.connect(self.replace_error_tab_with_dataset)
@@ -729,7 +729,7 @@ class MainWindow(FramelessMainWindowMixin, QMainWindow):
         shell_splitter.addWidget(main_widget)
         shell_splitter.setStretchFactor(0, 0)
         shell_splitter.setStretchFactor(1, 1)
-        shell_splitter.setSizes([SZ.SIDEBAR_W, 1200])
+        shell_splitter.setSizes([max(SZ.SIDEBAR_W, 330), 1200])
         self._shell_splitter = shell_splitter
 
         root.addWidget(shell_splitter)
@@ -935,11 +935,12 @@ class MainWindow(FramelessMainWindowMixin, QMainWindow):
         self._refresh_window_control_icons(is_maximized)
 
     def _configure_dataset_tab_bar(self) -> None:
-        """Tune the dataset tab bar to behave more like the concept's compact strip."""
+        """Keep dataset pages in a tab widget while the sidebar owns navigation."""
         tab_bar = self.dataset_tabs_widget.tabBar()
         tab_bar.setExpanding(False)
         tab_bar.setElideMode(Qt.TextElideMode.ElideRight)
         tab_bar.setDrawBase(False)
+        tab_bar.hide()
 
     def _show_welcome(self) -> None:
         """Show the welcome panel (hide dataset tabs and sidebar)."""
@@ -1946,9 +1947,16 @@ class MainWindow(FramelessMainWindowMixin, QMainWindow):
     # ──────────────────────────────────────────────────────────────────
 
     def _get_selected_dataset_tabs(self) -> List[DatasetTab]:
-        """Return dataset tabs for sidebar-selected cards, or all tabs if none selected."""
+        """Return dataset tabs included by sidebar scope, or all tabs if no scope exists."""
         selected_paths = self.control_panel.get_selected_paths()
         if not selected_paths:
+            card_count = (
+                self.control_panel.get_scope_card_count()
+                if hasattr(self.control_panel, "get_scope_card_count")
+                else 0
+            )
+            if card_count:
+                return []
             return self.dataset_tabs
         path_set = set(selected_paths)
         filtered = [t for t in self.dataset_tabs
@@ -2023,7 +2031,7 @@ class MainWindow(FramelessMainWindowMixin, QMainWindow):
                 self.dataset_tabs,
                 currently_selected=selected_tabs,
                 title="Dataset & Group Manager",
-                subtitle="Choose active samples, assign groups, and apply the shared workspace scope",
+                subtitle="Choose included samples, assign groups, and apply the shared workspace scope",
                 action_text="Apply",
                 action_icon="fa6s.check",
                 minimum_selection=1,
@@ -2038,7 +2046,7 @@ class MainWindow(FramelessMainWindowMixin, QMainWindow):
             selected_paths = self._dataset_paths_for_tabs(selected_tabs)
             self.control_panel.set_selected_paths(selected_paths, emit_signal=False)
             self._sync_scope_outputs()
-            self._show_status_message(f"Dataset scope updated: {len(selected_tabs)} selected")
+            self._show_status_message(f"Dataset scope updated: {len(selected_tabs)} included")
         finally:
             self._dataset_group_manager_active = False
             self._dataset_group_manager_last_closed_at = time.monotonic()

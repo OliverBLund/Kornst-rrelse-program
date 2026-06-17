@@ -815,25 +815,27 @@ QScrollBar::sub-line:horizontal {{
    GENERIC PUSH BUTTON
 ════════════════════════════════════════ */
 QPushButton {{
-    background: #FAFAF7;
-    border: 1px solid {C.BORDER};
+    background: #FFFDF8;
+    border: 1px solid {C.BORDER_DK};
     border-radius: {r}px;
     padding: 4px 11px;
     font-size: {F.SZ_MD}pt;
-    color: {C.TEXT_MID};
+    color: {C.TEXT};
 }}
 QPushButton:hover {{
-    background: {C.TAN_H};
-    border-color: {C.BORDER_DK};
+    background: #FFFFFF;
+    border-color: {C.EARTH};
     color: {C.TEXT};
 }}
 QPushButton:pressed {{
-    background: {C.BG_LOW};
+    background: {C.BG_RAISED};
     border-color: {C.EARTH};
 }}
 QPushButton:disabled {{
     opacity: 0.45;
     color: {C.TEXT_MUTED};
+    background: {C.BG_RAISED};
+    border-color: {C.BORDER};
 }}
 
 /* Primary button (olive) */
@@ -1249,21 +1251,22 @@ QPushButton[pw-chk="true"][active="true"] {{
 
 /* Small action buttons (zoom, export, sidebar toggle) */
 QPushButton[pw-btn="true"] {{
-    background: #F3EFE7;
-    border: 1px solid {C.BORDER};
+    background: #FFFDF8;
+    border: 1px solid {C.BORDER_DK};
     border-radius: {r}px;
     padding: 0 7px;
     min-height: 22px;
     max-height: 22px;
     font-size: {F.SZ_SM}pt;
-    color: {C.TEXT_MID};
+    color: {C.TEXT};
 }}
 QPushButton[pw-btn="true"]:hover {{
-    background: {C.BG_LOW};
-    border-color: {C.BORDER_DK};
+    background: #FFFFFF;
+    border-color: {C.EARTH};
 }}
 QPushButton[pw-btn="true"]:pressed {{
-    background: {C.BG_LOW};
+    background: {C.BG_RAISED};
+    border-color: {C.EARTH};
 }}
 
 /* Style / unit dropdowns inside plot toolbar and sidebar */

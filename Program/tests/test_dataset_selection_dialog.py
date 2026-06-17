@@ -6,6 +6,7 @@ from types import SimpleNamespace
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 sys.path.insert(0, "Program")
 
+from PyQt6.QtCore import Qt
 from PyQt6.QtWidgets import QApplication, QPushButton
 
 from gui.dataset_selection_dialog import DatasetSelectionDialog
@@ -33,8 +34,23 @@ class DummyDatasetTab:
         return []
 
 
+class DummyMouseEvent:
+    def __init__(self, x: float):
+        self._x = x
+        self.accepted = False
+
+    def button(self):
+        return Qt.MouseButton.LeftButton
+
+    def position(self):
+        return SimpleNamespace(x=lambda: self._x)
+
+    def accept(self):
+        self.accepted = True
+
+
 class TestDatasetSelectionDialog(unittest.TestCase):
-    def test_checked_rows_can_be_assigned_to_group_in_bulk(self):
+    def test_selected_rows_can_be_assigned_to_group_in_bulk(self):
         tabs = [
             DummyDatasetTab("Sample A", "A.csv"),
             DummyDatasetTab("Sample B", "B.csv"),
@@ -47,14 +63,39 @@ class TestDatasetSelectionDialog(unittest.TestCase):
             allow_grouping=True,
         )
         try:
+            dialog._rows[0].set_selected(True)
+            dialog._rows[1].set_selected(True)
             dialog._group_box.setText("Layer A")
-            dialog._assign_group_to_checked()
+            dialog._assign_group_to_selected()
 
             assignments = dialog.get_group_assignments()
             self.assertEqual(assignments[tabs[0]], "Layer A")
             self.assertEqual(assignments[tabs[1]], "Layer A")
             self.assertEqual(assignments[tabs[2]], "Ungrouped")
+            self.assertFalse(dialog._rows[0].is_selected())
+            self.assertFalse(dialog._rows[1].is_selected())
+            self.assertTrue(dialog._rows[0].is_checked())
+            self.assertTrue(dialog._rows[1].is_checked())
             self.assertIn("2 groups", dialog._sel_hint.text())
+        finally:
+            dialog.deleteLater()
+
+    def test_group_targets_start_unselected_even_when_scope_is_included(self):
+        tabs = [
+            DummyDatasetTab("Sample A", "A.csv"),
+            DummyDatasetTab("Sample B", "B.csv"),
+        ]
+        dialog = DatasetSelectionDialog(
+            tabs,
+            currently_selected=tabs,
+            minimum_selection=1,
+            allow_grouping=True,
+        )
+        try:
+            self.assertTrue(all(row.is_checked() for row in dialog._rows))
+            self.assertFalse(any(row.is_selected() for row in dialog._rows))
+            self.assertIn("0 rows selected", dialog._sel_hint.text())
+            self.assertEqual(dialog._sel_count_badge.text(), "2 included")
         finally:
             dialog.deleteLater()
 
@@ -76,6 +117,34 @@ class TestDatasetSelectionDialog(unittest.TestCase):
 
             visible_names = [row.tab.get_dataset_name() for row in dialog._visible_rows()]
             self.assertEqual(visible_names, ["Sample B"])
+        finally:
+            dialog.deleteLater()
+
+    def test_row_body_selects_row_and_checkbox_area_toggles_included_scope(self):
+        tabs = [DummyDatasetTab("Sample A", "A.csv")]
+        dialog = DatasetSelectionDialog(
+            tabs,
+            currently_selected=tabs,
+            minimum_selection=1,
+            allow_grouping=True,
+        )
+        try:
+            row = dialog._rows[0]
+            self.assertTrue(row.is_checked())
+            self.assertFalse(row.is_selected())
+
+            body_click = DummyMouseEvent(80)
+            row.mousePressEvent(body_click)
+            self.assertTrue(body_click.accepted)
+            self.assertTrue(row.is_checked())
+            self.assertTrue(row.is_selected())
+
+            checkbox_click = DummyMouseEvent(10)
+            row.mousePressEvent(checkbox_click)
+            self.assertTrue(checkbox_click.accepted)
+            self.assertFalse(row.is_checked())
+            self.assertTrue(row.is_selected())
+            self.assertEqual(dialog._sel_count_badge.text(), "0 included")
         finally:
             dialog.deleteLater()
 
@@ -103,6 +172,8 @@ class TestDatasetSelectionDialog(unittest.TestCase):
             dialog._rebuild_rows_layout = wrapped_rebuild
             dialog._rows[0]._group_edit.setFocus()
             dialog._rows[0].set_group_name("Temporary")
+            for row in dialog._rows[:3]:
+                row.set_selected(True)
             dialog._group_box.setText("Layer A")
 
             button = [
@@ -117,6 +188,30 @@ class TestDatasetSelectionDialog(unittest.TestCase):
             self.assertEqual(assignments[tabs[2]], "Layer A")
             self.assertEqual(assignments[tabs[3]], "Ungrouped")
             self.assertLessEqual(rebuilds["count"], 3)
+        finally:
+            dialog.deleteLater()
+
+    def test_grouping_toolbar_omits_select_visible_and_uses_visible_buttons(self):
+        tabs = [
+            DummyDatasetTab("Sample A", "A.csv"),
+            DummyDatasetTab("Sample B", "B.csv"),
+        ]
+        dialog = DatasetSelectionDialog(
+            tabs,
+            currently_selected=tabs,
+            minimum_selection=1,
+            allow_grouping=True,
+        )
+        try:
+            buttons = dialog.findChildren(QPushButton)
+            labels = [button.text() for button in buttons]
+            include_all = next(button for button in buttons if button.text() == "Include All")
+
+            self.assertNotIn("Select Visible", labels)
+            self.assertIn("Clear Selection", labels)
+            self.assertIn("Apply Group", labels)
+            self.assertIn("background: #FFFDF8", include_all.styleSheet())
+            self.assertNotIn("background: transparent", include_all.styleSheet())
         finally:
             dialog.deleteLater()
 

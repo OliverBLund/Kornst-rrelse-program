@@ -257,6 +257,12 @@ class TestComparisonTabSelectionState(unittest.TestCase):
         self.assertIn('Overall', headers)
         self.assertIn('Layer 1', headers)
         self.assertIn('Layer 2', headers)
+        header = self.widget._aggregate_table.horizontalHeader()
+        for col in range(1, self.widget._aggregate_table.columnCount()):
+            self.assertEqual(
+                header.sectionResizeMode(col),
+                comparison_tab_module.QHeaderView.ResizeMode.Stretch,
+            )
         group_chip_texts = [
             self.widget._details_dataset_chips_layout.itemAt(i).widget().layout().itemAt(1).widget().text()
             for i in range(self.widget._details_dataset_chips_layout.count() - 1)
@@ -333,20 +339,28 @@ class TestComparisonTabSelectionState(unittest.TestCase):
         self.assertIn('m/d', self.widget._details_context.text())
         self.assertIn('m/d', self.widget._details_focus_strip.text())
 
-    def test_details_dataset_strip_uses_widget_chips_with_dataset_colors(self):
+    def test_details_dataset_strip_is_hidden_until_aggregate_mode(self):
+        self.tabs[0].dataset.group_name = 'Layer 1'
+        self.tabs[1].dataset.group_name = 'Layer 1'
+        self.tabs[2].dataset.group_name = 'Layer 2'
         self.widget.set_dataset_state(self.tabs, selected_tabs=self.tabs)
 
-        first_chip = self.widget._details_dataset_chips_layout.itemAt(0).widget()
-        dot_label = first_chip.layout().itemAt(0).widget()
-        name_label = first_chip.layout().itemAt(1).widget()
+        self.assertTrue(self.widget._details_dataset_strip.isHidden())
 
-        self.assertEqual(dot_label.text(), '●')
-        self.assertIn(comparison_tab_module.DATASET_COLORS[0], dot_label.styleSheet())
-        self.assertIn('Sample A', first_chip.toolTip())
-        self.assertEqual(name_label.text(), 'Sample A')
+        self.widget._set_details_view_mode('aggregate')
+        chip_labels = [
+            self.widget._details_dataset_chips_layout.itemAt(i).widget().layout().itemAt(1).widget().text()
+            for i in range(self.widget._details_dataset_chips_layout.count() - 1)
+        ]
+
+        self.assertFalse(self.widget._details_dataset_strip.isHidden())
+        self.assertEqual(chip_labels, ['Layer 1 (2)', 'Layer 2 (1)'])
 
     def test_grain_heat_toggle_applies_visible_background_role(self):
         self.widget.set_dataset_state(self.tabs, selected_tabs=self.tabs)
+        self.assertFalse(self.widget._heat_btn.isChecked())
+
+        self.widget._heat_btn.setChecked(True)
 
         d50_row = next(
             row for row, row_def in enumerate(self.widget._GRAIN_ROWS)
@@ -400,6 +414,7 @@ class TestComparisonTabSelectionState(unittest.TestCase):
 
     def test_dataset_subset_change_recalculates_details_heat_cells(self):
         self.widget.set_dataset_state(self.tabs, selected_tabs=self.tabs)
+        self.widget._heat_btn.setChecked(True)
         self.widget._set_details_mode('k')
 
         hazen_row = next(
@@ -421,6 +436,7 @@ class TestComparisonTabSelectionState(unittest.TestCase):
 
     def test_result_change_recalculates_details_heat_cells_on_update(self):
         self.widget.set_dataset_state(self.tabs, selected_tabs=self.tabs)
+        self.widget._heat_btn.setChecked(True)
         self.widget._set_details_mode('k')
 
         hazen_row = next(
@@ -443,6 +459,9 @@ class TestComparisonTabSelectionState(unittest.TestCase):
     def test_details_heat_legend_uses_real_palette_swatch_widgets(self):
         self.widget.set_dataset_state(self.tabs, selected_tabs=self.tabs)
 
+        self.assertTrue(self.widget._details_legend_section.isHidden())
+        self.widget._heat_btn.setChecked(True)
+
         legend_frames = self.widget._details_legend_section.findChildren(comparison_tab_module.QFrame)
         swatches = [
             frame for frame in legend_frames
@@ -456,6 +475,19 @@ class TestComparisonTabSelectionState(unittest.TestCase):
 
         self.widget._heat_btn.setChecked(False)
         self.assertTrue(self.widget._details_legend_section.isHidden())
+
+    def test_entering_details_tab_resets_heat_coloring(self):
+        self.widget.set_dataset_state(self.tabs, selected_tabs=self.tabs)
+        self.widget._heat_btn.setChecked(True)
+
+        details_index = next(
+            index for index in range(self.widget._tabs.count())
+            if self.widget._tabs.tabText(index) == 'Details'
+        )
+        self.widget._tabs.setCurrentIndex(details_index)
+
+        self.assertFalse(self.widget._heat_btn.isChecked())
+        self.assertEqual(self.widget._heat_btn.text(), 'Off')
 
     def test_k_table_header_sort_reorders_rows_by_dataset_values(self):
         self.widget.set_dataset_state(self.tabs, selected_tabs=self.tabs)
@@ -519,6 +551,23 @@ class TestComparisonTabSelectionState(unittest.TestCase):
 
         self.assertIn('m/s', self.widget._stats_context.text())
         self.assertIn('m/s', self.widget._box_fig.axes[0].get_ylabel())
+
+    def test_statistics_metric_toolbar_omits_ambiguous_range_button(self):
+        self.widget.set_dataset_state(self.tabs, selected_tabs=self.tabs)
+
+        metric_texts = [
+            self.widget._stats_metric_geo_btn.text(),
+            self.widget._stats_metric_arith_btn.text(),
+            self.widget._stats_metric_med_btn.text(),
+        ]
+        self.assertEqual(metric_texts, ['Geo. mean', 'Arith. mean', 'Median'])
+        self.assertFalse(hasattr(self.widget, '_stats_metric_range_btn'))
+
+        scope_headers = [
+            self.widget._stats_scope_table.horizontalHeaderItem(col).text()
+            for col in range(self.widget._stats_scope_table.columnCount())
+        ]
+        self.assertTrue(any(header.startswith('K range') for header in scope_headers))
 
     def test_statistics_heatmap_uses_stable_domain_method_order(self):
         self.widget.set_dataset_state(self.tabs, selected_tabs=self.tabs)

@@ -103,6 +103,17 @@ class TestControlPanelSettings(unittest.TestCase):
         self.assertFalse(_RejectedDialog.created[0].initial_value)
         self.assertEqual(host.saved_values, [])
 
+    def test_new_sample_cards_start_included_in_shared_scope(self):
+        file_path = os.path.normpath(r"C:\temp\sample.csv")
+
+        self.panel.file_statuses[file_path] = "loaded"
+        self.panel.add_file_to_table(file_path, "loaded", display_name="Sample")
+        self.panel._update_inventory_bar()
+
+        self.assertEqual(self.panel.get_selected_paths(), [file_path])
+        self.assertEqual(self.panel._chip_selected.text(), "1 included")
+        self.assertEqual(self.panel.get_scope_card_count(), 1)
+
 
 if __name__ == "__main__":
     unittest.main(verbosity=2)

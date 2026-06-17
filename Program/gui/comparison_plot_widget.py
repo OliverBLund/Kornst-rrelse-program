@@ -252,18 +252,20 @@ class ComparisonPlotWidget(QWidget):
                 border: none;
                 gridline-color: transparent;
                 color: {C.TEXT};
+                font-size: 10px;
             }}
             QTableWidget#cmp-drawer-table::item {{
                 border-bottom: 1px solid rgba(212,196,168,0.35);
-                padding: 3px 7px;
+                padding: 2px 7px;
             }}
             QHeaderView::section {{
                 background: {C.BG_LOW};
                 color: {C.TEXT_MID};
                 border: none;
                 border-bottom: 1px solid {C.BORDER};
-                padding: 5px 7px;
+                padding: 3px 7px;
                 font-weight: 600;
+                font-size: 10px;
             }}
         """)
 
@@ -307,10 +309,14 @@ class ComparisonPlotWidget(QWidget):
         self._drawer_table.setSelectionMode(QAbstractItemView.SelectionMode.NoSelection)
         self._drawer_table.setAlternatingRowColors(False)
         self._drawer_table.setShowGrid(False)
+        self._drawer_table.setWordWrap(False)
         self._drawer_table.verticalHeader().setVisible(False)
+        self._drawer_table.verticalHeader().setSectionResizeMode(QHeaderView.ResizeMode.Fixed)
+        self._drawer_table.verticalHeader().setDefaultSectionSize(24)
         self._drawer_table.horizontalHeader().setStretchLastSection(True)
         self._drawer_table.horizontalHeader().setMinimumSectionSize(72)
         self._drawer_table.horizontalHeader().setSectionResizeMode(QHeaderView.ResizeMode.ResizeToContents)
+        self._drawer_table.horizontalHeader().setFixedHeight(25)
         self._drawer_table.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAsNeeded)
         self._drawer_table.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAsNeeded)
         self._drawer_table.setHorizontalScrollMode(QAbstractItemView.ScrollMode.ScrollPerPixel)
@@ -1672,9 +1678,10 @@ class ComparisonPlotWidget(QWidget):
                         Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter
                     )
                 self._drawer_table.setItem(row_index, col_index, item)
+            self._drawer_table.setRowHeight(row_index, 24)
 
         self._drawer_table.resizeColumnsToContents()
-        self._drawer_table.resizeRowsToContents()
+        self._drawer_table.verticalHeader().setDefaultSectionSize(24)
 
     @staticmethod
     def _with_extension(file_path: str, extension: str) -> str:

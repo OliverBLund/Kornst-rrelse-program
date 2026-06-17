@@ -406,6 +406,9 @@ class TestPlotWorkspaceWiring(unittest.TestCase):
         self.assertEqual(self.workspace._drawer_title.text(), 'K-value bar chart data')
         self.assertEqual(self.workspace._drawer_headers, ['Method', 'K (m/d)', 'Status'])
         self.assertIn(('Beyer', '12.96', 'Warning'), self.workspace._drawer_rows)
+        self.assertFalse(self.workspace._drawer_table.wordWrap())
+        self.assertEqual(self.workspace._drawer_table.verticalHeader().defaultSectionSize(), 24)
+        self.assertEqual(self.workspace._drawer_table.rowHeight(0), 24)
 
         original_dialog = QFileDialog.getSaveFileName
         original_info = QMessageBox.information

@@ -111,11 +111,6 @@ class ReportGenerator:
             @page {
                 size: A4;
                 margin: 20mm 20mm 25mm 20mm;
-                @bottom-right {
-                    content: "Page " counter(page) " of " counter(pages);
-                    font-size: 8pt;
-                    color: #6c757d;
-                }
             }
 
             @media print {
@@ -290,6 +285,24 @@ class ReportGenerator:
 
             .table-compact th { padding: 5px 8px; font-size: 8.5pt; }
             .table-compact td { padding: 4px 8px; }
+            .table-wide {
+                table-layout: fixed;
+                font-size: 8pt;
+            }
+            .table-wide th,
+            .table-wide td {
+                padding: 4px 5px;
+                overflow-wrap: anywhere;
+                word-break: break-word;
+            }
+            .table-wide th:first-child,
+            .table-wide td:first-child {
+                width: 16%;
+            }
+            .table-wide th:last-child,
+            .table-wide td:last-child {
+                width: 16%;
+            }
 
             /* ── Metadata box ─────────────────────────────────── */
             .metadata {
@@ -1880,275 +1893,6 @@ class ReportGenerator:
 
         return html
 
-    def _generate_comparison_report_legacy(self, datasets: List[GrainSizeData],
-                                          k_results_dict: Dict[str, List[KCalculationResult]],
-                                          temperature: float,
-                                          porosity: float,
-                                          metadata: Optional[Dict[str, str]] = None,
-                                          sections: Optional[Dict[str, bool]] = None,
-                                          brand=None) -> str:
-        """Generate a comparison report for multiple samples"""
-
-        # Set defaults
-        if metadata is None:
-            metadata = {}
-        if sections is None:
-            sections = {
-                'cover_page': True,
-                'executive_summary': True,
-                'methodology': True,
-                'results': True,
-                'plots': True,
-                'interpretation': True,
-                'grain_comparison': True,
-                'k_statistics': True
-            }
-
-        # Calculate K-values for summary
-        mean_k_by_sample = {}
-        for name, results in k_results_dict.items():
-            summary = build_k_result_summary(results, dataset_name=name)
-            if summary.geometric_mean_m_s is not None:
-                mean_k_by_sample[name] = summary.geometric_mean_m_s
-
-        # Start HTML report
-        html = f"""
-        <!DOCTYPE html>
-        <html>
-        <head>
-            <title>Multi-Sample Comparison Report</title>
-            {self._get_branded_style(brand)}
-        </head>
-        <body>
-        <div class="report-top-bar"></div>
-        """
-
-        # Add cover page if requested
-        if sections.get('cover_page', True):
-            html += self._create_cover_page(
-                title="Multi-Sample Comparison Report",
-                subtitle=f"Hydraulic Conductivity Analysis - {len(datasets)} Samples",
-                metadata=metadata, brand=brand
-            )
-
-        html += f"""
-            <h1>Multi-Sample Comparison Report</h1>
-
-            {self._format_metadata_section(metadata)}
-
-            <div class="metadata">
-                <p><strong>Number of Samples:</strong> {len(datasets)}</p>
-                <p><strong>Temperature:</strong> {temperature}°C</p>
-                <p><strong>Porosity:</strong> {porosity}</p>
-            </div>
-        """
-
-        # Executive Summary
-        if sections.get('executive_summary', True):
-            html += f"""
-            <div style="page-break-before: auto;">
-            <h2>Executive Summary</h2>
-            <div class="info-box">
-                <p><strong>Comparison Analysis:</strong> This report compares {len(datasets)} soil samples
-                based on grain size distribution and hydraulic conductivity estimates.</p>
-            """
-
-            if mean_k_by_sample:
-                highest = max(mean_k_by_sample.items(), key=lambda x: x[1])
-                lowest = min(mean_k_by_sample.items(), key=lambda x: x[1])
-                html += f"""
-                <p><strong>Key Findings:</strong></p>
-                <ul>
-                    <li>Highest permeability: {highest[0]} ({highest[1]:.2e} m/s)</li>
-                    <li>Lowest permeability: {lowest[0]} ({lowest[1]:.2e} m/s)</li>
-                    <li>Permeability range: {highest[1]/lowest[1]:.1f}x difference</li>
-                </ul>
-                """
-
-            html += """
-            </div>
-            </div>
-            """
-
-        # Methodology
-        if sections.get('methodology', True):
-            html += """
-            <div style="page-break-before: auto;">
-            <h2>Methodology</h2>
-            <div class="info-box">
-                <h3>Comparative Analysis Approach</h3>
-                <p>This comparison report presents a side-by-side analysis of multiple soil samples
-                to identify patterns, variations, and relationships between grain size characteristics
-                and hydraulic conductivity estimates.</p>
-                <h3>Analysis Components</h3>
-                <p><strong>Grain Size Comparison:</strong> Overlapping distribution curves allow visual
-                assessment of particle size variations between samples.</p>
-                <p><strong>K-Value Comparison:</strong> Box plots and statistical summaries reveal the
-                range and reliability of hydraulic conductivity estimates across samples.</p>
-                <p><strong>Method Reliability:</strong> A reliability matrix shows which empirical methods
-                are applicable for each sample, helping identify the most suitable estimation approaches.</p>
-            </div>
-            </div>
-            """
-
-        # Results
-        if sections.get('results', True):
-            html += f"""
-            <div style="page-break-before: auto;">
-            <h2>Results & Analysis</h2>
-
-            <h3>Sample Overview</h3>
-            <table>
-                <thead>
-                    <tr>
-                        <th>Sample</th>
-                        <th>D₁₀ (mm)</th>
-                        <th>D₅₀ (mm)</th>
-                        <th>D₆₀ (mm)</th>
-                        <th>Cu</th>
-                        <th>Soil Type</th>
-                        <th>K geometric mean (m/s)</th>
-                    </tr>
-                </thead>
-                <tbody>
-            """
-
-            for dataset in datasets:
-                d10 = dataset.get_d10()
-                d50 = dataset.get_d50()
-                d60 = dataset.get_d60()
-                cu = (d60/d10) if (d10 and d60) else None
-
-                # Get geometric mean K if available
-                mean_k = "N/A"
-                if dataset.sample_name in mean_k_by_sample:
-                    mean_k = f"{mean_k_by_sample[dataset.sample_name]:.2e}"
-
-                html += f"""
-                <tr>
-                    <td>{dataset.sample_name}</td>
-                    <td>{f'{d10:.3f}' if d10 else 'N/A'}</td>
-                    <td>{f'{d50:.3f}' if d50 else 'N/A'}</td>
-                    <td>{f'{d60:.3f}' if d60 else 'N/A'}</td>
-                    <td>{f'{cu:.2f}' if cu else 'N/A'}</td>
-                    <td>{dataset.classify(scheme=self._scheme).label}</td>
-                    <td>{mean_k}</td>
-                </tr>
-                """
-
-            html += "</tbody></table>"
-
-            # Add comprehensive comparison tables
-            if sections.get('grain_comparison', True):
-                html += f"<h3>Grain Parameters Comparison</h3>{self._create_grain_parameters_comparison_table(datasets)}"
-
-            if sections.get('k_statistics', True) and k_results_dict:
-                html += f"<h3>Permeability Classification Summary</h3>{self._create_permeability_classification_table(k_results_dict)}"
-
-            html += "</div>"
-
-        # Visual Charts
-        if sections.get('plots', True):
-            comparison_plot = self._create_comparison_grain_size_plot(datasets)
-            k_boxplot = self._create_k_value_boxplot(k_results_dict)
-            reliability_matrix = self._create_method_reliability_matrix(k_results_dict)
-
-            if comparison_plot:
-                html += f"""
-                <div style="page-break-before: auto;">
-                <h2>Grain Size Distribution Comparison</h2>
-                <div class="plot-container">
-                    <img src="{comparison_plot}" alt="Grain Size Comparison" style="max-width: 100%; height: auto;">
-                </div>
-                </div>
-                """
-
-            if k_boxplot:
-                html += f"""
-                <div style="page-break-before: auto;">
-                <h2>Hydraulic Conductivity Distribution</h2>
-                <div class="plot-container">
-                    <img src="{k_boxplot}" alt="K-Value Boxplot" style="max-width: 100%; height: auto;">
-                </div>
-                </div>
-                """
-
-            if reliability_matrix:
-                html += f"""
-                <div style="page-break-before: always;">
-                <h2>Appendix: Method Reliability Matrix</h2>
-                <div class="plot-container">
-                    <img src="{reliability_matrix}" alt="Method Reliability Matrix" style="max-width: 100%; height: auto;">
-                </div>
-                </div>
-                """
-
-        # Interpretation
-        if sections.get('interpretation', True):
-            html += """
-            <div style="page-break-before: auto;">
-            <h2>Interpretation & Discussion</h2>
-            <div class="info-box">
-                <h3>Comparative Analysis</h3>
-            """
-
-            if mean_k_by_sample:
-                highest = max(mean_k_by_sample.items(), key=lambda x: x[1])
-                lowest = min(mean_k_by_sample.items(), key=lambda x: x[1])
-
-                html += f"""
-                <p><strong>Permeability Characteristics:</strong></p>
-                <ul>
-                    <li>The highest permeability sample is {highest[0]} with K = {highest[1]:.2e} m/s,
-                    classified as {self._classify_permeability(highest[1])}.</li>
-                    <li>The lowest permeability sample is {lowest[0]} with K = {lowest[1]:.2e} m/s,
-                    classified as {self._classify_permeability(lowest[1])}.</li>
-                    <li>The {highest[1]/lowest[1]:.1f}-fold difference in permeability reflects the
-                    variability in grain size distribution among the samples.</li>
-                </ul>
-                """
-
-                # Statistical analysis
-                all_k_values = list(mean_k_by_sample.values())
-                mean_all = np.mean(all_k_values)
-                std_all = np.std(all_k_values)
-
-                html += f"""
-                <p><strong>Statistical Overview:</strong></p>
-                <ul>
-                    <li>Average sample K geometric mean: {mean_all:.2e} m/s</li>
-                    <li>Standard deviation: {std_all:.2e} m/s</li>
-                    <li>Coefficient of variation: {(std_all/mean_all)*100:.1f}%</li>
-                </ul>
-                """
-
-            html += """
-            </div>
-            """
-
-            # Add custom notes if provided
-            if metadata.get('notes'):
-                html += f"""
-                <div class="info-box">
-                    <h3>Additional Notes</h3>
-                    <p>{self._note_html(metadata['notes'])}</p>
-                </div>
-                """
-
-            html += "</div>"
-
-        # Add footer
-        html += """
-            <div class="footer">
-                <span><strong>Multi-Sample Comparison Report</strong></span>
-                <span>Generated by Grain Size Analysis &amp; Hydraulic Conductivity Calculator</span>
-            </div>
-        </body>
-        </html>
-        """
-
-        return html
-
     def generate_comparison_report(self, datasets: List[GrainSizeData],
                                   k_results_dict: Optional[Dict[str, List[KCalculationResult]]] = None,
                                   temperature: Optional[float] = None,
@@ -2666,7 +2410,7 @@ class ReportGenerator:
                                                   sample_labels: Optional[List[str]] = None) -> str:
         """Generate HTML comparison table with color-coded cells showing D10, D50, D60, Cu, Cc for all samples"""
         html = """
-        <table>
+        <table class="table-compact table-wide">
             <thead>
             <tr>
                     <th>Parameter</th>

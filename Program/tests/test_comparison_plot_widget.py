@@ -176,6 +176,8 @@ class TestComparisonPlotWidget(unittest.TestCase):
         self.assertEqual(self.widget._drawer_title.text(), 'K distribution summary - OK only')
         self.assertIn('sigma lnK', headers)
         self.assertGreaterEqual(self.widget._drawer_table.rowCount(), 1)
+        self.assertEqual(self.widget._drawer_table.verticalHeader().defaultSectionSize(), 24)
+        self.assertEqual(self.widget._drawer_table.rowHeight(0), 24)
 
         self.widget._set_drawer_visible(True)
         self.widget._drawer_anim.setCurrentTime(self.widget._drawer_anim.duration())

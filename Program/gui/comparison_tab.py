@@ -16,38 +16,67 @@ Layout:
 from __future__ import annotations
 
 import math
-import numpy as np
-from typing import Optional, List
+from typing import List, Optional
 
+import numpy as np
+from analysis.comparison_snapshot import (
+    ComparisonSnapshotOptions,
+    build_comparison_snapshot,
+)
+from grain_classification import (
+    ISO14688,
+)
+from grain_classification import (
+    cu_label as _gc_cu_label,
+)
+from grain_classification import (
+    interpolate_at as _interpolate_at,
+)
+from grain_classification import (
+    permeability_class as _gc_perm_class,
+)
+from k_aggregation import UNGROUPED_LABEL, KAggregationOptions, dataset_group_name
+from k_calculations_v2 import CalculationStatus
 from matplotlib.figure import Figure
 from matplotlib.patches import Patch
+from PyQt6.QtCore import QSize, Qt, pyqtSignal
+from PyQt6.QtGui import QBrush, QColor, QFont, QFontMetrics, QIcon, QPainter, QPixmap
 
 # ── PyQt6 ─────────────────────────────────────────────────────────────────────
 from PyQt6.QtWidgets import (
-    QWidget, QVBoxLayout, QHBoxLayout, QLabel, QPushButton,
-    QTabWidget, QTableWidget, QTableWidgetItem, QHeaderView,
-    QScrollArea, QSizePolicy, QFileDialog, QFrame, QStackedWidget, QComboBox,
-    QButtonGroup, QSplitter,
+    QButtonGroup,
+    QComboBox,
+    QFileDialog,
+    QFrame,
+    QGridLayout,
+    QHBoxLayout,
+    QHeaderView,
+    QLabel,
+    QPushButton,
+    QScrollArea,
+    QSizePolicy,
+    QSplitter,
+    QStackedWidget,
+    QTableWidget,
+    QTableWidgetItem,
+    QTabWidget,
+    QVBoxLayout,
+    QWidget,
 )
-from PyQt6.QtCore import Qt, pyqtSignal, QSize
-from PyQt6.QtGui import QColor, QFont, QBrush, QPixmap, QPainter, QIcon, QFontMetrics
+from unit_conversions import (
+    HydraulicConductivityConverter,
+    HydraulicConductivityUnit,
+    get_default_plot_unit,
+)
+
+from .comparison_plot_widget import ComparisonPlotWidget
+from .dataset_selection_dialog import DatasetSelectionDialog
 
 # ── Internal ──────────────────────────────────────────────────────────────────
 from .matplotlib_canvas import FigureCanvas
-from .comparison_plot_widget import ComparisonPlotWidget
-from .dataset_selection_dialog import DatasetSelectionDialog
 from .stack_fade import TabFadeInController
-from .theme import C, F, icon as theme_icon
-from analysis.comparison_snapshot import ComparisonSnapshotOptions, build_comparison_snapshot
-from k_aggregation import UNGROUPED_LABEL, KAggregationOptions, dataset_group_name
-from k_calculations_v2 import CalculationStatus
-from unit_conversions import HydraulicConductivityUnit, HydraulicConductivityConverter, get_default_plot_unit
-from grain_classification import (
-    ISO14688,
-    interpolate_at as _interpolate_at,
-    cu_label as _gc_cu_label,
-    permeability_class as _gc_perm_class,
-)
+from .theme import C, F
+from .theme import icon as theme_icon
 
 
 def _dot_icon(color_hex: str, size: int = 8) -> QIcon:
@@ -89,16 +118,36 @@ class _SortableTableWidgetItem(QTableWidgetItem):
         rhs_group = other.data(_SORT_GROUP_ROLE) if other is not None else None
         if lhs_group is not None and rhs_group is not None and lhs_group != rhs_group:
             table = self.tableWidget()
-            order = table.horizontalHeader().sortIndicatorOrder() if table is not None else Qt.SortOrder.AscendingOrder
+            order = (
+                table.horizontalHeader().sortIndicatorOrder()
+                if table is not None
+                else Qt.SortOrder.AscendingOrder
+            )
             # Keep numeric/method rows above classification/summary rows in both sort directions.
-            return lhs_group > rhs_group if order == Qt.SortOrder.DescendingOrder else lhs_group < rhs_group
+            return (
+                lhs_group > rhs_group
+                if order == Qt.SortOrder.DescendingOrder
+                else lhs_group < rhs_group
+            )
 
         lhs_pinned = self.data(_SORT_PINNED_ORDER_ROLE)
         rhs_pinned = other.data(_SORT_PINNED_ORDER_ROLE) if other is not None else None
-        if lhs_group not in (None, 0) and lhs_pinned is not None and rhs_pinned is not None:
+        if (
+            lhs_group not in (None, 0)
+            and lhs_pinned is not None
+            and rhs_pinned is not None
+        ):
             table = self.tableWidget()
-            order = table.horizontalHeader().sortIndicatorOrder() if table is not None else Qt.SortOrder.AscendingOrder
-            return lhs_pinned > rhs_pinned if order == Qt.SortOrder.DescendingOrder else lhs_pinned < rhs_pinned
+            order = (
+                table.horizontalHeader().sortIndicatorOrder()
+                if table is not None
+                else Qt.SortOrder.AscendingOrder
+            )
+            return (
+                lhs_pinned > rhs_pinned
+                if order == Qt.SortOrder.DescendingOrder
+                else lhs_pinned < rhs_pinned
+            )
 
         lhs = self.data(Qt.ItemDataRole.UserRole)
         rhs = other.data(Qt.ItemDataRole.UserRole) if other is not None else None
@@ -112,15 +161,23 @@ class _SortableTableWidgetItem(QTableWidgetItem):
 
 # ── Dataset color palette (warm-earth, consistent with design spec) ────────────
 DATASET_COLORS: List[str] = [
-    '#3a7ea0', '#6b8e23', '#b46428', '#2a9d8f',
-    '#8b4513', '#c45c2e', '#4a6fa5', '#5e7b1a',
-    '#8b6914', '#2e6b7d',
+    "#3a7ea0",
+    "#6b8e23",
+    "#b46428",
+    "#2a9d8f",
+    "#8b4513",
+    "#c45c2e",
+    "#4a6fa5",
+    "#5e7b1a",
+    "#8b6914",
+    "#2e6b7d",
 ]
 
 
 # ─────────────────────────────────────────────────────────────────────────────
 # Helper functions
 # ─────────────────────────────────────────────────────────────────────────────
+
 
 def _get_fines_pct(dataset, scheme=None) -> Optional[float]:
     """Return % passing at scheme.silt_max (default ISO 0.063 mm) via log-linear interpolation.
@@ -150,13 +207,14 @@ def _perm_class(mean_k: float) -> str:
 
 
 _PERM_CLASS_COLOR = {
-    "Very High (Gravel)":           "#2e7d32",  # dark green
-    "High (Clean Sand)":            "#558b2f",  # olive green
-    "Moderate (Fine Sand)":         "#f57f17",  # amber
-    "Low (Silt)":                   "#e65100",  # deep orange
-    "Very Low (Clay-Silt)":         "#b71c1c",  # dark red
-    "Practically Impermeable (Clay)":"#7b1fa2", # deep purple
+    "Very High (Gravel)": "#2e7d32",  # dark green
+    "High (Clean Sand)": "#558b2f",  # olive green
+    "Moderate (Fine Sand)": "#f57f17",  # amber
+    "Low (Silt)": "#e65100",  # deep orange
+    "Very Low (Clay-Silt)": "#b71c1c",  # dark red
+    "Practically Impermeable (Clay)": "#7b1fa2",  # deep purple
 }
+
 
 def _perm_color(valid_k_list: list) -> str:
     """Return hex color for the permeability class based on geometric mean."""
@@ -171,6 +229,7 @@ def _perm_color(valid_k_list: list) -> str:
 # Details tab panel header
 # ─────────────────────────────────────────────────────────────────────────────
 
+
 class _DetailsPanelHeader(QWidget):
     """Header band for the two side-by-side panels in the Details tab.
 
@@ -183,8 +242,7 @@ class _DetailsPanelHeader(QWidget):
         self.setFixedHeight(30)
         self.setAttribute(Qt.WidgetAttribute.WA_StyledBackground)
         self.setStyleSheet(
-            f"background: {C.BG_LOW};"
-            f"border-bottom: 2px solid {C.BORDER_DK};"
+            f"background: {C.BG_LOW};border-bottom: 2px solid {C.BORDER_DK};"
         )
         lay = QHBoxLayout(self)
         lay.setContentsMargins(12, 0, 12, 0)
@@ -203,6 +261,7 @@ class _DetailsPanelHeader(QWidget):
 # ComparisonTab
 # ─────────────────────────────────────────────────────────────────────────────
 
+
 class ComparisonTab(QWidget):
     """Main comparison widget — wires 3 sub-tabs: Plot, Details, Statistics."""
 
@@ -214,21 +273,21 @@ class ComparisonTab(QWidget):
     # ── Grain parameter definitions ──────────────────────────────────────────
     # (label, tooltip, bold, olive-highlight)
     _GRAIN_ROWS = [
-        ("D10",    "Effective size (mm)",           True,  True),
-        ("D16",    "16th percentile (mm)",           False, False),
-        ("D30",    "30th percentile (mm)",           True,  True),
-        ("D50",    "Median (mm)",                    True,  True),
-        ("Dmean",  "Arithmetic mean size (mm)",      False, False),
-        ("D60",    "60th percentile (mm)",           True,  True),
-        ("D84",    "84th percentile (mm)",           False, False),
-        ("D90",    "90th percentile (mm)",           False, False),
-        ("D95",    "95th percentile (mm)",           False, False),
-        ("Cu",     "Uniformity coeff. D60/D10",      True,  True),
-        ("Cc",     "Curvature coeff.",               True,  True),
-        ("σ",      "Sorting coeff. √(D84/D16)",      False, False),
-        ("Fines%", "% passing 0.063 mm",             False, False),
-        ("Classif.","Soil classification (active scheme)", False, False),
-        ("Class",  "Gradation class",                False, False),
+        ("D10", "Effective size (mm)", True, True),
+        ("D16", "16th percentile (mm)", False, False),
+        ("D30", "30th percentile (mm)", True, True),
+        ("D50", "Median (mm)", True, True),
+        ("Dmean", "Arithmetic mean size (mm)", False, False),
+        ("D60", "60th percentile (mm)", True, True),
+        ("D84", "84th percentile (mm)", False, False),
+        ("D90", "90th percentile (mm)", False, False),
+        ("D95", "95th percentile (mm)", False, False),
+        ("Cu", "Uniformity coeff. D60/D10", True, True),
+        ("Cc", "Curvature coeff.", True, True),
+        ("σ", "Sorting coeff. √(D84/D16)", False, False),
+        ("Fines%", "% passing 0.063 mm", False, False),
+        ("Classif.", "Soil classification (active scheme)", False, False),
+        ("Class", "Gradation class", False, False),
     ]
     _GRAIN_PRESETS = {
         "core": {"D10", "D30", "D50", "D60", "Cu", "Cc", "Fines%", "Classif.", "Class"},
@@ -243,10 +302,22 @@ class ComparisonTab(QWidget):
         "Perm. class",
     }
     _K_METHOD_ORDER = [
-        "Hazen", "Hazen_1892", "Slichter", "Terzaghi",
-        "Beyer", "Sauerbrei", "Kruger", "Kozeny-Carman",
-        "Zunker", "Zamarin", "USBR", "Barr",
-        "Alyamani-Sen", "Chapuis", "Shepherd", "Krumbein-Monk",
+        "Hazen",
+        "Hazen_1892",
+        "Slichter",
+        "Terzaghi",
+        "Beyer",
+        "Sauerbrei",
+        "Kruger",
+        "Kozeny-Carman",
+        "Zunker",
+        "Zamarin",
+        "USBR",
+        "Barr",
+        "Alyamani-Sen",
+        "Chapuis",
+        "Shepherd",
+        "Krumbein-Monk",
     ]
 
     def __init__(self, parent=None):
@@ -256,7 +327,7 @@ class ComparisonTab(QWidget):
         self.selected_datasets: list = []
         self._pinned: set[str] = set()
         self._plot_hidden: set[str] = set()
-        self._heat_on: bool = True
+        self._heat_on: bool = False
         self._active_scheme = ISO14688
         self._details_mode: str = "grain"
         self._details_view_mode: str = "individual"
@@ -322,8 +393,8 @@ class ComparisonTab(QWidget):
         root.addWidget(self._tabs, 1)
 
         for page, label, fa_name in [
-            (self._build_plot_tab(),       "Plot",       "fa6s.chart-area"),
-            (self._build_details_tab_v2(), "Details",    "fa6s.table"),
+            (self._build_plot_tab(), "Plot", "fa6s.chart-area"),
+            (self._build_details_tab_v2(), "Details", "fa6s.table"),
             (self._build_statistics_tab(), "Statistics", "fa6s.chart-bar"),
         ]:
             try:
@@ -331,11 +402,16 @@ class ComparisonTab(QWidget):
             except Exception:
                 self._tabs.addTab(page, label)
         self._tabs.setIconSize(QSize(12, 12))
+        self._tabs.currentChanged.connect(self._on_comparison_subtab_changed)
         self._tabs_fader = TabFadeInController(
             self._tabs,
             self,
             duration_ms=100,
         )
+
+    def _on_comparison_subtab_changed(self, index: int) -> None:
+        if self._tabs.tabText(index) == "Details":
+            self._set_details_heat_enabled(False)
 
     def _build_header(self) -> QWidget:
         """Top 52 px header bar — title/subtitle block + action buttons."""
@@ -475,7 +551,9 @@ class ComparisonTab(QWidget):
                 f"QPushButton:disabled {{ color: {C.TEXT_MUTED}; background: transparent; }}"
             )
         try:
-            self._plot_scope_edit_btn.setIcon(theme_icon("fa6s.layer-group", C.TEXT_MID, size=10))
+            self._plot_scope_edit_btn.setIcon(
+                theme_icon("fa6s.layer-group", C.TEXT_MID, size=10)
+            )
             self._plot_show_all_btn.setIcon(theme_icon("fa6s.eye", C.TEXT_MID, size=10))
             self._plot_scope_edit_btn.setIconSize(QSize(10, 10))
             self._plot_show_all_btn.setIconSize(QSize(10, 10))
@@ -511,7 +589,9 @@ class ComparisonTab(QWidget):
         plot_tabs = self._plot_dataset_tabs()
         plotted_names = {tab.get_dataset_name() for tab in plot_tabs}
         grouped_tabs = self._plot_grouped_selected_tabs()
-        named_groups = [group for group, _tabs in grouped_tabs if group != UNGROUPED_LABEL]
+        named_groups = [
+            group for group, _tabs in grouped_tabs if group != UNGROUPED_LABEL
+        ]
         group_colors = self._group_color_map(named_groups)
 
         if hasattr(self, "_pin_scope_label"):
@@ -537,10 +617,14 @@ class ComparisonTab(QWidget):
             return
 
         for group_index, (group_name, tabs) in enumerate(grouped_tabs):
-            color = group_colors.get(group_name, DATASET_COLORS[group_index % len(DATASET_COLORS)])
+            color = group_colors.get(
+                group_name, DATASET_COLORS[group_index % len(DATASET_COLORS)]
+            )
             names = [tab.get_dataset_name() for tab in tabs]
             visible_count = sum(1 for name in names if name in plotted_names)
-            hidden_all = bool(names) and all(name in self._plot_hidden for name in names)
+            hidden_all = bool(names) and all(
+                name in self._plot_hidden for name in names
+            )
             focused_all = bool(names) and all(name in self._pinned for name in names)
 
             group_row = self._make_plot_group_row(
@@ -551,7 +635,9 @@ class ComparisonTab(QWidget):
                 hidden=hidden_all,
                 focused=focused_all,
             )
-            self._pin_list_layout.insertWidget(self._pin_list_layout.count() - 1, group_row)
+            self._pin_list_layout.insertWidget(
+                self._pin_list_layout.count() - 1, group_row
+            )
 
             for tab in tabs:
                 name = tab.get_dataset_name()
@@ -566,7 +652,9 @@ class ComparisonTab(QWidget):
                     focused=focused,
                     plotted=plotted,
                 )
-                self._pin_list_layout.insertWidget(self._pin_list_layout.count() - 1, row)
+                self._pin_list_layout.insertWidget(
+                    self._pin_list_layout.count() - 1, row
+                )
 
     def _plot_grouped_selected_tabs(self) -> list[tuple[str, list]]:
         grouped: dict[str, list] = {}
@@ -646,7 +734,9 @@ class ComparisonTab(QWidget):
             active=not hidden,
             color=color if not hidden else C.TEXT_MUTED,
         )
-        visible_btn.clicked.connect(lambda _checked=False, g=group_name: self._toggle_group_visibility(g))
+        visible_btn.clicked.connect(
+            lambda _checked=False, g=group_name: self._toggle_group_visibility(g)
+        )
         layout.addWidget(visible_btn)
 
         focus_btn = self._make_plot_action_button(
@@ -655,7 +745,9 @@ class ComparisonTab(QWidget):
             active=focused,
             color=color if focused else C.TEXT_MUTED,
         )
-        focus_btn.clicked.connect(lambda _checked=False, g=group_name: self._toggle_group_pin(g))
+        focus_btn.clicked.connect(
+            lambda _checked=False, g=group_name: self._toggle_group_pin(g)
+        )
         layout.addWidget(focus_btn)
         return row
 
@@ -697,13 +789,19 @@ class ComparisonTab(QWidget):
         )
         lbl.setToolTip(name)
         text_lay.addWidget(lbl)
-        status_text = "Hidden" if hidden else ("Focused" if focused else ("" if plotted else "Outside focus"))
+        status_text = (
+            "Hidden"
+            if hidden
+            else ("Focused" if focused else ("" if plotted else "Outside focus"))
+        )
         if status_text:
             status_lbl = QLabel(status_text)
             status_lbl.setStyleSheet(
                 f"font-size: {F.SZ_XS}pt; color: {C.TEXT_MUTED}; background: transparent; border: none;"
             )
-            status_lbl.setToolTip(group_name if group_name != UNGROUPED_LABEL else "No group")
+            status_lbl.setToolTip(
+                group_name if group_name != UNGROUPED_LABEL else "No group"
+            )
             text_lay.addWidget(status_lbl)
         layout.addWidget(text_box, 1)
 
@@ -713,7 +811,9 @@ class ComparisonTab(QWidget):
             active=not hidden,
             color=color if not hidden else C.TEXT_MUTED,
         )
-        visible_btn.clicked.connect(lambda _checked=False, n=name: self._toggle_plot_visibility(n))
+        visible_btn.clicked.connect(
+            lambda _checked=False, n=name: self._toggle_plot_visibility(n)
+        )
         layout.addWidget(visible_btn)
 
         focus_btn = self._make_plot_action_button(
@@ -741,44 +841,117 @@ class ComparisonTab(QWidget):
         tb.setContentsMargins(12, 8, 12, 8)
         tb.setSpacing(8)
 
-        view_frame, view_buttons = self._make_details_segmented_control([
-            ("Individual", "fa6s.table-columns", True, lambda: self._set_details_view_mode("individual")),
-            ("Aggregate", "fa6s.chart-simple", False, lambda: self._set_details_view_mode("aggregate")),
-        ])
-        self._details_view_individual_btn, self._details_view_aggregate_btn = view_buttons
+        view_frame, view_buttons = self._make_details_segmented_control(
+            [
+                (
+                    "Individual",
+                    "fa6s.table-columns",
+                    True,
+                    lambda: self._set_details_view_mode("individual"),
+                ),
+                (
+                    "Aggregate",
+                    "fa6s.chart-simple",
+                    False,
+                    lambda: self._set_details_view_mode("aggregate"),
+                ),
+            ]
+        )
+        self._details_view_individual_btn, self._details_view_aggregate_btn = (
+            view_buttons
+        )
+        self._stabilize_segment_group(
+            view_buttons, ["Individual", "Aggregate"], min_width=96
+        )
         tb.addWidget(view_frame)
 
-        mode_frame, mode_buttons = self._make_details_segmented_control([
-            ("Grain", "fa6s.wheat-awn", True, lambda: self._set_details_mode("grain")),
-            ("K-values", "fa6s.water", False, lambda: self._set_details_mode("k")),
-        ])
+        mode_frame, mode_buttons = self._make_details_segmented_control(
+            [
+                (
+                    "Grain",
+                    "fa6s.wheat-awn",
+                    True,
+                    lambda: self._set_details_mode("grain"),
+                ),
+                ("K-values", "fa6s.water", False, lambda: self._set_details_mode("k")),
+            ]
+        )
+        self._details_mode_frame = mode_frame
         self._details_mode_grain_btn, self._details_mode_k_btn = mode_buttons
+        self._stabilize_segment_group(mode_buttons, ["Grain", "K-values"], min_width=88)
         tb.addWidget(mode_frame)
 
-        preset_frame, preset_buttons = self._make_details_segmented_control([
-            ("Summary", "fa6s.circle-check", True, lambda: self._on_details_preset_clicked("core")),
-            ("All rows", "fa6s.list", False, lambda: self._on_details_preset_clicked("all")),
-            ("Classification", "fa6s.sliders", False, lambda: self._on_details_preset_clicked("context")),
-        ])
+        preset_frame, preset_buttons = self._make_details_segmented_control(
+            [
+                (
+                    "Summary",
+                    "fa6s.circle-check",
+                    True,
+                    lambda: self._on_details_preset_clicked("core"),
+                ),
+                (
+                    "All rows",
+                    "fa6s.list",
+                    False,
+                    lambda: self._on_details_preset_clicked("all"),
+                ),
+                (
+                    "Classification",
+                    "fa6s.sliders",
+                    False,
+                    lambda: self._on_details_preset_clicked("context"),
+                ),
+            ]
+        )
         (
             self._details_preset_core_btn,
             self._details_preset_all_btn,
             self._details_preset_context_btn,
         ) = preset_buttons
+        self._stabilize_segment_group(
+            preset_buttons,
+            [
+                "Summary",
+                "All rows",
+                "Classification",
+                "All methods",
+                "Valid in all",
+                "Choose",
+                "Aggregate rows",
+            ],
+            min_width=116,
+        )
         tb.addWidget(preset_frame)
 
-        status_frame, status_buttons = self._make_details_segmented_control([
-            ("OK only", "fa6s.circle-check", not self._stats_include_warnings, lambda: self._set_details_warning_scope(False)),
-            ("Warnings", "fa6s.triangle-exclamation", self._stats_include_warnings, lambda: self._set_details_warning_scope(True)),
-        ])
+        status_frame, status_buttons = self._make_details_segmented_control(
+            [
+                (
+                    "OK only",
+                    "fa6s.circle-check",
+                    not self._stats_include_warnings,
+                    lambda: self._set_details_warning_scope(False),
+                ),
+                (
+                    "Warnings",
+                    "fa6s.triangle-exclamation",
+                    self._stats_include_warnings,
+                    lambda: self._set_details_warning_scope(True),
+                ),
+            ]
+        )
         self._details_status_ok_btn, self._details_status_warn_btn = status_buttons
+        self._stabilize_segment_group(
+            status_buttons, ["OK only", "Warnings"], min_width=90
+        )
         tb.addWidget(status_frame)
 
         self._details_scope_btn = QPushButton("Scope & Groups")
         self._details_scope_btn.setProperty("pw-btn", True)
         self._details_scope_btn.setFixedHeight(24)
         self._details_scope_btn.setCursor(Qt.CursorShape.PointingHandCursor)
-        self._details_scope_btn.setIcon(theme_icon("fa6s.layer-group", C.OLIVE, size=12))
+        self._details_scope_btn.setIcon(
+            theme_icon("fa6s.layer-group", C.OLIVE, size=12)
+        )
         self._details_scope_btn.setIconSize(QSize(12, 12))
         self._details_scope_btn.setEnabled(False)
         self._details_scope_btn.clicked.connect(self._on_manage_datasets)
@@ -796,9 +969,14 @@ class ComparisonTab(QWidget):
         self._details_unit_combo.setObjectName("pw-style-sel")
         for unit, symbol in HydraulicConductivityConverter.get_all_units().items():
             self._details_unit_combo.addItem(symbol, unit)
-        default_index = list(HydraulicConductivityConverter.get_all_units().keys()).index(self._details_k_unit)
+        default_index = list(
+            HydraulicConductivityConverter.get_all_units().keys()
+        ).index(self._details_k_unit)
         self._details_unit_combo.setCurrentIndex(default_index)
-        self._details_unit_combo.currentIndexChanged.connect(self._on_details_unit_changed)
+        self._stabilize_unit_combo(self._details_unit_combo)
+        self._details_unit_combo.currentIndexChanged.connect(
+            self._on_details_unit_changed
+        )
         tb.addWidget(self._details_unit_combo)
 
         heat_lbl = QLabel("Heat")
@@ -808,9 +986,9 @@ class ComparisonTab(QWidget):
         )
         tb.addWidget(heat_lbl)
 
-        self._heat_btn = QPushButton("On")
+        self._heat_btn = QPushButton("On" if self._heat_on else "Off")
         self._heat_btn.setCheckable(True)
-        self._heat_btn.setChecked(True)
+        self._heat_btn.setChecked(self._heat_on)
         self._heat_btn.setFixedSize(46, 22)
         self._heat_btn.setCursor(Qt.CursorShape.PointingHandCursor)
         self._heat_btn.setStyleSheet(f"""
@@ -833,6 +1011,10 @@ class ComparisonTab(QWidget):
         tb.addWidget(self._heat_btn)
 
         self._details_context = QLabel("")
+        self._details_context.setMinimumWidth(0)
+        self._details_context.setSizePolicy(
+            QSizePolicy.Policy.Ignored, QSizePolicy.Policy.Fixed
+        )
         self._details_context.setStyleSheet(
             f"font-family: '{F.MONO}'; font-size: {F.SZ_XS}pt;"
             f"color: {C.TEXT_MUTED}; background: transparent; border: none;"
@@ -902,14 +1084,50 @@ class ComparisonTab(QWidget):
             btn.setCheckable(True)
             btn.setChecked(active)
             btn.setCursor(Qt.CursorShape.PointingHandCursor)
-            btn.setIcon(theme_icon(icon_name, C.OLIVE if active else C.TEXT_MID, size=12))
+            btn.setIcon(
+                theme_icon(icon_name, C.OLIVE if active else C.TEXT_MID, size=12)
+            )
             btn.setIconSize(QSize(12, 12))
+            btn.setSizePolicy(QSizePolicy.Policy.Fixed, QSizePolicy.Policy.Fixed)
             btn.toggled.connect(lambda on, b=btn: _sync_segment_button(b, on))
             btn.clicked.connect(lambda _checked=False, cb=callback: cb())
             group.addButton(btn)
             row.addWidget(btn)
             buttons.append(btn)
         return frame, buttons
+
+    def _stabilize_segment_group(
+        self,
+        buttons: list[QPushButton],
+        labels: list[str] | None = None,
+        *,
+        min_width: int = 78,
+    ) -> None:
+        """Give segmented toolbar buttons stable widths across checked/text states."""
+        if not buttons:
+            return
+        font = QFont(F.UI, F.SZ_SM, QFont.Weight.Bold)
+        metrics = QFontMetrics(font)
+        candidates = labels or [button.text() for button in buttons]
+        width = max(
+            min_width,
+            max(metrics.horizontalAdvance(str(text)) for text in candidates) + 38,
+        )
+        for button in buttons:
+            button.setFixedWidth(width)
+        frame = buttons[0].parentWidget()
+        if frame is not None:
+            frame.setFixedWidth(width * len(buttons) + 2)
+            frame.setSizePolicy(QSizePolicy.Policy.Fixed, QSizePolicy.Policy.Fixed)
+
+    def _stabilize_unit_combo(self, combo: QComboBox, *, min_width: int = 74) -> None:
+        metrics = QFontMetrics(combo.font())
+        symbols = list(HydraulicConductivityConverter.UNIT_SYMBOLS.values())
+        width = max(
+            min_width, max(metrics.horizontalAdvance(symbol) for symbol in symbols) + 34
+        )
+        combo.setFixedWidth(width)
+        combo.setSizePolicy(QSizePolicy.Policy.Fixed, QSizePolicy.Policy.Fixed)
 
     def _set_segment_checked(self, btn: QPushButton, checked: bool) -> None:
         btn.setChecked(checked)
@@ -945,7 +1163,9 @@ class ComparisonTab(QWidget):
 
     def _build_details_dataset_strip(self) -> QWidget:
         wrap = QWidget()
-        wrap.setStyleSheet(f"background: {C.BG_RAISED}; border-bottom: 1px solid {C.BORDER};")
+        wrap.setStyleSheet(
+            f"background: {C.BG_RAISED}; border-bottom: 1px solid {C.BORDER};"
+        )
         root = QHBoxLayout(wrap)
         root.setContentsMargins(0, 0, 0, 0)
         root.setSpacing(0)
@@ -977,6 +1197,16 @@ class ComparisonTab(QWidget):
         v.setContentsMargins(0, 0, 0, 0)
         v.setSpacing(0)
 
+        (
+            header,
+            self._details_rail_title,
+            self._details_rail_subtitle,
+            self._details_rail_badge,
+        ) = self._build_compact_rail_header(
+            "Details Summary", "No datasets selected", "0 / 0"
+        )
+        v.addWidget(header)
+
         rail_scroll = QScrollArea()
         rail_scroll.setWidgetResizable(True)
         rail_scroll.setFrameShape(QFrame.Shape.NoFrame)
@@ -986,83 +1216,104 @@ class ComparisonTab(QWidget):
         rail_content = QWidget()
         rail_content.setStyleSheet("background: transparent;")
         rail_content_layout = QVBoxLayout(rail_content)
-        rail_content_layout.setContentsMargins(8, 8, 8, 8)
-        rail_content_layout.setSpacing(8)
+        rail_content_layout.setContentsMargins(12, 10, 12, 12)
+        rail_content_layout.setSpacing(12)
 
-        self._details_focus_section, self._details_focus_layout = self._build_details_rail_section("Current Scope")
+        self._details_focus_section, self._details_focus_layout = (
+            self._build_compact_rail_section("Scope")
+        )
         rail_content_layout.addWidget(self._details_focus_section)
 
-        self._details_insight_section, self._details_insights_layout = self._build_details_rail_section("Filters")
+        self._details_insight_section, self._details_insights_layout = (
+            self._build_compact_rail_section("Filters")
+        )
         rail_content_layout.addWidget(self._details_insight_section)
 
-        self._details_status_section, self._details_status_layout = self._build_details_rail_section("K Summary")
+        self._details_status_section, self._details_status_layout = (
+            self._build_compact_rail_section("K Summary")
+        )
         rail_content_layout.addWidget(self._details_status_section)
 
-        self._details_grain_summary_section, self._details_grain_summary_layout = self._build_details_rail_section("Grain Summary")
+        self._details_grain_summary_section, self._details_grain_summary_layout = (
+            self._build_compact_rail_section("Grain Summary")
+        )
         rail_content_layout.addWidget(self._details_grain_summary_section)
 
-        self._details_groups_section, self._details_groups_layout = self._build_details_rail_section("Groups")
+        self._details_groups_section, self._details_groups_layout = (
+            self._build_compact_rail_section("Groups")
+        )
         rail_content_layout.addWidget(self._details_groups_section)
 
-        self._details_legend_section, legend_layout = self._build_details_rail_section("Heat Legend")
-        for label, color in [
-            ("Lower range", _heat_color(0.0).name()),
-            ("Middle range", _heat_color(0.5).name()),
-            ("Higher range", _heat_color(1.0).name()),
-        ]:
-            legend_layout.addWidget(self._make_stats_legend_row(label, color))
+        self._details_legend_section, legend_layout = self._build_compact_rail_section(
+            "Heat Legend"
+        )
+        legend_layout.addWidget(
+            self._make_rail_legend_row(
+                [
+                    ("low", _heat_color(0.0).name()),
+                    ("mid", _heat_color(0.5).name()),
+                    ("high", _heat_color(1.0).name()),
+                ]
+            )
+        )
         rail_content_layout.addWidget(self._details_legend_section)
         rail_content_layout.addStretch(1)
         rail_scroll.setWidget(rail_content)
         v.addWidget(rail_scroll, 1)
         return rail
 
-    def _build_details_rail_section(self, title: str):
-        section = QWidget()
-        section.setObjectName("detailsRailSection")
-        section.setStyleSheet(
-            "QWidget#detailsRailSection { background: transparent; border: none; }"
-            "QWidget#detailsRailSection QLabel { border: none; }"
-        )
-        v = QVBoxLayout(section)
-        v.setContentsMargins(6, 7, 6, 7)
-        v.setSpacing(7)
-
-        hdr = QLabel(title.upper())
-        hdr.setStyleSheet(
-            f"font-family: '{F.MONO}'; font-size: {F.SZ_XS}pt; font-weight: 700;"
-            f"letter-spacing: 0.08em; color: {C.TEXT_MUTED}; background: transparent;"
-        )
-        v.addWidget(hdr)
-
-        content = QVBoxLayout()
-        content.setSpacing(5)
-        v.addLayout(content)
-        return section, content
-
     def _sync_details_mode_ui(self) -> None:
         grain_mode = self._details_mode == "grain"
         aggregate_mode = self._details_view_mode == "aggregate"
-        active_preset = self._details_grain_preset if grain_mode else self._details_k_preset
-        active_toolbar_preset = "all" if (
-            aggregate_mode and (self._stats_common_methods_only or self._stats_method_scope == "valid_all")
-        ) else ("core" if aggregate_mode else active_preset)
+        active_preset = (
+            self._details_grain_preset if grain_mode else self._details_k_preset
+        )
+        active_toolbar_preset = (
+            "all"
+            if (
+                aggregate_mode
+                and (
+                    self._stats_common_methods_only
+                    or self._stats_method_scope == "valid_all"
+                )
+            )
+            else ("core" if aggregate_mode else active_preset)
+        )
         self._details_preset = active_preset
         self._set_segment_checked(self._details_view_individual_btn, not aggregate_mode)
         self._set_segment_checked(self._details_view_aggregate_btn, aggregate_mode)
         self._set_segment_checked(self._details_mode_grain_btn, grain_mode)
         self._set_segment_checked(self._details_mode_k_btn, not grain_mode)
-        self._set_segment_checked(self._details_preset_core_btn, active_toolbar_preset == "core")
-        self._set_segment_checked(self._details_preset_all_btn, active_toolbar_preset == "all")
-        self._set_segment_checked(self._details_preset_context_btn, active_toolbar_preset == "context")
-        self._set_segment_checked(self._details_status_ok_btn, not self._stats_include_warnings)
-        self._set_segment_checked(self._details_status_warn_btn, self._stats_include_warnings)
+        self._set_segment_checked(
+            self._details_preset_core_btn, active_toolbar_preset == "core"
+        )
+        self._set_segment_checked(
+            self._details_preset_all_btn, active_toolbar_preset == "all"
+        )
+        self._set_segment_checked(
+            self._details_preset_context_btn, active_toolbar_preset == "context"
+        )
+        self._set_segment_checked(
+            self._details_status_ok_btn, not self._stats_include_warnings
+        )
+        self._set_segment_checked(
+            self._details_status_warn_btn, self._stats_include_warnings
+        )
+        for btn in (self._details_mode_grain_btn, self._details_mode_k_btn):
+            btn.setEnabled(not aggregate_mode)
+            btn.setToolTip(
+                "Aggregate view combines grain and K summaries in one table."
+                if aggregate_mode
+                else ""
+            )
         self._details_preset_context_btn.setEnabled(not aggregate_mode)
         if aggregate_mode:
             self._details_preset_core_btn.setText("All methods")
             self._details_preset_all_btn.setText("Valid in all")
             self._details_preset_context_btn.setText("Choose")
-            self._details_preset_context_btn.setToolTip("Custom method selection will be added in a later pass")
+            self._details_preset_context_btn.setToolTip(
+                "Custom method selection will be added in a later pass"
+            )
         elif not grain_mode:
             self._details_preset_core_btn.setText("All methods")
             self._details_preset_all_btn.setText("Valid in all")
@@ -1076,13 +1327,19 @@ class ComparisonTab(QWidget):
         if aggregate_mode:
             self._details_stack.setCurrentWidget(self._aggregate_table)
         else:
-            self._details_stack.setCurrentWidget(self._grain_table if grain_mode else self._k_table)
+            self._details_stack.setCurrentWidget(
+                self._grain_table if grain_mode else self._k_table
+            )
         self._details_unit_lbl.setVisible(aggregate_mode or not grain_mode)
         self._details_unit_combo.setVisible(aggregate_mode or not grain_mode)
         if aggregate_mode:
             context_suffix = f"Aggregate - {HydraulicConductivityConverter.UNIT_SYMBOLS[self._details_k_unit]}"
         else:
-            context_suffix = "Grain" if grain_mode else f"K-Values - {HydraulicConductivityConverter.UNIT_SYMBOLS[self._details_k_unit]}"
+            context_suffix = (
+                "Grain"
+                if grain_mode
+                else f"K-Values - {HydraulicConductivityConverter.UNIT_SYMBOLS[self._details_k_unit]}"
+            )
         self._details_context.setText(f"{self._scheme_label()} · {context_suffix}")
         self._details_status_section.setVisible(True)
 
@@ -1114,7 +1371,10 @@ class ComparisonTab(QWidget):
 
     def _set_details_method_scope(self, *, valid_in_all: bool) -> None:
         target_scope = "valid_all" if valid_in_all else "all"
-        if self._stats_method_scope == target_scope and self._stats_common_methods_only == valid_in_all:
+        if (
+            self._stats_method_scope == target_scope
+            and self._stats_common_methods_only == valid_in_all
+        ):
             return
         self._stats_method_scope = target_scope
         self._stats_common_methods_only = valid_in_all
@@ -1130,7 +1390,11 @@ class ComparisonTab(QWidget):
         self._refresh_details_views()
 
     def _set_details_preset(self, preset: str) -> None:
-        active_preset = self._details_grain_preset if self._details_mode == "grain" else self._details_k_preset
+        active_preset = (
+            self._details_grain_preset
+            if self._details_mode == "grain"
+            else self._details_k_preset
+        )
         if preset == active_preset:
             return
         if self._details_mode == "grain":
@@ -1303,9 +1567,9 @@ class ComparisonTab(QWidget):
         )
         tb_row.addWidget(heat_lbl)
 
-        self._heat_btn = QPushButton("On")
+        self._heat_btn = QPushButton("On" if self._heat_on else "Off")
         self._heat_btn.setCheckable(True)
-        self._heat_btn.setChecked(True)
+        self._heat_btn.setChecked(self._heat_on)
         self._heat_btn.setFixedSize(46, 22)
         self._heat_btn.setCursor(Qt.CursorShape.PointingHandCursor)
         self._heat_btn.setStyleSheet(f"""
@@ -1376,12 +1640,31 @@ class ComparisonTab(QWidget):
 
     def _on_heat_toggle(self, checked: bool) -> None:
         """Toggle heat coloring on/off and refresh both tables."""
+        self._set_details_heat_enabled(checked)
+
+    def _set_details_heat_enabled(self, checked: bool) -> None:
+        """Set Details heat coloring without relying on toggle signal side effects."""
+        checked = bool(checked)
+        if self._heat_on == checked:
+            button = getattr(self, "_heat_btn", None)
+            if button is not None:
+                button.setText("On" if checked else "Off")
+            return
+
         self._heat_on = checked
-        self._heat_btn.setText("On" if checked else "Off")
-        self._refresh_details_views()
+        button = getattr(self, "_heat_btn", None)
+        if button is not None:
+            was_blocked = button.blockSignals(True)
+            button.setChecked(checked)
+            button.setText("On" if checked else "Off")
+            button.blockSignals(was_blocked)
+        if hasattr(self, "_grain_table"):
+            self._refresh_details_views()
 
     def _scheme_label(self) -> str:
-        return getattr(self._active_scheme, "name", None) or self._active_scheme.__class__.__name__.replace("_", " ")
+        return getattr(
+            self._active_scheme, "name", None
+        ) or self._active_scheme.__class__.__name__.replace("_", " ")
 
     def _reset_layout(self, layout) -> None:
         while layout.count():
@@ -1463,7 +1746,9 @@ class ComparisonTab(QWidget):
         h.addWidget(badge, 0, Qt.AlignmentFlag.AlignTop)
         return row
 
-    def _make_dataset_chip(self, name: str, color: str, group_name: str | None = None) -> QWidget:
+    def _make_dataset_chip(
+        self, name: str, color: str, group_name: str | None = None
+    ) -> QWidget:
         chip = QWidget()
         group_name = group_name or "Ungrouped"
         chip.setToolTip(f"{name}\nGroup: {group_name}")
@@ -1484,12 +1769,16 @@ class ComparisonTab(QWidget):
         h.addWidget(name_lbl, 0, Qt.AlignmentFlag.AlignVCenter)
         return chip
 
-    def _make_group_chip(self, group_name: str, color: str, dataset_count: int, members: list[str]) -> QWidget:
+    def _make_group_chip(
+        self, group_name: str, color: str, dataset_count: int, members: list[str]
+    ) -> QWidget:
         chip = QWidget()
         member_preview = "\n".join(members[:8])
         if len(members) > 8:
             member_preview += f"\n+ {len(members) - 8} more"
-        chip.setToolTip(f"{group_name}\n{dataset_count} datasets\n{member_preview}".strip())
+        chip.setToolTip(
+            f"{group_name}\n{dataset_count} datasets\n{member_preview}".strip()
+        )
         h = QHBoxLayout(chip)
         h.setContentsMargins(2, 0, 8, 0)
         h.setSpacing(6)
@@ -1498,7 +1787,9 @@ class ComparisonTab(QWidget):
         dot.setStyleSheet(
             f"color: {color}; background: transparent; border: none; font-size: {F.SZ_SM + 1}pt; font-weight: 700;"
         )
-        name_lbl = QLabel(self._short_dataset_name(f"{group_name} ({dataset_count})", max_width=145))
+        name_lbl = QLabel(
+            self._short_dataset_name(f"{group_name} ({dataset_count})", max_width=145)
+        )
         name_lbl.setStyleSheet(
             f"color: {C.TEXT_MID}; background: transparent; border: none; font-size: {F.SZ_SM}pt; font-weight: 700;"
         )
@@ -1557,13 +1848,16 @@ class ComparisonTab(QWidget):
                 widget.deleteLater()
 
         if self._details_view_mode == "aggregate" and self.selected_datasets:
+            self._details_dataset_strip.setVisible(True)
             snapshot = self._build_comparison_snapshot()
             groups = list(snapshot.k.group_names)
             group_colors = self._group_color_map(groups)
             members_by_group: dict[str, list[str]] = {group: [] for group in groups}
             for tab in self.selected_datasets:
                 group_name = dataset_group_name(tab.get_dataset())
-                members_by_group.setdefault(group_name, []).append(tab.get_dataset_name())
+                members_by_group.setdefault(group_name, []).append(
+                    tab.get_dataset_name()
+                )
             for group_name in groups:
                 members = members_by_group.get(group_name, [])
                 chip = self._make_group_chip(
@@ -1575,11 +1869,7 @@ class ComparisonTab(QWidget):
                 layout.insertWidget(layout.count() - 1, chip)
             return
 
-        for i, tab in enumerate(self.selected_datasets):
-            name = tab.get_dataset_name()
-            color = DATASET_COLORS[i % len(DATASET_COLORS)]
-            chip = self._make_dataset_chip(name, color, dataset_group_name(tab.get_dataset()))
-            layout.insertWidget(layout.count() - 1, chip)
+        self._details_dataset_strip.setVisible(False)
 
     def _refresh_details_views(self) -> None:
         self._sync_details_mode_ui()
@@ -1603,6 +1893,27 @@ class ComparisonTab(QWidget):
         aggregation = snapshot.k if snapshot is not None else None
         grain = snapshot.grain if snapshot is not None else None
 
+        if aggregation is None or grain is None:
+            self._set_compact_rail_header(
+                self._details_rail_title,
+                self._details_rail_subtitle,
+                self._details_rail_badge,
+                title="Details Summary",
+                subtitle="No datasets selected",
+                badge="0 / 0",
+            )
+            self._details_focus_layout.addWidget(
+                self._make_rail_status_line(
+                    "Select datasets to populate details.", tone="warn"
+                )
+            )
+            self._details_status_section.setVisible(False)
+            self._details_grain_summary_section.setVisible(False)
+            self._details_groups_section.setVisible(False)
+            self._details_focus_strip.setText("")
+            self._details_legend_section.setVisible(self._heat_on)
+            return
+
         preset_label = {
             ("grain", "core"): "Summary rows",
             ("grain", "all"): "All grain rows",
@@ -1617,60 +1928,151 @@ class ComparisonTab(QWidget):
         included = aggregation.overall.included_count if aggregation is not None else 0
         total = aggregation.overall.total_cells if aggregation is not None else 0
         warnings = aggregation.overall.warning_count if aggregation is not None else 0
+        warnings_excluded = warnings if not self._stats_include_warnings else 0
 
-        for label, value in [
-            ("Datasets", str(dataset_count)),
-            ("Groups", str(group_count)),
-            ("Methods", str(method_count)),
-            ("Included K cells", f"{included} / {total}" if total else "0"),
-            ("Warnings excluded", str(warnings if not self._stats_include_warnings else 0)),
-        ]:
-            self._details_focus_layout.addWidget(self._make_stats_summary_row(label, value))
+        self._set_compact_rail_header(
+            self._details_rail_title,
+            self._details_rail_subtitle,
+            self._details_rail_badge,
+            title="Aggregate Summary"
+            if self._details_view_mode == "aggregate"
+            else "Details Summary",
+            subtitle=f"{dataset_count} datasets - {group_count} groups - {'OK + warnings' if self._stats_include_warnings else 'OK only'}",
+            badge=f"{included} / {total}" if total else "0 / 0",
+        )
+
+        self._details_focus_layout.addWidget(
+            self._make_rail_chip_group(
+                [
+                    (f"{dataset_count} datasets", "neutral"),
+                    (f"{group_count} groups", "neutral"),
+                    (f"{method_count} methods", "neutral"),
+                    (f"{included} / {total} K cells", "ok" if included else "warn"),
+                    (
+                        f"{warnings_excluded} warnings excluded",
+                        "warn" if warnings_excluded else "neutral",
+                    ),
+                ]
+            )
+        )
 
         status_text = "OK + warnings" if self._stats_include_warnings else "OK only"
-        method_text = "Valid in all" if self._stats_method_scope == "valid_all" or self._stats_common_methods_only else "All methods"
-        for label, value in [
-            ("View", "Aggregate" if self._details_view_mode == "aggregate" else ("Grain" if self._details_mode == "grain" else "K-values")),
-            ("Rows", preset_label),
-            ("Methods", method_text),
-            ("Status", status_text),
-            ("Unit", self._details_unit_symbol() if self._details_mode == "k" else "mm/%"),
-        ]:
-            self._details_insights_layout.addWidget(self._make_stats_summary_row(label, value))
+        method_text = (
+            "Valid in all"
+            if self._stats_method_scope == "valid_all"
+            or self._stats_common_methods_only
+            else "All methods"
+        )
+        unit_text = (
+            f"{self._details_unit_symbol()} + mm/%"
+            if self._details_view_mode == "aggregate"
+            else (self._details_unit_symbol() if self._details_mode == "k" else "mm/%")
+        )
+        self._details_insights_layout.addWidget(
+            self._make_rail_chip_group(
+                [
+                    (
+                        "Aggregate"
+                        if self._details_view_mode == "aggregate"
+                        else ("Grain" if self._details_mode == "grain" else "K-values"),
+                        "ok",
+                    ),
+                    (preset_label, "neutral"),
+                    (method_text, "neutral"),
+                    (status_text, "ok" if not self._stats_include_warnings else "warn"),
+                    (unit_text, "neutral"),
+                ]
+            )
+        )
 
         if aggregation is not None:
             k_stats = aggregation.overall
             k_range = "-"
             if k_stats.min_m_s is not None and k_stats.max_m_s is not None:
                 k_range = f"{self._format_k_value(k_stats.min_m_s)} - {self._format_k_value(k_stats.max_m_s)}"
-            for label, value in [
-                ("Geo. mean", self._format_k_value(k_stats.geometric_mean_m_s) if k_stats.geometric_mean_m_s is not None else "-"),
-                ("Median", self._format_k_value(k_stats.median_m_s) if k_stats.median_m_s is not None else "-"),
-                ("Arithmetic mean", self._format_k_value(k_stats.arithmetic_mean_m_s) if k_stats.arithmetic_mean_m_s is not None else "-"),
-                ("Range", k_range),
-                ("Perm. class", _perm_class(k_stats.geometric_mean_m_s) if k_stats.geometric_mean_m_s is not None else "-"),
-            ]:
-                self._details_status_layout.addWidget(self._make_stats_summary_row(label, value))
+            geo_text = (
+                self._format_k_value(k_stats.geometric_mean_m_s)
+                if k_stats.geometric_mean_m_s is not None
+                else "-"
+            )
+            perm_class = (
+                _perm_class(k_stats.geometric_mean_m_s)
+                if k_stats.geometric_mean_m_s is not None
+                else "-"
+            )
+            self._details_status_layout.addWidget(
+                self._make_rail_headline(
+                    "Geometric mean", "primary aggregate K", geo_text
+                )
+            )
+            self._add_rail_metric_grid(
+                self._details_status_layout,
+                [
+                    (
+                        "Arithmetic",
+                        self._format_k_value(k_stats.arithmetic_mean_m_s)
+                        if k_stats.arithmetic_mean_m_s is not None
+                        else "-",
+                    ),
+                    (
+                        "Median",
+                        self._format_k_value(k_stats.median_m_s)
+                        if k_stats.median_m_s is not None
+                        else "-",
+                    ),
+                    ("Range", k_range),
+                    (
+                        "Class",
+                        perm_class.split(" (", 1)[0] if perm_class != "-" else "-",
+                    ),
+                ],
+            )
+            self._details_status_layout.addWidget(
+                self._make_rail_status_line(
+                    perm_class
+                    if perm_class != "-"
+                    else "No included K values for this scope.",
+                    tone="ok" if geo_text != "-" else "warn",
+                )
+            )
 
         if grain is not None and hasattr(self, "_details_grain_summary_layout"):
             g_stats = grain.overall
             metrics = g_stats.metrics
-            for label, metric_key, suffix in [
-                ("D50 median", "D50", " mm"),
-                ("Mean grain size", "Dmean", " mm"),
-                ("Cu median", "Cu", ""),
-                ("Fines median", "Fines%", "%"),
-            ]:
-                metric = metrics.get(metric_key)
-                value = metric.median if metric is not None else None
-                self._details_grain_summary_layout.addWidget(
-                    self._make_stats_summary_row(label, self._format_grain_summary_value(value, suffix))
-                )
+            d50_metric = metrics.get("D50")
+            d50_text = self._format_grain_summary_value(
+                d50_metric.median if d50_metric is not None else None,
+                " mm",
+            )
             self._details_grain_summary_layout.addWidget(
-                self._make_stats_summary_row("Dominant class", g_stats.dominant_class)
+                self._make_rail_headline(
+                    "D50 median", "across included datasets", d50_text
+                )
+            )
+            self._add_rail_metric_grid(
+                self._details_grain_summary_layout,
+                [
+                    (
+                        "Mean grain size",
+                        self._grain_metric_text(g_stats, "Dmean", " mm"),
+                    ),
+                    ("Cu median", self._grain_metric_text(g_stats, "Cu")),
+                    ("Fines median", self._grain_metric_text(g_stats, "Fines%", "%")),
+                    ("Dominant class", g_stats.dominant_class),
+                ],
             )
 
-        if aggregation is not None and grain is not None and hasattr(self, "_details_groups_layout"):
+        show_group_breakdown = len(aggregation.group_names) > 1 or any(
+            group != UNGROUPED_LABEL for group in aggregation.group_names
+        )
+        self._details_groups_section.setVisible(show_group_breakdown)
+        if (
+            show_group_breakdown
+            and aggregation is not None
+            and grain is not None
+            and hasattr(self, "_details_groups_layout")
+        ):
+            group_colors = self._group_color_map(list(aggregation.group_names))
             for group_name in aggregation.group_names:
                 k_group = aggregation.by_group.get(group_name)
                 g_group = grain.by_group.get(group_name)
@@ -1683,18 +2085,30 @@ class ComparisonTab(QWidget):
                     ds_count = g_group.dataset_count
                     d50_metric = g_group.metrics.get("D50")
                     if d50_metric is not None and d50_metric.median is not None:
-                        d50_text = f"{d50_metric.median:.3g} mm"
-                value = f"{ds_count} datasets, K {k_text}, D50 {d50_text}"
-                self._details_groups_layout.addWidget(self._make_stats_summary_row(group_name, value))
+                        d50_text = f"D50 {d50_metric.median:.3g} mm"
+                included_text = "0 / 0"
+                if k_group is not None:
+                    included_text = f"{k_group.included_count} / {k_group.total_cells}"
+                self._details_groups_layout.addWidget(
+                    self._make_rail_group_row(
+                        group_name,
+                        f"{ds_count} datasets - {included_text} K cells",
+                        f"K {k_text}\n{d50_text}",
+                        group_colors.get(group_name, C.TEXT_MID),
+                    )
+                )
+
+        self._details_status_section.setVisible(True)
+        self._details_grain_summary_section.setVisible(True)
 
         focus_bits = [
             f"{len(self.selected_datasets)} datasets",
             self._scheme_label(),
             "heat on" if self._heat_on else "heat off",
         ]
-        if self._details_mode == "k":
+        if self._details_mode == "k" or self._details_view_mode == "aggregate":
             focus_bits.insert(2, self._details_unit_symbol())
-        self._details_focus_strip.setText("  ·  ".join(focus_bits))
+        self._details_focus_strip.setText("  -  ".join(focus_bits))
         self._details_legend_section.setVisible(self._heat_on)
 
     @staticmethod
@@ -1710,17 +2124,26 @@ class ComparisonTab(QWidget):
     def _build_detail_insights(self) -> list[tuple[str, str]]:
         tabs = self.selected_datasets
         if not tabs:
-            return [("No comparison data", "Load at least two datasets to populate details.")]
+            return [
+                (
+                    "No comparison data",
+                    "Load at least two datasets to populate details.",
+                )
+            ]
 
         if self._details_mode == "grain":
             tracked = ["D50", "Cu", "Fines%"]
             insights = []
             spreads = []
             for label in tracked:
-                values = [self._get_grain_value(tab.get_dataset(), label) for tab in tabs]
+                values = [
+                    self._get_grain_value(tab.get_dataset(), label) for tab in tabs
+                ]
                 valid = [value for value in values if value is not None]
                 if len(valid) >= 2:
-                    spreads.append((max(valid) - min(valid), label, min(valid), max(valid)))
+                    spreads.append(
+                        (max(valid) - min(valid), label, min(valid), max(valid))
+                    )
             if spreads:
                 spreads.sort(reverse=True)
                 _, label, low, high = spreads[0]
@@ -1730,14 +2153,25 @@ class ComparisonTab(QWidget):
                         f"{low:.4g} to {high:.4g} across the selected set.",
                     )
                 )
-            insights.append(("Classification context", f"Labels follow the active scheme: {self._scheme_label()}."))
+            insights.append(
+                (
+                    "Classification context",
+                    f"Labels follow the active scheme: {self._scheme_label()}.",
+                )
+            )
             return insights[:3]
 
         valid_per_dataset = []
         for tab in tabs:
-            vals = [r.k_value for r in tab.get_results() if r.k_value is not None and r.k_value > 0]
+            vals = [
+                r.k_value
+                for r in tab.get_results()
+                if r.k_value is not None and r.k_value > 0
+            ]
             if vals:
-                valid_per_dataset.append((tab.get_dataset_name(), float(np.exp(np.mean(np.log(vals))))))
+                valid_per_dataset.append(
+                    (tab.get_dataset_name(), float(np.exp(np.mean(np.log(vals)))))
+                )
         insights = []
         if valid_per_dataset:
             valid_per_dataset.sort(key=lambda item: item[1])
@@ -1772,7 +2206,9 @@ class ComparisonTab(QWidget):
                     state = "ok"
                 elif result.status == CalculationStatus.WARNING:
                     state = "warn"
-                counts.setdefault(result.method_name, {"ok": 0, "warn": 0, "na": 0})[state] += 1
+                counts.setdefault(result.method_name, {"ok": 0, "warn": 0, "na": 0})[
+                    state
+                ] += 1
 
         rows = []
         total = max(1, len(self.selected_datasets))
@@ -1807,25 +2243,60 @@ class ComparisonTab(QWidget):
         tb.setContentsMargins(14, 0, 14, 0)
         tb.setSpacing(10)
 
-        view_frame, view_buttons = self._make_details_segmented_control([
-            ("K spread", "fa6s.chart-column", True, lambda: self._set_stats_view_mode("spread")),
-            ("Coverage", "fa6s.border-all", False, lambda: self._set_stats_view_mode("coverage")),
-        ])
+        view_frame, view_buttons = self._make_details_segmented_control(
+            [
+                (
+                    "K spread",
+                    "fa6s.chart-column",
+                    True,
+                    lambda: self._set_stats_view_mode("spread"),
+                ),
+                (
+                    "Coverage",
+                    "fa6s.border-all",
+                    False,
+                    lambda: self._set_stats_view_mode("coverage"),
+                ),
+            ]
+        )
         self._stats_view_spread_btn, self._stats_view_coverage_btn = view_buttons
+        self._stabilize_segment_group(
+            view_buttons, ["K spread", "Coverage"], min_width=94
+        )
         tb.addWidget(view_frame, 0)
 
-        metric_frame, metric_buttons = self._make_details_segmented_control([
-            ("Geo. mean", "fa6s.chart-line", self._stats_metric == "geometric", lambda: self._on_stats_metric_changed("geometric")),
-            ("Arith. mean", "fa6s.calculator", self._stats_metric == "arithmetic", lambda: self._on_stats_metric_changed("arithmetic")),
-            ("Median", "fa6s.align-center", self._stats_metric == "median", lambda: self._on_stats_metric_changed("median")),
-            ("Range", "fa6s.arrows-left-right", self._stats_metric == "range", lambda: self._on_stats_metric_changed("range")),
-        ])
+        metric_frame, metric_buttons = self._make_details_segmented_control(
+            [
+                (
+                    "Geo. mean",
+                    "fa6s.chart-line",
+                    self._stats_metric == "geometric",
+                    lambda: self._on_stats_metric_changed("geometric"),
+                ),
+                (
+                    "Arith. mean",
+                    "fa6s.calculator",
+                    self._stats_metric == "arithmetic",
+                    lambda: self._on_stats_metric_changed("arithmetic"),
+                ),
+                (
+                    "Median",
+                    "fa6s.align-center",
+                    self._stats_metric == "median",
+                    lambda: self._on_stats_metric_changed("median"),
+                ),
+            ]
+        )
         (
             self._stats_metric_geo_btn,
             self._stats_metric_arith_btn,
             self._stats_metric_med_btn,
-            self._stats_metric_range_btn,
         ) = metric_buttons
+        self._stabilize_segment_group(
+            metric_buttons,
+            ["Geo. mean", "Arith. mean", "Median"],
+            min_width=100,
+        )
         tb.addWidget(metric_frame, 0)
 
         unit_lbl = QLabel("Unit")
@@ -1841,29 +2312,66 @@ class ComparisonTab(QWidget):
         default_index = self._stats_unit_combo.findData(self._stats_k_unit)
         if default_index >= 0:
             self._stats_unit_combo.setCurrentIndex(default_index)
+        self._stabilize_unit_combo(self._stats_unit_combo)
         self._stats_unit_combo.currentIndexChanged.connect(self._on_stats_unit_changed)
         tb.addWidget(self._stats_unit_combo, 0)
 
-        method_frame, method_buttons = self._make_details_segmented_control([
-            ("All methods", "fa6s.table-list", True, lambda: self._set_stats_method_scope(valid_in_all=False)),
-            ("Valid in all", "fa6s.circle-check", False, lambda: self._set_stats_method_scope(valid_in_all=True)),
-            ("Choose", "fa6s.sliders", False, self._sync_stats_controls),
-        ])
+        method_frame, method_buttons = self._make_details_segmented_control(
+            [
+                (
+                    "All methods",
+                    "fa6s.table-list",
+                    True,
+                    lambda: self._set_stats_method_scope(valid_in_all=False),
+                ),
+                (
+                    "Valid in all",
+                    "fa6s.circle-check",
+                    False,
+                    lambda: self._set_stats_method_scope(valid_in_all=True),
+                ),
+                ("Choose", "fa6s.sliders", False, self._sync_stats_controls),
+            ]
+        )
         (
             self._stats_methods_all_btn,
             self._stats_methods_valid_all_btn,
             self._stats_methods_choose_btn,
         ) = method_buttons
-        self._stats_methods_valid_all_btn.setToolTip("Only include methods valid for every selected dataset")
+        self._stabilize_segment_group(
+            method_buttons,
+            ["All methods", "Valid in all", "Choose"],
+            min_width=112,
+        )
+        self._stats_methods_valid_all_btn.setToolTip(
+            "Only include methods valid for every selected dataset"
+        )
         self._stats_methods_choose_btn.setEnabled(False)
-        self._stats_methods_choose_btn.setToolTip("Custom method selection will be added in a later pass")
+        self._stats_methods_choose_btn.setToolTip(
+            "Custom method selection will be added in a later pass"
+        )
         tb.addWidget(method_frame, 0)
 
-        status_frame, status_buttons = self._make_details_segmented_control([
-            ("OK only", "fa6s.circle-check", not self._stats_include_warnings, lambda: self._set_stats_warning_scope(False)),
-            ("Warnings", "fa6s.triangle-exclamation", self._stats_include_warnings, lambda: self._set_stats_warning_scope(True)),
-        ])
+        status_frame, status_buttons = self._make_details_segmented_control(
+            [
+                (
+                    "OK only",
+                    "fa6s.circle-check",
+                    not self._stats_include_warnings,
+                    lambda: self._set_stats_warning_scope(False),
+                ),
+                (
+                    "Warnings",
+                    "fa6s.triangle-exclamation",
+                    self._stats_include_warnings,
+                    lambda: self._set_stats_warning_scope(True),
+                ),
+            ]
+        )
         self._stats_ok_only_btn, self._stats_warnings_btn = status_buttons
+        self._stabilize_segment_group(
+            status_buttons, ["OK only", "Warnings"], min_width=90
+        )
         tb.addWidget(status_frame, 0)
 
         self._stats_scope_btn = QPushButton("Scope & Groups")
@@ -1877,6 +2385,10 @@ class ComparisonTab(QWidget):
         tb.addWidget(self._stats_scope_btn, 0)
 
         self._stats_context = QLabel("")
+        self._stats_context.setMinimumWidth(0)
+        self._stats_context.setSizePolicy(
+            QSizePolicy.Policy.Ignored, QSizePolicy.Policy.Fixed
+        )
         self._stats_context.setStyleSheet(
             f"font-family: '{F.MONO}'; font-size: {F.SZ_XS}pt; color: {C.TEXT_MUTED}; background: transparent;"
         )
@@ -1947,6 +2459,16 @@ class ComparisonTab(QWidget):
         rv.setContentsMargins(0, 0, 0, 0)
         rv.setSpacing(0)
 
+        (
+            header,
+            self._stats_rail_title,
+            self._stats_rail_subtitle,
+            self._stats_rail_badge,
+        ) = self._build_compact_rail_header(
+            "Statistics Summary", "No datasets selected", "0 / 0"
+        )
+        rv.addWidget(header)
+
         rail_scroll = QScrollArea()
         rail_scroll.setWidgetResizable(True)
         rail_scroll.setFrameShape(QFrame.Shape.NoFrame)
@@ -1957,21 +2479,46 @@ class ComparisonTab(QWidget):
         rail_content.setStyleSheet("background: transparent;")
         rail_content.setMinimumWidth(0)
         rail_content_layout = QVBoxLayout(rail_content)
-        rail_content_layout.setContentsMargins(8, 8, 8, 8)
-        rail_content_layout.setSpacing(8)
+        rail_content_layout.setContentsMargins(12, 10, 12, 12)
+        rail_content_layout.setSpacing(12)
 
-        self._stats_scope_section, self._stats_scope_layout = self._build_stats_rail_section("Current Scope")
+        self._stats_scope_section, self._stats_scope_layout = (
+            self._build_compact_rail_section("Scope")
+        )
         rail_content_layout.addWidget(self._stats_scope_section)
-        self._stats_filter_section, self._stats_filter_layout = self._build_stats_rail_section("Current Filters")
+        self._stats_filter_section, self._stats_filter_layout = (
+            self._build_compact_rail_section("Filters")
+        )
         rail_content_layout.addWidget(self._stats_filter_section)
-        self._stats_insight_section, self._stats_insights_layout = self._build_stats_rail_section("Distribution Summary")
+        self._stats_insight_section, self._stats_insights_layout = (
+            self._build_compact_rail_section("K Distribution")
+        )
         rail_content_layout.addWidget(self._stats_insight_section)
-        self._stats_grain_section, self._stats_grain_layout = self._build_stats_rail_section("Grain Summary")
-        rail_content_layout.addWidget(self._stats_grain_section)
-        self._stats_summary_section, self._stats_summary_layout = self._build_stats_rail_section("Method Coverage")
+        self._stats_summary_section, self._stats_summary_layout = (
+            self._build_compact_rail_section("Coverage")
+        )
         rail_content_layout.addWidget(self._stats_summary_section)
-        self._stats_group_section, self._stats_group_layout = self._build_stats_rail_section("Group Summary")
+        self._stats_group_section, self._stats_group_layout = (
+            self._build_compact_rail_section("Groups")
+        )
         rail_content_layout.addWidget(self._stats_group_section)
+        self._stats_visible_table_section, self._stats_visible_table_layout = (
+            self._build_compact_rail_section("Visible Table")
+        )
+        rail_content_layout.addWidget(self._stats_visible_table_section)
+        self._stats_status_legend_section, self._stats_status_legend_layout = (
+            self._build_compact_rail_section("Status Legend")
+        )
+        self._stats_status_legend_layout.addWidget(
+            self._make_rail_legend_row(
+                [
+                    ("included", C.OLIVE),
+                    ("warned", C.LED_WARN),
+                    ("missing", C.TEXT_MUTED),
+                ]
+            )
+        )
+        rail_content_layout.addWidget(self._stats_status_legend_section)
         rail_content_layout.addStretch(1)
         rail_scroll.setWidget(rail_content)
         rv.addWidget(rail_scroll, 1)
@@ -2105,32 +2652,11 @@ class ComparisonTab(QWidget):
             QScrollBar::add-line, QScrollBar::sub-line {{ width: 0; height: 0; }}
         """)
 
-    def _build_stats_rail_section(self, title: str):
-        section = QWidget()
-        section.setObjectName("statsRailSection")
-        section.setStyleSheet(
-            "QWidget#statsRailSection { background: transparent; border: none; }"
-            "QWidget#statsRailSection QLabel { border: none; }"
-        )
-        v = QVBoxLayout(section)
-        v.setContentsMargins(6, 7, 6, 7)
-        v.setSpacing(7)
-
-        hdr = QLabel(title.upper())
-        hdr.setStyleSheet(
-            f"font-family: '{F.MONO}'; font-size: {F.SZ_XS}pt; font-weight: 700;"
-            f"letter-spacing: 0.08em; color: {C.TEXT_MUTED}; background: transparent;"
-        )
-        v.addWidget(hdr)
-
-        content = QVBoxLayout()
-        content.setSpacing(5)
-        v.addLayout(content)
-        return section, content
-
     def _build_stats_dataset_strip(self) -> QWidget:
         wrap = QWidget()
-        wrap.setStyleSheet(f"background: rgba(255,255,255,0.34); border-bottom: 1px solid {C.BORDER};")
+        wrap.setStyleSheet(
+            f"background: rgba(255,255,255,0.34); border-bottom: 1px solid {C.BORDER};"
+        )
         root = QHBoxLayout(wrap)
         root.setContentsMargins(0, 0, 0, 0)
         root.setSpacing(0)
@@ -2164,19 +2690,34 @@ class ComparisonTab(QWidget):
     def _sync_stats_controls(self) -> None:
         if not hasattr(self, "_stats_view_spread_btn"):
             return
-        self._set_segment_checked(self._stats_view_spread_btn, self._stats_view_mode == "spread")
-        self._set_segment_checked(self._stats_view_coverage_btn, self._stats_view_mode == "coverage")
-        self._set_segment_checked(self._stats_metric_geo_btn, self._stats_metric == "geometric")
-        self._set_segment_checked(self._stats_metric_arith_btn, self._stats_metric == "arithmetic")
-        self._set_segment_checked(self._stats_metric_med_btn, self._stats_metric == "median")
-        self._set_segment_checked(self._stats_metric_range_btn, self._stats_metric == "range")
-        valid_in_all = self._stats_common_methods_only or self._stats_method_scope == "valid_all"
+        self._set_segment_checked(
+            self._stats_view_spread_btn, self._stats_view_mode == "spread"
+        )
+        self._set_segment_checked(
+            self._stats_view_coverage_btn, self._stats_view_mode == "coverage"
+        )
+        self._set_segment_checked(
+            self._stats_metric_geo_btn, self._stats_metric == "geometric"
+        )
+        self._set_segment_checked(
+            self._stats_metric_arith_btn, self._stats_metric == "arithmetic"
+        )
+        self._set_segment_checked(
+            self._stats_metric_med_btn, self._stats_metric == "median"
+        )
+        valid_in_all = (
+            self._stats_common_methods_only or self._stats_method_scope == "valid_all"
+        )
         self._set_segment_checked(self._stats_methods_all_btn, not valid_in_all)
         self._set_segment_checked(self._stats_methods_valid_all_btn, valid_in_all)
         self._set_segment_checked(self._stats_methods_choose_btn, False)
         self._stats_methods_choose_btn.setEnabled(False)
-        self._set_segment_checked(self._stats_ok_only_btn, not self._stats_include_warnings)
-        self._set_segment_checked(self._stats_warnings_btn, self._stats_include_warnings)
+        self._set_segment_checked(
+            self._stats_ok_only_btn, not self._stats_include_warnings
+        )
+        self._set_segment_checked(
+            self._stats_warnings_btn, self._stats_include_warnings
+        )
         if hasattr(self, "_stats_stack"):
             self._stats_stack.setCurrentWidget(
                 self._stats_coverage_panel
@@ -2193,7 +2734,10 @@ class ComparisonTab(QWidget):
 
     def _set_stats_method_scope(self, *, valid_in_all: bool) -> None:
         target_scope = "valid_all" if valid_in_all else "all"
-        if self._stats_method_scope == target_scope and self._stats_common_methods_only == valid_in_all:
+        if (
+            self._stats_method_scope == target_scope
+            and self._stats_common_methods_only == valid_in_all
+        ):
             return
         self._stats_method_scope = target_scope
         self._stats_common_methods_only = valid_in_all
@@ -2250,15 +2794,18 @@ class ComparisonTab(QWidget):
         return HydraulicConductivityConverter.UNIT_SYMBOLS[self._stats_k_unit]
 
     def _format_stats_k_value(self, value_m_s: float) -> str:
-        converted = HydraulicConductivityConverter.convert_from_m_per_s(value_m_s, self._stats_k_unit)
-        return HydraulicConductivityConverter.DISPLAY_FORMATS[self._stats_k_unit].format(converted)
+        converted = HydraulicConductivityConverter.convert_from_m_per_s(
+            value_m_s, self._stats_k_unit
+        )
+        return HydraulicConductivityConverter.DISPLAY_FORMATS[
+            self._stats_k_unit
+        ].format(converted)
 
     def _stats_metric_label(self) -> str:
         return {
             "geometric": "Geo. mean",
             "arithmetic": "Arith. mean",
             "median": "Median",
-            "range": "Range",
         }.get(self._stats_metric, "Geo. mean")
 
     def _stats_metric_value(self, stats) -> Optional[float]:
@@ -2268,10 +2815,6 @@ class ComparisonTab(QWidget):
             return stats.arithmetic_mean_m_s
         if self._stats_metric == "median":
             return stats.median_m_s
-        if self._stats_metric == "range":
-            if stats.min_m_s is None or stats.max_m_s is None:
-                return None
-            return stats.max_m_s - stats.min_m_s
         return stats.geometric_mean_m_s
 
     def _aggregation_options(self) -> KAggregationOptions:
@@ -2294,7 +2837,9 @@ class ComparisonTab(QWidget):
         )
 
     def _build_comparison_snapshot(self):
-        return build_comparison_snapshot(self.selected_datasets, self._snapshot_options())
+        return build_comparison_snapshot(
+            self.selected_datasets, self._snapshot_options()
+        )
 
     def _build_k_aggregation(self):
         return self._build_comparison_snapshot().k
@@ -2308,7 +2853,9 @@ class ComparisonTab(QWidget):
     def _make_stats_summary_row(self, label: str, value: str) -> QWidget:
         row = QWidget()
         row.setObjectName("statsSummaryRow")
-        row.setStyleSheet("QWidget#statsSummaryRow { background: transparent; border: none; }")
+        row.setStyleSheet(
+            "QWidget#statsSummaryRow { background: transparent; border: none; }"
+        )
         h = QHBoxLayout(row)
         h.setContentsMargins(0, 3, 0, 3)
         h.setSpacing(10)
@@ -2323,7 +2870,9 @@ class ComparisonTab(QWidget):
         val_lbl.setMinimumWidth(0)
         val_lbl.setMaximumWidth(188)
         val_lbl.setWordWrap(True)
-        val_lbl.setAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
+        val_lbl.setAlignment(
+            Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter
+        )
         val_lbl.setStyleSheet(
             f"font-family: '{F.MONO}'; font-size: {F.SZ_SM}pt; color: {C.TEXT_MID}; background: transparent; border: none; font-weight: 600;"
         )
@@ -2331,8 +2880,354 @@ class ComparisonTab(QWidget):
         h.addWidget(val_lbl, 1, Qt.AlignmentFlag.AlignRight)
         return row
 
+    def _build_compact_rail_header(self, title: str, subtitle: str, badge: str):
+        head = QFrame()
+        head.setObjectName("compactRailHeader")
+        head.setFixedHeight(42)
+        head.setStyleSheet(
+            f"""
+            QFrame#compactRailHeader {{
+                background: {C.BG_RAISED};
+                border: none;
+                border-bottom: 1px solid {C.BORDER};
+            }}
+            QFrame#compactRailHeader QLabel {{ border: none; background: transparent; }}
+            """
+        )
+        h = QHBoxLayout(head)
+        h.setContentsMargins(12, 0, 12, 0)
+        h.setSpacing(8)
+
+        copy = QWidget()
+        copy.setStyleSheet("background: transparent; border: none;")
+        cv = QVBoxLayout(copy)
+        cv.setContentsMargins(0, 0, 0, 0)
+        cv.setSpacing(1)
+
+        title_lbl = QLabel(title)
+        title_lbl.setStyleSheet(
+            f"font-size: {F.SZ_BASE}pt; font-weight: 700; color: {C.TEXT};"
+        )
+        subtitle_lbl = QLabel(subtitle)
+        subtitle_lbl.setMinimumWidth(0)
+        subtitle_lbl.setSizePolicy(QSizePolicy.Policy.Ignored, QSizePolicy.Policy.Fixed)
+        subtitle_lbl.setStyleSheet(
+            f"font-family: '{F.MONO}'; font-size: {F.SZ_XS}pt; font-weight: 600;"
+            f"color: {C.TEXT_MUTED};"
+        )
+        cv.addWidget(title_lbl)
+        cv.addWidget(subtitle_lbl)
+
+        badge_lbl = QLabel(badge)
+        badge_lbl.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        badge_lbl.setStyleSheet(
+            f"padding: 2px 8px; border: 1px solid rgba(107,142,35,0.25);"
+            f"border-radius: 999px; background: rgba(107,142,35,0.08);"
+            f"color: {C.OLIVE_DK}; font-family: '{F.MONO}'; font-size: {F.SZ_XS}pt;"
+            f"font-weight: 800;"
+        )
+
+        h.addWidget(copy, 1)
+        h.addWidget(badge_lbl, 0, Qt.AlignmentFlag.AlignVCenter)
+        return head, title_lbl, subtitle_lbl, badge_lbl
+
+    def _set_compact_rail_header(
+        self,
+        title_lbl: QLabel,
+        subtitle_lbl: QLabel,
+        badge_lbl: QLabel,
+        *,
+        title: str,
+        subtitle: str,
+        badge: str,
+    ) -> None:
+        title_lbl.setText(title)
+        subtitle_lbl.setText(subtitle)
+        badge_lbl.setText(badge)
+
+    def _build_compact_rail_section(self, title: str):
+        section = QWidget()
+        section.setObjectName("compactRailSection")
+        section.setStyleSheet(
+            "QWidget#compactRailSection { background: transparent; border: none; }"
+            "QWidget#compactRailSection QLabel { border: none; }"
+        )
+        v = QVBoxLayout(section)
+        v.setContentsMargins(0, 0, 0, 0)
+        v.setSpacing(7)
+
+        hdr = QLabel(title.upper())
+        hdr.setStyleSheet(
+            f"font-family: '{F.MONO}'; font-size: {F.SZ_XS}pt; font-weight: 800;"
+            f"letter-spacing: 0.08em; color: {C.TEXT_MUTED}; background: transparent;"
+        )
+        v.addWidget(hdr)
+
+        content = QVBoxLayout()
+        content.setSpacing(7)
+        content.setContentsMargins(0, 0, 0, 0)
+        v.addLayout(content)
+        return section, content
+
+    def _make_rail_chip(self, text: str, *, tone: str = "neutral") -> QLabel:
+        lbl = QLabel(text)
+        lbl.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        lbl.setWordWrap(False)
+        if tone == "ok":
+            bg, fg, border = (
+                "rgba(107,142,35,0.08)",
+                C.OLIVE_DK,
+                "rgba(107,142,35,0.23)",
+            )
+        elif tone == "warn":
+            bg, fg, border = "rgba(196,165,116,0.13)", C.EARTH, "rgba(196,165,116,0.36)"
+        else:
+            bg, fg, border = (
+                "rgba(255,255,255,0.44)",
+                C.TEXT_MID,
+                "rgba(212,196,168,0.82)",
+            )
+        lbl.setStyleSheet(
+            f"padding: 3px 7px; border: 1px solid {border}; border-radius: 999px;"
+            f"background: {bg}; color: {fg}; font-size: {F.SZ_XS + 1}pt; font-weight: 700;"
+        )
+        return lbl
+
+    def _make_rail_chip_group(self, chips: list[tuple[str, str]]) -> QWidget:
+        wrap = QWidget()
+        wrap.setStyleSheet("background: transparent; border: none;")
+        grid = QGridLayout(wrap)
+        grid.setContentsMargins(0, 0, 0, 0)
+        grid.setHorizontalSpacing(6)
+        grid.setVerticalSpacing(6)
+        for idx, (text, tone) in enumerate(chips):
+            grid.addWidget(self._make_rail_chip(text, tone=tone), idx // 2, idx % 2)
+        grid.setColumnStretch(0, 1)
+        grid.setColumnStretch(1, 1)
+        return wrap
+
+    def _make_rail_headline(self, label: str, subtext: str, value: str) -> QWidget:
+        row = QWidget()
+        row.setStyleSheet("background: transparent; border: none;")
+        h = QHBoxLayout(row)
+        h.setContentsMargins(0, 0, 0, 0)
+        h.setSpacing(10)
+
+        copy = QWidget()
+        copy.setStyleSheet("background: transparent; border: none;")
+        cv = QVBoxLayout(copy)
+        cv.setContentsMargins(0, 0, 0, 0)
+        cv.setSpacing(1)
+        label_lbl = QLabel(label)
+        label_lbl.setStyleSheet(
+            f"font-size: {F.SZ_SM}pt; font-weight: 800; color: {C.TEXT_MID};"
+            f"background: transparent;"
+        )
+        sub_lbl = QLabel(subtext)
+        sub_lbl.setMinimumWidth(0)
+        sub_lbl.setSizePolicy(QSizePolicy.Policy.Ignored, QSizePolicy.Policy.Fixed)
+        sub_lbl.setStyleSheet(
+            f"font-family: '{F.MONO}'; font-size: {F.SZ_XS}pt; font-weight: 600;"
+            f"color: {C.TEXT_MUTED}; background: transparent;"
+        )
+        cv.addWidget(label_lbl)
+        cv.addWidget(sub_lbl)
+
+        value_lbl = QLabel(value)
+        value_lbl.setAlignment(
+            Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignBottom
+        )
+        value_lbl.setStyleSheet(
+            f"font-family: '{F.MONO}'; font-size: {F.SZ_BASE + 5}pt; font-weight: 800;"
+            f"color: {C.TEXT}; background: transparent;"
+        )
+        h.addWidget(copy, 1)
+        h.addWidget(value_lbl, 0)
+        return row
+
+    def _make_rail_metric(self, label: str, value: str) -> QWidget:
+        metric = QFrame()
+        metric.setObjectName("compactRailMetric")
+        metric.setStyleSheet(
+            f"""
+            QFrame#compactRailMetric {{
+                background: rgba(255,255,255,0.32);
+                border: 1px solid rgba(212,196,168,0.62);
+                border-radius: 4px;
+            }}
+            QFrame#compactRailMetric QLabel {{ border: none; background: transparent; }}
+            """
+        )
+        v = QVBoxLayout(metric)
+        v.setContentsMargins(8, 6, 8, 6)
+        v.setSpacing(2)
+        key = QLabel(label)
+        key.setMinimumWidth(0)
+        key.setSizePolicy(QSizePolicy.Policy.Ignored, QSizePolicy.Policy.Fixed)
+        key.setStyleSheet(
+            f"font-size: {F.SZ_XS + 1}pt; font-weight: 700; color: {C.TEXT_MUTED};"
+        )
+        val = QLabel(value)
+        val.setMinimumWidth(0)
+        val.setSizePolicy(QSizePolicy.Policy.Ignored, QSizePolicy.Policy.Fixed)
+        val.setStyleSheet(
+            f"font-family: '{F.MONO}'; font-size: {F.SZ_SM}pt; font-weight: 800;"
+            f"color: {C.TEXT};"
+        )
+        v.addWidget(key)
+        v.addWidget(val)
+        return metric
+
+    def _add_rail_metric_grid(
+        self, layout: QVBoxLayout, metrics: list[tuple[str, str]]
+    ) -> None:
+        wrap = QWidget()
+        wrap.setStyleSheet("background: transparent; border: none;")
+        grid = QGridLayout(wrap)
+        grid.setContentsMargins(0, 0, 0, 0)
+        grid.setHorizontalSpacing(6)
+        grid.setVerticalSpacing(6)
+        for idx, (label, value) in enumerate(metrics):
+            grid.addWidget(self._make_rail_metric(label, value), idx // 2, idx % 2)
+        grid.setColumnStretch(0, 1)
+        grid.setColumnStretch(1, 1)
+        layout.addWidget(wrap)
+
+    def _make_rail_status_line(self, text: str, *, tone: str = "ok") -> QWidget:
+        row = QFrame()
+        row.setObjectName("compactRailStatus")
+        if tone == "warn":
+            bg, fg, border = "rgba(196,165,116,0.14)", C.EARTH, "rgba(196,165,116,0.34)"
+        else:
+            bg, fg, border = (
+                "rgba(107,142,35,0.07)",
+                C.OLIVE_DK,
+                "rgba(107,142,35,0.22)",
+            )
+        row.setStyleSheet(
+            f"""
+            QFrame#compactRailStatus {{
+                background: {bg};
+                border: 1px solid {border};
+                border-radius: 4px;
+            }}
+            QFrame#compactRailStatus QLabel {{ border: none; background: transparent; }}
+            """
+        )
+        h = QHBoxLayout(row)
+        h.setContentsMargins(8, 6, 8, 6)
+        h.setSpacing(6)
+        mark = QLabel("OK" if tone != "warn" else "WARN")
+        mark.setStyleSheet(
+            f"font-family: '{F.MONO}'; font-size: {F.SZ_XS}pt; font-weight: 800;"
+            f"color: {fg};"
+        )
+        body = QLabel(text)
+        body.setWordWrap(True)
+        body.setStyleSheet(f"font-size: {F.SZ_SM}pt; font-weight: 700; color: {fg};")
+        h.addWidget(mark, 0, Qt.AlignmentFlag.AlignTop)
+        h.addWidget(body, 1)
+        return row
+
+    def _make_rail_group_row(
+        self, name: str, meta: str, value: str, color: str
+    ) -> QWidget:
+        row = QFrame()
+        row.setObjectName("compactRailGroupRow")
+        row.setStyleSheet(
+            f"""
+            QFrame#compactRailGroupRow {{
+                background: rgba(255,255,255,0.30);
+                border: 1px solid rgba(212,196,168,0.62);
+                border-radius: 4px;
+            }}
+            QFrame#compactRailGroupRow QLabel {{ border: none; background: transparent; }}
+            """
+        )
+        h = QHBoxLayout(row)
+        h.setContentsMargins(8, 7, 8, 7)
+        h.setSpacing(8)
+
+        swatch = QFrame()
+        swatch.setFixedSize(8, 34)
+        swatch.setStyleSheet(f"background: {color}; border: none; border-radius: 3px;")
+
+        copy = QWidget()
+        copy.setStyleSheet("background: transparent; border: none;")
+        cv = QVBoxLayout(copy)
+        cv.setContentsMargins(0, 0, 0, 0)
+        cv.setSpacing(1)
+        name_lbl = QLabel(name)
+        name_lbl.setMinimumWidth(0)
+        name_lbl.setSizePolicy(QSizePolicy.Policy.Ignored, QSizePolicy.Policy.Fixed)
+        name_lbl.setStyleSheet(
+            f"font-size: {F.SZ_SM}pt; font-weight: 800; color: {C.TEXT};"
+        )
+        meta_lbl = QLabel(meta)
+        meta_lbl.setMinimumWidth(0)
+        meta_lbl.setSizePolicy(QSizePolicy.Policy.Ignored, QSizePolicy.Policy.Fixed)
+        meta_lbl.setStyleSheet(
+            f"font-family: '{F.MONO}'; font-size: {F.SZ_XS}pt; font-weight: 600;"
+            f"color: {C.TEXT_MUTED};"
+        )
+        cv.addWidget(name_lbl)
+        cv.addWidget(meta_lbl)
+
+        value_lbl = QLabel(value)
+        value_lbl.setAlignment(
+            Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter
+        )
+        value_lbl.setStyleSheet(
+            f"font-family: '{F.MONO}'; font-size: {F.SZ_XS + 1}pt; font-weight: 800;"
+            f"color: {C.TEXT};"
+        )
+        h.addWidget(swatch)
+        h.addWidget(copy, 1)
+        h.addWidget(value_lbl, 0)
+        return row
+
+    def _make_rail_legend_row(self, entries: list[tuple[str, str]]) -> QWidget:
+        wrap = QWidget()
+        wrap.setStyleSheet("background: transparent; border: none;")
+        h = QHBoxLayout(wrap)
+        h.setContentsMargins(0, 0, 0, 0)
+        h.setSpacing(6)
+        for label, color in entries:
+            pill = QWidget()
+            pill.setObjectName("compactLegendPill")
+            pill.setStyleSheet(
+                f"""
+                QWidget#compactLegendPill {{
+                    background: rgba(255,255,255,0.28);
+                    border: 1px solid rgba(212,196,168,0.76);
+                    border-radius: 999px;
+                }}
+                QWidget#compactLegendPill QLabel {{ border: none; background: transparent; }}
+                """
+            )
+            ph = QHBoxLayout(pill)
+            ph.setContentsMargins(7, 3, 7, 3)
+            ph.setSpacing(5)
+            dot = QFrame()
+            dot.setFixedSize(16, 16)
+            dot.setStyleSheet(
+                f"background: {color}; border: 1px solid rgba(92,78,61,0.28); border-radius: 4px;"
+            )
+            text = QLabel(label)
+            text.setStyleSheet(
+                f"font-size: {F.SZ_XS + 1}pt; font-weight: 700; color: {C.TEXT_MID};"
+            )
+            ph.addWidget(dot)
+            ph.addWidget(text)
+            h.addWidget(pill)
+        h.addStretch(1)
+        return wrap
+
     def _clear_stats_tables(self) -> None:
-        for table in (getattr(self, "_stats_scope_table", None), getattr(self, "_stats_method_table", None)):
+        for table in (
+            getattr(self, "_stats_scope_table", None),
+            getattr(self, "_stats_method_table", None),
+        ):
             if table is None:
                 continue
             table.clearContents()
@@ -2383,10 +3278,19 @@ class ComparisonTab(QWidget):
     def _refresh_stats_scope_table(self, snapshot) -> None:
         table = self._stats_scope_table
         headers = [
-            "Scope", "Datasets", "Included K", f"Geo. mean K ({self._stats_unit_symbol()})",
-            f"Arith. mean K ({self._stats_unit_symbol()})", f"Median K ({self._stats_unit_symbol()})",
-            f"K range ({self._stats_unit_symbol()})", "Log spread", "D50 median",
-            "Mean grain size", "Cu median", "Fines median", "Dominant class",
+            "Scope",
+            "Datasets",
+            "Included K",
+            f"Geo. mean K ({self._stats_unit_symbol()})",
+            f"Arith. mean K ({self._stats_unit_symbol()})",
+            f"Median K ({self._stats_unit_symbol()})",
+            f"K range ({self._stats_unit_symbol()})",
+            "Log spread",
+            "D50 median",
+            "Mean grain size",
+            "Cu median",
+            "Fines median",
+            "Dominant class",
         ]
         table.setSortingEnabled(False)
         table.clearContents()
@@ -2396,49 +3300,96 @@ class ComparisonTab(QWidget):
         aggregation = snapshot.k
         grain = snapshot.grain
         grouped = self._stats_uses_group_scope()
-        rows = [("Overall", "all selected datasets", aggregation.overall, grain.overall, C.EARTH)]
+        rows = [
+            (
+                "Overall",
+                "all selected datasets",
+                aggregation.overall,
+                grain.overall,
+                C.EARTH,
+            )
+        ]
         if grouped:
             group_colors = self._group_color_map(list(aggregation.group_names))
             for group_name in aggregation.group_names:
-                rows.append((
-                    group_name,
-                    "group aggregate",
-                    aggregation.by_group.get(group_name),
-                    grain.by_group.get(group_name),
-                    group_colors.get(group_name, C.TEXT_MID),
-                ))
+                rows.append(
+                    (
+                        group_name,
+                        "group aggregate",
+                        aggregation.by_group.get(group_name),
+                        grain.by_group.get(group_name),
+                        group_colors.get(group_name, C.TEXT_MID),
+                    )
+                )
         else:
             for idx, dataset_name in enumerate(aggregation.dataset_names):
-                rows.append((
-                    dataset_name,
-                    "dataset",
-                    aggregation.by_dataset.get(dataset_name),
-                    grain.by_dataset.get(dataset_name),
-                    DATASET_COLORS[idx % len(DATASET_COLORS)],
-                ))
+                rows.append(
+                    (
+                        dataset_name,
+                        "dataset",
+                        aggregation.by_dataset.get(dataset_name),
+                        grain.by_dataset.get(dataset_name),
+                        DATASET_COLORS[idx % len(DATASET_COLORS)],
+                    )
+                )
 
         table.setRowCount(len(rows))
-        for row_i, (scope_name, subtitle, k_stats, grain_stats, color) in enumerate(rows):
+        for row_i, (scope_name, subtitle, k_stats, grain_stats, color) in enumerate(
+            rows
+        ):
             scope_text = f"{scope_name}\n{subtitle}" if subtitle else scope_name
-            self._set_stats_table_item(table, row_i, 0, scope_text, color=color, bold=True, align_right=False)
-            self._set_stats_table_item(table, row_i, 1, str(getattr(k_stats, "dataset_count", 0)))
+            self._set_stats_table_item(
+                table, row_i, 0, scope_text, color=color, bold=True, align_right=False
+            )
+            self._set_stats_table_item(
+                table, row_i, 1, str(getattr(k_stats, "dataset_count", 0))
+            )
             included = f"{getattr(k_stats, 'included_count', 0)} / {getattr(k_stats, 'total_cells', 0)}"
             self._set_stats_table_item(table, row_i, 2, included)
-            self._set_stats_table_item(table, row_i, 3, self._stats_k_text(getattr(k_stats, "geometric_mean_m_s", None)))
-            self._set_stats_table_item(table, row_i, 4, self._stats_k_text(getattr(k_stats, "arithmetic_mean_m_s", None)))
-            self._set_stats_table_item(table, row_i, 5, self._stats_k_text(getattr(k_stats, "median_m_s", None)))
-            self._set_stats_table_item(table, row_i, 6, self._stats_k_range_text(k_stats))
+            self._set_stats_table_item(
+                table,
+                row_i,
+                3,
+                self._stats_k_text(getattr(k_stats, "geometric_mean_m_s", None)),
+            )
+            self._set_stats_table_item(
+                table,
+                row_i,
+                4,
+                self._stats_k_text(getattr(k_stats, "arithmetic_mean_m_s", None)),
+            )
+            self._set_stats_table_item(
+                table,
+                row_i,
+                5,
+                self._stats_k_text(getattr(k_stats, "median_m_s", None)),
+            )
+            self._set_stats_table_item(
+                table, row_i, 6, self._stats_k_range_text(k_stats)
+            )
             log_spread = getattr(k_stats, "log10_std_dev", None)
-            self._set_stats_table_item(table, row_i, 7, f"{log_spread:.2f}" if log_spread is not None else "-")
-            self._set_stats_table_item(table, row_i, 8, self._grain_metric_text(grain_stats, "D50", " mm"))
-            self._set_stats_table_item(table, row_i, 9, self._grain_metric_text(grain_stats, "Dmean", " mm"))
-            self._set_stats_table_item(table, row_i, 10, self._grain_metric_text(grain_stats, "Cu"))
-            self._set_stats_table_item(table, row_i, 11, self._grain_metric_text(grain_stats, "Fines%", "%"))
+            self._set_stats_table_item(
+                table, row_i, 7, f"{log_spread:.2f}" if log_spread is not None else "-"
+            )
+            self._set_stats_table_item(
+                table, row_i, 8, self._grain_metric_text(grain_stats, "D50", " mm")
+            )
+            self._set_stats_table_item(
+                table, row_i, 9, self._grain_metric_text(grain_stats, "Dmean", " mm")
+            )
+            self._set_stats_table_item(
+                table, row_i, 10, self._grain_metric_text(grain_stats, "Cu")
+            )
+            self._set_stats_table_item(
+                table, row_i, 11, self._grain_metric_text(grain_stats, "Fines%", "%")
+            )
             self._set_stats_table_item(
                 table,
                 row_i,
                 12,
-                getattr(grain_stats, "dominant_class", "N/A") if grain_stats is not None else "N/A",
+                getattr(grain_stats, "dominant_class", "N/A")
+                if grain_stats is not None
+                else "N/A",
                 align_right=False,
             )
             table.setRowHeight(row_i, 42)
@@ -2450,9 +3401,16 @@ class ComparisonTab(QWidget):
     def _refresh_stats_method_table(self, snapshot) -> None:
         table = self._stats_method_table
         headers = [
-            "Method", "Included", "Warnings", "Missing / excluded", "Valid all datasets",
-            "Valid groups", f"Geo. mean K ({self._stats_unit_symbol()})",
-            f"Median K ({self._stats_unit_symbol()})", f"K range ({self._stats_unit_symbol()})", "Status",
+            "Method",
+            "Included",
+            "Warnings",
+            "Missing / excluded",
+            "Valid all datasets",
+            "Valid groups",
+            f"Geo. mean K ({self._stats_unit_symbol()})",
+            f"Median K ({self._stats_unit_symbol()})",
+            f"K range ({self._stats_unit_symbol()})",
+            "Status",
         ]
         table.setSortingEnabled(False)
         table.clearContents()
@@ -2467,7 +3425,9 @@ class ComparisonTab(QWidget):
             if group in aggregation.by_group
         }
         records_by_method = {
-            method: [record for record in aggregation.records if record.method_name == method]
+            method: [
+                record for record in aggregation.records if record.method_name == method
+            ]
             for method in aggregation.method_names
         }
 
@@ -2477,13 +3437,20 @@ class ComparisonTab(QWidget):
             records = records_by_method.get(method_name, [])
             valid_group_count = 0
             for group_name in groups:
-                group_records = [record for record in records if record.group_name == group_name]
+                group_records = [
+                    record for record in records if record.group_name == group_name
+                ]
                 included_count = sum(1 for record in group_records if record.included)
-                if dataset_count_by_group.get(group_name, 0) and included_count == dataset_count_by_group[group_name]:
+                if (
+                    dataset_count_by_group.get(group_name, 0)
+                    and included_count == dataset_count_by_group[group_name]
+                ):
                     valid_group_count += 1
 
             included = f"{getattr(method_stats, 'included_count', 0)} / {getattr(method_stats, 'total_cells', 0)}"
-            missing_excluded = getattr(method_stats, "missing_count", 0) + getattr(method_stats, "excluded_count", 0)
+            missing_excluded = getattr(method_stats, "missing_count", 0) + getattr(
+                method_stats, "excluded_count", 0
+            )
             warning_count = getattr(method_stats, "warning_count", 0)
             valid_all = "Yes" if method_name in aggregation.complete_methods else "No"
             if getattr(method_stats, "included_count", 0) == 0:
@@ -2493,16 +3460,52 @@ class ComparisonTab(QWidget):
             else:
                 status, status_color, bg = "OK", C.OLIVE, "#eef5e2"
 
-            self._set_stats_table_item(table, row_i, 0, method_name, bold=True, align_right=False)
+            self._set_stats_table_item(
+                table, row_i, 0, method_name, bold=True, align_right=False
+            )
             self._set_stats_table_item(table, row_i, 1, included)
-            self._set_stats_table_item(table, row_i, 2, str(warning_count), color=C.LED_WARN if warning_count else C.TEXT_MID)
-            self._set_stats_table_item(table, row_i, 3, str(missing_excluded), color=C.TEXT_MUTED if missing_excluded else C.TEXT_MID)
-            self._set_stats_table_item(table, row_i, 4, valid_all, color=C.OLIVE if valid_all == "Yes" else C.TEXT_MUTED)
-            self._set_stats_table_item(table, row_i, 5, f"{valid_group_count} / {len(groups)}")
-            self._set_stats_table_item(table, row_i, 6, self._stats_k_text(getattr(method_stats, "geometric_mean_m_s", None)))
-            self._set_stats_table_item(table, row_i, 7, self._stats_k_text(getattr(method_stats, "median_m_s", None)))
-            self._set_stats_table_item(table, row_i, 8, self._stats_k_range_text(method_stats))
-            self._set_stats_table_item(table, row_i, 9, status, color=status_color, bold=True, background=bg)
+            self._set_stats_table_item(
+                table,
+                row_i,
+                2,
+                str(warning_count),
+                color=C.LED_WARN if warning_count else C.TEXT_MID,
+            )
+            self._set_stats_table_item(
+                table,
+                row_i,
+                3,
+                str(missing_excluded),
+                color=C.TEXT_MUTED if missing_excluded else C.TEXT_MID,
+            )
+            self._set_stats_table_item(
+                table,
+                row_i,
+                4,
+                valid_all,
+                color=C.OLIVE if valid_all == "Yes" else C.TEXT_MUTED,
+            )
+            self._set_stats_table_item(
+                table, row_i, 5, f"{valid_group_count} / {len(groups)}"
+            )
+            self._set_stats_table_item(
+                table,
+                row_i,
+                6,
+                self._stats_k_text(getattr(method_stats, "geometric_mean_m_s", None)),
+            )
+            self._set_stats_table_item(
+                table,
+                row_i,
+                7,
+                self._stats_k_text(getattr(method_stats, "median_m_s", None)),
+            )
+            self._set_stats_table_item(
+                table, row_i, 8, self._stats_k_range_text(method_stats)
+            )
+            self._set_stats_table_item(
+                table, row_i, 9, status, color=status_color, bold=True, background=bg
+            )
             table.setRowHeight(row_i, 36)
 
         table.resizeColumnsToContents()
@@ -2561,8 +3564,7 @@ class ComparisonTab(QWidget):
         """Apply a selected subset while preserving dataset order and valid pins."""
         selected_names = {tab.get_dataset_name() for tab in selected_tabs}
         self.selected_datasets = [
-            tab for tab in self.dataset_tabs
-            if tab.get_dataset_name() in selected_names
+            tab for tab in self.dataset_tabs if tab.get_dataset_name() in selected_names
         ]
         if not self.selected_datasets and self.dataset_tabs:
             self.selected_datasets = list(self.dataset_tabs)
@@ -2593,7 +3595,8 @@ class ComparisonTab(QWidget):
         if selected_tabs:
             selected_names = {tab.get_dataset_name() for tab in selected_tabs}
             selected_tabs = [
-                tab for tab in self.dataset_tabs
+                tab
+                for tab in self.dataset_tabs
                 if tab.get_dataset_name() in selected_names
             ]
         else:
@@ -2644,7 +3647,8 @@ class ComparisonTab(QWidget):
         else:
             plot_scope = "all scoped visible"
         self._count_label.setText(
-            "Load datasets to compare" if n_loaded == 0
+            "Load datasets to compare"
+            if n_loaded == 0
             else f"{n_selected} selected  ·  {n_loaded} loaded  ·  {plot_scope}"
         )
         self._manage_btn.setEnabled(n_loaded >= 1)
@@ -2689,7 +3693,11 @@ class ComparisonTab(QWidget):
         """Return file-path keys for a comparison subset."""
         paths: list[str] = []
         for tab in dataset_tabs:
-            dataset = tab.get_dataset() if hasattr(tab, "get_dataset") else getattr(tab, "dataset", None)
+            dataset = (
+                tab.get_dataset()
+                if hasattr(tab, "get_dataset")
+                else getattr(tab, "dataset", None)
+            )
             file_path = getattr(dataset, "file_path", "") if dataset is not None else ""
             if file_path:
                 paths.append(file_path)
@@ -2698,15 +3706,13 @@ class ComparisonTab(QWidget):
     def _plot_dataset_tabs(self) -> list:
         """Return the selected datasets currently visible in the plot."""
         visible_tabs = [
-            tab for tab in self.selected_datasets
+            tab
+            for tab in self.selected_datasets
             if tab.get_dataset_name() not in self._plot_hidden
         ]
         if not self._pinned:
             return visible_tabs
-        return [
-            tab for tab in visible_tabs
-            if tab.get_dataset_name() in self._pinned
-        ]
+        return [tab for tab in visible_tabs if tab.get_dataset_name() in self._pinned]
 
     def _update_plot(self) -> None:
         """Push datasets into the comparison plot widget."""
@@ -2739,15 +3745,23 @@ class ComparisonTab(QWidget):
 
         for fig, canvas, message in [
             (self._box_fig, self._box_canvas, "Select at least 2 datasets to compare"),
-            (self._heat_fig, self._heat_canvas, "Select at least 2 datasets to compare"),
+            (
+                self._heat_fig,
+                self._heat_canvas,
+                "Select at least 2 datasets to compare",
+            ),
         ]:
             fig.clear()
             ax = fig.add_subplot(1, 1, 1)
             ax.text(
-                0.5, 0.5, message,
+                0.5,
+                0.5,
+                message,
                 transform=ax.transAxes,
-                ha='center', va='center',
-                fontsize=11, color=C.TEXT_MUTED,
+                ha="center",
+                va="center",
+                fontsize=11,
+                color=C.TEXT_MUTED,
             )
             ax.set_xticks([])
             ax.set_yticks([])
@@ -2819,7 +3833,11 @@ class ComparisonTab(QWidget):
         w.setObjectName("detailParamCell")
         w.setAttribute(Qt.WidgetAttribute.WA_StyledBackground)
         bg = C.BG_LOW if summary else C.BG
-        border = "2px solid rgba(139,117,84,0.30)" if summary else "1px solid rgba(212,196,168,0.45)"
+        border = (
+            "2px solid rgba(139,117,84,0.30)"
+            if summary
+            else "1px solid rgba(212,196,168,0.45)"
+        )
         w.setStyleSheet(
             f"QWidget#detailParamCell {{ background: {bg}; border-bottom: {border}; }}"
             "QWidget#detailParamCell QLabel { border: none; }"
@@ -2856,7 +3874,11 @@ class ComparisonTab(QWidget):
         w = QWidget()
         w.setObjectName("detailValueCell")
         w.setAttribute(Qt.WidgetAttribute.WA_StyledBackground)
-        border = "2px solid rgba(139,117,84,0.30)" if summary else "1px solid rgba(212,196,168,0.45)"
+        border = (
+            "2px solid rgba(139,117,84,0.30)"
+            if summary
+            else "1px solid rgba(212,196,168,0.45)"
+        )
         w.setStyleSheet(
             f"QWidget#detailValueCell {{ background: {background}; border-bottom: {border}; }}"
             "QWidget#detailValueCell QLabel { border: none; }"
@@ -2888,22 +3910,40 @@ class ComparisonTab(QWidget):
         return HydraulicConductivityConverter.UNIT_SYMBOLS[self._details_k_unit]
 
     def _format_k_value(self, value_m_s: float) -> str:
-        converted = HydraulicConductivityConverter.convert_from_m_per_s(value_m_s, self._details_k_unit)
-        return HydraulicConductivityConverter.DISPLAY_FORMATS[self._details_k_unit].format(converted)
+        converted = HydraulicConductivityConverter.convert_from_m_per_s(
+            value_m_s, self._details_k_unit
+        )
+        return HydraulicConductivityConverter.DISPLAY_FORMATS[
+            self._details_k_unit
+        ].format(converted)
 
-    def _configure_details_columns(self, table: QTableWidget, column_count: int) -> None:
+    def _configure_details_columns(
+        self, table: QTableWidget, column_count: int
+    ) -> None:
         header = table.horizontalHeader()
+        header.setStretchLastSection(False)
         header.setSectionResizeMode(0, QHeaderView.ResizeMode.Fixed)
         table.setColumnWidth(0, _DETAILS_ROW_HEADER_WIDTH)
+        data_resize_mode = (
+            QHeaderView.ResizeMode.Stretch
+            if column_count <= 8
+            else QHeaderView.ResizeMode.ResizeToContents
+        )
         for c in range(1, column_count):
-            header.setSectionResizeMode(c, QHeaderView.ResizeMode.ResizeToContents)
+            header.setSectionResizeMode(c, data_resize_mode)
+            if data_resize_mode == QHeaderView.ResizeMode.ResizeToContents:
+                table.setColumnWidth(c, max(120, table.columnWidth(c)))
 
     def _apply_grain_row_preset(self) -> None:
         allowed = self._GRAIN_PRESETS[self._details_preset]
         for row_i, (label, *_rest) in enumerate(self._GRAIN_ROWS):
-            self._grain_table.setRowHidden(row_i, allowed is not None and label not in allowed)
+            self._grain_table.setRowHidden(
+                row_i, allowed is not None and label not in allowed
+            )
 
-    def _apply_k_row_preset(self, method_names: list[str], summary_rows: list[tuple[str, str]]) -> None:
+    def _apply_k_row_preset(
+        self, method_names: list[str], summary_rows: list[tuple[str, str]]
+    ) -> None:
         if self._details_preset == "core":
             allowed_methods = None
             allowed_summaries = None
@@ -2915,10 +3955,15 @@ class ComparisonTab(QWidget):
             allowed_summaries = self._K_SUMMARY_LABELS
 
         for row_i, method in enumerate(method_names):
-            self._k_table.setRowHidden(row_i, allowed_methods is not None and method not in allowed_methods)
+            self._k_table.setRowHidden(
+                row_i, allowed_methods is not None and method not in allowed_methods
+            )
         offset = len(method_names)
         for idx, (label, _desc) in enumerate(summary_rows):
-            self._k_table.setRowHidden(offset + idx, allowed_summaries is not None and label not in allowed_summaries)
+            self._k_table.setRowHidden(
+                offset + idx,
+                allowed_summaries is not None and label not in allowed_summaries,
+            )
 
     def _refresh_aggregate_table(self) -> None:
         """Rebuild the snapshot-backed aggregate details table."""
@@ -2950,15 +3995,24 @@ class ComparisonTab(QWidget):
         def add_section(title: str) -> None:
             rows.append({"section": title})
 
-        def add_row(label: str, desc: str, overall: str, group_values: list[str], included: str, status: str) -> None:
-            rows.append({
-                "label": label,
-                "desc": desc,
-                "overall": overall,
-                "groups": group_values,
-                "included": included,
-                "status": status,
-            })
+        def add_row(
+            label: str,
+            desc: str,
+            overall: str,
+            group_values: list[str],
+            included: str,
+            status: str,
+        ) -> None:
+            rows.append(
+                {
+                    "label": label,
+                    "desc": desc,
+                    "overall": overall,
+                    "groups": group_values,
+                    "included": included,
+                    "status": status,
+                }
+            )
 
         def k_range(stats) -> str:
             if stats is None or stats.min_m_s is None or stats.max_m_s is None:
@@ -3009,10 +4063,13 @@ class ComparisonTab(QWidget):
         add_row(
             "Permeability class",
             "Class from aggregate geometric mean",
-            _perm_class(overall.geometric_mean_m_s) if overall.geometric_mean_m_s is not None else "-",
+            _perm_class(overall.geometric_mean_m_s)
+            if overall.geometric_mean_m_s is not None
+            else "-",
             [
                 _perm_class(k_report.by_group[group].geometric_mean_m_s)
-                if k_report.by_group.get(group) is not None and k_report.by_group[group].geometric_mean_m_s is not None
+                if k_report.by_group.get(group) is not None
+                and k_report.by_group[group].geometric_mean_m_s is not None
                 else "-"
                 for group in groups
             ],
@@ -3025,8 +4082,11 @@ class ComparisonTab(QWidget):
             for method in k_report.method_names:
                 method_stats = k_report.by_method.get(method)
                 group_values = [
-                    self._format_k_value(self._method_group_geometric_mean(k_report, method, group))
-                    if self._method_group_geometric_mean(k_report, method, group) is not None
+                    self._format_k_value(
+                        self._method_group_geometric_mean(k_report, method, group)
+                    )
+                    if self._method_group_geometric_mean(k_report, method, group)
+                    is not None
                     else "-"
                     for group in groups
                 ]
@@ -3042,18 +4102,43 @@ class ComparisonTab(QWidget):
         add_section("Grain aggregate context")
         grain_rows = [
             ("D50 median", "Median diameter per scope", "D50", "median", " mm"),
-            ("Mean grain size", "Arithmetic mean of distribution", "Dmean", "median", " mm"),
-            ("Fines percent median", "Passing at active fines boundary", "Fines%", "median", "%"),
+            (
+                "Mean grain size",
+                "Arithmetic mean of distribution",
+                "Dmean",
+                "median",
+                " mm",
+            ),
+            (
+                "Fines percent median",
+                "Passing at active fines boundary",
+                "Fines%",
+                "median",
+                "%",
+            ),
             ("Cu median", "Uniformity coefficient", "Cu", "median", ""),
         ]
         for label, desc, metric_key, attr, suffix in grain_rows:
             metric = grain_report.overall.metrics.get(metric_key)
-            overall_value = self._format_grain_summary_value(getattr(metric, attr, None) if metric is not None else None, suffix)
+            overall_value = self._format_grain_summary_value(
+                getattr(metric, attr, None) if metric is not None else None, suffix
+            )
             group_values = []
             for group in groups:
                 group_stats = grain_report.by_group.get(group)
-                group_metric = group_stats.metrics.get(metric_key) if group_stats is not None else None
-                group_values.append(self._format_grain_summary_value(getattr(group_metric, attr, None) if group_metric is not None else None, suffix))
+                group_metric = (
+                    group_stats.metrics.get(metric_key)
+                    if group_stats is not None
+                    else None
+                )
+                group_values.append(
+                    self._format_grain_summary_value(
+                        getattr(group_metric, attr, None)
+                        if group_metric is not None
+                        else None,
+                        suffix,
+                    )
+                )
             add_row(
                 label,
                 desc,
@@ -3066,7 +4151,12 @@ class ComparisonTab(QWidget):
             "Dominant class",
             "Most common classification label",
             grain_report.overall.dominant_class,
-            [grain_report.by_group[group].dominant_class if group in grain_report.by_group else "-" for group in groups],
+            [
+                grain_report.by_group[group].dominant_class
+                if group in grain_report.by_group
+                else "-"
+                for group in groups
+            ],
             f"{grain_report.overall.dataset_count} / {grain_report.overall.dataset_count}",
             "OK" if grain_report.overall.dominant_class != "N/A" else "N/A",
         )
@@ -3086,7 +4176,9 @@ class ComparisonTab(QWidget):
             self._aggregate_table.setCellWidget(
                 row_i,
                 0,
-                self._make_param_cell(row["label"], row["desc"], olive=False, summary=False),
+                self._make_param_cell(
+                    row["label"], row["desc"], olive=False, summary=False
+                ),
             )
             values = [row["overall"], *row["groups"], row["included"], row["status"]]
             for col_i, text in enumerate(values, start=1):
@@ -3099,7 +4191,9 @@ class ComparisonTab(QWidget):
                 else:
                     text_color = C.TEXT_MID
                 item = _SortableTableWidgetItem(str(text))
-                item.setTextAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
+                item.setTextAlignment(
+                    Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter
+                )
                 item.setFont(QFont(F.MONO, F.SZ_SM))
                 item.setForeground(QBrush(QColor(text_color)))
                 self._aggregate_table.setItem(row_i, col_i, item)
@@ -3114,7 +4208,9 @@ class ComparisonTab(QWidget):
         self._aggregate_table.setSortingEnabled(False)
 
     @staticmethod
-    def _method_group_geometric_mean(k_report, method_name: str, group_name: str) -> Optional[float]:
+    def _method_group_geometric_mean(
+        k_report, method_name: str, group_name: str
+    ) -> Optional[float]:
         values = [
             record.k_value
             for record in k_report.included_records
@@ -3182,14 +4278,22 @@ class ComparisonTab(QWidget):
                 label_item.setData(_SORT_PINNED_ORDER_ROLE, pinned_order)
             self._grain_table.setItem(row_i, 0, label_item)
             self._grain_table.setCellWidget(
-                row_i, 0, self._make_param_cell(label, tooltip, olive, summary=summary_row)
+                row_i,
+                0,
+                self._make_param_cell(label, tooltip, olive, summary=summary_row),
             )
-            self._grain_table.setRowHeight(row_i, _DETAILS_SUMMARY_ROW_HEIGHT if summary_row else _DETAILS_ROW_HEIGHT)
+            self._grain_table.setRowHeight(
+                row_i,
+                _DETAILS_SUMMARY_ROW_HEIGHT if summary_row else _DETAILS_ROW_HEIGHT,
+            )
 
             if is_text:
                 if label == "Classif.":
                     for col_i, tab in enumerate(tabs):
-                        val_str = tab.get_dataset().classify(scheme=self._active_scheme).label or "—"
+                        val_str = (
+                            tab.get_dataset().classify(scheme=self._active_scheme).label
+                            or "—"
+                        )
                         color = DATASET_COLORS[col_i % len(DATASET_COLORS)]
                         item = _SortableTableWidgetItem(val_str)
                         item.setData(Qt.ItemDataRole.UserRole, val_str.lower())
@@ -3204,7 +4308,9 @@ class ComparisonTab(QWidget):
                         self._grain_table.setCellWidget(
                             row_i,
                             1 + col_i,
-                            self._make_value_cell(val_str, color, C.BG_LOW, summary=True),
+                            self._make_value_cell(
+                                val_str, color, C.BG_LOW, summary=True
+                            ),
                         )
                 elif label == "Class":
                     for col_i, tab in enumerate(tabs):
@@ -3223,7 +4329,9 @@ class ComparisonTab(QWidget):
                         self._grain_table.setCellWidget(
                             row_i,
                             1 + col_i,
-                            self._make_value_cell(val_str, color, C.BG_LOW, summary=True),
+                            self._make_value_cell(
+                                val_str, color, C.BG_LOW, summary=True
+                            ),
                         )
                 continue
 
@@ -3260,7 +4368,11 @@ class ComparisonTab(QWidget):
                 self._grain_table.setCellWidget(
                     row_i,
                     1 + col_i,
-                    self._make_value_cell(item.text(), color if val is not None else C.TEXT_MUTED, bg_color),
+                    self._make_value_cell(
+                        item.text(),
+                        color if val is not None else C.TEXT_MUTED,
+                        bg_color,
+                    ),
                 )
 
         self._grain_table.resizeColumnsToContents()
@@ -3272,14 +4384,14 @@ class ComparisonTab(QWidget):
 
     # ── K-value descriptions (method name → short description) ───────────────
     _K_DESCS: dict = {
-        "Hazen":         "based on D10",
+        "Hazen": "based on D10",
         "Kozeny-Carman": "pore structure",
-        "USBR":          "Bureau of Reclamation",
-        "Terzaghi":      "sandy soils",
-        "Slichter":      "uniform sands",
-        "Beyer":         "non-uniform sands",
-        "Seelheim":      "D10 based",
-        "Pavchich":      "coarse sands",
+        "USBR": "Bureau of Reclamation",
+        "Terzaghi": "sandy soils",
+        "Slichter": "uniform sands",
+        "Beyer": "non-uniform sands",
+        "Seelheim": "D10 based",
+        "Pavchich": "coarse sands",
     }
 
     def _refresh_k_table(self) -> None:
@@ -3297,11 +4409,11 @@ class ComparisonTab(QWidget):
 
         # Summary rows appended at the bottom
         SUMMARY_ROWS = [
-            ("K̄ geometric",  "All methods"),
+            ("K̄ geometric", "All methods"),
             ("K̄ arithmetic", "All methods"),
-            ("K median",      "All methods"),
-            ("K std. dev.",   "Spread across methods"),
-            ("Perm. class",   "Classification"),
+            ("K median", "All methods"),
+            ("K std. dev.", "Spread across methods"),
+            ("Perm. class", "Classification"),
         ]
 
         n_method = len(method_names)
@@ -3394,7 +4506,9 @@ class ComparisonTab(QWidget):
             col_vals = [
                 record.k_value
                 for record in aggregation.included_records
-                if record.dataset_name == dataset_name and record.k_value is not None and record.k_value > 0
+                if record.dataset_name == dataset_name
+                and record.k_value is not None
+                and record.k_value > 0
             ]
             valid_k_per_ds.append(col_vals)
 
@@ -3407,7 +4521,11 @@ class ComparisonTab(QWidget):
             self._k_table.setRowHeight(row_i, _DETAILS_SUMMARY_ROW_HEIGHT)
 
             is_geom = s_label == "K̄ geometric"
-            detail = s_desc if s_label == "Perm. class" else f"{s_desc} · {self._details_unit_symbol()}"
+            detail = (
+                s_desc
+                if s_label == "Perm. class"
+                else f"{s_desc} · {self._details_unit_symbol()}"
+            )
             # Two-line summary label, olive-highlighted for K̄ geometric
             summary_item = _SortableTableWidgetItem("")
             summary_item.setData(Qt.ItemDataRole.UserRole, s_label.lower())
@@ -3415,13 +4533,19 @@ class ComparisonTab(QWidget):
             summary_item.setData(_SORT_PINNED_ORDER_ROLE, si)
             self._k_table.setItem(row_i, 0, summary_item)
             self._k_table.setCellWidget(
-                row_i, 0, self._make_param_cell(s_label, detail, olive=is_geom, summary=True)
+                row_i,
+                0,
+                self._make_param_cell(s_label, detail, olive=is_geom, summary=True),
             )
 
             for col_i, vk in enumerate(valid_k_per_ds):
                 color = DATASET_COLORS[col_i % len(DATASET_COLORS)]
                 if s_label == "K̄ geometric":
-                    txt = self._format_k_value(float(np.exp(np.mean(np.log(vk))))) if vk else "—"
+                    txt = (
+                        self._format_k_value(float(np.exp(np.mean(np.log(vk)))))
+                        if vk
+                        else "—"
+                    )
                 elif s_label == "K̄ arithmetic":
                     txt = self._format_k_value(float(np.mean(vk))) if vk else "—"
                 elif s_label == "K median":
@@ -3484,7 +4608,13 @@ class ComparisonTab(QWidget):
                 self._k_table.setCellWidget(
                     row_i,
                     1 + col_i,
-                    self._make_value_cell(cell.text(), text_color, summary_bg.name(), bold=bold_value, summary=True),
+                    self._make_value_cell(
+                        cell.text(),
+                        text_color,
+                        summary_bg.name(),
+                        bold=bold_value,
+                        summary=True,
+                    ),
                 )
 
         self._k_table.resizeColumnsToContents()
@@ -3507,7 +4637,10 @@ class ComparisonTab(QWidget):
             groups = list(snapshot.k.group_names)
             group_colors = self._group_color_map(groups)
             members_by_group = self._stats_group_members()
-            layout.insertWidget(layout.count() - 1, self._make_overall_scope_chip(len(self.selected_datasets)))
+            layout.insertWidget(
+                layout.count() - 1,
+                self._make_overall_scope_chip(len(self.selected_datasets)),
+            )
             for group_name in groups:
                 members = members_by_group.get(group_name, [])
                 chip = self._make_group_chip(
@@ -3522,13 +4655,20 @@ class ComparisonTab(QWidget):
         for i, tab in enumerate(self.selected_datasets):
             name = tab.get_dataset_name()
             color = DATASET_COLORS[i % len(DATASET_COLORS)]
-            chip = self._make_dataset_chip(name, color, dataset_group_name(tab.get_dataset()))
+            chip = self._make_dataset_chip(
+                name, color, dataset_group_name(tab.get_dataset())
+            )
             layout.insertWidget(layout.count() - 1, chip)
 
     def _build_stats_insights(self) -> list[tuple[str, str]]:
         tabs = self.selected_datasets
         if not tabs:
-            return [("No comparison data", "Select at least two datasets to populate comparison statistics.")]
+            return [
+                (
+                    "No comparison data",
+                    "Select at least two datasets to populate comparison statistics.",
+                )
+            ]
 
         snapshot = self._build_comparison_snapshot()
         aggregation = snapshot.k
@@ -3541,7 +4681,9 @@ class ComparisonTab(QWidget):
             vals = [
                 record.k_value
                 for record in aggregation.included_records
-                if record.dataset_name == dataset_name and record.k_value is not None and record.k_value > 0
+                if record.dataset_name == dataset_name
+                and record.k_value is not None
+                and record.k_value > 0
             ]
             if len(vals) >= 2:
                 spread = math.log10(max(vals)) - math.log10(min(vals))
@@ -3577,7 +4719,9 @@ class ComparisonTab(QWidget):
             )
 
         if issue_counts:
-            caution_method, issue_count = max(issue_counts.items(), key=lambda item: item[1])
+            caution_method, issue_count = max(
+                issue_counts.items(), key=lambda item: item[1]
+            )
             if issue_count > 0:
                 insights.append(
                     (
@@ -3606,24 +4750,42 @@ class ComparisonTab(QWidget):
             self._stats_context.setText("Select at least 2 datasets to compare")
             self._stats_dist_meta.setText("")
             self._stats_agreement_meta.setText("")
+            self._set_compact_rail_header(
+                self._stats_rail_title,
+                self._stats_rail_subtitle,
+                self._stats_rail_badge,
+                title="Statistics Summary",
+                subtitle="No datasets selected",
+                badge="0 / 0",
+            )
             if hasattr(self, "_stats_group_section"):
                 self._stats_group_section.setVisible(False)
+            if hasattr(self, "_stats_visible_table_section"):
+                self._stats_visible_table_section.setVisible(False)
             if hasattr(self, "_stats_scope_layout"):
                 self._reset_layout(self._stats_scope_layout)
             if hasattr(self, "_stats_filter_layout"):
                 self._reset_layout(self._stats_filter_layout)
-            if hasattr(self, "_stats_grain_layout"):
-                self._reset_layout(self._stats_grain_layout)
             if hasattr(self, "_stats_group_layout"):
                 self._reset_layout(self._stats_group_layout)
+            if hasattr(self, "_stats_visible_table_layout"):
+                self._reset_layout(self._stats_visible_table_layout)
             self._clear_stats_tables()
             self._reset_layout(self._stats_insights_layout)
             self._stats_insights_layout.addWidget(
-                self._make_stats_insight_row("No comparison data", "Select at least two datasets to populate comparison statistics.")
+                self._make_rail_status_line(
+                    "Select at least two datasets to populate comparison statistics.",
+                    tone="warn",
+                )
             )
             self._reset_layout(self._stats_summary_layout)
-            self._stats_summary_layout.addWidget(self._make_stats_summary_row("Selected metric", metric_label))
-            self._stats_summary_layout.addWidget(self._make_stats_summary_row("Unit", self._stats_unit_symbol()))
+            self._add_rail_metric_grid(
+                self._stats_summary_layout,
+                [
+                    ("Selected metric", metric_label),
+                    ("Unit", self._stats_unit_symbol()),
+                ],
+            )
             return
 
         snapshot = self._build_comparison_snapshot()
@@ -3642,86 +4804,152 @@ class ComparisonTab(QWidget):
         missing_count = stats.missing_count + stats.excluded_count
 
         self._stats_context.setText(
-            f"{len(self.selected_datasets)} datasets · {self._scheme_label()} · {self._stats_unit_symbol()} · {metric_label}"
-        )
-        self._stats_context.setText(
             f"{len(self.selected_datasets)} datasets - {len(aggregation.group_names)} groups - "
             f"{self._stats_unit_symbol()} - {metric_label} - {filter_label}"
         )
-        scope_label = "overall + groups" if self._stats_uses_group_scope() else "datasets"
+        self._set_compact_rail_header(
+            self._stats_rail_title,
+            self._stats_rail_subtitle,
+            self._stats_rail_badge,
+            title="Statistics Summary",
+            subtitle=f"{len(self.selected_datasets)} datasets - {len(aggregation.group_names)} groups - {'OK + warnings' if self._stats_include_warnings else 'OK only'}",
+            badge=f"{valid_count} / {total_cells}" if total_cells else "0 / 0",
+        )
+        scope_label = (
+            "overall + groups" if self._stats_uses_group_scope() else "datasets"
+        )
         self._stats_dist_meta.setText(f"{metric_label} - {scope_label}")
-        self._stats_agreement_meta.setText(f"{len(method_names)} methods - {scope_label}")
+        self._stats_agreement_meta.setText(
+            f"{len(method_names)} methods - {scope_label}"
+        )
         self._refresh_stats_scope_table(snapshot)
         self._refresh_stats_method_table(snapshot)
 
         if hasattr(self, "_stats_scope_layout"):
             self._reset_layout(self._stats_scope_layout)
-            for label, value in [
-                ("Datasets", str(len(self.selected_datasets))),
-                ("Groups", str(len(aggregation.group_names))),
-                ("Methods", str(len(method_names))),
-                ("Included K cells", f"{valid_count} / {total_cells}" if total_cells else "0"),
-                ("Warnings excluded", str(warning_count if not self._stats_include_warnings else 0)),
-            ]:
-                self._stats_scope_layout.addWidget(self._make_stats_summary_row(label, value))
+            warnings_excluded = warning_count if not self._stats_include_warnings else 0
+            self._stats_scope_layout.addWidget(
+                self._make_rail_chip_group(
+                    [
+                        (f"{len(self.selected_datasets)} datasets", "neutral"),
+                        (f"{len(aggregation.group_names)} groups", "neutral"),
+                        (f"{len(method_names)} methods", "neutral"),
+                        (
+                            f"{valid_count} / {total_cells} K cells",
+                            "ok" if valid_count else "warn",
+                        ),
+                        (
+                            f"{warnings_excluded} warnings excluded",
+                            "warn" if warnings_excluded else "neutral",
+                        ),
+                    ]
+                )
+            )
 
         if hasattr(self, "_stats_filter_layout"):
             self._reset_layout(self._stats_filter_layout)
-            method_text = "Valid in all" if self._stats_common_methods_only or self._stats_method_scope == "valid_all" else "All methods"
-            for label, value in [
-                ("View", "Coverage" if self._stats_view_mode == "coverage" else "K spread"),
-                ("Metric", metric_label),
-                ("Methods", method_text),
-                ("Status", "OK + warnings" if self._stats_include_warnings else "OK only"),
-                ("Unit", self._stats_unit_symbol()),
-            ]:
-                self._stats_filter_layout.addWidget(self._make_stats_summary_row(label, value))
+            method_text = (
+                "Valid in all"
+                if self._stats_common_methods_only
+                or self._stats_method_scope == "valid_all"
+                else "All methods"
+            )
+            status_text = "OK + warnings" if self._stats_include_warnings else "OK only"
+            self._stats_filter_layout.addWidget(
+                self._make_rail_chip_group(
+                    [
+                        (
+                            "Coverage"
+                            if self._stats_view_mode == "coverage"
+                            else "K spread",
+                            "ok",
+                        ),
+                        (metric_label, "neutral"),
+                        (method_text, "neutral"),
+                        (
+                            status_text,
+                            "ok" if not self._stats_include_warnings else "warn",
+                        ),
+                        (self._stats_unit_symbol(), "neutral"),
+                    ]
+                )
+            )
 
         self._reset_layout(self._stats_insights_layout)
         k_range = "-"
         if stats.min_m_s is not None and stats.max_m_s is not None:
             k_range = f"{self._format_stats_k_value(stats.min_m_s)} - {self._format_stats_k_value(stats.max_m_s)}"
-        for label, value in [
-            ("Overall geo. mean", self._format_stats_k_value(stats.geometric_mean_m_s) if stats.geometric_mean_m_s is not None else "-"),
-            ("Arithmetic mean", self._format_stats_k_value(stats.arithmetic_mean_m_s) if stats.arithmetic_mean_m_s is not None else "-"),
-            ("Overall median", self._format_stats_k_value(stats.median_m_s) if stats.median_m_s is not None else "-"),
-            ("Overall range", k_range),
-            ("Log spread", f"{stats.log10_std_dev:.2f}" if stats.log10_std_dev is not None else "-"),
-        ]:
-            self._stats_insights_layout.addWidget(self._make_stats_summary_row(label, value))
-
-        if hasattr(self, "_stats_grain_layout"):
-            self._reset_layout(self._stats_grain_layout)
-            grain_stats = snapshot.grain.overall
-            for label, metric_key, suffix in [
-                ("D50 median", "D50", " mm"),
-                ("Mean grain size", "Dmean", " mm"),
-                ("Cu median", "Cu", ""),
-                ("Fines median", "Fines%", "%"),
-            ]:
-                metric = grain_stats.metrics.get(metric_key)
-                value = metric.median if metric is not None else None
-                self._stats_grain_layout.addWidget(
-                    self._make_stats_summary_row(label, self._format_grain_summary_value(value, suffix))
-                )
-            self._stats_grain_layout.addWidget(
-                self._make_stats_summary_row("Dominant class", grain_stats.dominant_class)
+        geo_text = (
+            self._format_stats_k_value(stats.geometric_mean_m_s)
+            if stats.geometric_mean_m_s is not None
+            else "-"
+        )
+        self._stats_insights_layout.addWidget(
+            self._make_rail_headline(
+                "Geometric mean", "overall selected scope", geo_text
             )
+        )
+        self._add_rail_metric_grid(
+            self._stats_insights_layout,
+            [
+                (
+                    "Arithmetic",
+                    self._format_stats_k_value(stats.arithmetic_mean_m_s)
+                    if stats.arithmetic_mean_m_s is not None
+                    else "-",
+                ),
+                (
+                    "Median",
+                    self._format_stats_k_value(stats.median_m_s)
+                    if stats.median_m_s is not None
+                    else "-",
+                ),
+                ("Range", k_range),
+                (
+                    "ln(K) std.",
+                    f"{stats.ln_std_dev:.2f}" if stats.ln_std_dev is not None else "-",
+                ),
+            ],
+        )
+        self._stats_insights_layout.addWidget(
+            self._make_rail_status_line(
+                "Moderate K heterogeneity for the active scope"
+                if stats.ln_std_dev is not None and stats.ln_std_dev < 1
+                else "High K heterogeneity in the active scope",
+                tone="ok"
+                if stats.ln_std_dev is not None and stats.ln_std_dev < 1
+                else "warn",
+            )
+        )
 
         self._reset_layout(self._stats_summary_layout)
-        for label, value in [
-            ("Methods available", str(len(method_names))),
-            ("Valid in all", str(len(aggregation.complete_methods))),
-            ("Values included", f"{valid_count} / {total_cells}" if total_cells else "0"),
-            ("With warnings", str(warning_count)),
-            ("Excluded cells", str(stats.excluded_count)),
-            ("Missing cells", str(stats.missing_count)),
-        ]:
-            self._stats_summary_layout.addWidget(self._make_stats_summary_row(label, value))
+        coverage_pct = (
+            int(round((valid_count / total_cells) * 100)) if total_cells else 0
+        )
+        self._stats_summary_layout.addWidget(
+            self._make_rail_headline(
+                "Included K cells",
+                "after method and status filters",
+                f"{coverage_pct}%",
+            )
+        )
+        self._add_rail_metric_grid(
+            self._stats_summary_layout,
+            [
+                ("Methods available", str(len(method_names))),
+                ("Valid in all", str(len(aggregation.complete_methods))),
+                (
+                    "Values included",
+                    f"{valid_count} / {total_cells}" if total_cells else "0",
+                ),
+                ("With warnings", str(warning_count)),
+                ("Excluded cells", str(stats.excluded_count)),
+                ("Missing cells", str(stats.missing_count)),
+            ],
+        )
 
-        show_group_breakdown = (
-            len(aggregation.group_names) > 1
-            or any(group != UNGROUPED_LABEL for group in aggregation.group_names)
+        show_group_breakdown = len(aggregation.group_names) > 1 or any(
+            group != UNGROUPED_LABEL for group in aggregation.group_names
         )
         if hasattr(self, "_stats_group_layout"):
             self._reset_layout(self._stats_group_layout)
@@ -3729,24 +4957,63 @@ class ComparisonTab(QWidget):
             self._stats_group_section.setVisible(show_group_breakdown)
         if show_group_breakdown and hasattr(self, "_stats_group_layout"):
             grain = snapshot.grain
+            group_colors = self._group_color_map(list(aggregation.group_names))
             for group_name in aggregation.group_names:
                 group_stats = aggregation.by_group.get(group_name)
                 grain_stats = grain.by_group.get(group_name)
-                metric_value = self._stats_metric_value(group_stats) if group_stats is not None else None
-                k_text = self._format_stats_k_value(metric_value) if metric_value is not None else "-"
+                metric_value = (
+                    self._stats_metric_value(group_stats)
+                    if group_stats is not None
+                    else None
+                )
+                k_text = (
+                    self._format_stats_k_value(metric_value)
+                    if metric_value is not None
+                    else "-"
+                )
                 d50_text = "-"
-                dmean_text = "-"
                 dataset_count = 0
                 if grain_stats is not None:
                     dataset_count = grain_stats.dataset_count
                     d50_metric = grain_stats.metrics.get("D50")
                     if d50_metric is not None and d50_metric.median is not None:
                         d50_text = f"{d50_metric.median:.3g} mm"
-                    dmean_metric = grain_stats.metrics.get("Dmean")
-                    if dmean_metric is not None and dmean_metric.median is not None:
-                        dmean_text = f"{dmean_metric.median:.3g} mm"
-                value = f"{dataset_count} datasets, K {k_text}, D50 {d50_text}, mean {dmean_text}"
-                self._stats_group_layout.addWidget(self._make_stats_summary_row(group_name, value))
+                included_text = "0 / 0"
+                if group_stats is not None:
+                    included_text = (
+                        f"{group_stats.included_count} / {group_stats.total_cells}"
+                    )
+                self._stats_group_layout.addWidget(
+                    self._make_rail_group_row(
+                        group_name,
+                        f"{dataset_count} datasets - {included_text} K cells",
+                        f"K {k_text}\nD50 {d50_text}",
+                        group_colors.get(group_name, C.TEXT_MID),
+                    )
+                )
+
+        if hasattr(self, "_stats_visible_table_layout"):
+            self._reset_layout(self._stats_visible_table_layout)
+            active_rows = (
+                self._stats_method_table.rowCount()
+                if self._stats_view_mode == "coverage"
+                else self._stats_scope_table.rowCount()
+            )
+            active_cols = (
+                self._stats_method_table.columnCount()
+                if self._stats_view_mode == "coverage"
+                else self._stats_scope_table.columnCount()
+            )
+            self._add_rail_metric_grid(
+                self._stats_visible_table_layout,
+                [
+                    ("Rows", str(active_rows)),
+                    ("Columns", str(active_cols)),
+                    ("Export", "visible table"),
+                    ("Plot", "PNG/SVG"),
+                ],
+            )
+            self._stats_visible_table_section.setVisible(True)
 
     def _refresh_stats(self) -> None:
         """Redraw both matplotlib statistics figures."""
@@ -3782,7 +5049,9 @@ class ComparisonTab(QWidget):
                     and (group_name is None or record.group_name == group_name)
                 ]
                 vals = [
-                    HydraulicConductivityConverter.convert_from_m_per_s(v, self._stats_k_unit)
+                    HydraulicConductivityConverter.convert_from_m_per_s(
+                        v, self._stats_k_unit
+                    )
                     for v in vals_m_s
                 ]
                 data_per_ds.append(vals)
@@ -3794,10 +5063,14 @@ class ComparisonTab(QWidget):
                 vals_m_s = [
                     record.k_value
                     for record in aggregation.included_records
-                    if record.dataset_name == dataset_name and record.k_value is not None and record.k_value > 0
+                    if record.dataset_name == dataset_name
+                    and record.k_value is not None
+                    and record.k_value > 0
                 ]
                 vals = [
-                    HydraulicConductivityConverter.convert_from_m_per_s(v, self._stats_k_unit)
+                    HydraulicConductivityConverter.convert_from_m_per_s(
+                        v, self._stats_k_unit
+                    )
                     for v in vals_m_s
                 ]
                 data_per_ds.append(vals)
@@ -3806,9 +5079,14 @@ class ComparisonTab(QWidget):
 
         if not any(data_per_ds):
             ax.text(
-                0.5, 0.5, "No K data available",
-                ha="center", va="center", transform=ax.transAxes,
-                color=C.TEXT_MUTED, fontsize=11,
+                0.5,
+                0.5,
+                "No K data available",
+                ha="center",
+                va="center",
+                transform=ax.transAxes,
+                color=C.TEXT_MUTED,
+                fontsize=11,
             )
             self._box_canvas.draw()
             return
@@ -3844,9 +5122,6 @@ class ComparisonTab(QWidget):
                 marker_values.append(float(np.mean(vals)))
             elif self._stats_metric == "median":
                 marker_values.append(float(np.median(vals)))
-            elif self._stats_metric == "range":
-                range_value = float(max(vals) - min(vals))
-                marker_values.append(range_value if range_value > 0 else float(vals[0]))
             else:
                 marker_values.append(float(np.exp(np.mean(np.log(vals)))))
         x_positions = list(range(1, len(p_data) + 1))
@@ -3864,13 +5139,19 @@ class ComparisonTab(QWidget):
         ax.set_yscale("log")
         ax.set_ylabel(f"K ({self._stats_unit_symbol()})", color=C.TEXT_MID, fontsize=10)
         ax.set_title(
-            "K-value Distribution by Group" if self._stats_uses_group_scope() else "K-value Distribution by Dataset",
+            "K-value Distribution by Group"
+            if self._stats_uses_group_scope()
+            else "K-value Distribution by Dataset",
             color=C.TEXT_MID,
             fontsize=11,
             fontweight="600",
         )
         many_scopes = len(p_labels) > 6
-        ax.tick_params(axis="x", labelrotation=18 if many_scopes else 0, labelsize=7 if many_scopes else 8)
+        ax.tick_params(
+            axis="x",
+            labelrotation=18 if many_scopes else 0,
+            labelsize=7 if many_scopes else 8,
+        )
         ax.tick_params(axis="y", labelsize=8)
         for idx, tick_lbl in enumerate(ax.get_xticklabels()):
             tick_lbl.set_color(p_colors[idx % len(p_colors)])
@@ -3879,7 +5160,8 @@ class ComparisonTab(QWidget):
         ax.spines["top"].set_visible(False)
         ax.spines["right"].set_visible(False)
         ax.text(
-            0.99, 0.98,
+            0.99,
+            0.98,
             f"Marker: {self._stats_metric_label()}",
             transform=ax.transAxes,
             ha="right",
@@ -3912,17 +5194,32 @@ class ComparisonTab(QWidget):
             group_colors = self._group_color_map(groups)
             members_by_group = self._stats_group_members()
             scope_names = ["Overall", *groups]
-            scope_colors = [C.EARTH, *[group_colors.get(group, C.TEXT_MID) for group in groups]]
-            scope_dataset_counts = [len(tabs), *[len(members_by_group.get(group, [])) for group in groups]]
+            scope_colors = [
+                C.EARTH,
+                *[group_colors.get(group, C.TEXT_MID) for group in groups],
+            ]
+            scope_dataset_counts = [
+                len(tabs),
+                *[len(members_by_group.get(group, [])) for group in groups],
+            ]
         else:
-            scope_names = [self._short_dataset_name(tab.get_dataset_name(), max_width=84) for tab in tabs]
-            scope_colors = [DATASET_COLORS[i % len(DATASET_COLORS)] for i, _tab in enumerate(tabs)]
+            scope_names = [
+                self._short_dataset_name(tab.get_dataset_name(), max_width=84)
+                for tab in tabs
+            ]
+            scope_colors = [
+                DATASET_COLORS[i % len(DATASET_COLORS)] for i, _tab in enumerate(tabs)
+            ]
             scope_dataset_counts = [1 for _tab in tabs]
 
         if not method_names or not scope_names:
             ax.text(
-                0.5, 0.5, "No method data available",
-                ha="center", va="center", transform=ax.transAxes,
+                0.5,
+                0.5,
+                "No method data available",
+                ha="center",
+                va="center",
+                transform=ax.transAxes,
                 color=C.TEXT_MUTED,
             )
             self._heat_canvas.draw()
@@ -3937,7 +5234,11 @@ class ComparisonTab(QWidget):
         }
         if use_group_scope:
             records_by_method = {
-                method: [record for record in aggregation.records if record.method_name == method]
+                method: [
+                    record
+                    for record in aggregation.records
+                    if record.method_name == method
+                ]
                 for method in method_names
             }
             for ci, scope_name in enumerate(scope_names):
@@ -3946,16 +5247,21 @@ class ComparisonTab(QWidget):
                     method_records = records_by_method.get(method, [])
                     if scope_name != "Overall":
                         method_records = [
-                            record for record in method_records
+                            record
+                            for record in method_records
                             if record.group_name == scope_name
                         ]
                     included = sum(1 for record in method_records if record.included)
-                    warnings = sum(1 for record in method_records if record.status == "Warning")
+                    warnings = sum(
+                        1 for record in method_records if record.status == "Warning"
+                    )
                     if dataset_count and included == dataset_count and warnings == 0:
                         matrix[ri, ci] = 2.0
                     elif included > 0 or warnings > 0:
                         matrix[ri, ci] = 1.0
-                    overlay_text[ri][ci] = f"{included}/{dataset_count}" if dataset_count else "-"
+                    overlay_text[ri][ci] = (
+                        f"{included}/{dataset_count}" if dataset_count else "-"
+                    )
         else:
             for ci, tab in enumerate(tabs):
                 dataset_name = tab.get_dataset_name()
@@ -3995,7 +5301,9 @@ class ComparisonTab(QWidget):
         ax.set_yticks(range(len(method_names)))
         ax.set_yticklabels(method_names, fontsize=8)
         ax.set_title(
-            "Method Coverage by Group" if use_group_scope else "Method Agreement & Applicability",
+            "Method Coverage by Group"
+            if use_group_scope
+            else "Method Agreement & Applicability",
             color=C.TEXT_MID,
             fontsize=11,
             fontweight="600",
@@ -4031,26 +5339,42 @@ class ComparisonTab(QWidget):
                 v = matrix[ri, ci]
                 if use_group_scope:
                     ax.text(
-                        ci, ri, overlay_text[ri][ci],
-                        ha="center", va="center",
+                        ci,
+                        ri,
+                        overlay_text[ri][ci],
+                        ha="center",
+                        va="center",
                         fontsize=7,
                         fontweight="700",
-                        color=C.TEXT_MID if v >= 2.0 else "white" if v >= 1.0 else "#8e816f",
+                        color=C.TEXT_MID
+                        if v >= 2.0
+                        else "white"
+                        if v >= 1.0
+                        else "#8e816f",
                     )
                     continue
                 if v >= 2.0:
                     continue
                 if v >= 1.0:
                     ax.text(
-                        ci, ri, "!",
-                        ha="center", va="center",
-                        fontsize=9, fontweight="700", color="white",
+                        ci,
+                        ri,
+                        "!",
+                        ha="center",
+                        va="center",
+                        fontsize=9,
+                        fontweight="700",
+                        color="white",
                     )
                 else:
                     ax.text(
-                        ci, ri, "—",
-                        ha="center", va="center",
-                        fontsize=9, color="#8e816f",
+                        ci,
+                        ri,
+                        "—",
+                        ha="center",
+                        va="center",
+                        fontsize=9,
+                        color="#8e816f",
                     )
 
         # Color x-tick labels per dataset or group color.
@@ -4089,6 +5413,7 @@ class ComparisonTab(QWidget):
                 )
         except Exception as exc:
             from PyQt6.QtWidgets import QMessageBox
+
             QMessageBox.warning(
                 self,
                 "Export Failed",
