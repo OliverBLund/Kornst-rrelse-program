@@ -641,25 +641,6 @@ QWidget#app-toolbar QPushButton[toolaction="true"][active="true"] {{
     border-color: rgba(107,142,35,0.35);
     color: {C.OLIVE};
 }}
-/* Primary action in toolbar (Calculate K) */
-QWidget#app-toolbar QPushButton[toolprimary="true"] {{
-    background: {C.OLIVE};
-    border: 1px solid {C.OLIVE_DK};
-    border-radius: {r}px;
-    color: white;
-    font-weight: 600;
-    font-size: {F.SZ_BASE}pt;
-    padding: 0 13px;
-    min-height: 26px;
-    max-height: 28px;
-}}
-QWidget#app-toolbar QPushButton[toolprimary="true"]:hover {{
-    background: {C.OLIVE_H};
-}}
-QWidget#app-toolbar QPushButton[toolprimary="true"]:pressed {{
-    background: {C.OLIVE_DK};
-}}
-
 /* ════════════════════════════════════════
    STATUS BAR  — matches _shared.css .st
 ════════════════════════════════════════ */

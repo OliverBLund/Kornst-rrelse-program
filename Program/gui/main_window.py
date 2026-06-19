@@ -29,6 +29,7 @@ from gui.reporting_tab import ReportingTab
 from gui.export_tab import ExportTab
 from gui.error_tab import ErrorTab
 from gui.loading_dialog import LoadingDialog
+from gui.method_selection_dialog import MethodSelectionDialog
 from gui.log_overlay import (
     InAppLogStore,
     LogDropdownPanel,
@@ -36,12 +37,14 @@ from gui.log_overlay import (
     uninstall_in_app_logging,
 )
 from gui.stack_fade import StackFadeController, TabFadeInController
+from gui.startup_tour import StartupTourOverlay, TourStep
 from gui.welcome_widget import WelcomeWidget
 from gui.theme import C, F, SZ, build_stylesheet, icon, apply_matplotlib_style, apply_tooltip_style
 from gui.plot_context import build_plot_context_from_tab
 from qt_chrome import FramelessMainWindowMixin
 from data_loader import DataLoader, GrainSizeData, get_test_data_files
 from k_calculations import KCalculator
+from method_registry import normalize_method_selection
 from grain_classification import ISO14688
 from load_process_worker import run_external_load
 
@@ -67,13 +70,10 @@ def _save_welcome_preference(settings, dont_show: bool) -> None:
 
 class _AppToolbar(QWidget):
     """
-    Global toolbar: navigation tabs (left) + action buttons (middle) + help (right).
+    Global toolbar: navigation tabs (left) + log/help actions (right).
     Styled entirely via QSS properties defined in theme.build_stylesheet().
     """
     tab_changed = pyqtSignal(int)   # emits 0=Individual, 1=Comparison, 2=Reports, 3=Export
-    add_files_clicked = pyqtSignal()
-    add_files_mode_clicked = pyqtSignal(str)
-    calculate_clicked = pyqtSignal()
     log_clicked = pyqtSignal()
     help_clicked = pyqtSignal()
 
@@ -128,45 +128,6 @@ class _AppToolbar(QWidget):
             badge.setMinimumWidth(16)
             badge.hide()
             self._badge_lbls.append(badge)
-
-        # ── Separator — .tb-sep ──────────────────────────────────────
-        sep = QWidget()
-        sep.setFixedSize(1, 20)
-        sep.setStyleSheet(f"background: {C.TB_BDR};")
-        layout.addWidget(sep)
-        layout.addSpacing(6)
-
-        # ── Action buttons — .tb-btn ─────────────────────────────────
-        self._add_btn = QPushButton(" Add Data")
-        self._add_btn.setObjectName("tb-add")
-        self._add_btn.setProperty("toolaction", True)
-        try:
-            self._add_btn.setIcon(icon("fa6s.folder-open", C.TEXT_MID))
-            self._add_btn.setIconSize(self._CHROME_ICON_SIZE)
-        except Exception:
-            pass
-        self._add_btn.setCursor(Qt.CursorShape.PointingHandCursor)
-        add_menu = QMenu(self._add_btn)
-        processed_action = add_menu.addAction("Processed Sieve Data...")
-        processed_action.triggered.connect(lambda _checked=False: self.add_files_mode_clicked.emit("processed"))
-        raw_action = add_menu.addAction("Raw Sieve Weighings...")
-        raw_action.triggered.connect(lambda _checked=False: self.add_files_mode_clicked.emit("raw_sieve"))
-        self._add_btn.setMenu(add_menu)
-        layout.addWidget(self._add_btn)
-        layout.addSpacing(4)
-
-        # ── Primary button — .tb-btn.go ──────────────────────────────
-        self._calc_btn = QPushButton(" Calculate K")
-        self._calc_btn.setObjectName("tb-calc")
-        self._calc_btn.setProperty("toolprimary", True)
-        try:
-            self._calc_btn.setIcon(icon("fa6s.bolt", "#ffffff"))
-            self._calc_btn.setIconSize(self._CHROME_ICON_SIZE)
-        except Exception:
-            pass
-        self._calc_btn.setCursor(Qt.CursorShape.PointingHandCursor)
-        self._calc_btn.clicked.connect(self.calculate_clicked)
-        layout.addWidget(self._calc_btn)
 
         layout.addStretch()
 
@@ -521,6 +482,10 @@ class MainWindow(FramelessMainWindowMixin, QMainWindow):
         # Data structures
         self.data_loader = DataLoader()
         self.k_calculator = KCalculator()
+        self.available_method_names = tuple(self.k_calculator.get_all_method_names())
+        self.active_method_names = normalize_method_selection(
+            None, available_methods=self.available_method_names
+        )
         self.dataset_tabs: List[DatasetTab] = []
         self.dataset_counter = 0
         self.active_scheme = ISO14688
@@ -540,6 +505,8 @@ class MainWindow(FramelessMainWindowMixin, QMainWindow):
         self._dataset_group_manager_active = False
         self._dataset_group_manager_last_closed_at = 0.0
         self._help_dialog = None
+        self._startup_tour = None
+        self._suppress_calculation_refresh_depth = 0
         self._external_load_poll_timer = QTimer(self)
         self._external_load_poll_timer.setInterval(25)
         self._external_load_poll_timer.timeout.connect(self._poll_external_load_process)
@@ -632,9 +599,6 @@ class MainWindow(FramelessMainWindowMixin, QMainWindow):
         # Global toolbar
         self.app_toolbar = _AppToolbar()
         self.app_toolbar.tab_changed.connect(self._on_nav_tab_changed)
-        self.app_toolbar.add_files_clicked.connect(self.control_panel.add_files)
-        self.app_toolbar.add_files_mode_clicked.connect(self.control_panel.add_files)
-        self.app_toolbar.calculate_clicked.connect(self.calculate_all_k_values)
         self.app_toolbar.log_clicked.connect(self.toggle_log_overlay)
         self.app_toolbar.help_clicked.connect(self.show_help)
         main_layout.addWidget(self.app_toolbar)
@@ -709,6 +673,7 @@ class MainWindow(FramelessMainWindowMixin, QMainWindow):
         self.comparison_tab.dataset_selection_requested.connect(
             self._on_comparison_selection_requested
         )
+        self.comparison_tab.method_selection_requested.connect(self.choose_k_methods)
         self.content_stack.addWidget(self.comparison_tab)
 
         # Page 2 — Reports
@@ -786,12 +751,17 @@ class MainWindow(FramelessMainWindowMixin, QMainWindow):
         # Analysis
         analysis_menu = QMenu("Analysis", self)
 
-        calculate_action = QAction("&Calculate K Values", self)
+        calculate_action = QAction("&Recalculate K Values", self)
         calculate_action.setShortcut("Ctrl+K")
         calculate_action.setIcon(icon("fa6s.bolt", C.TEXT_MUTED))
         calculate_action.triggered.connect(self.calculate_all_k_values)
         analysis_menu.addAction(calculate_action)
         self.addAction(calculate_action)
+
+        choose_methods_action = QAction("Choose &K Methods\u2026", self)
+        choose_methods_action.setIcon(icon("fa6s.sliders", C.TEXT_MUTED))
+        choose_methods_action.triggered.connect(self.choose_k_methods)
+        analysis_menu.addAction(choose_methods_action)
 
         analysis_menu.addSeparator()
 
@@ -835,6 +805,18 @@ class MainWindow(FramelessMainWindowMixin, QMainWindow):
 
         # Help
         help_menu = QMenu("Help", self)
+
+        startup_guide_action = QAction("&Startup Guide", self)
+        startup_guide_action.setIcon(icon("fa6s.route", C.TEXT_MUTED))
+        startup_guide_action.triggered.connect(self.show_startup_guide)
+        help_menu.addAction(startup_guide_action)
+
+        individual_guide_action = QAction("Guide &Individual Samples", self)
+        individual_guide_action.setIcon(icon("fa6s.chart-area", C.TEXT_MUTED))
+        individual_guide_action.triggered.connect(self.show_individual_samples_guide)
+        help_menu.addAction(individual_guide_action)
+
+        help_menu.addSeparator()
 
         help_action = QAction("&Help Topics", self)
         help_action.setShortcut("F1")
@@ -2133,7 +2115,10 @@ class MainWindow(FramelessMainWindowMixin, QMainWindow):
         self.rich_status_bar.set_segment("DATASETS", str(n) if n else "—")
         self.rich_status_bar.set_segment("SAMPLE", sample_label[:24] if sample_label else "—")
         self.rich_status_bar.set_segment("TEMP", f"{temp}°C")
-        self.rich_status_bar.set_segment("METHODS", str(len(self.k_calculator.get_all_method_names())))
+        self.rich_status_bar.set_segment(
+            "METHODS",
+            f"{len(self.active_method_names)} / {len(self.available_method_names)}",
+        )
         self.app_toolbar.set_badge(0, n)
 
     def add_dataset_tab(self, dataset: GrainSizeData):
@@ -2141,6 +2126,7 @@ class MainWindow(FramelessMainWindowMixin, QMainWindow):
         self.dataset_counter += 1
         self._hide_welcome()
         dataset_tab = DatasetTab(dataset)
+        dataset_tab.set_active_methods(self.active_method_names, refresh=False)
 
         temperature = self.control_panel.temp_spinbox.value()
         dataset_tab.set_parameters(temperature)
@@ -2175,8 +2161,7 @@ class MainWindow(FramelessMainWindowMixin, QMainWindow):
         ):
             dataset_tab.apply_precomputed_results(precomputed_results)
         else:
-            selected_methods = self.k_calculator.get_all_method_names()
-            dataset_tab.calculate_k_values(selected_methods)
+            dataset_tab.calculate_k_values(self.active_method_names)
 
         if not bulk_mode:
             self._refresh_dataset_status_segments(dataset.sample_name)
@@ -2362,14 +2347,48 @@ class MainWindow(FramelessMainWindowMixin, QMainWindow):
     # CALCULATIONS
     # ──────────────────────────────────────────────────────────────────
 
+    def choose_k_methods(self):
+        """Open the workspace K-method selector."""
+        dialog = MethodSelectionDialog(
+            selected_methods=self.active_method_names,
+            available_methods=self.available_method_names,
+            parent=self,
+        )
+        if dialog.exec():
+            self.set_active_k_methods(dialog.selected_methods())
+
+    def set_active_k_methods(self, method_names) -> None:
+        """Apply a workspace-wide K-method filter to all result surfaces."""
+        next_methods = normalize_method_selection(
+            method_names,
+            available_methods=self.available_method_names,
+        )
+        if next_methods == self.active_method_names:
+            return
+
+        self.active_method_names = next_methods
+        self._suppress_calculation_refresh_depth += 1
+        try:
+            for dataset_tab in self.dataset_tabs:
+                dataset_tab.set_active_methods(self.active_method_names)
+        finally:
+            self._suppress_calculation_refresh_depth = max(
+                0, self._suppress_calculation_refresh_depth - 1
+            )
+
+        if len(self.dataset_tabs) >= 2:
+            self.comparison_tab.update_comparison()
+        self.reporting_tab.set_dataset_tabs(self.dataset_tabs)
+        self._update_export_tab()
+        self._refresh_dataset_status_segments()
+        self._show_status_message(
+            f"Active K methods: {len(self.active_method_names)} / {len(self.available_method_names)}"
+        )
+
     def calculate_all_k_values(self):
         if not self.dataset_tabs:
             QMessageBox.information(self, "No Data", "Please load datasets first.")
             return
-
-        from k_calculations import KCalculator
-        calculator = KCalculator()
-        selected_methods = calculator.get_all_method_names()
 
         self.progress_bar.setVisible(True)
         self.progress_bar.setMaximum(len(self.dataset_tabs))
@@ -2379,11 +2398,11 @@ class MainWindow(FramelessMainWindowMixin, QMainWindow):
             temperature = self.control_panel.temp_spinbox.value()
             for i, dataset_tab in enumerate(self.dataset_tabs):
                 dataset_tab.set_parameters(temperature)
-                dataset_tab.calculate_k_values(selected_methods)
+                dataset_tab.calculate_k_values(self.active_method_names)
                 self.progress_bar.setValue(i + 1)
 
             self._show_status_message(
-                f"K values calculated for {len(self.dataset_tabs)} dataset(s)"
+                f"K values recalculated for {len(self.dataset_tabs)} dataset(s)"
             )
             if self.content_stack.currentIndex() == 1:
                 self.comparison_tab.update_comparison()
@@ -2458,6 +2477,433 @@ class MainWindow(FramelessMainWindowMixin, QMainWindow):
     def show_help(self):
         self.open_help_dialog()
 
+    def show_startup_guide(self):
+        """Open the guided startup tour proof of concept."""
+        self._start_tour_overlay(
+            self._global_tour_steps(),
+            reveal_sidebar=True,
+            show_startup_checkbox=True,
+        )
+
+    def _start_tour_overlay(
+        self,
+        steps: list[TourStep],
+        *,
+        reveal_sidebar: bool = False,
+        show_startup_checkbox: bool = True,
+    ) -> None:
+        """Open a guided tour overlay with consistent cleanup."""
+        if self._log_overlay is not None and self._log_overlay.isVisible():
+            self._log_overlay.hide()
+            self.app_toolbar.set_log_active(False)
+
+        if reveal_sidebar and hasattr(self, "control_panel") and not self.control_panel.isVisible():
+            self.control_panel.setVisible(True)
+
+        if self._startup_tour is not None:
+            self._startup_tour.hide()
+            self._startup_tour.deleteLater()
+
+        self._startup_tour = StartupTourOverlay(
+            self,
+            steps,
+            show_startup_checkbox=show_startup_checkbox,
+        )
+        self._startup_tour.finished.connect(self._on_startup_tour_finished)
+        self._startup_tour.start()
+
+    def _on_startup_tour_finished(self, _dont_show_on_startup: bool = False) -> None:
+        tour = self._startup_tour
+        self._startup_tour = None
+        if tour is not None:
+            tour.deleteLater()
+
+    def _global_tour_steps(self) -> list[TourStep]:
+        """Return the shell-level tour used by the startup guide overlay."""
+        return [
+            TourStep(
+                title="Start in the sidebar",
+                body=(
+                    "Use the import box in the main sidebar to drop files or choose "
+                    "the import path. This is the primary entry point for processed "
+                    "sieve data and raw sieve weighings."
+                ),
+                target=lambda: getattr(self.control_panel, "_drop_zone", self.control_panel),
+                tips=(
+                    "Processed sieve data means size plus percent passing.",
+                    "Raw sieve weighings means retained weights are converted first.",
+                    "Use this instead of a separate top-toolbar import button.",
+                ),
+            ),
+            TourStep(
+                title="Loaded samples live here",
+                body=(
+                    "After loading, each dataset appears as a sample card. The sidebar "
+                    "is the everyday navigation point for opening, inspecting, remapping, "
+                    "including, or excluding datasets."
+                ),
+                target=lambda: getattr(self.control_panel, "_file_list", self.control_panel),
+                tips=(
+                    "Click a sample to open it.",
+                    "Checked samples are included in comparison, reports, and export.",
+                    "Use a sample card's context actions for inspect, remap, log, and remove.",
+                ),
+            ),
+            TourStep(
+                title="Manage scope and groups",
+                body=(
+                    "Use Manage when several datasets need group names or included-scope "
+                    "changes. Groups feed aggregate tables, comparison plots, report "
+                    "tables, and export outputs."
+                ),
+                target=lambda: getattr(self.control_panel, "_manage_samples_btn", self.control_panel),
+                tips=(
+                    "Rows can be selected like a spreadsheet before applying a group.",
+                    "Group-level visibility is handled in the comparison plot sidebar.",
+                ),
+            ),
+            TourStep(
+                title="Check calculation inputs",
+                body=(
+                    "Temperature and porosity settings sit in the sidebar because they "
+                    "affect K calculations. K-values refresh automatically after loading "
+                    "and after supported parameter changes."
+                ),
+                target=lambda: getattr(self.control_panel, "temp_spinbox", self.control_panel),
+                tips=(
+                    "Temperature affects water density and viscosity.",
+                    "Dataset porosity can be managed separately when needed.",
+                    "Manual recalculation is still available from the Analysis menu.",
+                ),
+            ),
+            TourStep(
+                title="Review stratigraphy",
+                body=(
+                    "The stratigraphy panel summarizes the active dataset's grain "
+                    "fractions, classification scheme, and permeability class."
+                ),
+                target=lambda: getattr(self.control_panel, "_strata_widget", self.control_panel),
+                tips=(
+                    "The Scheme button changes the classification system.",
+                    "Plots such as the grain-size histogram should follow the selected scheme.",
+                ),
+            ),
+            TourStep(
+                title="Individual Samples",
+                body=(
+                    "Use Individual Samples for one dataset at a time: distribution plots, "
+                    "histograms, method results, warnings, and detailed per-sample tables."
+                ),
+                target=lambda: self.app_toolbar._nav_btns[0],
+                tips=("The Samples sidebar is the dataset switcher for this workspace.",),
+            ),
+            TourStep(
+                title="Comparison",
+                body=(
+                    "Use Comparison to work across datasets. This is where groups, aggregate "
+                    "statistics, group-aware plots, and method inclusion choices matter most."
+                ),
+                target=lambda: self.app_toolbar._nav_btns[1],
+                tips=(
+                    "The plot sidebar controls visible samples and groups.",
+                    "Details and Statistics summarize individual and aggregate results.",
+                ),
+            ),
+            TourStep(
+                title="Reports",
+                body=(
+                    "Use Reports for generated documents and report tables. The goal is that "
+                    "reported tables use the same calculation backend as the live results."
+                ),
+                target=lambda: self.app_toolbar._nav_btns[2],
+                tips=("Report layout and plot parity remain part of final QA.",),
+            ),
+            TourStep(
+                title="Export",
+                body=(
+                    "Use Export for full data dumps and visible plot/table data. This is the "
+                    "place for reproducible CSV, Excel, and figure outputs."
+                ),
+                target=lambda: self.app_toolbar._nav_btns[3],
+                tips=("Drawer tables should export the same data they display.",),
+            ),
+            TourStep(
+                title="Activity log",
+                body=(
+                    "The Log button opens in-program messages for data loading and validation. "
+                    "Use it to check skipped rows, wrong-mode detection, and future warnings."
+                ),
+                target=self.app_toolbar.log_button,
+                tips=(
+                    "Warnings should be visible without requiring the terminal.",
+                    "This becomes more important during batch imports.",
+                ),
+            ),
+            TourStep(
+                title="Status line",
+                body=(
+                    "The bottom status line summarizes the active sample, D50, K mean, "
+                    "temperature, method count, and dataset count."
+                ),
+                target=lambda: self.rich_status_bar,
+                tips=("This stays visible while moving between tabs.",),
+            ),
+            TourStep(
+                title="Help and guides",
+                body=(
+                    "The Help button opens the guide library. The startup guide is for "
+                    "orientation; detailed explanations belong in the help pages."
+                ),
+                target=lambda: self.app_toolbar._help_btn,
+                tips=("The same overlay can later be reused for tab-specific tours.",),
+            ),
+        ]
+
+    def show_individual_samples_guide(self):
+        """Open a guided tour for the active Individual Samples dataset."""
+        dataset_tab = self._current_dataset_tab()
+        if dataset_tab is None and self.dataset_tabs:
+            dataset_tab = self.dataset_tabs[0]
+            tab_index = self.dataset_tabs_widget.indexOf(dataset_tab)
+            if tab_index >= 0:
+                self.dataset_tabs_widget.setCurrentIndex(tab_index)
+
+        if dataset_tab is None:
+            QMessageBox.information(
+                self,
+                "No Dataset Loaded",
+                "Load at least one dataset before starting the Individual Samples guide.",
+            )
+            return
+
+        self._switch_to_tab(0)
+        QApplication.processEvents()
+        self._start_tour_overlay(
+            self._individual_samples_tour_steps(dataset_tab),
+            show_startup_checkbox=False,
+        )
+
+    def _show_individual_tour_subtab(self, dataset_tab: DatasetTab, subtab_index: int) -> None:
+        """Switch to a dataset subtab before a focused tour step is positioned."""
+        self._switch_to_tab(0)
+        tab_index = self.dataset_tabs_widget.indexOf(dataset_tab)
+        if tab_index >= 0:
+            self.dataset_tabs_widget.setCurrentIndex(tab_index)
+
+        if hasattr(dataset_tab, "nested_tabs"):
+            dataset_tab.nested_tabs.setCurrentIndex(subtab_index)
+
+        if subtab_index == 1 and hasattr(dataset_tab, "results_table"):
+            table = dataset_tab.results_table
+            if table.rowCount() > 0 and not table.selectedItems():
+                table.selectRow(0)
+
+    def _first_tour_target(self, *widgets: QWidget | None) -> QWidget | None:
+        """Return the first currently visible tour target, then the first existing target."""
+        for widget in widgets:
+            if widget is None:
+                continue
+            try:
+                if widget.isVisibleTo(self):
+                    return widget
+            except RuntimeError:
+                continue
+        for widget in widgets:
+            if widget is not None:
+                return widget
+        return self
+
+    def _individual_samples_tour_steps(self, dataset_tab: DatasetTab) -> list[TourStep]:
+        """Return a focused tour that walks Plot, Results, and Statistics automatically."""
+        plot = dataset_tab.plot_workspace
+        stats = dataset_tab.statistics_tab
+
+        plot_step = lambda: self._show_individual_tour_subtab(dataset_tab, 0)
+        results_step = lambda: self._show_individual_tour_subtab(dataset_tab, 1)
+        stats_step = lambda: self._show_individual_tour_subtab(dataset_tab, 2)
+
+        return [
+            TourStep(
+                title="Individual Samples workspace",
+                body=(
+                    "This workspace follows one loaded dataset at a time. The guide will "
+                    "switch through Plot, Results, and Statistics so the full per-sample "
+                    "workflow is visible in one pass."
+                ),
+                target=lambda: self._first_tour_target(
+                    dataset_tab.nested_tabs.tabBar(),
+                    dataset_tab.nested_tabs,
+                ),
+                tips=(
+                    "Use the main Samples sidebar to change which dataset is active.",
+                    "The nested subtabs are only for the active dataset.",
+                ),
+                kicker="Individual Samples",
+                before_step=plot_step,
+            ),
+            TourStep(
+                title="Plot: choose what to inspect",
+                body=(
+                    "The Plot subtab starts with the distribution curve. Use the segmented "
+                    "buttons and More Plots menu for K-values, combined plots, cumulative "
+                    "views, and the grain-size histogram."
+                ),
+                target=lambda: self._first_tour_target(
+                    getattr(plot, "_seg_dist", None),
+                    getattr(plot, "_more_plots", None),
+                    plot,
+                ),
+                tips=(
+                    "D10/D50/D60 reference lines are controlled from the D-lines toggle.",
+                    "The histogram follows the active stratigraphy scheme.",
+                ),
+                kicker="Plot",
+                before_step=plot_step,
+            ),
+            TourStep(
+                title="Plot: controls sidebar",
+                body=(
+                    "The Controls button opens the detailed plot settings sidebar for axes, "
+                    "units, labels, reference lines, and K-value display options."
+                ),
+                target=lambda: self._first_tour_target(
+                    getattr(plot, "_tb_sidebar_btn", None),
+                    plot,
+                ),
+                tips=(
+                    "Quick toggles stay in the toolbar.",
+                    "Detailed settings stay in the sidebar.",
+                ),
+                kicker="Plot",
+                before_step=plot_step,
+            ),
+            TourStep(
+                title="Plot: visible chart and table data",
+                body=(
+                    "The chart is the visual result. The table drawer gives the exact rows "
+                    "behind the active plot and exports those same rows."
+                ),
+                target=lambda: self._first_tour_target(
+                    getattr(plot, "plot_widget", None),
+                    getattr(plot, "_tb_drawer_btn", None),
+                    plot,
+                ),
+                tips=(
+                    "Use PNG export for the figure.",
+                    "Use the drawer CSV export for the plotted data.",
+                ),
+                kicker="Plot",
+                before_step=plot_step,
+            ),
+            TourStep(
+                title="Results: K-method overview",
+                body=(
+                    "The Results subtab is the main per-sample K-value table. It shows "
+                    "each method, K in multiple units, and whether the method is OK, "
+                    "warning, or excluded."
+                ),
+                target=lambda: self._first_tour_target(
+                    getattr(dataset_tab, "results_table", None),
+                    getattr(dataset_tab, "results_widget", None),
+                ),
+                tips=(
+                    "Warnings and failed applicability conditions are not silently averaged.",
+                    "Manual fallback remains in Analysis > Recalculate K Values.",
+                ),
+                kicker="Results",
+                before_step=results_step,
+            ),
+            TourStep(
+                title="Results: selected method details",
+                body=(
+                    "Selecting a method row updates the right detail panel with formula, "
+                    "parameters, applicability, status explanation, and reference."
+                ),
+                target=lambda: self._first_tour_target(
+                    getattr(dataset_tab, "detail_panel", None),
+                    getattr(dataset_tab, "results_table", None),
+                ),
+                tips=(
+                    "This panel explains why a method is included or excluded from K means.",
+                    "It is the place to resolve method-specific warnings.",
+                ),
+                kicker="Results",
+                before_step=results_step,
+            ),
+            TourStep(
+                title="Results: result cards",
+                body=(
+                    "The cards at the top summarize the active dataset: geometric K mean, "
+                    "arithmetic K mean, included methods, D50, and temperature."
+                ),
+                target=lambda: self._first_tour_target(
+                    getattr(dataset_tab, "res_bar", None),
+                    getattr(dataset_tab, "results_widget", None),
+                ),
+                tips=(
+                    "Means are based on included OK methods.",
+                    "These per-dataset values feed aggregate views, reports, and export.",
+                ),
+                kicker="Results",
+                before_step=results_step,
+            ),
+            TourStep(
+                title="Statistics: per-sample summary",
+                body=(
+                    "Statistics is a read-only summary for the active dataset. It gathers "
+                    "grain-size percentiles, gradation parameters, K statistics, data "
+                    "quality, and classification context."
+                ),
+                target=lambda: self._first_tour_target(
+                    getattr(stats, "info_bar", None),
+                    stats,
+                ),
+                tips=(
+                    "Use Results for method decisions.",
+                    "Use Statistics for descriptive grain-size and K summaries.",
+                ),
+                kicker="Statistics",
+                before_step=stats_step,
+            ),
+            TourStep(
+                title="Statistics: grain-size metrics",
+                body=(
+                    "The upper statistics panels show percentiles and gradation metrics "
+                    "such as Cu, Cc, sorting, span, and the method-percentile reference."
+                ),
+                target=lambda: self._first_tour_target(
+                    getattr(stats, "percentiles_text", None),
+                    getattr(stats, "gradation_text", None),
+                    stats,
+                ),
+                tips=(
+                    "These values come from the loaded gradation curve.",
+                    "They should remain consistent with plot labels and report tables.",
+                ),
+                kicker="Statistics",
+                before_step=stats_step,
+            ),
+            TourStep(
+                title="Statistics: K and quality context",
+                body=(
+                    "The lower statistics panels summarize K spread, data-quality basis, "
+                    "soil classification, and environmental parameters such as temperature "
+                    "and porosity."
+                ),
+                target=lambda: self._first_tour_target(
+                    getattr(stats, "k_stats_widget", None),
+                    getattr(stats, "quality_widget", None),
+                    stats,
+                ),
+                tips=(
+                    "This tab should explain what the dataset looks like, not replace export.",
+                    "Report and export should reuse the same backend values.",
+                ),
+                kicker="Statistics",
+                before_step=stats_step,
+            ),
+        ]
+
     def open_help_dialog(self, topic_file: str | None = None):
         """Open the shared help dialog without blocking the main window."""
         from gui.help_dialog import HelpDialog
@@ -2487,7 +2933,7 @@ class MainWindow(FramelessMainWindowMixin, QMainWindow):
             "<h3>Grain Size Analysis Tool</h3>"
             "<p>Version 0.9.0-\u03b2</p>"
             "<p>Grain size distribution analysis and hydraulic conductivity calculations.</p>"
-            "<p>14+ K-calculation methods \u00b7 batch import \u00b7 comparison \u00b7 export</p>"
+            "<p>16 K-calculation methods \u00b7 batch import \u00b7 comparison \u00b7 export</p>"
             "<p>\u00a9 2024 \u2014 DTU Geotechnical Analysis Suite</p>",
         )
 
@@ -2523,6 +2969,8 @@ class MainWindow(FramelessMainWindowMixin, QMainWindow):
     # ──────────────────────────────────────────────────────────────────
 
     def _on_calculation_complete(self, sample_name: str, results):
+        if self._suppress_calculation_refresh_depth > 0:
+            return
         if self._bulk_dataset_add_depth > 0:
             self._bulk_dataset_add_dirty = True
             if sample_name:

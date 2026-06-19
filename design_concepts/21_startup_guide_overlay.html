@@ -1,0 +1,1050 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>21 - Startup Guide Overlay Concept</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Playfair+Display:wght@600;700&family=Source+Sans+3:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;500;600;700&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.2/css/all.min.css">
+  <link rel="stylesheet" href="_shared.css">
+  <style>
+    body{overflow:hidden}
+    .main{
+      grid-area:main;
+      display:flex;
+      flex-direction:column;
+      min-width:0;
+      min-height:0;
+      background:var(--bg);
+      position:relative;
+      overflow:hidden;
+    }
+    .tb{
+      height:40px;
+      display:flex;
+      align-items:center;
+      gap:6px;
+      padding:0 10px;
+      background:var(--tb-bg);
+      border-bottom:1px solid var(--tb-bdr);
+      flex-shrink:0;
+    }
+    .nav-tab,.tool-btn{
+      height:28px;
+      display:flex;
+      align-items:center;
+      gap:6px;
+      border-radius:var(--r);
+      border:1px solid transparent;
+      padding:0 10px;
+      font-size:12px;
+      font-weight:700;
+      color:var(--text-mid);
+      background:transparent;
+      white-space:nowrap;
+    }
+    .nav-tab.on{
+      color:var(--text);
+      border-bottom:2px solid var(--olive);
+      border-radius:0;
+    }
+    .tool-btn{
+      background:#fffdf8;
+      border-color:var(--border-dk);
+      color:var(--text);
+    }
+    .tb-spacer{flex:1}
+    .status{
+      grid-area:st;
+      height:24px;
+      display:flex;
+      align-items:center;
+      gap:14px;
+      padding:0 10px;
+      background:var(--st-bg);
+      color:var(--st-text);
+      font:500 11px var(--fm);
+    }
+    .status span{color:var(--st-muted)}
+
+    .guide-launch{
+      margin-left:auto;
+      height:24px;
+      display:flex;
+      align-items:center;
+      gap:6px;
+      padding:0 9px;
+      border:1px solid rgba(107,142,35,.3);
+      border-radius:99px;
+      background:rgba(107,142,35,.08);
+      color:var(--olive-dk);
+      font-weight:700;
+      font-size:11px;
+    }
+
+    .wlc{
+      flex:1;
+      min-height:0;
+      overflow:hidden;
+      position:relative;
+      display:flex;
+      justify-content:center;
+      align-items:center;
+      padding:24px;
+      background:linear-gradient(170deg,#b5a080 0%,#a0826d 45%,#6a94a8 100%);
+    }
+    .wlc::before{
+      content:'';
+      position:absolute;
+      inset:0;
+      background:rgba(255,255,255,.38);
+    }
+    .welcome-card{
+      width:min(720px,calc(100% - 40px));
+      position:relative;
+      z-index:1;
+      background:rgba(255,255,255,.96);
+      border:1px solid rgba(180,160,130,.35);
+      border-radius:10px;
+      box-shadow:0 10px 30px rgba(60,30,8,.14);
+      padding:16px;
+      display:grid;
+      grid-template-columns:1fr 1fr;
+      gap:10px;
+    }
+    .hero-title{
+      grid-column:1/-1;
+      text-align:center;
+      padding:6px 10px 12px;
+      border-bottom:1px solid var(--border);
+    }
+    .hero-title h1{
+      font-family:var(--fd);
+      font-size:26px;
+      line-height:1.1;
+      color:var(--text);
+      margin-bottom:3px;
+    }
+    .hero-title p{color:var(--text-mid);font-size:12px}
+    .panel{
+      min-height:156px;
+      border:1px solid var(--border);
+      border-radius:6px;
+      background:#f8f6f2;
+      padding:10px;
+      display:flex;
+      flex-direction:column;
+      gap:8px;
+    }
+    .panel h2{
+      font-size:12px;
+      display:flex;
+      align-items:center;
+      gap:6px;
+      color:var(--text);
+    }
+    .panel h2 i{font-size:11px;color:var(--earth)}
+    .quick-actions{display:flex;flex-direction:column;gap:8px}
+    .qa-btn{
+      height:36px;
+      display:flex;
+      align-items:center;
+      justify-content:center;
+      gap:8px;
+      border-radius:5px;
+      border:1px solid var(--border-dk);
+      background:#fffdf8;
+      color:var(--text);
+      font-size:12px;
+      font-weight:700;
+    }
+    .qa-btn.main-action{
+      background:var(--olive);
+      border-color:var(--olive-dk);
+      color:#fff;
+    }
+    .recent-row,.note-row{
+      min-height:28px;
+      display:flex;
+      align-items:center;
+      gap:8px;
+      padding:5px 7px;
+      border-radius:4px;
+      color:var(--text-mid);
+      font-size:11px;
+      background:rgba(255,255,255,.44);
+    }
+    .recent-row i,.note-row i{color:var(--earth);width:13px}
+    .side-drop{
+      margin:10px 10px 8px;
+      min-height:66px;
+      border:1.5px dashed var(--sb-bdr);
+      border-radius:6px;
+      background:rgba(255,255,255,.28);
+      display:flex;
+      flex-direction:column;
+      align-items:center;
+      justify-content:center;
+      gap:4px;
+      color:var(--sb-text);
+      text-align:center;
+      font-size:12px;
+      font-weight:700;
+    }
+    .side-drop i{color:var(--olive);font-size:15px}
+    .side-drop span{font:600 9px var(--fm);color:var(--sb-muted);text-transform:uppercase;letter-spacing:.08em}
+    .side-samples{
+      padding:8px 10px;
+      display:flex;
+      flex-direction:column;
+      gap:7px;
+    }
+    .sample-card{
+      border:1px solid var(--sb-bdr);
+      background:#f0ebe2;
+      border-radius:5px;
+      padding:7px;
+      display:grid;
+      grid-template-columns:18px 1fr auto;
+      gap:7px;
+      align-items:center;
+      color:var(--sb-text);
+    }
+    .sample-check{
+      width:14px;
+      height:14px;
+      border-radius:3px;
+      background:var(--olive);
+      color:#fff;
+      display:flex;
+      align-items:center;
+      justify-content:center;
+      font-size:9px;
+    }
+    .sample-title{font-weight:700;font-size:12px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+    .sample-meta{font:500 9px var(--fm);color:var(--sb-muted);margin-top:2px}
+    .sample-tools{display:flex;gap:3px}
+    .mini-tool{
+      width:22px;
+      height:22px;
+      border-radius:4px;
+      border:1px solid var(--sb-bdr);
+      background:rgba(255,255,255,.45);
+      display:flex;
+      align-items:center;
+      justify-content:center;
+      color:var(--sb-mid);
+      font-size:10px;
+    }
+    .sb-guide-btn{
+      margin:0 10px 8px;
+      height:28px;
+      display:flex;
+      align-items:center;
+      justify-content:center;
+      gap:6px;
+      border-radius:var(--r);
+      border:1px solid rgba(107,142,35,.34);
+      background:rgba(107,142,35,.08);
+      color:var(--olive-dk);
+      font-size:12px;
+      font-weight:700;
+    }
+    .side-mini-panel{
+      margin:0 10px 8px;
+      border-top:1px solid var(--sb-bdr);
+      padding-top:8px;
+      color:var(--sb-text);
+    }
+    .side-mini-title{
+      font:800 9px var(--fm);
+      text-transform:uppercase;
+      letter-spacing:.12em;
+      color:var(--sb-muted);
+      margin-bottom:5px;
+    }
+    .side-kv{
+      display:flex;
+      justify-content:space-between;
+      gap:8px;
+      font-size:11px;
+      padding:3px 0;
+    }
+    .side-kv strong{font:800 11px var(--fm);color:var(--text)}
+
+    .cmp-preview{
+      display:none;
+      flex:1;
+      min-height:0;
+      background:var(--bg);
+      flex-direction:column;
+    }
+    .cmp-tabs{
+      height:32px;
+      display:flex;
+      align-items:flex-end;
+      gap:2px;
+      padding:0 12px;
+      background:var(--bg-raised);
+      border-bottom:1px solid var(--border);
+      flex-shrink:0;
+    }
+    .cmp-tab{
+      height:30px;
+      display:flex;
+      align-items:center;
+      gap:6px;
+      padding:0 14px;
+      border:1px solid transparent;
+      border-bottom:none;
+      border-radius:var(--r) var(--r) 0 0;
+      color:var(--text-muted);
+      font-weight:700;
+      font-size:12px;
+    }
+    .cmp-tab.on{
+      background:var(--bg);
+      border-color:var(--border);
+      color:var(--text);
+    }
+    .cmp-body{
+      flex:1;
+      min-height:0;
+      display:grid;
+      grid-template-columns:1fr 292px;
+    }
+    .plot-area{
+      display:flex;
+      flex-direction:column;
+      min-width:0;
+      border-right:1px solid var(--border);
+      position:relative;
+    }
+    .plot-toolbar{
+      height:38px;
+      display:flex;
+      align-items:center;
+      gap:6px;
+      padding:0 10px;
+      background:var(--bg-raised);
+      border-bottom:1px solid var(--border);
+    }
+    .seg{
+      display:inline-flex;
+      border:1px solid var(--border);
+      border-radius:var(--r);
+      overflow:hidden;
+      background:#f5f1ea;
+    }
+    .seg span{
+      height:24px;
+      min-width:88px;
+      display:flex;
+      align-items:center;
+      justify-content:center;
+      gap:6px;
+      padding:0 9px;
+      border-right:1px solid var(--border);
+      font-size:12px;
+      font-weight:700;
+      color:var(--text-mid);
+    }
+    .seg span:last-child{border-right:none}
+    .seg .on{
+      background:rgba(107,142,35,.12);
+      color:var(--olive-dk);
+    }
+    .chart{
+      flex:1;
+      min-height:0;
+      margin:18px;
+      border:1px solid var(--border);
+      background:#fffefa;
+      position:relative;
+      overflow:hidden;
+    }
+    .chart::before{
+      content:'';
+      position:absolute;
+      inset:22px 30px 34px 44px;
+      background:
+        linear-gradient(to right,rgba(212,196,168,.35) 1px,transparent 1px) 0 0/72px 100%,
+        linear-gradient(to top,rgba(212,196,168,.35) 1px,transparent 1px) 0 0/100% 52px;
+    }
+    .curve{
+      position:absolute;
+      left:70px;
+      right:55px;
+      bottom:64px;
+      height:210px;
+      border-bottom:4px solid #2459d8;
+      border-right:4px solid #2459d8;
+      border-radius:0 0 180px 0;
+      transform:skewX(-17deg);
+    }
+    .drawer{
+      height:30px;
+      display:flex;
+      align-items:center;
+      gap:8px;
+      padding:0 10px;
+      border-top:1px solid var(--border);
+      background:var(--bg-raised);
+      color:var(--text-mid);
+      font-size:11px;
+      font-weight:700;
+    }
+    .rail{
+      background:var(--pw-sb);
+      min-width:0;
+      display:flex;
+      flex-direction:column;
+    }
+    .rail-head{
+      padding:10px 14px;
+      border-bottom:1px solid var(--border);
+      color:var(--text-muted);
+      font:700 10px var(--fm);
+      letter-spacing:.08em;
+      text-transform:uppercase;
+    }
+    .rail-section{
+      padding:10px 14px;
+      border-bottom:1px solid rgba(212,196,168,.75);
+    }
+    .rail-section h3{
+      font:700 10px var(--fm);
+      color:var(--text-muted);
+      letter-spacing:.08em;
+      text-transform:uppercase;
+      margin-bottom:8px;
+    }
+    .rail-line{
+      display:flex;
+      justify-content:space-between;
+      gap:10px;
+      font-size:12px;
+      color:var(--text-mid);
+      padding:4px 0;
+      border-bottom:1px solid rgba(212,196,168,.45);
+    }
+    .rail-line strong{font-family:var(--fm);font-size:11px;color:var(--text)}
+
+    .tour-layer{
+      position:absolute;
+      inset:0;
+      z-index:7000;
+      pointer-events:none;
+    }
+    .spotlight{
+      position:absolute;
+      left:var(--sx);
+      top:var(--sy);
+      width:var(--swid);
+      height:var(--sh);
+      border:2px solid rgba(255,255,255,.96);
+      border-radius:8px;
+      box-shadow:
+        0 0 0 9999px rgba(36,29,20,.62),
+        0 12px 34px rgba(0,0,0,.18),
+        0 0 0 4px rgba(107,142,35,.24);
+      pointer-events:none;
+      transition:all .18s ease;
+    }
+    .spotlight::after{
+      content:'';
+      position:absolute;
+      inset:-7px;
+      border:1px solid rgba(255,255,255,.45);
+      border-radius:12px;
+    }
+    .callout{
+      position:absolute;
+      left:var(--cx);
+      top:var(--cy);
+      width:340px;
+      border:1px solid rgba(120,95,60,.35);
+      border-radius:8px;
+      background:#fffdf8;
+      box-shadow:0 18px 50px rgba(35,22,8,.28),0 2px 8px rgba(35,22,8,.14);
+      pointer-events:auto;
+      overflow:hidden;
+      transition:all .18s ease;
+    }
+    .callout::before{
+      content:'';
+      position:absolute;
+      width:14px;
+      height:14px;
+      background:#fffdf8;
+      border-left:1px solid rgba(120,95,60,.35);
+      border-top:1px solid rgba(120,95,60,.35);
+      transform:rotate(45deg);
+      left:var(--arrow-x);
+      top:var(--arrow-y);
+    }
+    .callout-head{
+      padding:12px 14px 8px;
+      border-bottom:1px solid rgba(212,196,168,.75);
+      background:rgba(238,232,220,.55);
+      position:relative;
+    }
+    .step-kicker{
+      display:flex;
+      align-items:center;
+      justify-content:space-between;
+      gap:10px;
+      margin-bottom:4px;
+      color:var(--text-muted);
+      font:700 10px var(--fm);
+      letter-spacing:.08em;
+      text-transform:uppercase;
+    }
+    .step-pill{
+      border:1px solid rgba(107,142,35,.26);
+      background:rgba(107,142,35,.08);
+      color:var(--olive-dk);
+      border-radius:99px;
+      padding:2px 8px;
+      letter-spacing:0;
+      text-transform:none;
+    }
+    .callout h2{
+      font-size:17px;
+      line-height:1.2;
+      color:var(--text);
+      margin:0;
+    }
+    .callout-body{
+      padding:12px 14px 13px;
+      color:var(--text-mid);
+      line-height:1.45;
+      font-size:13px;
+    }
+    .callout-body p{margin-bottom:10px}
+    .tip-list{
+      display:flex;
+      flex-direction:column;
+      gap:6px;
+      margin-top:8px;
+    }
+    .tip{
+      display:flex;
+      align-items:flex-start;
+      gap:8px;
+      font-size:12px;
+      color:var(--text-mid);
+    }
+    .tip i{
+      color:var(--olive);
+      font-size:10px;
+      margin-top:4px;
+      width:12px;
+    }
+    .tour-progress{
+      display:flex;
+      gap:4px;
+      margin:2px 0 12px;
+    }
+    .dot{
+      height:4px;
+      flex:1;
+      border-radius:99px;
+      background:var(--border);
+    }
+    .dot.done,.dot.on{background:var(--olive)}
+    .tour-actions{
+      display:flex;
+      align-items:center;
+      gap:7px;
+      border-top:1px solid rgba(212,196,168,.75);
+      padding:10px 14px;
+      background:#f8f4ec;
+    }
+    .tour-btn{
+      height:28px;
+      display:flex;
+      align-items:center;
+      justify-content:center;
+      gap:6px;
+      padding:0 11px;
+      border:1px solid var(--border-dk);
+      border-radius:var(--r);
+      background:#fffdf8;
+      color:var(--text);
+      font-size:12px;
+      font-weight:700;
+      pointer-events:auto;
+    }
+    .tour-btn.primary{
+      margin-left:auto;
+      border-color:var(--olive-dk);
+      background:var(--olive);
+      color:#fff;
+    }
+    .tour-check{
+      display:flex;
+      align-items:center;
+      gap:6px;
+      font-size:11px;
+      color:var(--text-muted);
+      margin-right:auto;
+    }
+    .tour-check span{
+      width:12px;
+      height:12px;
+      border:1px solid var(--border-dk);
+      background:#fff;
+      border-radius:3px;
+    }
+
+    .tour-map{
+      position:absolute;
+      right:14px;
+      bottom:14px;
+      z-index:7200;
+      width:260px;
+      border:1px solid rgba(120,95,60,.32);
+      background:rgba(255,253,248,.96);
+      border-radius:8px;
+      overflow:hidden;
+      box-shadow:0 12px 34px rgba(35,22,8,.22);
+      pointer-events:auto;
+    }
+    .tour-map h3{
+      padding:9px 11px;
+      font:700 10px var(--fm);
+      color:var(--text-muted);
+      letter-spacing:.08em;
+      text-transform:uppercase;
+      background:rgba(238,232,220,.66);
+      border-bottom:1px solid var(--border);
+    }
+    .map-step{
+      display:grid;
+      grid-template-columns:20px 1fr;
+      gap:7px;
+      align-items:start;
+      padding:8px 11px;
+      border-bottom:1px solid rgba(212,196,168,.55);
+      cursor:pointer;
+    }
+    .map-step:last-child{border-bottom:none}
+    .map-num{
+      width:18px;
+      height:18px;
+      border-radius:99px;
+      border:1px solid var(--border-dk);
+      display:flex;
+      align-items:center;
+      justify-content:center;
+      font:700 10px var(--fm);
+      color:var(--text-muted);
+      background:#fffdf8;
+    }
+    .map-step.on{
+      background:rgba(107,142,35,.08);
+    }
+    .map-step.on .map-num{
+      background:var(--olive);
+      border-color:var(--olive-dk);
+      color:#fff;
+    }
+    .map-title{
+      color:var(--text);
+      font-size:12px;
+      font-weight:700;
+      line-height:1.1;
+    }
+    .map-meta{
+      color:var(--text-muted);
+      font-size:10.5px;
+      margin-top:2px;
+      line-height:1.25;
+    }
+
+    .step-preview{
+      position:absolute;
+      left:14px;
+      bottom:14px;
+      z-index:7200;
+      display:flex;
+      gap:6px;
+      pointer-events:auto;
+    }
+    .step-preview button{
+      height:26px;
+      border:1px solid rgba(120,95,60,.34);
+      background:rgba(255,253,248,.9);
+      border-radius:99px;
+      padding:0 9px;
+      color:var(--text-mid);
+      font-size:11px;
+      font-weight:700;
+    }
+    .step-preview button.on{
+      background:var(--olive);
+      color:#fff;
+      border-color:var(--olive-dk);
+    }
+
+    body[data-step="4"] .wlc{display:none}
+    body[data-step="4"] .cmp-preview{display:flex}
+    body[data-step="5"] .wlc{display:none}
+    body[data-step="5"] .cmp-preview{display:flex}
+    body[data-step="6"] .wlc{display:none}
+    body[data-step="6"] .cmp-preview{display:flex}
+
+    @media (max-width:1100px){
+      .tour-map{display:none}
+      .callout{width:310px}
+      .welcome-card{grid-template-columns:1fr}
+    }
+  </style>
+</head>
+<body data-step="1">
+<div class="app">
+  <div class="mb">
+    <div class="mi">File</div>
+    <div class="mi">Edit</div>
+    <div class="mi">View</div>
+    <div class="mi">Help</div>
+    <div class="mb-sp"></div>
+    <div class="guide-launch" data-target="help"><i class="fa-solid fa-route"></i> Startup guide</div>
+  </div>
+
+  <aside class="sb">
+    <div class="sb-logo">
+      <div class="logo-mark"><i class="fa-solid fa-layer-group"></i></div>
+      <div class="logo-tx">
+        <div class="logo-name">GrainSize Analysis</div>
+        <div class="logo-sub">SIEVE DATA WORKSPACE</div>
+      </div>
+    </div>
+    <div class="sb-body">
+      <div class="side-drop" data-target="drop-zone">
+        <i class="fa-solid fa-cloud-arrow-up"></i>
+        Drop files or click to choose import path
+        <span>processed sieve data / raw sieve weighings</span>
+      </div>
+      <div class="sb-sect">
+        <div class="sb-sect-lbl">Samples</div>
+        <button class="sb-sect-btn"><i class="fa-solid fa-plus"></i> Add</button>
+      </div>
+      <div class="side-samples" data-target="samples">
+        <div class="sample-card">
+          <div class="sample-check"><i class="fa-solid fa-check"></i></div>
+          <div>
+            <div class="sample-title">NBAL-01 [English]</div>
+            <div class="sample-meta">D50 0.30 mm | K geo 33.9</div>
+          </div>
+          <div class="sample-tools">
+            <div class="mini-tool"><i class="fa-solid fa-eye"></i></div>
+            <div class="mini-tool"><i class="fa-solid fa-pen"></i></div>
+          </div>
+        </div>
+        <div class="sample-card">
+          <div class="sample-check"><i class="fa-solid fa-check"></i></div>
+          <div>
+            <div class="sample-title">NBAL-02 [English]</div>
+            <div class="sample-meta">Layer A | included</div>
+          </div>
+          <div class="sample-tools">
+            <div class="mini-tool"><i class="fa-solid fa-eye"></i></div>
+            <div class="mini-tool"><i class="fa-solid fa-pen"></i></div>
+          </div>
+        </div>
+      </div>
+      <button class="sb-guide-btn" data-target="manager"><i class="fa-solid fa-users-gear"></i> Dataset & Group Manager</button>
+      <div class="side-mini-panel" data-target="inputs">
+        <div class="side-mini-title">Calculation Inputs</div>
+        <div class="side-kv"><span>Temperature</span><strong>20.0 C</strong></div>
+        <div class="side-kv"><span>Porosity</span><strong>Calculated</strong></div>
+      </div>
+      <div class="side-mini-panel" data-target="strata">
+        <div class="side-mini-title">Stratigraphy</div>
+        <div class="side-kv"><span>Class</span><strong>Poorly-graded sand</strong></div>
+        <div class="side-kv"><span>Scheme</span><strong>ISO 14688</strong></div>
+      </div>
+    </div>
+  </aside>
+
+  <main class="main">
+    <div class="tb">
+      <button class="nav-tab on"><i class="fa-solid fa-chart-area"></i> Individual Samples</button>
+      <button class="nav-tab" data-target="comparison-tab"><i class="fa-solid fa-table-columns"></i> Comparison</button>
+      <button class="nav-tab"><i class="fa-solid fa-file-lines"></i> Reports</button>
+      <button class="nav-tab"><i class="fa-solid fa-file-export"></i> Export</button>
+      <div class="tb-spacer"></div>
+      <button class="tool-btn"><i class="fa-solid fa-clipboard-list"></i> Log</button>
+      <button class="tool-btn"><i class="fa-solid fa-book"></i> Help</button>
+    </div>
+
+    <section class="wlc">
+      <div class="welcome-card">
+        <div class="hero-title">
+          <h1>GrainSize Analysis</h1>
+          <p>Load sieve data, calculate hydraulic conductivity, compare samples, and export reports.</p>
+        </div>
+        <div class="panel">
+          <h2><i class="fa-solid fa-clock-rotate-left"></i> Recent</h2>
+          <div class="recent-row"><i class="fa-solid fa-file-excel"></i> NBAL test session</div>
+          <div class="recent-row"><i class="fa-solid fa-folder"></i> 10 grouped datasets</div>
+          <div class="recent-row"><i class="fa-solid fa-file-csv"></i> Raw sieve CSV check</div>
+        </div>
+        <div class="panel" data-target="quick-actions">
+          <h2><i class="fa-solid fa-bolt"></i> Quick Actions</h2>
+          <div class="quick-actions">
+            <button class="qa-btn main-action"><i class="fa-solid fa-chart-line"></i> Processed sieve data</button>
+            <button class="qa-btn"><i class="fa-solid fa-scale-balanced"></i> Raw sieve weightings</button>
+            <button class="qa-btn"><i class="fa-solid fa-table"></i> Open spreadsheet mapper</button>
+          </div>
+        </div>
+        <div class="panel">
+          <h2><i class="fa-solid fa-circle-question"></i> Quick Help</h2>
+          <div class="note-row"><i class="fa-solid fa-book"></i> Loading guide</div>
+          <div class="note-row"><i class="fa-solid fa-file-lines"></i> Report guide</div>
+          <div class="note-row"><i class="fa-solid fa-route"></i> Restart startup guide</div>
+        </div>
+        <div class="panel">
+          <h2><i class="fa-solid fa-star"></i> What's New</h2>
+          <div class="note-row"><i class="fa-solid fa-check"></i> Aggregate Details and Statistics</div>
+          <div class="note-row"><i class="fa-solid fa-check"></i> Grouped comparison scope</div>
+          <div class="note-row"><i class="fa-solid fa-check"></i> Plot data drawers</div>
+        </div>
+      </div>
+    </section>
+
+    <section class="cmp-preview">
+      <div class="cmp-tabs">
+        <div class="cmp-tab on"><i class="fa-solid fa-chart-area"></i> Plot</div>
+        <div class="cmp-tab"><i class="fa-solid fa-table"></i> Details</div>
+        <div class="cmp-tab"><i class="fa-solid fa-chart-bar"></i> Statistics</div>
+      </div>
+      <div class="cmp-body">
+        <div class="plot-area">
+          <div class="plot-toolbar" data-target="plot-toolbar">
+            <div class="seg"><span class="on"><i class="fa-solid fa-chart-line"></i> Distribution</span><span>K-values</span></div>
+            <button class="tool-btn"><i class="fa-solid fa-download"></i> PNG</button>
+            <button class="tool-btn"><i class="fa-solid fa-file-csv"></i> CSV</button>
+            <div class="tb-spacer"></div>
+            <button class="tool-btn"><i class="fa-solid fa-sliders"></i> Controls</button>
+          </div>
+          <div class="chart" data-target="plot">
+            <div class="curve"></div>
+          </div>
+          <div class="drawer" data-target="drawer"><i class="fa-solid fa-table"></i> Table <span>Distribution curve data</span><span class="tb-spacer"></span><button class="tool-btn">Export CSV</button></div>
+        </div>
+        <aside class="rail" data-target="comparison-scope">
+          <div class="rail-head">Plot Visibility</div>
+          <div class="rail-section">
+            <h3>Scope</h3>
+            <div class="rail-line"><span>Visible</span><strong>8 / 11</strong></div>
+            <div class="rail-line"><span>Groups</span><strong>3</strong></div>
+            <div class="rail-line"><span>Pinned</span><strong>none</strong></div>
+          </div>
+          <div class="rail-section">
+            <h3>Groups</h3>
+            <div class="rail-line"><span>Layer A</span><strong>4/4</strong></div>
+            <div class="rail-line"><span>Layer B</span><strong>3/3</strong></div>
+            <div class="rail-line"><span>Layer C</span><strong>0/3</strong></div>
+          </div>
+        </aside>
+      </div>
+    </section>
+
+    <div class="tour-layer" aria-hidden="true">
+      <div class="spotlight"></div>
+      <div class="callout">
+        <div class="callout-head">
+          <div class="step-kicker"><span id="stepKicker">Startup guide</span><span class="step-pill" id="stepCount">1 / 6</span></div>
+          <h2 id="stepTitle">Choose the right loading path</h2>
+        </div>
+        <div class="callout-body">
+          <div class="tour-progress" id="progress"></div>
+          <p id="stepBody">Start with processed sieve data when your file already contains particle size and percent passing. Use raw sieve weightings when the file contains retained weights.</p>
+          <div class="tip-list" id="tips"></div>
+        </div>
+        <div class="tour-actions">
+          <div class="tour-check"><span></span> Do not show on startup</div>
+          <button class="tour-btn" id="backBtn"><i class="fa-solid fa-arrow-left"></i> Back</button>
+          <button class="tour-btn">Skip</button>
+          <button class="tour-btn primary" id="nextBtn">Next <i class="fa-solid fa-arrow-right"></i></button>
+        </div>
+      </div>
+      <div class="tour-map">
+        <h3>Tour Outline</h3>
+        <div id="tourMap"></div>
+      </div>
+      <div class="step-preview" id="stepPreview"></div>
+    </div>
+  </main>
+
+  <div class="status">
+    <strong>Ready</strong>
+    <span>2 datasets loaded</span>
+    <span>Unit m/d</span>
+    <span>Guide can be opened from Help at any time</span>
+  </div>
+</div>
+
+<script>
+const steps = [
+  {
+    title:'Start in the sidebar',
+    kicker:'Import path',
+    body:'Drop files here or click to choose whether the files are processed sieve data or raw sieve weighings. This is the primary import path.',
+    tips:['Processed sieve data means particle size plus percent passing.', 'Raw sieve weighings are converted before calculations.'],
+    sx:'10px', sy:'82px', swid:'238px', sh:'76px',
+    cx:'278px', cy:'82px', ax:'-8px', ay:'48px',
+    meta:'Sidebar import'
+  },
+  {
+    title:'Your loaded samples live here',
+    kicker:'Workspace scope',
+    body:'Sample cards become the main navigation and inclusion list after loading. Checked samples feed comparison, reports, and export.',
+    tips:['Click a sample to open it.', 'Use inspect or remap when a file needs review.'],
+    sx:'12px', sy:'190px', swid:'234px', sh:'142px',
+    cx:'276px', cy:'154px', ax:'-8px', ay:'84px',
+    meta:'Sidebar samples'
+  },
+  {
+    title:'Assign groups before comparing',
+    kicker:'Groups',
+    body:'Use the Dataset & Group Manager to assign layers or sampling zones once, then reuse those groups in plots, Details, Statistics, reports, and export.',
+    tips:['Rows are selected directly like a spreadsheet.', 'Groups should be optional but easy to apply in batches.'],
+    sx:'10px', sy:'342px', swid:'238px', sh:'36px',
+    cx:'276px', cy:'292px', ax:'-8px', ay:'62px',
+    meta:'Dataset manager'
+  },
+  {
+    title:'Check calculation inputs',
+    kicker:'Parameters',
+    body:'Temperature and porosity settings live in the sidebar because they affect hydraulic conductivity calculations. K-values refresh automatically after loading and supported edits.',
+    tips:['Temperature affects water density and viscosity.', 'Manual recalculation stays available from the Analysis menu.'],
+    sx:'10px', sy:'388px', swid:'238px', sh:'72px',
+    cx:'276px', cy:'350px', ax:'-8px', ay:'72px',
+    meta:'Calculation inputs'
+  },
+  {
+    title:'Review stratigraphy',
+    kicker:'Classification',
+    body:'The stratigraphy summary shows grain fractions, the active classification scheme, and the active soil/permeability class.',
+    tips:['The scheme should drive grain-size histogram labels.', 'This panel should summarize, not replace, the detailed tabs.'],
+    sx:'10px', sy:'470px', swid:'238px', sh:'72px',
+    cx:'276px', cy:'430px', ax:'-8px', ay:'76px',
+    meta:'Stratigraphy'
+  },
+  {
+    title:'Individual Samples',
+    kicker:'Main tab',
+    body:'Use Individual Samples for one dataset at a time: distribution plots, histograms, K methods, warnings, and detailed per-sample tables.',
+    tips:['The sidebar chooses which sample is active.', 'Per-sample plot drawers should expose the plotted data.'],
+    sx:'270px', sy:'38px', swid:'174px', sh:'32px',
+    cx:'330px', cy:'94px', ax:'56px', ay:'-8px',
+    meta:'Individual tab'
+  },
+  {
+    title:'Comparison',
+    kicker:'Main tab',
+    body:'Use Comparison for grouped plots, aggregate Details, Statistics, and method inclusion choices across datasets.',
+    tips:['Group colors and visibility should stay consistent.', 'Aggregate tables should use the shared calculation backend.'],
+    sx:'448px', sy:'38px', swid:'120px', sh:'32px',
+    cx:'382px', cy:'98px', ax:'114px', ay:'-8px',
+    meta:'Comparison tab'
+  },
+  {
+    title:'Reports',
+    kicker:'Main tab',
+    body:'Use Reports for generated documents and report tables. Report values should match the same live results shown elsewhere.',
+    tips:['Wide tables and plot parity remain release QA items.', 'Reports should not invent separate calculations.'],
+    sx:'570px', sy:'38px', swid:'100px', sh:'32px',
+    cx:'430px', cy:'100px', ax:'182px', ay:'-8px',
+    meta:'Reports tab'
+  },
+  {
+    title:'Export',
+    kicker:'Main tab',
+    body:'Use Export for full data dumps, aggregate/group tables, and plot/table drawer data with clear file names.',
+    tips:['Exported rows should match visible drawer tables.', 'Dataset and group scope should be explicit.'],
+    sx:'672px', sy:'38px', swid:'90px', sh:'32px',
+    cx:'480px', cy:'102px', ax:'226px', ay:'-8px',
+    meta:'Export tab'
+  },
+  {
+    title:'Check loading messages',
+    kicker:'Activity log',
+    body:'The activity log should surface wrong-mode detection, skipped rows, warnings, and future validation messages without using the terminal.',
+    tips:['This is especially important for batch imports.', 'Keep messages tied to the relevant file when possible.'],
+    sx:'calc(100% - 128px)', sy:'38px', swid:'54px', sh:'32px',
+    cx:'calc(100% - 490px)', cy:'100px', ax:'336px', ay:'-8px',
+    meta:'Log'
+  },
+  {
+    title:'Use the status line',
+    kicker:'Status',
+    body:'The bottom status line gives quick context while moving between work areas: active sample, D50, K mean, temperature, methods, and dataset count.',
+    tips:['It should stay visible across tabs.', 'It should summarize rather than compete with the main workspace.'],
+    sx:'260px', sy:'calc(100% - 26px)', swid:'calc(100% - 260px)', sh:'26px',
+    cx:'356px', cy:'calc(100% - 190px)', ax:'70px', ay:'178px',
+    meta:'Status line'
+  },
+  {
+    title:'Open detailed help',
+    kicker:'Guides',
+    body:'The startup guide gives orientation. Longer explanations should live in the Help window and future tab-specific guided tours.',
+    tips:['Auto-run-once can be added after the copy is approved.', 'Tab guides can reuse this same overlay system.'],
+    sx:'calc(100% - 66px)', sy:'2px', swid:'58px', sh:'28px',
+    cx:'calc(100% - 438px)', cy:'54px', ax:'334px', ay:'-8px',
+    meta:'Help'
+  },
+];
+
+let current = 0;
+const body = document.body;
+const rootStyle = document.documentElement.style;
+const title = document.getElementById('stepTitle');
+const kicker = document.getElementById('stepKicker');
+const count = document.getElementById('stepCount');
+const text = document.getElementById('stepBody');
+const tips = document.getElementById('tips');
+const progress = document.getElementById('progress');
+const map = document.getElementById('tourMap');
+const preview = document.getElementById('stepPreview');
+
+function setStep(index){
+  current = Math.max(0, Math.min(steps.length - 1, index));
+  const s = steps[current];
+  body.dataset.step = String(current + 1);
+  rootStyle.setProperty('--sx', s.sx);
+  rootStyle.setProperty('--sy', s.sy);
+  rootStyle.setProperty('--swid', s.swid);
+  rootStyle.setProperty('--sh', s.sh);
+  rootStyle.setProperty('--cx', s.cx);
+  rootStyle.setProperty('--cy', s.cy);
+  rootStyle.setProperty('--arrow-x', s.ax);
+  rootStyle.setProperty('--arrow-y', s.ay);
+  title.textContent = s.title;
+  kicker.textContent = s.kicker;
+  count.textContent = `${current + 1} / ${steps.length}`;
+  text.textContent = s.body;
+  tips.innerHTML = s.tips.map(t => `<div class="tip"><i class="fa-solid fa-check"></i><span>${t}</span></div>`).join('');
+  progress.innerHTML = steps.map((_,i) => `<div class="dot ${i < current ? 'done' : ''} ${i === current ? 'on' : ''}"></div>`).join('');
+  map.innerHTML = steps.map((step,i) => `
+    <div class="map-step ${i === current ? 'on' : ''}" onclick="setStep(${i})">
+      <div class="map-num">${i + 1}</div>
+      <div><div class="map-title">${step.title}</div><div class="map-meta">${step.meta}</div></div>
+    </div>`).join('');
+  preview.innerHTML = steps.map((_,i) => `<button class="${i === current ? 'on' : ''}" onclick="setStep(${i})">${i + 1}</button>`).join('');
+  document.getElementById('backBtn').style.visibility = current === 0 ? 'hidden' : 'visible';
+  document.getElementById('nextBtn').innerHTML = current === steps.length - 1 ? 'Done <i class="fa-solid fa-check"></i>' : 'Next <i class="fa-solid fa-arrow-right"></i>';
+}
+
+document.getElementById('backBtn').addEventListener('click', () => setStep(current - 1));
+document.getElementById('nextBtn').addEventListener('click', () => setStep(current + 1));
+setStep(0);
+</script>
+</body>
+</html>

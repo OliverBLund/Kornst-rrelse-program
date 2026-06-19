@@ -14,6 +14,7 @@ from data_loader import GrainSizeData
 from k_calculations_v2 import KCalculationResult
 from k_aggregation import KAggregationOptions, build_k_result_summary
 from grain_classification import ISO14688
+from method_registry import DEFAULT_METHOD_ORDER, METHOD_CATEGORY_MAP, ordered_methods
 from .plot_renderers import (
     apply_legend_aware_layout,
     render_applicability_heatmap,
@@ -36,19 +37,8 @@ from .theme import apply_matplotlib_style
 class ExportManager:
     """Manages export operations for various file formats"""
 
-    DEFAULT_METHOD_ORDER = [
-        'Hazen', 'Hazen_1892', 'Slichter', 'Terzaghi',
-        'Beyer', 'Sauerbrei', 'Kruger', 'Kozeny-Carman',
-        'Zunker', 'Zamarin', 'USBR', 'Barr',
-        'Alyamani-Sen', 'Chapuis', 'Shepherd', 'Krumbein-Monk',
-    ]
-    METHOD_CATEGORY_MAP = {
-        'hazen_based': {'Hazen', 'Hazen_1892'},
-        'porosity_dependent': {'Slichter', 'Kozeny-Carman', 'Zunker', 'Zamarin', 'Barr'},
-        'uniformity_dependent': {'Beyer'},
-        'empirical': {'USBR', 'Alyamani-Sen', 'Chapuis', 'Shepherd', 'Terzaghi', 'Kruger', 'Krumbein-Monk'},
-        'temperature_corrected': {'Sauerbrei'},
-    }
+    DEFAULT_METHOD_ORDER = list(DEFAULT_METHOD_ORDER)
+    METHOD_CATEGORY_MAP = METHOD_CATEGORY_MAP
     UNIT_SPECS = [
         ('m_s', 'K (m/s)', 'm/s', 'k_m_s', 1.0, '.3e'),
         ('cm_s', 'K (cm/s)', 'cm/s', 'k_cm_s', 100.0, '.3e'),
@@ -159,10 +149,7 @@ class ExportManager:
 
     def _ordered_method_names(self, method_names) -> List[str]:
         """Return methods in the preferred domain order."""
-        seen = set(method_names)
-        ordered = [name for name in self.DEFAULT_METHOD_ORDER if name in seen]
-        extras = sorted(seen.difference(self.DEFAULT_METHOD_ORDER))
-        return ordered + extras
+        return ordered_methods(method_names, self.DEFAULT_METHOD_ORDER)
 
     def _selected_method_names(self, config: Dict) -> Optional[set[str]]:
         """Return selected method names or None when no filtering is requested."""
@@ -995,16 +982,11 @@ class ExportManager:
                     all_method_names.add(result.method_name)
 
         # Sort method names for consistent ordering
-        method_names = sorted(all_method_names)
+        method_names = self._ordered_method_names(all_method_names)
 
         # If no results yet, use standard methods as fallback
         if not method_names:
-            method_names = [
-                'Hazen', 'Hazen_1892', 'Slichter', 'Terzaghi',
-                'Beyer', 'Sauerbrei', 'Kruger', 'Kozeny-Carman',
-                'Zunker', 'Zamarin', 'USBR', 'Barr',
-                'Alyamani-Sen', 'Chapuis', 'Shepherd', 'Krumbein-Monk'
-            ]
+            method_names = list(self.DEFAULT_METHOD_ORDER)
 
         with open(filepath, 'w', newline='', encoding='utf-8') as f:
             writer = csv.writer(f)

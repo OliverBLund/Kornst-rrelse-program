@@ -1,0 +1,673 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>19 - Comparison Details Sidebar Refinement</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Playfair+Display:wght@600;700&family=Source+Sans+3:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;500;600;700&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.2/css/all.min.css">
+  <link rel="stylesheet" href="_shared.css">
+  <style>
+    .cmp-page{
+      flex:1;
+      min-height:0;
+      display:flex;
+      flex-direction:column;
+      background:var(--bg);
+      overflow:hidden;
+    }
+    .cmp-subtabs{
+      height:32px;
+      display:flex;
+      align-items:flex-end;
+      gap:2px;
+      padding:0 12px;
+      background:var(--bg-raised);
+      border-bottom:1px solid var(--border);
+      flex-shrink:0;
+    }
+    .cmp-tab{
+      height:30px;
+      display:flex;
+      align-items:center;
+      gap:6px;
+      padding:0 13px;
+      border:1px solid transparent;
+      border-bottom:none;
+      border-radius:var(--r) var(--r) 0 0;
+      color:var(--text-muted);
+      font-size:12px;
+      font-weight:600;
+    }
+    .cmp-tab.on{
+      background:var(--bg);
+      border-color:var(--border);
+      color:var(--text);
+    }
+    .cmp-toolbar{
+      display:flex;
+      align-items:center;
+      gap:8px;
+      min-height:44px;
+      padding:8px 12px;
+      background:var(--bg-raised);
+      border-bottom:1px solid var(--border);
+      flex-shrink:0;
+    }
+    .seg{
+      display:inline-flex;
+      align-items:center;
+      border:1px solid var(--border);
+      border-radius:var(--r);
+      overflow:hidden;
+      background:#f5f1ea;
+      flex-shrink:0;
+    }
+    .seg button{
+      height:24px;
+      min-width:90px;
+      border:none;
+      border-right:1px solid var(--border);
+      background:transparent;
+      color:var(--text-mid);
+      font-size:12px;
+      font-weight:600;
+      display:flex;
+      align-items:center;
+      justify-content:center;
+      gap:6px;
+    }
+    .seg button:last-child{border-right:none}
+    .seg button.on{
+      background:rgba(107,142,35,.12);
+      color:var(--olive-dk);
+      font-weight:700;
+    }
+    .seg button.disabled{
+      color:var(--text-muted);
+      background:rgba(212,196,168,.16);
+    }
+    .cmp-context{
+      margin-left:auto;
+      min-width:0;
+      color:var(--text-muted);
+      font:600 10px var(--fm);
+      white-space:nowrap;
+      overflow:hidden;
+      text-overflow:ellipsis;
+    }
+    .scope-strip{
+      height:34px;
+      display:flex;
+      align-items:center;
+      gap:8px;
+      padding:0 12px;
+      background:rgba(255,255,255,.32);
+      border-bottom:1px solid var(--border);
+      overflow:auto hidden;
+      flex-shrink:0;
+    }
+    .scope-chip{
+      display:inline-flex;
+      align-items:center;
+      gap:6px;
+      height:22px;
+      padding:0 8px;
+      border-radius:99px;
+      border:1px solid var(--border);
+      background:rgba(255,255,255,.52);
+      color:var(--text-mid);
+      font-size:11px;
+      font-weight:600;
+      white-space:nowrap;
+      flex-shrink:0;
+    }
+    .scope-chip strong{
+      font-family:var(--fm);
+      color:var(--text);
+    }
+    .scope-chip.ok{
+      background:rgba(107,142,35,.08);
+      border-color:rgba(107,142,35,.25);
+      color:var(--olive-dk);
+    }
+    .scope-chip.warn{
+      background:rgba(196,165,116,.12);
+      border-color:rgba(196,165,116,.36);
+      color:#76521c;
+    }
+    .cmp-body{
+      flex:1;
+      min-height:0;
+      display:grid;
+      grid-template-columns:minmax(0,1fr) 360px;
+      overflow:hidden;
+    }
+    .table-area{
+      min-width:0;
+      display:flex;
+      flex-direction:column;
+      overflow:hidden;
+      background:var(--bg);
+    }
+    .fake-table{
+      flex:1;
+      min-height:0;
+      overflow:auto;
+      padding:0;
+    }
+    table{
+      width:100%;
+      min-width:900px;
+      border-collapse:collapse;
+      font-size:12px;
+    }
+    th{
+      position:sticky;
+      top:0;
+      z-index:2;
+      height:36px;
+      background:var(--bg-raised);
+      border-bottom:2px solid var(--border-dk);
+      border-right:1px solid rgba(212,196,168,.56);
+      color:var(--text-mid);
+      font-weight:700;
+      padding:0 10px;
+      white-space:nowrap;
+    }
+    td{
+      height:46px;
+      border-bottom:1px solid rgba(212,196,168,.45);
+      border-right:1px solid rgba(212,196,168,.24);
+      padding:0 10px;
+      color:var(--text);
+      background:rgba(255,255,255,.16);
+    }
+    td.num{
+      font-family:var(--fm);
+      text-align:right;
+      font-weight:600;
+    }
+    td.result{
+      width:220px;
+      color:var(--text);
+      font-weight:700;
+    }
+    td.result span{
+      display:block;
+      margin-top:2px;
+      color:var(--text-muted);
+      font:500 10px var(--fm);
+    }
+    tr.section td{
+      height:34px;
+      background:var(--bg);
+      color:var(--text-muted);
+      font:700 10px var(--fm);
+      letter-spacing:.1em;
+      text-transform:uppercase;
+    }
+    .rail{
+      min-width:0;
+      display:flex;
+      flex-direction:column;
+      overflow:hidden;
+      background:var(--bg-raised);
+      border-left:1px solid var(--border);
+    }
+    .rail-head{
+      min-height:42px;
+      display:flex;
+      align-items:center;
+      gap:8px;
+      padding:0 12px;
+      border-bottom:1px solid var(--border);
+      flex-shrink:0;
+    }
+    .rail-title{
+      min-width:0;
+      flex:1;
+    }
+    .rail-title strong{
+      display:block;
+      color:var(--text);
+      font-size:13px;
+      line-height:1.05;
+    }
+    .rail-title span{
+      display:block;
+      color:var(--text-muted);
+      font:600 10px var(--fm);
+      margin-top:2px;
+    }
+    .rail-badge{
+      height:22px;
+      padding:0 8px;
+      display:flex;
+      align-items:center;
+      border-radius:99px;
+      border:1px solid rgba(107,142,35,.25);
+      background:rgba(107,142,35,.08);
+      color:var(--olive-dk);
+      font:700 10px var(--fm);
+      white-space:nowrap;
+    }
+    .rail-scroll{
+      flex:1;
+      min-height:0;
+      overflow:auto;
+      padding:10px 12px 12px;
+    }
+    .filter-chips{
+      display:flex;
+      flex-wrap:wrap;
+      gap:6px;
+      margin-bottom:12px;
+    }
+    .mini-chip{
+      height:22px;
+      display:inline-flex;
+      align-items:center;
+      gap:5px;
+      padding:0 7px;
+      border-radius:99px;
+      border:1px solid rgba(212,196,168,.82);
+      background:rgba(255,255,255,.44);
+      color:var(--text-mid);
+      font-size:10.5px;
+      font-weight:700;
+      white-space:nowrap;
+    }
+    .mini-chip.ok{
+      background:rgba(107,142,35,.08);
+      border-color:rgba(107,142,35,.23);
+      color:var(--olive-dk);
+    }
+    .summary-band{
+      border-top:1px solid var(--border);
+      padding:12px 0 13px;
+    }
+    .summary-band:first-of-type{border-top:none;padding-top:0}
+    .band-title{
+      display:flex;
+      align-items:center;
+      gap:7px;
+      margin-bottom:9px;
+      color:var(--text-muted);
+      font:800 10px var(--fm);
+      letter-spacing:.09em;
+      text-transform:uppercase;
+    }
+    .headline-result{
+      display:grid;
+      grid-template-columns:1fr auto;
+      align-items:end;
+      gap:10px;
+      margin-bottom:8px;
+    }
+    .headline-result .label{
+      color:var(--text-mid);
+      font-size:12px;
+      font-weight:700;
+      min-width:0;
+    }
+    .headline-result .sub{
+      display:block;
+      color:var(--text-muted);
+      font:600 10px var(--fm);
+      margin-top:1px;
+      white-space:nowrap;
+      overflow:hidden;
+      text-overflow:ellipsis;
+    }
+    .headline-result .value{
+      font:800 22px var(--fm);
+      color:var(--text);
+      line-height:1;
+      white-space:nowrap;
+    }
+    .metric-grid{
+      display:grid;
+      grid-template-columns:1fr 1fr;
+      gap:6px;
+    }
+    .metric{
+      min-width:0;
+      padding:7px 8px;
+      border:1px solid rgba(212,196,168,.62);
+      background:rgba(255,255,255,.32);
+      border-radius:4px;
+    }
+    .metric .k{
+      color:var(--text-muted);
+      font-size:10.5px;
+      font-weight:700;
+      white-space:nowrap;
+      overflow:hidden;
+      text-overflow:ellipsis;
+    }
+    .metric .v{
+      margin-top:2px;
+      color:var(--text);
+      font:800 12px var(--fm);
+      white-space:nowrap;
+      overflow:hidden;
+      text-overflow:ellipsis;
+    }
+    .class-line{
+      display:flex;
+      gap:6px;
+      align-items:flex-start;
+      margin-top:8px;
+      padding:7px 8px;
+      border:1px solid rgba(107,142,35,.22);
+      background:rgba(107,142,35,.07);
+      border-radius:4px;
+      color:var(--olive-dk);
+      font-weight:700;
+      font-size:11.5px;
+      line-height:1.25;
+    }
+    .group-list{
+      display:flex;
+      flex-direction:column;
+      gap:7px;
+    }
+    .group-row{
+      display:grid;
+      grid-template-columns:8px minmax(0,1fr) auto;
+      gap:8px;
+      align-items:center;
+      padding:8px;
+      border:1px solid rgba(212,196,168,.62);
+      background:rgba(255,255,255,.30);
+      border-radius:4px;
+    }
+    .group-swatch{
+      width:8px;
+      height:34px;
+      border-radius:3px;
+    }
+    .group-name{
+      min-width:0;
+      color:var(--text);
+      font-weight:800;
+      font-size:12px;
+      overflow:hidden;
+      text-overflow:ellipsis;
+      white-space:nowrap;
+    }
+    .group-meta{
+      margin-top:2px;
+      color:var(--text-muted);
+      font:600 10px var(--fm);
+      white-space:nowrap;
+      overflow:hidden;
+      text-overflow:ellipsis;
+    }
+    .group-values{
+      text-align:right;
+      color:var(--text);
+      font:800 11px var(--fm);
+      line-height:1.35;
+      white-space:nowrap;
+    }
+    .legend-inline{
+      display:flex;
+      gap:6px;
+      flex-wrap:wrap;
+    }
+    .heat-pill{
+      display:inline-flex;
+      align-items:center;
+      gap:5px;
+      height:22px;
+      padding:0 7px;
+      border:1px solid rgba(212,196,168,.76);
+      border-radius:99px;
+      color:var(--text-mid);
+      font-size:10px;
+      font-weight:700;
+      background:rgba(255,255,255,.28);
+    }
+    .heat-dot{
+      width:9px;
+      height:9px;
+      border-radius:50%;
+    }
+  </style>
+</head>
+<body>
+<div class="app">
+  <main class="main">
+    <section class="cmp-page">
+      <div class="cmp-subtabs">
+        <div class="cmp-tab"><i class="fa-solid fa-chart-line"></i>Plot</div>
+        <div class="cmp-tab on"><i class="fa-solid fa-table"></i>Details</div>
+        <div class="cmp-tab"><i class="fa-solid fa-chart-column"></i>Statistics</div>
+      </div>
+
+      <div class="cmp-toolbar">
+        <div class="seg">
+          <button>Individual</button>
+          <button class="on">Aggregate</button>
+        </div>
+        <div class="seg">
+          <button class="disabled"><i class="fa-solid fa-wheat-awn"></i>Grain</button>
+          <button class="disabled"><i class="fa-solid fa-water"></i>K-values</button>
+        </div>
+        <div class="seg">
+          <button class="on">All methods</button>
+          <button>Valid in all</button>
+          <button class="disabled">Choose</button>
+        </div>
+        <div class="seg">
+          <button class="on">OK only</button>
+          <button>Warnings</button>
+        </div>
+        <button class="tb-btn"><i class="fa-solid fa-layer-group"></i>Scope & Groups</button>
+        <div class="cmp-context">ISO 14688 / DS/EN ISO 14688 · aggregate · mm/%</div>
+      </div>
+
+      <div class="scope-strip">
+        <div class="scope-chip"><i class="fa-solid fa-vial"></i><strong>5</strong> datasets</div>
+        <div class="scope-chip"><i class="fa-solid fa-layer-group"></i><strong>2</strong> groups</div>
+        <div class="scope-chip ok"><i class="fa-solid fa-circle-check"></i><strong>58 / 80</strong> K cells included</div>
+        <div class="scope-chip warn"><i class="fa-solid fa-triangle-exclamation"></i><strong>22</strong> warnings excluded</div>
+      </div>
+
+      <div class="cmp-body">
+        <section class="table-area">
+          <div class="fake-table">
+            <table>
+              <thead>
+                <tr>
+                  <th>Result</th>
+                  <th>Overall</th>
+                  <th>test</th>
+                  <th>test2</th>
+                  <th>Included</th>
+                  <th>Status</th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr class="section"><td colspan="6">K aggregate summaries</td></tr>
+                <tr>
+                  <td class="result">K geometric mean<span>Included methods across selected datasets</span></td>
+                  <td class="num">11.44</td>
+                  <td class="num">7.89</td>
+                  <td class="num">20.14</td>
+                  <td class="num">58 / 80</td>
+                  <td class="num">OK</td>
+                </tr>
+                <tr>
+                  <td class="result">K arithmetic mean<span>Linear average of included values</span></td>
+                  <td class="num">39.18</td>
+                  <td class="num">28.44</td>
+                  <td class="num">55.29</td>
+                  <td class="num">58 / 80</td>
+                  <td class="num">OK</td>
+                </tr>
+                <tr>
+                  <td class="result">K range<span>Minimum to maximum included value</span></td>
+                  <td class="num">0.02 - 252.1</td>
+                  <td class="num">0.02 - 84.6</td>
+                  <td class="num">3.8 - 252.1</td>
+                  <td class="num">58 / 80</td>
+                  <td class="num">OK</td>
+                </tr>
+                <tr>
+                  <td class="result">Permeability class<span>Class from aggregate geometric mean</span></td>
+                  <td class="num">High (Clean Sand)</td>
+                  <td class="num">Moderate</td>
+                  <td class="num">High</td>
+                  <td class="num">5 / 5</td>
+                  <td class="num">OK</td>
+                </tr>
+                <tr class="section"><td colspan="6">Method aggregates</td></tr>
+                <tr>
+                  <td class="result">Sauerbrei<span>Geometric mean per scope</span></td>
+                  <td class="num">9.42</td>
+                  <td class="num">6.78</td>
+                  <td class="num">18.42</td>
+                  <td class="num">5 / 5</td>
+                  <td class="num">OK</td>
+                </tr>
+                <tr>
+                  <td class="result">Kozeny-Carman<span>Geometric mean per scope</span></td>
+                  <td class="num">48.77</td>
+                  <td class="num">39.61</td>
+                  <td class="num">82.44</td>
+                  <td class="num">5 / 5</td>
+                  <td class="num">OK</td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+        </section>
+
+        <aside class="rail">
+          <div class="rail-head">
+            <div class="rail-title">
+              <strong>Aggregate Summary</strong>
+              <span>5 datasets · 2 groups · OK only</span>
+            </div>
+            <div class="rail-badge">58 / 80</div>
+          </div>
+
+          <div class="rail-scroll">
+            <div class="filter-chips">
+              <div class="mini-chip ok"><i class="fa-solid fa-chart-simple"></i>Aggregate</div>
+              <div class="mini-chip"><i class="fa-solid fa-list"></i>Summary</div>
+              <div class="mini-chip"><i class="fa-solid fa-table-list"></i>All methods</div>
+              <div class="mini-chip ok"><i class="fa-solid fa-circle-check"></i>OK only</div>
+              <div class="mini-chip"><i class="fa-solid fa-ruler"></i>mm/%</div>
+            </div>
+
+            <section class="summary-band">
+              <div class="band-title"><i class="fa-solid fa-water"></i>K Summary</div>
+              <div class="headline-result">
+                <div>
+                  <div class="label">Geometric mean</div>
+                  <span class="sub">primary aggregate K</span>
+                </div>
+                <div class="value">11.44</div>
+              </div>
+              <div class="metric-grid">
+                <div class="metric">
+                  <div class="k">Arithmetic</div>
+                  <div class="v">39.18</div>
+                </div>
+                <div class="metric">
+                  <div class="k">Median</div>
+                  <div class="v">21.43</div>
+                </div>
+                <div class="metric">
+                  <div class="k">Range</div>
+                  <div class="v">0.02 - 252.1</div>
+                </div>
+                <div class="metric">
+                  <div class="k">Class</div>
+                  <div class="v">High</div>
+                </div>
+              </div>
+              <div class="class-line">
+                <i class="fa-solid fa-circle-check"></i>
+                <span>High permeability · Clean sand range</span>
+              </div>
+            </section>
+
+            <section class="summary-band">
+              <div class="band-title"><i class="fa-solid fa-wheat-awn"></i>Grain Summary</div>
+              <div class="headline-result">
+                <div>
+                  <div class="label">D50 median</div>
+                  <span class="sub">across included datasets</span>
+                </div>
+                <div class="value">0.48</div>
+              </div>
+              <div class="metric-grid">
+                <div class="metric">
+                  <div class="k">Mean grain size</div>
+                  <div class="v">0.617 mm</div>
+                </div>
+                <div class="metric">
+                  <div class="k">Cu median</div>
+                  <div class="v">3.67</div>
+                </div>
+                <div class="metric">
+                  <div class="k">Fines median</div>
+                  <div class="v">2.9%</div>
+                </div>
+                <div class="metric">
+                  <div class="k">Dominant class</div>
+                  <div class="v">Poorly-graded sand</div>
+                </div>
+              </div>
+            </section>
+
+            <section class="summary-band">
+              <div class="band-title"><i class="fa-solid fa-layer-group"></i>Groups</div>
+              <div class="group-list">
+                <div class="group-row">
+                  <div class="group-swatch" style="background:#3a7ea0"></div>
+                  <div>
+                    <div class="group-name">test</div>
+                    <div class="group-meta">3 datasets · D50 0.42 mm</div>
+                  </div>
+                  <div class="group-values">K 7.89<br>58%</div>
+                </div>
+                <div class="group-row">
+                  <div class="group-swatch" style="background:#6b8e23"></div>
+                  <div>
+                    <div class="group-name">test2</div>
+                    <div class="group-meta">2 datasets · D50 0.61 mm</div>
+                  </div>
+                  <div class="group-values">K 20.14<br>42%</div>
+                </div>
+              </div>
+            </section>
+
+            <section class="summary-band">
+              <div class="band-title"><i class="fa-solid fa-temperature-half"></i>Heat Legend</div>
+              <div class="legend-inline">
+                <div class="heat-pill"><span class="heat-dot" style="background:#dce7bf"></span>low</div>
+                <div class="heat-pill"><span class="heat-dot" style="background:#e2bb69"></span>mid</div>
+                <div class="heat-pill"><span class="heat-dot" style="background:#c98752"></span>high</div>
+              </div>
+            </section>
+          </div>
+        </aside>
+      </div>
+    </section>
+  </main>
+</div>
+
+<script src="_shell.js"></script>
+<script>
+  initShell({ activeTab: 'comparison', showDatasetBar: false });
+</script>
+</body>
+</html>

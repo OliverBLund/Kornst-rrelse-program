@@ -7,7 +7,9 @@ classification logic stay consistent everywhere.
 
 from __future__ import annotations
 
-from typing import Dict, List, Set
+from typing import Dict, List
+
+from method_registry import DEFAULT_METHOD_ORDER, ordered_methods
 
 
 # ── Method colours ────────────────────────────────────────────
@@ -31,15 +33,6 @@ METHOD_COLORS: Dict[str, str] = {
     "Chapuis":       "#ff5722",  # Deep orange-red
     "Krumbein-Monk": "#9c27b0",  # Purple
 }
-
-# Canonical display order for methods (matches the UI sidebar).
-DEFAULT_METHOD_ORDER: List[str] = [
-    "Hazen", "Hazen_1892", "Slichter", "Terzaghi",
-    "Beyer", "Sauerbrei", "Kruger", "Kozeny-Carman",
-    "Zunker", "Zamarin", "USBR", "Barr",
-    "Alyamani-Sen", "Chapuis", "Shepherd", "Krumbein-Monk",
-]
-
 
 # ── Dataset colours ───────────────────────────────────────────
 # Used when multiple datasets share the same axes (comparison plots).
@@ -66,10 +59,3 @@ def classify_k_status(result) -> str:
     if "WARNING" in status_str or "OUTSIDE_RANGE" in status_str or not conditions_met:
         return "Warning"
     return "Error"
-
-
-def ordered_methods(methods, order: List[str] | None = None) -> List[str]:
-    """Return *methods* sorted by canonical order, with unknowns appended."""
-    ref = order or DEFAULT_METHOD_ORDER
-    idx = {m: i for i, m in enumerate(ref)}
-    return sorted(methods, key=lambda m: idx.get(m, len(ref)))

@@ -19,6 +19,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Arithmetic mean grain size per dataset for downstream summaries and aggregate reporting.
 - In-app activity/log overlay foundation for data-loading warnings and future program events.
 - Visible remap access from dataset/sample surfaces so a loaded file can be corrected without digging through inspector dialogs.
+- Workspace-wide K-method selection from the Analysis menu, with Comparison Details/Statistics shortcuts to the same selector.
 
 ### Changed
 - Excel import flow simplified so detected workbook sheets can load directly while still allowing mapping/remapping when needed.
@@ -41,6 +42,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Plot export controls are more consistent between single-sample and comparison plot sidebars, including PNG access.
 - Export-tab plot preview and export wording now make it clearer whether the output is a figure file or plot data table.
 - Full changelog now opens in the in-app Help & Documentation window instead of opening the raw Markdown file.
+- Active K-method selection now applies consistently to Results, plots, comparison summaries, reports, and export while keeping all methods cached internally.
 
 ### Fixed
 - Raw sieve auto-detection no longer silently accepts obviously invalid columns such as loss-percent rows or numeric header artifacts as sieve/weight columns.

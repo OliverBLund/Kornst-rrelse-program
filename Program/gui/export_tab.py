@@ -713,7 +713,7 @@ class ExportTab(QWidget):
         k_values_group = self._create_content_category(
             "K-Value Results",
             [
-                ("all_methods", "All calculation methods (16)"),
+                ("all_methods", "Active K methods"),
                 ("include_formulas", "Include formulas"),
                 ("include_validation", "Include validation messages"),
                 ("units_group", "Units: m/s, cm/s, m/d")
@@ -2879,7 +2879,7 @@ class ExportTab(QWidget):
                 preview_text.append(f"... (showing first 3 of {len(datasets_to_export)} datasets)")
 
             preview_text.append("")
-            preview_text.append("NOTE: Full wide format includes ALL methods in multiple units (m/s, cm/s, m/d)")
+            preview_text.append("NOTE: Full wide format includes active K methods in multiple units (m/s, cm/s, m/d)")
 
         # Show Excel preview if selected
         if self.selected_formats.get('excel'):

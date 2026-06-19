@@ -9,7 +9,7 @@ import unittest
 os.environ.setdefault('QT_QPA_PLATFORM', 'offscreen')
 sys.path.insert(0, 'Program')
 
-from PyQt6.QtWidgets import QApplication
+from PyQt6.QtWidgets import QApplication, QPushButton
 
 from gui.main_window import _AppToolbar
 
@@ -40,8 +40,6 @@ class TestAppToolbar(unittest.TestCase):
         self.assertLessEqual(badge.x() + badge.width(), button.width())
 
     def test_toolbar_uses_explicit_chrome_icon_sizes(self):
-        self.assertEqual(self.toolbar._add_btn.iconSize().width(), 13)
-        self.assertEqual(self.toolbar._calc_btn.iconSize().width(), 13)
         self.assertEqual(self.toolbar._log_btn.iconSize().width(), 13)
         self.assertEqual(self.toolbar._help_btn.iconSize().width(), 13)
         self.assertEqual(self.toolbar._nav_btns[0].iconSize().width(), 13)
@@ -64,19 +62,18 @@ class TestAppToolbar(unittest.TestCase):
         self.toolbar.set_log_badge(0)
         self.assertFalse(self.toolbar._log_badge.isVisible())
 
-    def test_add_data_toolbar_exposes_import_path_menu(self):
-        emitted = []
-        self.toolbar.add_files_mode_clicked.connect(emitted.append)
+    def test_toolbar_no_longer_exposes_import_or_calculate_buttons(self):
+        self.assertFalse(hasattr(self.toolbar, "_add_btn"))
+        self.assertFalse(hasattr(self.toolbar, "add_files_mode_clicked"))
+        self.assertFalse(hasattr(self.toolbar, "_calc_btn"))
+        self.assertFalse(hasattr(self.toolbar, "calculate_clicked"))
 
-        menu = self.toolbar._add_btn.menu()
-        self.assertIsNotNone(menu)
-        self.assertEqual(
-            [action.text() for action in menu.actions()],
-            ["Processed Sieve Data...", "Raw Sieve Weighings..."],
-        )
-
-        menu.actions()[1].trigger()
-        self.assertEqual(emitted, ["raw_sieve"])
+        button_texts = [
+            button.text().strip()
+            for button in self.toolbar.findChildren(QPushButton)
+        ]
+        self.assertNotIn("Add Data", button_texts)
+        self.assertNotIn("Calculate K", button_texts)
 
     def test_badge_font_uses_valid_point_size(self):
         badge = self.toolbar._badge_lbls[0]

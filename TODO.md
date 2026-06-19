@@ -63,10 +63,10 @@ Goal: get the program stable enough for the next tester round and then produce a
   - Entering the Details subtab resets heat coloring to off so tables start in a calm readable state.
 - [x] Remove redundant Dataset & Group Manager toolbar action and improve button affordance.
   - `Select Visible` was removed; default/plot/action buttons now have a clearer light face and stronger border.
-- [ ] Recheck Details toolbar behavior:
+- [x] Recheck Details toolbar behavior:
   - Individual mode: Grain/K-values should switch actual table content.
-  - Aggregate mode: either clearly disable Grain/K-values or split aggregate into true Grain and K aggregate views.
-- [ ] Recheck Statistics toolbar behavior:
+  - Aggregate mode hides Grain/K-values because the aggregate table combines grain and K summaries.
+- [x] Recheck Statistics toolbar behavior:
   - Valid in all must not resize the program window.
   - Unit changes must not resize the program window or toolbar controls.
   - Metric/method/status toggles must keep layout stable.
@@ -74,9 +74,9 @@ Goal: get the program stable enough for the next tester round and then produce a
   - Cards should be readable at default width.
   - Included/All/Review/Manage controls should not feel cramped.
   - Long sample names should truncate/wrap cleanly without shifting controls.
-- [ ] Decide whether top toolbar `Add Data` and `Calculate K` should stay.
-  - If kept, clarify why they exist in addition to sidebar/welcome actions.
-  - If removed, keep equivalent actions available through the sidebar/menu/shortcuts.
+- [x] Remove top toolbar `Add Data` and `Calculate K`.
+  - Import is now centered on the main sidebar drop zone / Samples `+ Add`, welcome quick actions, and File menu.
+  - K-values calculate on load and after supported edits; manual recalculation remains available as `Analysis > Recalculate K Values` / `Ctrl+K`.
 - [ ] Recheck plot sidebars and drawer behavior across common screen sizes.
   - Controls must scroll rather than push content offscreen.
   - Opening/closing sidebars should not reserve stray empty space.
@@ -118,6 +118,15 @@ Goal: get the program stable enough for the next tester round and then produce a
 
 - [ ] Update `CHANGELOG.md` and the in-app "What's New" section after the UI/report/export stabilization pass.
 - [ ] Make sure full changelog opens in the same help/dialog style as Guides/Help.
+- [x] Create a startup guide overlay concept and manual in-app proof of concept.
+  - Concept: `design_concepts/21_startup_guide_overlay.html`.
+  - POC entry point: Help > Startup Guide.
+  - Global POC now walks through sidebar import, sample cards, group management, calculation inputs, stratigraphy, all main tabs, activity log, status line, and Help.
+- [ ] Decide final startup guide behavior.
+  - Confirm expanded global tour copy and target order.
+  - Decide whether to auto-run once for first-time users through `QSettings`.
+  - Individual Samples focused tour is now available through `Help > Guide Individual Samples` and switches Plot / Results / Statistics automatically.
+  - Add optional Comparison, Reports, and Export focused tours after the Individual Samples tour is approved.
 - [ ] Remove or archive dead legacy code only after related behavior has regression coverage.
 - [ ] Review files marked legacy or containing unused older implementations.
 - [ ] Keep design concepts aligned with implemented UI changes.
@@ -155,3 +164,19 @@ Goal: get the program stable enough for the next tester round and then produce a
 ## Next Immediate Task
 
 Details and Statistics sidebars have passed manual QA. Next, continue the remaining P0/P1 release checks, especially plots, reports, export, porosity behavior, and end-to-end data-loading verification.
+
+
+Choose which methods to include in various things
+Make sure export / report respects groups, chosen methods etc
+Units in statistics table don’t seem to work
+Group level color changes
+Check text in the old program of headanayser to check the text box with credits etc.
+-	Inspiration, JF Devlin etc.
+Fix the main sidebar panel. Make the drop area smaller, remove the thing below the samples with clear all etc. Make parameters and stratigraphy accordions?
+Finish the “Help” dialog and read it through.
+Ensure references to articles for individual methods etc are correct
+Lognormal fordeling plot fra Poul powerpoint
+Fix program header resizing on one click
+
+Next step: 
+Per Loll kan måske teste og finde folk der kan teste?

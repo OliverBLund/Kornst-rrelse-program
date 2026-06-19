@@ -35,6 +35,7 @@ from grain_classification import (
 from grain_classification import (
     permeability_class as _gc_perm_class,
 )
+from method_registry import DEFAULT_METHOD_ORDER
 from k_aggregation import UNGROUPED_LABEL, KAggregationOptions, dataset_group_name
 from k_calculations_v2 import CalculationStatus
 from matplotlib.figure import Figure
@@ -44,6 +45,7 @@ from PyQt6.QtGui import QBrush, QColor, QFont, QFontMetrics, QIcon, QPainter, QP
 
 # ── PyQt6 ─────────────────────────────────────────────────────────────────────
 from PyQt6.QtWidgets import (
+    QAbstractItemView,
     QButtonGroup,
     QComboBox,
     QFileDialog,
@@ -269,6 +271,8 @@ class ComparisonTab(QWidget):
     comparison_updated = pyqtSignal()
     # Emitted when the manage-datasets dialog requests a new comparison subset.
     dataset_selection_requested = pyqtSignal(list)
+    # Emitted by method-scope shortcut buttons.
+    method_selection_requested = pyqtSignal()
 
     # ── Grain parameter definitions ──────────────────────────────────────────
     # (label, tooltip, bold, olive-highlight)
@@ -301,24 +305,7 @@ class ComparisonTab(QWidget):
         "K std. dev.",
         "Perm. class",
     }
-    _K_METHOD_ORDER = [
-        "Hazen",
-        "Hazen_1892",
-        "Slichter",
-        "Terzaghi",
-        "Beyer",
-        "Sauerbrei",
-        "Kruger",
-        "Kozeny-Carman",
-        "Zunker",
-        "Zamarin",
-        "USBR",
-        "Barr",
-        "Alyamani-Sen",
-        "Chapuis",
-        "Shepherd",
-        "Krumbein-Monk",
-    ]
+    _K_METHOD_ORDER = list(DEFAULT_METHOD_ORDER)
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -914,7 +901,7 @@ class ComparisonTab(QWidget):
                 "Summary",
                 "All rows",
                 "Classification",
-                "All methods",
+                "All active",
                 "Valid in all",
                 "Choose",
                 "Aggregate rows",
@@ -1299,6 +1286,7 @@ class ComparisonTab(QWidget):
         self._set_segment_checked(
             self._details_status_warn_btn, self._stats_include_warnings
         )
+        self._details_mode_frame.setVisible(not aggregate_mode)
         for btn in (self._details_mode_grain_btn, self._details_mode_k_btn):
             btn.setEnabled(not aggregate_mode)
             btn.setToolTip(
@@ -1306,16 +1294,16 @@ class ComparisonTab(QWidget):
                 if aggregate_mode
                 else ""
             )
-        self._details_preset_context_btn.setEnabled(not aggregate_mode)
+        self._details_preset_context_btn.setEnabled(True)
         if aggregate_mode:
-            self._details_preset_core_btn.setText("All methods")
+            self._details_preset_core_btn.setText("All active")
             self._details_preset_all_btn.setText("Valid in all")
             self._details_preset_context_btn.setText("Choose")
             self._details_preset_context_btn.setToolTip(
-                "Custom method selection will be added in a later pass"
+                "Choose the workspace K methods used across the program"
             )
         elif not grain_mode:
-            self._details_preset_core_btn.setText("All methods")
+            self._details_preset_core_btn.setText("All active")
             self._details_preset_all_btn.setText("Valid in all")
             self._details_preset_context_btn.setText("Aggregate rows")
             self._details_preset_context_btn.setToolTip("")
@@ -1365,7 +1353,7 @@ class ComparisonTab(QWidget):
             elif preset == "all":
                 self._set_details_method_scope(valid_in_all=True)
             else:
-                self._sync_details_mode_ui()
+                self.method_selection_requested.emit()
             return
         self._set_details_preset(preset)
 
@@ -1918,7 +1906,7 @@ class ComparisonTab(QWidget):
             ("grain", "core"): "Summary rows",
             ("grain", "all"): "All grain rows",
             ("grain", "context"): "Classification rows",
-            ("k", "core"): "All K methods",
+            ("k", "core"): "All active K methods",
             ("k", "all"): "Methods valid in all datasets",
             ("k", "context"): "Aggregate K rows",
         }[(self._details_mode, self._details_preset)]
@@ -1961,7 +1949,7 @@ class ComparisonTab(QWidget):
             "Valid in all"
             if self._stats_method_scope == "valid_all"
             or self._stats_common_methods_only
-            else "All methods"
+            else "All active"
         )
         unit_text = (
             f"{self._details_unit_symbol()} + mm/%"
@@ -2319,7 +2307,7 @@ class ComparisonTab(QWidget):
         method_frame, method_buttons = self._make_details_segmented_control(
             [
                 (
-                    "All methods",
+                    "All active",
                     "fa6s.table-list",
                     True,
                     lambda: self._set_stats_method_scope(valid_in_all=False),
@@ -2330,7 +2318,7 @@ class ComparisonTab(QWidget):
                     False,
                     lambda: self._set_stats_method_scope(valid_in_all=True),
                 ),
-                ("Choose", "fa6s.sliders", False, self._sync_stats_controls),
+                ("Choose", "fa6s.sliders", False, self.method_selection_requested.emit),
             ]
         )
         (
@@ -2340,15 +2328,15 @@ class ComparisonTab(QWidget):
         ) = method_buttons
         self._stabilize_segment_group(
             method_buttons,
-            ["All methods", "Valid in all", "Choose"],
+            ["All active", "Valid in all", "Choose"],
             min_width=112,
         )
         self._stats_methods_valid_all_btn.setToolTip(
             "Only include methods valid for every selected dataset"
         )
-        self._stats_methods_choose_btn.setEnabled(False)
+        self._stats_methods_choose_btn.setEnabled(True)
         self._stats_methods_choose_btn.setToolTip(
-            "Custom method selection will be added in a later pass"
+            "Choose the workspace K methods used across the program"
         )
         tb.addWidget(method_frame, 0)
 
@@ -2614,8 +2602,11 @@ class ComparisonTab(QWidget):
         table.horizontalHeader().setSortIndicatorShown(False)
         table.horizontalHeader().setMinimumSectionSize(72)
         table.verticalHeader().setDefaultSectionSize(34)
+        table.setMinimumWidth(0)
         table.setMinimumHeight(180)
-        table.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
+        table.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAsNeeded)
+        table.setHorizontalScrollMode(QAbstractItemView.ScrollMode.ScrollPerPixel)
+        table.setSizePolicy(QSizePolicy.Policy.Ignored, QSizePolicy.Policy.Expanding)
         table.setStyleSheet(f"""
             QTableWidget {{
                 background: rgba(255,255,255,0.30);
@@ -2711,7 +2702,7 @@ class ComparisonTab(QWidget):
         self._set_segment_checked(self._stats_methods_all_btn, not valid_in_all)
         self._set_segment_checked(self._stats_methods_valid_all_btn, valid_in_all)
         self._set_segment_checked(self._stats_methods_choose_btn, False)
-        self._stats_methods_choose_btn.setEnabled(False)
+        self._stats_methods_choose_btn.setEnabled(True)
         self._set_segment_checked(
             self._stats_ok_only_btn, not self._stats_include_warnings
         )
@@ -4409,9 +4400,9 @@ class ComparisonTab(QWidget):
 
         # Summary rows appended at the bottom
         SUMMARY_ROWS = [
-            ("K̄ geometric", "All methods"),
-            ("K̄ arithmetic", "All methods"),
-            ("K median", "All methods"),
+            ("K̄ geometric", "All active"),
+            ("K̄ arithmetic", "All active"),
+            ("K median", "All active"),
             ("K std. dev.", "Spread across methods"),
             ("Perm. class", "Classification"),
         ]
@@ -4852,7 +4843,7 @@ class ComparisonTab(QWidget):
                 "Valid in all"
                 if self._stats_common_methods_only
                 or self._stats_method_scope == "valid_all"
-                else "All methods"
+                else "All active"
             )
             status_text = "OK + warnings" if self._stats_include_warnings else "OK only"
             self._stats_filter_layout.addWidget(

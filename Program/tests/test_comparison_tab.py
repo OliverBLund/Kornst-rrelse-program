@@ -278,6 +278,20 @@ class TestComparisonTabSelectionState(unittest.TestCase):
         self.assertIn('K arithmetic mean', labels)
         self.assertIn('Mean grain size', labels)
 
+    def test_details_aggregate_mode_hides_individual_grain_k_toggle(self):
+        self.widget.set_dataset_state(self.tabs, selected_tabs=self.tabs)
+
+        self.assertFalse(self.widget._details_mode_frame.isHidden())
+
+        self.widget._set_details_view_mode('aggregate')
+
+        self.assertTrue(self.widget._details_mode_frame.isHidden())
+        self.assertIs(self.widget._details_stack.currentWidget(), self.widget._aggregate_table)
+
+        self.widget._set_details_view_mode('individual')
+
+        self.assertFalse(self.widget._details_mode_frame.isHidden())
+
     def test_grain_core_preset_hides_non_core_rows(self):
         self.widget.set_dataset_state(self.tabs, selected_tabs=self.tabs)
 
@@ -568,6 +582,41 @@ class TestComparisonTabSelectionState(unittest.TestCase):
             for col in range(self.widget._stats_scope_table.columnCount())
         ]
         self.assertTrue(any(header.startswith('K range') for header in scope_headers))
+
+    def test_statistics_toolbar_and_tables_do_not_request_content_width_growth(self):
+        self.widget.set_dataset_state(self.tabs, selected_tabs=self.tabs)
+
+        fixed_controls = [
+            self.widget._stats_view_spread_btn,
+            self.widget._stats_view_coverage_btn,
+            self.widget._stats_metric_geo_btn,
+            self.widget._stats_metric_arith_btn,
+            self.widget._stats_metric_med_btn,
+            self.widget._stats_methods_all_btn,
+            self.widget._stats_methods_valid_all_btn,
+            self.widget._stats_ok_only_btn,
+            self.widget._stats_warnings_btn,
+        ]
+        widths_before = [(button.minimumWidth(), button.maximumWidth()) for button in fixed_controls]
+
+        self.widget._set_stats_method_scope(valid_in_all=True)
+        source_index = self.widget._stats_unit_combo.findData(HydraulicConductivityUnit.M_PER_S)
+        self.widget._stats_unit_combo.setCurrentIndex(source_index)
+        self.widget._on_stats_metric_changed('arithmetic')
+
+        widths_after = [(button.minimumWidth(), button.maximumWidth()) for button in fixed_controls]
+        self.assertEqual(widths_before, widths_after)
+        for button in fixed_controls:
+            self.assertEqual(button.minimumWidth(), button.maximumWidth())
+        for table in (self.widget._stats_scope_table, self.widget._stats_method_table):
+            self.assertEqual(
+                table.sizePolicy().horizontalPolicy(),
+                comparison_tab_module.QSizePolicy.Policy.Ignored,
+            )
+            self.assertEqual(
+                table.horizontalScrollMode(),
+                comparison_tab_module.QAbstractItemView.ScrollMode.ScrollPerPixel,
+            )
 
     def test_statistics_heatmap_uses_stable_domain_method_order(self):
         self.widget.set_dataset_state(self.tabs, selected_tabs=self.tabs)

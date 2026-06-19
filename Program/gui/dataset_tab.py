@@ -31,7 +31,7 @@ import numpy as np
 from data_loader import GrainSizeData
 from k_calculations import KCalculator, KCalculationResult, CalculationStatus
 from k_aggregation import build_k_result_summary
-from unit_conversions import HydraulicConductivityConverter, HydraulicConductivityUnit
+from method_registry import normalize_method_selection
 from .stack_fade import TabFadeInController
 
 
@@ -132,6 +132,11 @@ class DatasetTab(QWidget):
         super().__init__(parent)
         self.dataset = dataset
         self.k_calculator = KCalculator()
+        self._available_method_names = tuple(self.k_calculator.get_all_method_names())
+        self.active_method_names = normalize_method_selection(
+            None, available_methods=self._available_method_names
+        )
+        self.all_results: List[KCalculationResult] = []
         self.current_results: List[KCalculationResult] = []
         # Use dataset-specific values instead of global defaults
         self.temperature = dataset.temperature
@@ -245,9 +250,9 @@ class DatasetTab(QWidget):
         bar_layout.setContentsMargins(0, 0, 0, 0)
         bar_layout.setSpacing(0)
 
-        self._stat_k_md   = self._make_stat_cell(bar_layout, "—", "K̄ (m/d)",        C.OLIVE, sub="geometric mean")
-        self._stat_k_ms   = self._make_stat_cell(bar_layout, "—", "K̄ (m/s)",        C.K_BLUE)
-        self._stat_valid  = self._make_stat_cell(bar_layout, "—", "Methods valid",   C.TEXT)
+        self._stat_k_geo_md = self._make_stat_cell(bar_layout, "—", "K geo. mean",   C.OLIVE, sub="m/d · OK methods")
+        self._stat_k_arith_md = self._make_stat_cell(bar_layout, "—", "K arith. mean", C.K_BLUE, sub="m/d · OK methods")
+        self._stat_valid  = self._make_stat_cell(bar_layout, "—", "Included methods", C.TEXT)
         self._stat_d50    = self._make_stat_cell(bar_layout, "—", "D₅₀",             C.TEXT)
         self._stat_temp   = self._make_stat_cell(bar_layout, f"{self.temperature:.1f} °C", "Temperature", C.TEXT)
 
@@ -359,10 +364,6 @@ class DatasetTab(QWidget):
         self.results_table.itemSelectionChanged.connect(self.on_result_row_selected)
         tc_layout.addWidget(self.results_table)
 
-        self._mean_summary_bar = self._create_mean_summary_bar()
-        self._mean_summary_bar.setVisible(False)
-        tc_layout.addWidget(self._mean_summary_bar)
-
         # Method detail panel
         self.detail_panel = self._create_detail_panel()
 
@@ -412,80 +413,6 @@ class DatasetTab(QWidget):
 
         parent_layout.addWidget(cell)
         return val_lbl
-
-    def _create_mean_summary_bar(self) -> "QFrame":
-        """Create the bottom Results-tab mean summary strip."""
-        from .theme import C, F
-        bar = QFrame()
-        bar.setObjectName("results-mean-summary")
-        bar.setFixedHeight(64)
-        bar.setStyleSheet(f"""
-            QFrame#results-mean-summary {{
-                background: {C.BG_RAISED};
-                border-top: 1px solid {C.BORDER};
-            }}
-            QFrame#results-mean-summary QLabel {{
-                background: transparent;
-                border: none;
-            }}
-        """)
-        layout = QHBoxLayout(bar)
-        layout.setContentsMargins(0, 0, 0, 0)
-        layout.setSpacing(0)
-
-        self._mean_geo_value, self._mean_geo_sub = self._add_mean_summary_cell(
-            layout,
-            "K geometric mean",
-            C.OLIVE,
-        )
-        self._mean_arith_value, self._mean_arith_sub = self._add_mean_summary_cell(
-            layout,
-            "K arithmetic mean",
-            C.K_BLUE,
-        )
-        self._mean_included_value, self._mean_included_sub = self._add_mean_summary_cell(
-            layout,
-            "Included methods",
-            C.TEXT,
-        )
-        layout.addStretch(1)
-        return bar
-
-    def _add_mean_summary_cell(self, parent_layout, label: str, value_color: str):
-        """Add one compact bottom-summary metric cell."""
-        from .theme import C, F
-        cell = QFrame()
-        cell.setStyleSheet(f"""
-            QFrame {{
-                background: transparent;
-                border-right: 1px solid {C.BORDER};
-            }}
-        """)
-        layout = QVBoxLayout(cell)
-        layout.setContentsMargins(14, 7, 18, 7)
-        layout.setSpacing(1)
-
-        value = QLabel("-")
-        value.setStyleSheet(
-            f"font-family: '{F.MONO}'; font-size: 12pt; font-weight: 700; color: {value_color};"
-        )
-        layout.addWidget(value)
-
-        title = QLabel(label)
-        title.setStyleSheet(
-            f"font-family: '{F.UI}'; font-size: {F.SZ_XS}pt; font-weight: 700; "
-            f"color: {C.TEXT_MUTED}; text-transform: uppercase; letter-spacing: 0.05em;"
-        )
-        layout.addWidget(title)
-
-        sub = QLabel("OK methods only")
-        sub.setStyleSheet(
-            f"font-family: '{F.MONO}'; font-size: {F.SZ_XS}pt; color: {C.TEXT_MUTED};"
-        )
-        layout.addWidget(sub)
-
-        parent_layout.addWidget(cell)
-        return value, sub
 
     def _create_detail_panel(self) -> "QFrame":
         """Create the method detail panel (right side of Results split view)."""
@@ -852,9 +779,8 @@ class DatasetTab(QWidget):
         self._clear_stale_mass_data()
         self.load_dataset_data()
 
-        if self.current_results:
-            selected_methods = [result.method_name for result in self.current_results]
-            self.calculate_k_values(selected_methods)
+        if self.all_results or self.current_results:
+            self.calculate_k_values()
 
         self.data_updated.emit(self.dataset.sample_name)
 
@@ -927,9 +853,10 @@ class DatasetTab(QWidget):
 
     def calculate_k_values(self, selected_methods: Optional[List[str]] = None):
         """Calculate K values for this dataset"""
-        if selected_methods is None:
-            # Get all available methods from calculator
-            selected_methods = self.k_calculator.get_all_method_names()
+        if selected_methods is not None:
+            self.active_method_names = normalize_method_selection(
+                selected_methods, available_methods=self._available_method_names
+            )
 
         # Prepare grain data
         grain_data = {}
@@ -952,22 +879,44 @@ class DatasetTab(QWidget):
         grain_data["particle_sizes"] = list(self.dataset.particle_sizes)
         grain_data["percent_passing"] = list(self.dataset.percent_passing)
 
-        # Calculate K values
-        self.current_results = self.k_calculator.calculate_all_methods(
+        # Calculate all methods and expose the active workspace subset.
+        self.all_results = self.k_calculator.calculate_all_methods(
             grain_data,
             temperature=self.temperature,
             porosity=self.porosity,
-            selected_methods=selected_methods,
+            selected_methods=self._available_method_names,
         )
 
-        self._apply_calculation_results(self.current_results)
+        self._apply_active_result_filter()
 
     def apply_precomputed_results(self, results: List[KCalculationResult]):
         """Bind worker-computed K results without recalculating on the UI thread."""
-        self._apply_calculation_results(list(results))
+        self.all_results = list(results)
+        self._apply_active_result_filter()
 
-    def _apply_calculation_results(self, results: List[KCalculationResult]):
-        self.current_results = list(results)
+    def set_active_methods(
+        self,
+        method_names: List[str] | tuple[str, ...],
+        *,
+        refresh: bool = True,
+    ) -> None:
+        """Set workspace-active methods and refresh filtered result surfaces."""
+        next_methods = normalize_method_selection(
+            method_names, available_methods=self._available_method_names
+        )
+        if next_methods == self.active_method_names:
+            return
+        self.active_method_names = next_methods
+        if refresh:
+            self._apply_active_result_filter()
+
+    def _apply_active_result_filter(self):
+        result_by_method = {result.method_name: result for result in self.all_results}
+        self.current_results = [
+            result
+            for method_name in self.active_method_names
+            if (result := result_by_method.get(method_name)) is not None
+        ]
 
         # Update results table
         self.update_results_table()
@@ -977,15 +926,14 @@ class DatasetTab(QWidget):
             self.statistics_tab.set_k_results(self.current_results)
 
         # Update plot with K results
-        if self.current_results:
-            k_dict = {}
-            flagged_methods = set()
-            for result in self.current_results:
-                if result.k_value is not None and result.k_value > 0:
-                    k_dict[result.method_name] = result.k_value
-                if result.status != CalculationStatus.OK or not result.conditions_met:
-                    flagged_methods.add(result.method_name)
-            self.plot_workspace.add_k_results(k_dict, flagged_methods)
+        k_dict = {}
+        flagged_methods = set()
+        for result in self.current_results:
+            if result.k_value is not None and result.k_value > 0:
+                k_dict[result.method_name] = result.k_value
+            if result.status != CalculationStatus.OK or not result.conditions_met:
+                flagged_methods.add(result.method_name)
+        self.plot_workspace.add_k_results(k_dict, flagged_methods)
 
         # Emit signal
         self.calculation_complete.emit(self.dataset.sample_name, self.current_results)
@@ -993,75 +941,82 @@ class DatasetTab(QWidget):
     def update_results_table(self):
         """Populate the 6-column K-values table."""
         from .theme import C, F
-        self.results_table.setSortingEnabled(False)
-        self.results_table.setRowCount(len(self.current_results))
+        signals_blocked = self.results_table.blockSignals(True)
+        try:
+            self.results_table.setSortingEnabled(False)
+            self.results_table.clearSelection()
+            self.results_table.setRowCount(len(self.current_results))
 
-        for row, result in enumerate(self.current_results):
-            meta = _METHOD_META.get(result.method_name, {})
-            category = meta.get("category", "—")
+            for row, result in enumerate(self.current_results):
+                meta = _METHOD_META.get(result.method_name, {})
+                category = meta.get("category", "—")
 
-            # Col 0: Method name
-            method_item = QTableWidgetItem(result.method_name)
-            method_item.setForeground(QColor(C.TEXT))
-            self.results_table.setItem(row, 0, method_item)
+                # Col 0: Method name
+                method_item = QTableWidgetItem(result.method_name)
+                method_item.setForeground(QColor(C.TEXT))
+                self.results_table.setItem(row, 0, method_item)
 
-            # Col 1: Category
-            cat_item = QTableWidgetItem(category)
-            cat_item.setForeground(QColor(C.TEXT_MUTED))
-            self.results_table.setItem(row, 1, cat_item)
+                # Col 1: Category
+                cat_item = QTableWidgetItem(category)
+                cat_item.setForeground(QColor(C.TEXT_MUTED))
+                self.results_table.setItem(row, 1, cat_item)
 
-            # Cols 2-4: K values
-            if result.k_value is not None and result.k_value > 0:
-                k_m_s = result.k_value
-                k_cm_s = k_m_s * 100.0
-                k_m_d = k_m_s * 86400.0
+                # Cols 2-4: K values
+                if result.k_value is not None and result.k_value > 0:
+                    k_m_s = result.k_value
+                    k_cm_s = k_m_s * 100.0
+                    k_m_d = k_m_s * 86400.0
 
-                for col, val, fmt in [(2, k_cm_s, f"{k_cm_s:.3e}"), (3, k_m_s, f"{k_m_s:.2e}"), (4, k_m_d, f"{k_m_d:.1f}")]:
-                    item = QTableWidgetItem(fmt)
-                    item.setTextAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
-                    item.setData(Qt.ItemDataRole.UserRole, val)
-                    item.setForeground(QColor(C.K_BLUE))
-                    self.results_table.setItem(row, col, item)
-            else:
-                for col in [2, 3, 4]:
-                    item = QTableWidgetItem("N/A")
-                    item.setTextAlignment(Qt.AlignmentFlag.AlignCenter | Qt.AlignmentFlag.AlignVCenter)
-                    item.setData(Qt.ItemDataRole.UserRole, -1)
-                    item.setForeground(QColor(C.TEXT_MUTED))
-                    item.setFont(self._italic_font())
-                    self.results_table.setItem(row, col, item)
+                    for col, val, fmt in [(2, k_cm_s, f"{k_cm_s:.3e}"), (3, k_m_s, f"{k_m_s:.2e}"), (4, k_m_d, f"{k_m_d:.1f}")]:
+                        item = QTableWidgetItem(fmt)
+                        item.setTextAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
+                        item.setData(Qt.ItemDataRole.UserRole, val)
+                        item.setForeground(QColor(C.K_BLUE))
+                        self.results_table.setItem(row, col, item)
+                else:
+                    for col in [2, 3, 4]:
+                        item = QTableWidgetItem("N/A")
+                        item.setTextAlignment(Qt.AlignmentFlag.AlignCenter | Qt.AlignmentFlag.AlignVCenter)
+                        item.setData(Qt.ItemDataRole.UserRole, -1)
+                        item.setForeground(QColor(C.TEXT_MUTED))
+                        item.setFont(self._italic_font())
+                        self.results_table.setItem(row, col, item)
 
-            # Col 5: Status badge
-            status = result.status.value if hasattr(result.status, "value") else str(result.status)
-            conditions_met = getattr(result, "conditions_met", True)
+                # Col 5: Status badge
+                status = result.status.value if hasattr(result.status, "value") else str(result.status)
+                conditions_met = getattr(result, "conditions_met", True)
 
-            if "OK" in status and conditions_met:
-                badge_text = "OK"
-                badge_fg = QColor(79, 106, 26)    # OLIVE_DK
-                badge_bg = QColor(90, 170, 58, 25)
-            elif "Warning" in status or not conditions_met:
-                badge_text = "Warning"
-                badge_fg = QColor(208, 128, 32)   # LED_WARN
-                badge_bg = QColor(208, 128, 32, 22)
-            elif "Error" in status:
-                badge_text = "Error"
-                badge_fg = QColor(192, 56, 40)    # LED_ERR
-                badge_bg = QColor(192, 56, 40, 20)
-            else:
-                badge_text = "N/A"
-                badge_fg = QColor(154, 140, 120)  # TEXT_MUTED
-                badge_bg = QColor(154, 140, 120, 20)
+                if "OK" in status and conditions_met:
+                    badge_text = "OK"
+                    badge_fg = QColor(79, 106, 26)    # OLIVE_DK
+                    badge_bg = QColor(90, 170, 58, 25)
+                elif "Warning" in status or not conditions_met:
+                    badge_text = "Warning"
+                    badge_fg = QColor(208, 128, 32)   # LED_WARN
+                    badge_bg = QColor(208, 128, 32, 22)
+                elif "Error" in status:
+                    badge_text = "Error"
+                    badge_fg = QColor(192, 56, 40)    # LED_ERR
+                    badge_bg = QColor(192, 56, 40, 20)
+                else:
+                    badge_text = "N/A"
+                    badge_fg = QColor(154, 140, 120)  # TEXT_MUTED
+                    badge_bg = QColor(154, 140, 120, 20)
 
-            status_item = QTableWidgetItem(badge_text)
-            status_item.setTextAlignment(Qt.AlignmentFlag.AlignCenter | Qt.AlignmentFlag.AlignVCenter)
-            status_item.setForeground(badge_fg)
-            status_item.setBackground(badge_bg)
-            if result.status_message:
-                status_item.setToolTip(result.status_message)
-            self.results_table.setItem(row, 5, status_item)
+                status_item = QTableWidgetItem(badge_text)
+                status_item.setTextAlignment(Qt.AlignmentFlag.AlignCenter | Qt.AlignmentFlag.AlignVCenter)
+                status_item.setForeground(badge_fg)
+                status_item.setBackground(badge_bg)
+                if result.status_message:
+                    status_item.setToolTip(result.status_message)
+                self.results_table.setItem(row, 5, status_item)
 
-        self.results_table.setSortingEnabled(True)
+            self.results_table.setSortingEnabled(True)
+        finally:
+            self.results_table.blockSignals(signals_blocked)
         self.update_summary_bar()
+        if self.current_results:
+            self._update_detail_panel(self.current_results[0])
 
     def _italic_font(self):
         """Return an italic QFont for N/A cells."""
@@ -1073,13 +1028,9 @@ class DatasetTab(QWidget):
         """Update the summary stat bar with current calculation results."""
         if not self.current_results:
             self.res_bar.setVisible(False)
-            if hasattr(self, "_mean_summary_bar"):
-                self._mean_summary_bar.setVisible(False)
             return
 
         self.res_bar.setVisible(True)
-        if hasattr(self, "_mean_summary_bar"):
-            self._mean_summary_bar.setVisible(True)
 
         summary = build_k_result_summary(
             self.current_results,
@@ -1089,18 +1040,15 @@ class DatasetTab(QWidget):
         total = len(self.current_results)
         valid_count = summary.included_count
 
-        # K̄ geometric mean (m/d)
         if summary.geometric_mean_m_s is not None:
-            k_geom_ms = summary.geometric_mean_m_s
-            k_arith_ms = summary.arithmetic_mean_m_s
-            k_geom_md = k_geom_ms * 86400.0
-            self._stat_k_md.setText(f"{k_geom_md:.2f}")
-            self._stat_k_ms.setText(f"{k_geom_ms:.2e}")
-            self._set_mean_summary_values(k_geom_ms, k_arith_ms, valid_count, total)
+            self._stat_k_geo_md.setText(f"{summary.geometric_mean_m_s * 86400.0:.2f}")
         else:
-            self._stat_k_md.setText("—")
-            self._stat_k_ms.setText("—")
-            self._set_mean_summary_values(None, None, valid_count, total)
+            self._stat_k_geo_md.setText("—")
+
+        if summary.arithmetic_mean_m_s is not None:
+            self._stat_k_arith_md.setText(f"{summary.arithmetic_mean_m_s * 86400.0:.2f}")
+        else:
+            self._stat_k_arith_md.setText("—")
 
         # Methods valid
         self._stat_valid.setText(f"{valid_count} / {total}")
@@ -1111,46 +1059,6 @@ class DatasetTab(QWidget):
 
         # Temperature (may have been updated)
         self._stat_temp.setText(f"{self.temperature:.1f} °C")
-
-    def _set_mean_summary_values(
-        self,
-        geometric_m_s: Optional[float],
-        arithmetic_m_s: Optional[float],
-        included_count: int,
-        total_count: int,
-    ) -> None:
-        if not hasattr(self, "_mean_geo_value"):
-            return
-        self._mean_geo_value.setText(self._format_result_k_primary(geometric_m_s))
-        self._mean_geo_sub.setText(self._format_result_k_secondary(geometric_m_s))
-        self._mean_arith_value.setText(self._format_result_k_primary(arithmetic_m_s))
-        self._mean_arith_sub.setText(self._format_result_k_secondary(arithmetic_m_s))
-
-        excluded_count = max(0, total_count - included_count)
-        self._mean_included_value.setText(f"{included_count} / {total_count}")
-        if excluded_count == 1:
-            self._mean_included_sub.setText("1 warning/error excluded")
-        else:
-            self._mean_included_sub.setText(f"{excluded_count} warning/error excluded")
-
-    @staticmethod
-    def _format_result_k_primary(value_m_s: Optional[float]) -> str:
-        if value_m_s is None:
-            return "-"
-        value_m_d = HydraulicConductivityConverter.convert_from_m_per_s(
-            value_m_s, HydraulicConductivityUnit.M_PER_DAY
-        )
-        return HydraulicConductivityConverter.format_value(
-            value_m_d, HydraulicConductivityUnit.M_PER_DAY
-        )
-
-    @staticmethod
-    def _format_result_k_secondary(value_m_s: Optional[float]) -> str:
-        if value_m_s is None:
-            return "OK methods only"
-        return HydraulicConductivityConverter.format_value(
-            value_m_s, HydraulicConductivityUnit.M_PER_S
-        )
 
     def on_result_row_selected(self):
         """Handle row selection — update detail panel."""
@@ -1310,6 +1218,10 @@ class DatasetTab(QWidget):
     def get_results(self) -> List[KCalculationResult]:
         """Get the current K-calculation results"""
         return self.current_results
+
+    def get_all_results(self) -> List[KCalculationResult]:
+        """Get the full internal K-calculation cache."""
+        return self.all_results
 
     # Note: Porosity management methods are now in StatisticsTab
     # These have been removed to avoid duplication

@@ -316,6 +316,81 @@ class TestReportGeneratorAppendices(unittest.TestCase):
         self.assertIn('from 2 OK methods', html)
         self.assertIn('K Arithmetic Mean', html)
 
+    def test_k_value_report_can_show_method_table_without_results_section(self):
+        html = self.generator.generate_k_value_report(
+            self.dataset,
+            self.results,
+            temperature=20.0,
+            porosity=0.35,
+            sections={
+                'cover_page': False,
+                'executive_summary': False,
+                'methodology': False,
+                'results': False,
+                'plots': False,
+                'interpretation': False,
+                'k_statistics': True,
+            },
+        )
+
+        self.assertIn('K-Value Results', html)
+        self.assertIn('K-Value Calculations by Method', html)
+        self.assertIn('Hazen', html)
+        self.assertNotIn('Results & Analysis', html)
+
+    def test_k_focus_comparison_report_includes_k_method_table_without_results_section(self):
+        sample_b = build_dataset('Sample B')
+        results_b = [
+            KCalculationResult(
+                method_name='USBR',
+                k_value=2.0e-4,
+                formula_used='k = f(d20)',
+                status=CalculationStatus.OK,
+                status_message='',
+                conditions_met=True,
+                temperature=20.0,
+                porosity=0.35,
+                grain_size_used='D20',
+            ),
+        ]
+
+        html = self.generator.generate_comparison_report(
+            [self.dataset, sample_b],
+            sections={
+                'cover_page': False,
+                'executive_summary': False,
+                'methodology': False,
+                'results': False,
+                'plots': False,
+                'interpretation': False,
+                'k_statistics': True,
+            },
+            sample_details=[
+                {
+                    'label': 'Sample A',
+                    'dataset': self.dataset,
+                    'k_results': self.results,
+                    'temperature': 20.0,
+                    'porosity': 0.35,
+                },
+                {
+                    'label': 'Sample B',
+                    'dataset': sample_b,
+                    'k_results': results_b,
+                    'temperature': 20.0,
+                    'porosity': 0.35,
+                },
+            ],
+        )
+
+        self.assertIn('K-Value Calculations by Dataset and Method', html)
+        self.assertIn('Permeability Classification Summary', html)
+        self.assertIn('Sample A', html)
+        self.assertIn('Sample B', html)
+        self.assertIn('Hazen', html)
+        self.assertIn('USBR', html)
+        self.assertNotIn('Sample Overview', html)
+
 
 if __name__ == '__main__':
     unittest.main(verbosity=2)

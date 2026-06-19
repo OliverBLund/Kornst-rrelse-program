@@ -1761,6 +1761,15 @@ class ReportGenerator:
 
             html += "</div>"
 
+        elif sections.get('k_statistics', True):
+            html += f"""
+            <div style="page-break-before: auto;">
+            <h2>K-Value Results</h2>
+            <h3>K-Value Calculations by Method</h3>
+            {self._create_k_statistics_table(k_results)}
+            </div>
+            """
+
         # Visual Charts
         if sections.get('plots', True):
             k_bar_chart = self._create_k_value_bar_chart(k_results)
@@ -2116,9 +2125,21 @@ class ReportGenerator:
                 html += f"<h3>Grain Parameters Comparison</h3>{self._create_grain_parameters_comparison_table(datasets, sample_labels)}"
 
             if sections.get('k_statistics', True) and plot_results_dict:
+                html += f"<h3>K-Value Calculations by Dataset and Method</h3>{self._create_comparison_k_statistics_table(plot_results_dict)}"
                 html += f"<h3>Permeability Classification Summary</h3>{self._create_permeability_classification_table(plot_results_dict)}"
 
             html += "</div>"
+
+        elif sections.get('k_statistics', True) and plot_results_dict:
+            html += f"""
+            <div style="page-break-before: auto;">
+            <h2>K-Value Results</h2>
+            <h3>K-Value Calculations by Dataset and Method</h3>
+            {self._create_comparison_k_statistics_table(plot_results_dict)}
+            <h3>Permeability Classification Summary</h3>
+            {self._create_permeability_classification_table(plot_results_dict)}
+            </div>
+            """
 
         if sections.get('plots', True):
             comparison_plot = self._create_comparison_grain_size_plot(datasets, sample_labels)
@@ -2342,6 +2363,67 @@ class ReportGenerator:
             """
 
         html += "</table>"
+        return html
+
+    def _create_comparison_k_statistics_table(self, k_results_dict: Dict[str, List[KCalculationResult]]) -> str:
+        """Generate a multi-sample table with one row per K method result."""
+        html = """
+        <table>
+            <thead>
+                <tr>
+                    <th>Sample</th>
+                    <th>Method</th>
+                    <th>K (m/s)</th>
+                    <th>K (m/d)</th>
+                    <th>Status</th>
+                    <th>Included in Mean</th>
+                    <th>Notes</th>
+                </tr>
+            </thead>
+            <tbody>
+        """
+
+        row_count = 0
+        for sample_name, results in k_results_dict.items():
+            if not results:
+                html += f"""
+                <tr>
+                    <td><strong>{self._esc(sample_name)}</strong></td>
+                    <td colspan="6" style="text-align: center;">No K-value results available</td>
+                </tr>
+                """
+                continue
+
+            for result in results:
+                status_text = classify_k_status(result)
+                k_value = getattr(result, "k_value", None)
+                has_value = k_value is not None and np.isfinite(k_value) and k_value > 0
+                k_ms = f"{k_value:.2e}" if has_value else "N/A"
+                k_md = f"{k_value * 86400.0:.2f}" if has_value else "N/A"
+                included = has_value and status_text == "OK"
+                notes = getattr(result, "status_message", "") or status_text
+
+                html += f"""
+                <tr>
+                    <td><strong>{self._esc(sample_name)}</strong></td>
+                    <td>{self._esc(getattr(result, "method_name", ""))}</td>
+                    <td style="text-align: right;">{k_ms}</td>
+                    <td style="text-align: right;">{k_md}</td>
+                    <td style="text-align: center;">{self._esc(status_text)}</td>
+                    <td style="text-align: center;">{"Yes" if included else "No"}</td>
+                    <td>{self._esc(notes)}</td>
+                </tr>
+                """
+                row_count += 1
+
+        if row_count == 0:
+            html += """
+            <tr>
+                <td colspan="7" style="text-align: center;">No K-value results available</td>
+            </tr>
+            """
+
+        html += "</tbody></table>"
         return html
 
     def _create_data_quality_table(self, dataset: GrainSizeData) -> str:
