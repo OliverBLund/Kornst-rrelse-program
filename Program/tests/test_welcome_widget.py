@@ -161,6 +161,86 @@ class TestWelcomeWidget(unittest.TestCase):
 
         widget.deleteLater()
 
+    def test_welcome_screen_compacts_for_short_laptop_windows(self):
+        sessions = [
+            {"name": "North Core Batch", "date": "2026-04-09", "files": ["a.csv", "b.csv"]},
+            {"name": "Older Batch", "date": "2026-03-18", "files": ["c.csv"]},
+            {"name": "Third Batch", "date": "2026-03-01", "files": ["d.csv"]},
+            {"name": "Fourth Batch", "date": "2026-02-11", "files": ["e.csv"]},
+        ]
+
+        for width, height in ((1366, 660), (1024, 600), (800, 560), (720, 540), (720, 500)):
+            widget = WelcomeWidget(recent_files=[], recent_sessions=sessions)
+            widget.resize(width, height)
+            widget.show()
+            APP.processEvents()
+
+            try:
+                self.assertEqual(widget._outer_scroll.verticalScrollBar().maximum(), 0)
+                self.assertEqual(widget._outer_scroll.horizontalScrollBar().maximum(), 0)
+                footer_bottom = widget._footer.mapTo(
+                    widget,
+                    widget._footer.rect().bottomRight(),
+                ).y()
+                self.assertLessEqual(footer_bottom, widget.height() - 1)
+                self.assertFalse(widget._guides_strip.isVisible())
+                self.assertLessEqual(widget._recent_scroll.maximumHeight(), 92)
+                if width <= 720:
+                    self.assertFalse(widget._whats_new_section.isVisible())
+            finally:
+                widget.deleteLater()
+
+    def test_welcome_screen_compacts_for_1366_by_768_laptops(self):
+        sessions = [
+            {"name": "North Core Batch", "date": "2026-04-09", "files": ["a.csv", "b.csv"]},
+            {"name": "Older Batch", "date": "2026-03-18", "files": ["c.csv"]},
+            {"name": "Third Batch", "date": "2026-03-01", "files": ["d.csv"]},
+            {"name": "Fourth Batch", "date": "2026-02-11", "files": ["e.csv"]},
+        ]
+        widget = WelcomeWidget(recent_files=[], recent_sessions=sessions)
+        widget.resize(1366, 768)
+        widget.show()
+        APP.processEvents()
+
+        try:
+            self.assertEqual(widget._outer_scroll.verticalScrollBar().maximum(), 0)
+            self.assertEqual(widget._outer_scroll.horizontalScrollBar().maximum(), 0)
+            footer_bottom = widget._footer.mapTo(
+                widget,
+                widget._footer.rect().bottomRight(),
+            ).y()
+            self.assertLessEqual(footer_bottom, widget.height() - 1)
+            self.assertFalse(widget._guides_strip.isVisible())
+            self.assertFalse(widget._title_desc.isVisible())
+            self.assertLessEqual(widget._title_card.sizeHint().height(), 120)
+            self.assertLessEqual(widget._main_card.sizeHint().height(), 320)
+        finally:
+            widget.deleteLater()
+
+    def test_welcome_footer_is_fixed_for_reduced_in_app_viewports(self):
+        sessions = [
+            {"name": "North Core Batch", "date": "2026-04-09", "files": ["a.csv", "b.csv"]},
+            {"name": "Older Batch", "date": "2026-03-18", "files": ["c.csv"]},
+            {"name": "Third Batch", "date": "2026-03-01", "files": ["d.csv"]},
+            {"name": "Fourth Batch", "date": "2026-02-11", "files": ["e.csv"]},
+        ]
+        widget = WelcomeWidget(recent_files=[], recent_sessions=sessions)
+        widget.resize(720, 440)
+        widget.show()
+        APP.processEvents()
+
+        try:
+            self.assertEqual(widget._outer_scroll.horizontalScrollBar().maximum(), 0)
+            footer_bottom = widget._footer.mapTo(
+                widget,
+                widget._footer.rect().bottomRight(),
+            ).y()
+            self.assertLessEqual(footer_bottom, widget.height() - 1)
+            self.assertTrue(widget._footer_dtu_pill.isVisible())
+            self.assertEqual(widget.dont_show_checkbox.text(), "Don't show on startup")
+        finally:
+            widget.deleteLater()
+
     def test_welcome_header_drops_batch_workspace_eyebrow_and_footer_shows_dtu(self):
         widget = WelcomeWidget(recent_files=[], recent_sessions=[])
 

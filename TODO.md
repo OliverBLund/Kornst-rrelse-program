@@ -166,13 +166,9 @@ Goal: get the program stable enough for the next tester round and then produce a
 Details and Statistics sidebars have passed manual QA. Next, continue the remaining P0/P1 release checks, especially plots, reports, export, porosity behavior, and end-to-end data-loading verification.
 
 
-Choose which methods to include in various things
 Make sure export / report respects groups, chosen methods etc
 Units in statistics table don’t seem to work
-Group level color changes
-Check text in the old program of headanayser to check the text box with credits etc.
--	Inspiration, JF Devlin etc.
-Fix the main sidebar panel. Make the drop area smaller, remove the thing below the samples with clear all etc. Make parameters and stratigraphy accordions?
+
 Finish the “Help” dialog and read it through.
 Ensure references to articles for individual methods etc are correct
 Lognormal fordeling plot fra Poul powerpoint

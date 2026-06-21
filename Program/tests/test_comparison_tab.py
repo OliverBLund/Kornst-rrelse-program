@@ -15,6 +15,7 @@ import gui.comparison_tab as comparison_tab_module
 from data_loader import GrainSizeData
 from grain_classification import USCS
 from gui.comparison_tab import ComparisonTab
+from gui.group_styles import clear_dataset_line_style, set_dataset_line_style
 from k_calculations_v2 import CalculationStatus, KCalculationResult
 from unit_conversions import HydraulicConductivityUnit
 
@@ -209,6 +210,45 @@ class TestComparisonTabSelectionState(unittest.TestCase):
         self.assertEqual(plotted, ['Sample A', 'Sample B', 'Sample C'])
         self.assertFalse(self.widget._pinned)
         self.assertFalse(self.widget._plot_hidden)
+
+    def test_plot_visibility_panel_shows_dataset_line_style_preview(self):
+        self.tabs[0].dataset.group_name = 'Layer 1'
+        self.tabs[1].dataset.group_name = 'Layer 1'
+        clear_dataset_line_style('B.csv')
+        try:
+            set_dataset_line_style('B.csv', ':')
+            self.widget.set_dataset_state(self.tabs, selected_tabs=self.tabs)
+
+            previews = self.widget._pin_list_widget.findChildren(
+                comparison_tab_module.LineStylePreview
+            )
+
+            self.assertTrue(
+                any(preview.property('lineStyle') == ':' for preview in previews)
+            )
+        finally:
+            clear_dataset_line_style('B.csv')
+
+    def test_plot_visibility_panel_refreshes_after_series_style_change(self):
+        self.tabs[0].dataset.group_name = 'Layer 1'
+        self.tabs[1].dataset.group_name = 'Layer 1'
+        clear_dataset_line_style('B.csv')
+        try:
+            self.widget.set_dataset_state(self.tabs[:2], selected_tabs=self.tabs[:2])
+
+            combo = self.widget._plot_widget._dataset_line_style_rows['B.csv']
+            combo.setCurrentIndex(combo.findData('--|s'))
+            APP.processEvents()
+
+            previews = self.widget._pin_list_widget.findChildren(
+                comparison_tab_module.LineStylePreview
+            )
+
+            self.assertTrue(
+                any(preview.property('lineStyle') == '--|s' for preview in previews)
+            )
+        finally:
+            clear_dataset_line_style('B.csv')
 
     def test_details_defaults_to_grain_core_and_elides_long_headers(self):
         long_tabs = [

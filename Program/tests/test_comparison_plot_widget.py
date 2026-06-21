@@ -18,6 +18,12 @@ from PyQt6.QtWidgets import QApplication, QFileDialog, QMessageBox
 
 from data_loader import GrainSizeData
 from gui.comparison_plot_widget import ComparisonPlotWidget
+from gui.group_styles import (
+    clear_dataset_line_style,
+    clear_group_color,
+    set_dataset_line_style,
+    set_group_color,
+)
 from gui.theme import SZ
 from k_calculations_v2 import CalculationStatus, KCalculationResult
 from unit_conversions import HydraulicConductivityUnit
@@ -163,6 +169,77 @@ class TestComparisonPlotWidget(unittest.TestCase):
         self.assertIn('Layer A', labels)
         self.assertIn('Layer B', labels)
         self.assertIn('Overall Kgeo', labels)
+
+    def test_group_color_override_drives_grouped_dataset_colors(self):
+        clear_group_color('Layer A')
+        try:
+            set_group_color('Layer A', '#123456')
+            self.widget.set_datasets([
+                DummyDatasetTab('Layer A-1', 1.0, group='Layer A'),
+                DummyDatasetTab('Layer A-2', 1.5, group='Layer A'),
+                DummyDatasetTab('Sample C', 2.0),
+            ])
+
+            colors = self.widget._effective_dataset_colors()
+
+            self.assertEqual(colors[0], '#123456')
+            self.assertEqual(colors[1], '#123456')
+            self.assertIn('Layer A', self.widget._group_color_rows)
+            self.assertNotIn('Layer A-1', self.widget._dataset_color_rows)
+            self.assertIn('Sample C', self.widget._dataset_color_rows)
+        finally:
+            clear_group_color('Layer A')
+
+    def test_grouped_dataset_line_style_override_is_respected(self):
+        clear_dataset_line_style('Layer A-2')
+        try:
+            set_dataset_line_style('Layer A-2', ':')
+            self.widget.set_datasets([
+                DummyDatasetTab('Layer A-1', 1.0, group='Layer A'),
+                DummyDatasetTab('Layer A-2', 1.5, group='Layer A'),
+            ])
+
+            self.assertEqual(self.widget._effective_dataset_colors()[0], self.widget._effective_dataset_colors()[1])
+            self.assertEqual(self.widget._effective_dataset_linestyles(), ['-', ':'])
+            self.assertIn('Layer A-2', self.widget._dataset_line_style_rows)
+            self.widget.on_plot_type_changed('Distribution')
+            self.widget.set_display_mode('overlay')
+            self.widget.refresh_plot()
+
+            ax = self.widget.figure.axes[0]
+            legend = ax.get_legend()
+            handles = getattr(legend, 'legend_handles', getattr(legend, 'legendHandles', []))
+            self.assertEqual(ax.lines[1].get_linestyle(), ':')
+            self.assertEqual(handles[1].get_linestyle(), ':')
+        finally:
+            clear_dataset_line_style('Layer A-2')
+
+    def test_grouped_dataset_marker_style_is_used_in_plot_and_legend(self):
+        clear_dataset_line_style('Layer A-2')
+        try:
+            set_dataset_line_style('Layer A-2', '--|s')
+            self.widget.set_datasets([
+                DummyDatasetTab('Layer A-1', 1.0, group='Layer A'),
+                DummyDatasetTab('Layer A-2', 1.5, group='Layer A'),
+            ])
+
+            combo = self.widget._dataset_line_style_rows['Layer A-2']
+            self.assertLessEqual(combo.maximumWidth(), 72)
+            self.assertEqual(combo.currentData(), '--|s')
+
+            self.widget.on_plot_type_changed('Distribution')
+            self.widget.set_display_mode('overlay')
+            self.widget.refresh_plot()
+
+            ax = self.widget.figure.axes[0]
+            legend = ax.get_legend()
+            handles = getattr(legend, 'legend_handles', getattr(legend, 'legendHandles', []))
+            self.assertEqual(ax.lines[1].get_linestyle(), '--')
+            self.assertEqual(ax.lines[1].get_marker(), 's')
+            self.assertEqual(handles[1].get_linestyle(), '--')
+            self.assertEqual(handles[1].get_marker(), 's')
+        finally:
+            clear_dataset_line_style('Layer A-2')
 
     def test_data_drawer_updates_for_k_distribution(self):
         self.widget.on_plot_type_changed('K Distribution')
@@ -425,6 +502,9 @@ class TestComparisonPlotWidget(unittest.TestCase):
         self.assertEqual(ax.lines[0].get_color(), ax.lines[1].get_color())
         self.assertNotEqual(ax.lines[0].get_linestyle(), ax.lines[1].get_linestyle())
         self.assertNotEqual(ax.lines[0].get_color(), ax.lines[2].get_color())
+        legend = ax.get_legend()
+        handles = getattr(legend, 'legend_handles', getattr(legend, 'legendHandles', []))
+        self.assertNotEqual(handles[0].get_linestyle(), handles[1].get_linestyle())
 
     def test_k_overlay_uses_dataset_color_override(self):
         self.widget._dataset_color_overrides['Sample A'] = '#123456'

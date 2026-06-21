@@ -122,6 +122,8 @@ class TestStartupTourOverlay(unittest.TestCase):
 
         self.assertIn("Startup Guide", setup_menus_source)
         self.assertIn("show_startup_guide", setup_menus_source)
+        self.assertIn("Analysis Settings", setup_menus_source)
+        self.assertIn("open_analysis_settings_dialog", setup_menus_source)
         self.assertIn("StartupTourOverlay", launcher_source)
         self.assertIn("_global_tour_steps", show_source)
 
@@ -131,8 +133,9 @@ class TestStartupTourOverlay(unittest.TestCase):
         self.assertIn("_drop_zone", steps_source)
         self.assertIn("_file_list", steps_source)
         self.assertIn("_manage_samples_btn", steps_source)
-        self.assertIn("_strata_widget", steps_source)
-        self.assertIn("refresh automatically", steps_source)
+        self.assertIn("_analysis_menu_btn", steps_source)
+        self.assertIn("Classification Scheme", steps_source)
+        self.assertIn("global calculation settings", steps_source)
         self.assertIn("_nav_btns[0]", steps_source)
         self.assertIn("_nav_btns[1]", steps_source)
         self.assertIn("_nav_btns[2]", steps_source)

@@ -32,7 +32,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Details aggregate mode separates summary grain rows from method aggregates so sorting does not mix incompatible row types.
 - Statistics aggregate mode now includes group summaries and tabular results below the plot area.
 - Individual-sample Statistics now uses structured Grain-size summary, Hydraulic conductivity, and Review/reference sections instead of a dense grid of scrollable text boxes.
-- Comparison plots and tables now use dataset group colors consistently where group context is active.
+- Comparison plots and tables now use dataset group colors consistently where group context is active, with per-dataset line styles available inside each group.
 - Distribution curve markers now default to D10, D50, and D60 instead of D10, D30, and D60.
 - K-value plots default to a linear Y-axis, with log scaling available as an explicit option.
 - K-value plots clarify geometric and arithmetic mean reference lines.
@@ -43,6 +43,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Export-tab plot preview and export wording now make it clearer whether the output is a figure file or plot data table.
 - Full changelog now opens in the in-app Help & Documentation window instead of opening the raw Markdown file.
 - Active K-method selection now applies consistently to Results, plots, comparison summaries, reports, and export while keeping all methods cached internally.
+- Main sidebar footer now shows a compact DTU logo and attribution block for Oliver Lund, HydrogeoSieveXL inspiration, Poul Løgstrup Bjerg, and DTU Sustain.
 
 ### Fixed
 - Raw sieve auto-detection no longer silently accepts obviously invalid columns such as loss-percent rows or numeric header artifacts as sieve/weight columns.
@@ -53,11 +54,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - K-value histogram and related K plots no longer default to log-scaled Y-axis behavior.
 - Min/max reference lines were removed from K plots to reduce clutter and keep the mean references clearer.
 - Welcome-screen hover help no longer depends on native black Qt tooltips; welcome action buttons use a readable in-window tooltip overlay.
+- Welcome screen now has a stronger compact layout for small laptop displays and reduced in-app viewports, including 1366x768 and narrow 720x500-style welcome areas, with the DTU/startup footer fixed outside the scrollable content.
 - Plot controls sidebar no longer reserves a blank vertical strip when the controls are closed.
 - SVG/PNG sidebar export handling was tightened so requested export formats are written with the expected file type and extension.
 - Details and Statistics sidebars were made less prone to clipped content by tightening summaries and improving scroll/resizing behavior.
 - Individual-sample Statistics no longer shows placeholder in-tab Excel/CSV export buttons; export remains handled through the Export tab and plot/data drawers.
 - Report and export K summaries now draw from the same shared calculation results used by the live UI.
+- Main sidebar import drop-zone now accepts drops on the visible target itself, including drops over its icon/text labels, and handles supported file extensions case-insensitively.
 
 ### Manual QA Checklist
 - Start the app and confirm the welcome quick actions, readable hover help, Help pages, and Full Changelog window.

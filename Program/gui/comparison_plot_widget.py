@@ -11,7 +11,7 @@ from PyQt6.QtWidgets import (
     QHeaderView, QAbstractItemView,
 )
 from PyQt6.QtCore import Qt, pyqtSignal, QSize, QPropertyAnimation, QEasingCurve
-from PyQt6.QtGui import QColor
+from PyQt6.QtGui import QColor, QFontMetrics
 from matplotlib.figure import Figure
 from matplotlib.patches import Patch
 import numpy as np
@@ -34,8 +34,19 @@ from .plot_styles import PlotStyle, PROFESSIONAL_STYLE, get_style, get_available
 from .sidebar_controls import (
     LEGEND_LOCATIONS as _CMP_LEGEND_LOCATIONS,
     LEGEND_LAYOUTS as _CMP_LEGEND_LAYOUTS,
+    LineStylePreview,
     make_color_row, make_combo_row, make_dspin_row,
     make_spin_row, make_toggle_row, set_swatch_color,
+)
+from .group_styles import (
+    LINE_STYLE_OPTIONS,
+    dataset_line_style,
+    dataset_series_key,
+    group_color_map,
+    line_style_label,
+    series_style_parts,
+    set_dataset_line_style,
+    set_group_color,
 )
 from .theme import C, SZ, apply_matplotlib_style, icon
 from analysis.comparison_snapshot import ComparisonSnapshotOptions, build_comparison_snapshot
@@ -130,6 +141,7 @@ class ComparisonPlotWidget(QWidget):
         self.flagged_methods_dict = {}  # dataset_name -> set(method_name)
         self._comparison_snapshot = None
         self._dataset_groups: Dict[str, str] = {}
+        self._dataset_style_keys: Dict[str, str] = {}
         self._group_color_map: Dict[str, str] = {}
         self._dataset_linestyles: Dict[str, str] = {}
         self.drawer_visible = False
@@ -163,6 +175,9 @@ class ComparisonPlotWidget(QWidget):
         self._dataset_color_overrides: Dict[str, str] = {}
         # Live handles to the color swatch widgets, keyed by sample name.
         self._dataset_color_rows: Dict[str, QLabel] = {}
+        # Live handles to group color swatches, keyed by group name.
+        self._group_color_rows: Dict[str, QLabel] = {}
+        self._dataset_line_style_rows: Dict[str, QComboBox] = {}
 
         layout = QVBoxLayout(self)
         layout.setContentsMargins(2, 2, 2, 2)
@@ -601,16 +616,16 @@ class ComparisonPlotWidget(QWidget):
         self._sect_display.add_widget(self._row_k_log)
         lay.addWidget(self._sect_display)
 
-        # ── Dataset Colors ──
+        # ── Series Appearance ──
         self._sect_dataset_colors = CollapsibleSection(
-            "Dataset Colors", "fa6s.palette",
+            "Series Appearance", "fa6s.palette",
             CollapsibleSection.PURPLE, expanded=False,
         )
         self._color_container = QWidget()
         self._color_container_lay = QVBoxLayout(self._color_container)
         self._color_container_lay.setContentsMargins(0, 0, 0, 0)
         self._color_container_lay.setSpacing(0)
-        self._empty_colors_hint = QLabel("  Add datasets to see per-sample colors.")
+        self._empty_colors_hint = QLabel("  Add datasets to see color controls.")
         self._empty_colors_hint.setStyleSheet(
             f"color: #8a816f; padding: 10px; font-size: 10px;"
         )
@@ -811,7 +826,7 @@ class ComparisonPlotWidget(QWidget):
         self.refresh_plot()
 
     def _rebuild_dataset_color_rows(self) -> None:
-        """Refresh the Dataset Colors section when datasets change."""
+        """Refresh color controls when datasets or groups change."""
         if not hasattr(self, '_color_container_lay'):
             return
         while self._color_container_lay.count():
@@ -820,6 +835,8 @@ class ComparisonPlotWidget(QWidget):
             if w is not None:
                 w.setParent(None)
         self._dataset_color_rows.clear()
+        self._group_color_rows.clear()
+        self._dataset_line_style_rows.clear()
 
         if not self.datasets:
             self._color_container_lay.addWidget(self._empty_colors_hint)
@@ -827,9 +844,47 @@ class ComparisonPlotWidget(QWidget):
             return
 
         self._empty_colors_hint.hide()
+
+        group_order: list[str] = []
+        grouped_datasets: dict[str, list[object]] = {}
+        ungrouped_datasets: list[tuple[int, object]] = []
         for i, ds in enumerate(self.datasets):
+            group_name = self._dataset_groups.get(ds.sample_name, UNGROUPED_LABEL)
+            if group_name == UNGROUPED_LABEL:
+                ungrouped_datasets.append((i, ds))
+                continue
+            if group_name not in group_order:
+                group_order.append(group_name)
+            grouped_datasets.setdefault(group_name, []).append(ds)
+
+        for group_name in group_order:
+            color = self._group_color_map.get(group_name, self.dataset_colors[0])
+            row, dot = make_color_row(group_name, color)
+            row.setToolTip(
+                "Group color. Datasets in this group use this color with different line styles."
+            )
+            dot.mousePressEvent = (
+                lambda _event, name=group_name, swatch=dot:
+                self._pick_group_color(name, swatch)
+            )
+            self._color_container_lay.addWidget(row)
+            self._group_color_rows[group_name] = dot
+            for ds in grouped_datasets.get(group_name, []):
+                key = self._dataset_style_keys.get(ds.sample_name, ds.sample_name)
+                line_style = self._dataset_linestyles.get(ds.sample_name, "-")
+                line_row, combo = self._make_line_style_row(
+                    ds.sample_name,
+                    key,
+                    line_style,
+                    color,
+                )
+                self._color_container_lay.addWidget(line_row)
+                self._dataset_line_style_rows[key] = combo
+
+        for i, ds in ungrouped_datasets:
             color = self._effective_color_for(ds.sample_name, i)
             row, dot = make_color_row(ds.sample_name, color)
+            row.setToolTip("Ungrouped dataset color.")
             dot.mousePressEvent = (
                 lambda _event, name=ds.sample_name, swatch=dot:
                 self._pick_dataset_color(name, swatch)
@@ -837,13 +892,88 @@ class ComparisonPlotWidget(QWidget):
             self._color_container_lay.addWidget(row)
             self._dataset_color_rows[ds.sample_name] = dot
 
+    def _make_line_style_row(
+        self,
+        sample_name: str,
+        dataset_key: str,
+        line_style: str,
+        color: str,
+    ) -> tuple[QWidget, QComboBox]:
+        row = QFrame()
+        row.setObjectName("series-line-style-row")
+        row.setStyleSheet(
+            "QFrame#series-line-style-row {"
+            "  border-bottom: 1px solid rgba(212,196,168,0.35);"
+            "  background: transparent;"
+            "}"
+            "QFrame#series-line-style-row QLabel {"
+            "  border: none;"
+            "  background: transparent;"
+            "}"
+            "QFrame#series-line-style-row QComboBox {"
+            "  min-width: 64px;"
+            "  max-width: 68px;"
+            "}"
+        )
+        lay = QHBoxLayout(row)
+        lay.setContentsMargins(10, 4, 6, 5)
+        lay.setSpacing(4)
+
+        preview = LineStylePreview(color, line_style, width=32, height=14)
+        preview.setToolTip(f"{sample_name}\nLine style: {line_style_label(line_style)}")
+
+        lbl = QLabel()
+        lbl.setProperty("pws-lbl", True)
+        lbl.setToolTip(sample_name)
+        lbl.setMinimumWidth(0)
+        lbl.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
+        lbl.setText(QFontMetrics(lbl.font()).elidedText(
+            sample_name,
+            Qt.TextElideMode.ElideRight,
+            72,
+        ))
+
+        combo = QComboBox()
+        combo.setObjectName("pw-style-sel")
+        combo.setToolTip("Line style for this dataset inside its group")
+        short_labels = {
+            "-": "Solid",
+            "--": "Dash",
+            ":": "Dot",
+            "-.": "Dash-dot",
+            "-|o": "Line o",
+            "--|s": "Dash s",
+            ":|^": "Dot ^",
+            "-.|D": "Ddot D",
+        }
+        for style, label in LINE_STYLE_OPTIONS:
+            combo.addItem(short_labels.get(style, label), style)
+            combo.setItemData(combo.count() - 1, label, Qt.ItemDataRole.ToolTipRole)
+        current_index = combo.findData(line_style)
+        combo.setCurrentIndex(current_index if current_index >= 0 else 0)
+        combo.currentIndexChanged.connect(
+            lambda _idx, key=dataset_key, name=sample_name, box=combo, view=preview:
+            self._on_dataset_line_style_changed(key, name, box.currentData(), view)
+        )
+        combo.setFixedWidth(68)
+
+        lay.addWidget(preview, 0, Qt.AlignmentFlag.AlignVCenter)
+        lay.addWidget(lbl, 1)
+        lay.addWidget(combo, 0)
+        return row, combo
+
+    def _short_label(self, text: str, max_chars: int = 36) -> str:
+        if len(text) <= max_chars:
+            return text
+        return text[: max(1, max_chars - 3)] + "..."
+
     def _effective_color_for(self, sample_name: str, index: int) -> str:
-        override = self._dataset_color_overrides.get(sample_name)
-        if override:
-            return override
         group_name = self._dataset_groups.get(sample_name, UNGROUPED_LABEL)
         if group_name != UNGROUPED_LABEL and group_name in self._group_color_map:
             return self._group_color_map[group_name]
+        override = self._dataset_color_overrides.get(sample_name)
+        if override:
+            return override
         return self.dataset_colors[index % len(self.dataset_colors)]
 
     def _pick_dataset_color(self, sample_name: str, swatch: QLabel) -> None:
@@ -868,6 +998,37 @@ class ComparisonPlotWidget(QWidget):
         set_swatch_color(swatch, hex_color)
         self.refresh_plot()
 
+    def _pick_group_color(self, group_name: str, swatch: QLabel) -> None:
+        current = self._group_color_map.get(group_name, self.dataset_colors[0])
+        chosen = QColorDialog.getColor(
+            QColor(current), self, f"Color for {group_name}"
+        )
+        if not chosen.isValid():
+            return
+        hex_color = set_group_color(group_name, chosen.name())
+        set_swatch_color(swatch, hex_color)
+        self._rebuild_group_style_maps()
+        self._rebuild_dataset_color_rows()
+        self.refresh_plot()
+
+    def _on_dataset_line_style_changed(
+        self,
+        dataset_key: str,
+        sample_name: str,
+        line_style: str,
+        preview: Optional[LineStylePreview] = None,
+    ) -> None:
+        if not line_style:
+            return
+        stored = set_dataset_line_style(dataset_key, line_style)
+        self._dataset_linestyles[sample_name] = stored
+        if preview is not None:
+            preview.set_line_style(stored)
+            preview.setToolTip(
+                f"{sample_name}\nLine style: {line_style_label(stored)}"
+            )
+        self.refresh_plot()
+
     def _effective_dataset_colors(self) -> List[str]:
         """Dataset-color list honouring any per-sample overrides."""
         return [
@@ -881,24 +1042,35 @@ class ComparisonPlotWidget(QWidget):
             for ds in self.datasets
         ]
 
+    def _effective_dataset_plot_styles(self) -> tuple[List[str], List[Optional[str]]]:
+        line_styles: list[str] = []
+        markers: list[Optional[str]] = []
+        for style_key in self._effective_dataset_linestyles():
+            line_style, marker = series_style_parts(style_key)
+            line_styles.append(line_style)
+            markers.append(marker)
+        return line_styles, markers
+
     def _rebuild_group_style_maps(self) -> None:
-        line_cycle = ["-", "--", ":", "-."]
         group_order: list[str] = []
         group_member_counts: dict[str, int] = {}
         self._dataset_groups = {}
+        self._dataset_style_keys = {}
         self._group_color_map = {}
         self._dataset_linestyles = {}
 
         for dataset in self.datasets:
             group_name = dataset_group_name(dataset)
             self._dataset_groups[dataset.sample_name] = group_name
+            self._dataset_style_keys[dataset.sample_name] = dataset_series_key(dataset)
             if group_name != UNGROUPED_LABEL and group_name not in group_order:
                 group_order.append(group_name)
 
-        self._group_color_map = {
-            group_name: self.dataset_colors[i % len(self.dataset_colors)]
-            for i, group_name in enumerate(group_order)
-        }
+        self._group_color_map = group_color_map(
+            group_order,
+            palette=self.dataset_colors,
+            include_ungrouped=False,
+        )
 
         for i, dataset in enumerate(self.datasets):
             group_name = self._dataset_groups.get(dataset.sample_name, UNGROUPED_LABEL)
@@ -907,7 +1079,12 @@ class ComparisonPlotWidget(QWidget):
                 continue
             member_index = group_member_counts.get(group_name, 0)
             group_member_counts[group_name] = member_index + 1
-            self._dataset_linestyles[dataset.sample_name] = line_cycle[member_index % len(line_cycle)]
+            default_style = LINE_STYLE_OPTIONS[member_index % len(LINE_STYLE_OPTIONS)][0]
+            dataset_key = self._dataset_style_keys.get(dataset.sample_name, dataset.sample_name)
+            self._dataset_linestyles[dataset.sample_name] = dataset_line_style(
+                dataset_key,
+                default_style,
+            )
 
     def _export_figure(self, fmt: str) -> None:
         """Save the current comparison figure to disk."""
@@ -1309,10 +1486,12 @@ class ComparisonPlotWidget(QWidget):
     
     def plot_distribution_overlay(self, ax):
         """Plot all distributions on single axes via shared renderer."""
+        linestyles, markers = self._effective_dataset_plot_styles()
         render_distribution_overlay(
             ax, self.datasets,
             colors=self._effective_dataset_colors(),
-            linestyles=self._effective_dataset_linestyles(),
+            linestyles=linestyles,
+            markers=markers,
             style=self.current_style,
             show_grid=self.show_grid,
             show_legend=self.show_legend,
@@ -1322,7 +1501,7 @@ class ComparisonPlotWidget(QWidget):
         """Plot distributions in grid layout"""
         rows, cols = self.grid_layout
         dataset_colors = self._effective_dataset_colors()
-        linestyles = self._effective_dataset_linestyles()
+        linestyles, markers = self._effective_dataset_plot_styles()
 
         for i, dataset in enumerate(self.datasets):
             if i >= rows * cols:
@@ -1331,10 +1510,11 @@ class ComparisonPlotWidget(QWidget):
             ax = self.figure.add_subplot(rows, cols, i + 1)
             color = dataset_colors[i % len(dataset_colors)]
             linestyle = linestyles[i % len(linestyles)] if linestyles else "-"
+            marker = markers[i % len(markers)] if markers else None
             
             ax.semilogx(dataset.particle_sizes, dataset.percent_passing,
                        linewidth=2, color=color, linestyle=linestyle,
-                       marker='o' if len(dataset.particle_sizes) < 20 else None,
+                       marker=marker or ('o' if len(dataset.particle_sizes) < 20 else None),
                        markersize=3)
             
             ax.set_title(dataset.sample_name, fontsize=9, fontweight='bold')
@@ -1538,7 +1718,7 @@ class ComparisonPlotWidget(QWidget):
         """Plot combined view"""
         rows, cols = self.grid_layout
         dataset_colors = self._effective_dataset_colors()
-        linestyles = self._effective_dataset_linestyles()
+        linestyles, markers = self._effective_dataset_plot_styles()
 
         for i, dataset in enumerate(self.datasets):
             if i >= rows * cols:
@@ -1550,10 +1730,12 @@ class ComparisonPlotWidget(QWidget):
             
             color = dataset_colors[i % len(dataset_colors)]
             linestyle = linestyles[i % len(linestyles)] if linestyles else "-"
+            marker = markers[i % len(markers)] if markers else None
             
             # Plot distribution
             ax1.semilogx(dataset.particle_sizes, dataset.percent_passing,
-                        linewidth=1.5, color=color, linestyle=linestyle, markersize=2)
+                        linewidth=1.5, color=color, linestyle=linestyle,
+                        marker=marker, markersize=2)
             ax1.set_title(f'{dataset.sample_name} - Dist', fontsize=8)
             ax1.set_xlabel('Size (mm)', fontsize=7)
             ax1.set_ylabel('% Pass', fontsize=7)

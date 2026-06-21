@@ -10,7 +10,8 @@ from __future__ import annotations
 
 from typing import Optional
 
-from PyQt6.QtCore import Qt
+from PyQt6.QtCore import QPointF, QRectF, QSize, Qt
+from PyQt6.QtGui import QColor, QPainter, QPen, QPolygonF
 from PyQt6.QtWidgets import (
     QComboBox, QDoubleSpinBox, QHBoxLayout, QLabel, QLineEdit,
     QSizePolicy, QSpinBox, QVBoxLayout, QWidget,
@@ -55,6 +56,116 @@ LEGEND_LAYOUTS: list[tuple[int, str]] = [
 
 
 _ROW_BORDER_QSS = "border-bottom: 1px solid rgba(212,196,168,0.4);"
+
+
+def _split_series_style(line_style: str) -> tuple[str, str | None]:
+    valid_lines = {"-", "--", ":", "-."}
+    valid_markers = {"o", "s", "^", "D"}
+    text = str(line_style or "-").strip()
+    line_part, marker_part = (text.split("|", 1) + [""])[:2]
+    line = line_part if line_part in valid_lines else "-"
+    marker = marker_part if marker_part in valid_markers else None
+    return line, marker
+
+
+def _normalized_series_style(line_style: str) -> str:
+    line, marker = _split_series_style(line_style)
+    return f"{line}|{marker}" if marker else line
+
+
+def _dash_pattern(line_style: str) -> list[float]:
+    line, _marker = _split_series_style(line_style)
+    return {
+        "--": [5.0, 3.0],
+        ":": [1.0, 3.0],
+        "-.": [5.0, 2.0, 1.0, 2.0],
+    }.get(line, [])
+
+
+class LineStylePreview(QWidget):
+    """Small painted preview for matplotlib-style line styles."""
+
+    def __init__(
+        self,
+        color: str = "#6b8e23",
+        line_style: str = "-",
+        *,
+        muted: bool = False,
+        width: int = 30,
+        height: int = 14,
+        parent: Optional[QWidget] = None,
+    ) -> None:
+        super().__init__(parent)
+        self._color = color
+        self._line_style = _normalized_series_style(line_style)
+        self._muted = bool(muted)
+        self.setFixedSize(width, height)
+        self.setSizePolicy(QSizePolicy.Policy.Fixed, QSizePolicy.Policy.Fixed)
+        self.setProperty("lineStyle", self._line_style)
+
+    def sizeHint(self) -> QSize:
+        return self.size()
+
+    def set_line_style(self, line_style: str) -> None:
+        self._line_style = _normalized_series_style(line_style)
+        self.setProperty("lineStyle", self._line_style)
+        self.update()
+
+    def set_color(self, color: str) -> None:
+        self._color = color
+        self.update()
+
+    def set_muted(self, muted: bool) -> None:
+        self._muted = bool(muted)
+        self.update()
+
+    def paintEvent(self, _event) -> None:
+        painter = QPainter(self)
+        painter.setRenderHint(QPainter.RenderHint.Antialiasing)
+        color = QColor(self._color)
+        if not color.isValid():
+            color = QColor("#6b8e23")
+        if self._muted:
+            color.setAlphaF(0.42)
+        pen = QPen(color, 2.0)
+        pen.setCapStyle(Qt.PenCapStyle.RoundCap)
+        pattern = _dash_pattern(self._line_style)
+        if pattern:
+            pen.setDashPattern(pattern)
+        painter.setPen(pen)
+        y = self.height() // 2
+        painter.drawLine(2, y, self.width() - 2, y)
+        _line, marker = _split_series_style(self._line_style)
+        if marker:
+            self._draw_marker(painter, color, marker)
+        painter.end()
+
+    def _draw_marker(self, painter: QPainter, color: QColor, marker: str) -> None:
+        cx = self.width() / 2.0
+        cy = self.height() / 2.0
+        radius = 3.2
+        marker_pen = QPen(color, 1.3)
+        marker_pen.setCapStyle(Qt.PenCapStyle.RoundCap)
+        painter.setPen(marker_pen)
+        painter.setBrush(color)
+
+        if marker == "o":
+            painter.drawEllipse(QRectF(cx - radius, cy - radius, radius * 2, radius * 2))
+        elif marker == "s":
+            painter.drawRect(QRectF(cx - radius, cy - radius, radius * 2, radius * 2))
+        elif marker == "^":
+            painter.drawPolygon(QPolygonF([
+                QPointF(cx, cy - radius - 0.5),
+                QPointF(cx - radius - 0.5, cy + radius),
+                QPointF(cx + radius + 0.5, cy + radius),
+            ]))
+        elif marker == "D":
+            painter.drawPolygon(QPolygonF([
+                QPointF(cx, cy - radius - 0.7),
+                QPointF(cx - radius - 0.7, cy),
+                QPointF(cx, cy + radius + 0.7),
+                QPointF(cx + radius + 0.7, cy),
+            ]))
 
 
 def _row() -> tuple[QWidget, QHBoxLayout]:

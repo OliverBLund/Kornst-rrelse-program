@@ -6,7 +6,8 @@ from unittest import mock
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 sys.path.insert(0, "Program")
 
-from PyQt6.QtWidgets import QApplication, QDialog
+from PyQt6.QtCore import QMimeData, QUrl
+from PyQt6.QtWidgets import QApplication, QDialog, QLabel
 
 from gui.control_panel import ControlPanel
 
@@ -113,6 +114,38 @@ class TestControlPanelSettings(unittest.TestCase):
         self.assertEqual(self.panel.get_selected_paths(), [file_path])
         self.assertEqual(self.panel._chip_selected.text(), "1 included")
         self.assertEqual(self.panel.get_scope_card_count(), 1)
+
+    def test_drop_zone_accepts_supported_file_types_on_visible_frame(self):
+        mime = QMimeData()
+        csv_path = r"C:/temp/sample.CSV"
+        ignored_path = r"C:/temp/notes.png"
+        mime.setUrls([
+            QUrl.fromLocalFile(csv_path),
+            QUrl.fromLocalFile(ignored_path),
+        ])
+
+        self.assertTrue(self.panel._drop_zone.acceptDrops())
+        self.assertEqual(self.panel._drop_zone.objectName(), "import-drop-zone")
+        self.assertTrue(
+            all(child.acceptDrops() for child in self.panel._drop_zone.findChildren(QLabel))
+        )
+        self.assertEqual(
+            self.panel._supported_drop_paths_from_mime(mime),
+            [csv_path],
+        )
+
+    def test_sidebar_credit_block_uses_dtu_logo_and_attribution_text(self):
+        self.assertEqual(
+            self.panel._sidebar_credit_logo.objectName(),
+            "sidebar-credit-logo",
+        )
+        self.assertFalse(self.panel._sidebar_credit_logo.pixmap().isNull())
+
+        credit_text = self.panel._sidebar_credit_text.text()
+        self.assertIn("Developed by Oliver Lund", credit_text)
+        self.assertIn("Inspired by HydrogeoSieveXL", credit_text)
+        self.assertIn("Supervisor: Poul Løgstrup Bjerg", credit_text)
+        self.assertIn("DTU Sustain", credit_text)
 
 
 if __name__ == "__main__":

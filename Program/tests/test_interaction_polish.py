@@ -101,6 +101,41 @@ class TestSidebarSampleCards(unittest.TestCase):
             card.deleteLater()
             APP.processEvents()
 
+    def test_expanded_sample_actions_wrap_into_two_rows(self):
+        card = _SampleCard(
+            "sample.csv",
+            "Sample With Enough Words To Exercise The Sidebar Width",
+            "loaded",
+        )
+        card.resize(220, 150)
+        card.show()
+        APP.processEvents()
+
+        try:
+            card._toggle_expand()
+            card.resize(220, card.sizeHint().height())
+            APP.processEvents()
+
+            self.assertTrue(card._detail.isVisible())
+            buttons = card._action_buttons
+            self.assertEqual(
+                set(buttons),
+                {"Inspect", "Remap", "Log", "Props", "Remove"},
+            )
+
+            row_tops = {
+                button.mapTo(card, button.rect().topLeft()).y()
+                for button in buttons.values()
+            }
+            self.assertEqual(len(row_tops), 2)
+            for button in buttons.values():
+                right_edge = button.mapTo(card, button.rect().bottomRight()).x()
+                self.assertLessEqual(right_edge, card.rect().right())
+        finally:
+            card.hide()
+            card.deleteLater()
+            APP.processEvents()
+
 
 if __name__ == "__main__":
     unittest.main(verbosity=2)

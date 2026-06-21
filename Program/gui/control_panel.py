@@ -4,6 +4,7 @@ Control panel widget for data import and analysis controls
 
 from collections import deque
 from collections.abc import Mapping
+import sys
 from PyQt6.QtWidgets import (QFrame, QVBoxLayout, QHBoxLayout, QGroupBox,
                             QPushButton, QLabel, QLineEdit, QComboBox,
                             QTableWidget, QTableWidgetItem, QTextEdit,
@@ -301,9 +302,14 @@ class _SampleCard(QWidget):
             f"padding: 3px 7px; border-radius: 3px; font-size: 8pt;")
         detail_v.addWidget(self._status_line)
 
-        # Action buttons row — .s-act-row in CSS
-        act_row = QHBoxLayout()
-        act_row.setSpacing(3)
+        # Action buttons rows — keeps expanded cards inside narrow sidebars.
+        self._action_buttons: dict[str, QPushButton] = {}
+        primary_row = QHBoxLayout()
+        primary_row.setContentsMargins(0, 0, 0, 0)
+        primary_row.setSpacing(4)
+        utility_row = QHBoxLayout()
+        utility_row.setContentsMargins(0, 0, 0, 0)
+        utility_row.setSpacing(4)
         for btn_text, btn_icon_name, is_danger, sig_attr in [
             ("Inspect", "fa6s.magnifying-glass", False, "sig_inspect"),
             ("Remap",   "fa6s.table-columns",    False, "sig_remap"),
@@ -314,6 +320,11 @@ class _SampleCard(QWidget):
             btn = QPushButton(btn_text)
             btn.setObjectName("card-action")
             btn.setFixedHeight(24)
+            btn.setMinimumWidth(0)
+            btn.setSizePolicy(
+                QSizePolicy.Policy.Expanding,
+                QSizePolicy.Policy.Fixed,
+            )
             try:
                 btn.setIcon(icon(btn_icon_name,
                                  "#a03020" if is_danger else C.SB_MID))
@@ -332,9 +343,13 @@ class _SampleCard(QWidget):
             # Wire to the matching signal — capture sig_attr by value
             _sig = getattr(self, sig_attr)
             btn.clicked.connect(lambda _checked, s=_sig: s.emit(self.file_path))
-            act_row.addWidget(btn)
-        act_row.addStretch()
-        detail_v.addLayout(act_row)
+            self._action_buttons[btn_text] = btn
+            if btn_text in {"Inspect", "Remap"}:
+                primary_row.addWidget(btn)
+            else:
+                utility_row.addWidget(btn)
+        detail_v.addLayout(primary_row)
+        detail_v.addLayout(utility_row)
 
         main_v.addWidget(self._detail)
 
@@ -1533,22 +1548,94 @@ class ControlPanel(QFrame):
         """Emit a clean zero-argument request from the sidebar Manage button."""
         self.manage_datasets_requested.emit()
 
-    def dragEnterEvent(self, event):
-        if event.mimeData().hasUrls():
-            urls = event.mimeData().urls()
-            if any(u.toLocalFile().lower().endswith(('.csv', '.xlsx', '.xls', '.txt'))
-                   for u in urls):
-                event.acceptProposedAction()
-                return
+    @staticmethod
+    def _resource_file(filename: str) -> str:
+        """Return a bundled resource path that works in source and frozen builds."""
+        if getattr(sys, "frozen", False):
+            bundle_root = getattr(sys, "_MEIPASS", "")
+            candidates = [
+                os.path.join(bundle_root, "Program", "resources", filename),
+                os.path.join(bundle_root, "resources", filename),
+            ]
+        else:
+            candidates = [
+                os.path.join(
+                    os.path.dirname(os.path.dirname(__file__)),
+                    "resources",
+                    filename,
+                )
+            ]
+        for path in candidates:
+            if path and os.path.exists(path):
+                return path
+        return candidates[0] if candidates else filename
+
+    @staticmethod
+    def _supported_drop_paths_from_mime(mime_data) -> list[str]:
+        if not mime_data or not mime_data.hasUrls():
+            return []
+        supported = ('.csv', '.xlsx', '.xls', '.txt')
+        paths = []
+        for url in mime_data.urls():
+            local_path = url.toLocalFile()
+            if local_path and local_path.lower().endswith(supported):
+                paths.append(local_path)
+        return paths
+
+    def _drop_zone_stylesheet(self, active: bool = False) -> str:
+        border = C.OLIVE if active else C.SB_BDR
+        bg = "rgba(107,142,35,0.13)" if active else "rgba(255,255,255,0.25)"
+        return (
+            f"QFrame#import-drop-zone {{ border: 1.5px dashed {border};"
+            f" border-radius: 5px; background: {bg}; }}"
+            f"QFrame#import-drop-zone:hover {{ border-color: {C.OLIVE};"
+            f" background: rgba(107,142,35,0.07); }}"
+        )
+
+    def _set_drop_zone_active(self, active: bool) -> None:
+        if hasattr(self, "_drop_zone"):
+            self._drop_zone.setStyleSheet(self._drop_zone_stylesheet(active))
+
+    def _accept_supported_drop(self, event) -> bool:
+        if self._supported_drop_paths_from_mime(event.mimeData()):
+            event.acceptProposedAction()
+            return True
         event.ignore()
+        return False
+
+    def dragEnterEvent(self, event):
+        if self._accept_supported_drop(event):
+            self._set_drop_zone_active(True)
 
     def dropEvent(self, event):
-        urls = event.mimeData().urls()
-        file_paths = [u.toLocalFile() for u in urls
-                      if u.toLocalFile().lower().endswith(('.csv', '.xlsx', '.xls', '.txt'))]
+        self._set_drop_zone_active(False)
+        file_paths = self._supported_drop_paths_from_mime(event.mimeData())
         if file_paths:
             self._handle_dropped_files(file_paths)
             event.acceptProposedAction()
+        else:
+            event.ignore()
+
+    def dragMoveEvent(self, event):
+        self._accept_supported_drop(event)
+
+    def dragLeaveEvent(self, event):
+        self._set_drop_zone_active(False)
+        event.accept()
+
+    def _drop_zone_drag_enter(self, event):
+        if self._accept_supported_drop(event):
+            self._set_drop_zone_active(True)
+
+    def _drop_zone_drag_move(self, event):
+        self._accept_supported_drop(event)
+
+    def _drop_zone_drag_leave(self, event):
+        self._set_drop_zone_active(False)
+        event.accept()
+
+    def _drop_zone_drop(self, event):
+        self.dropEvent(event)
 
     def _file_entry_parts(self, file_entry) -> tuple[str, str | None, str]:
         """Return actual path, sheet name, and stable file key for an import entry."""
@@ -1609,8 +1696,8 @@ class ControlPanel(QFrame):
         """Process files dropped onto the sidebar — same pipeline as add_files."""
         expanded_files = []
         already_added = []
-        excel_files = [f for f in file_paths if f.endswith(('.xlsx', '.xls')) and f not in self.file_statuses]
-        other_files = [f for f in file_paths if not f.endswith(('.xlsx', '.xls')) and f not in self.file_statuses]
+        excel_files = [f for f in file_paths if f.lower().endswith(('.xlsx', '.xls')) and f not in self.file_statuses]
+        other_files = [f for f in file_paths if not f.lower().endswith(('.xlsx', '.xls')) and f not in self.file_statuses]
         already_added = [os.path.basename(f) for f in file_paths if f in self.file_statuses]
 
         if excel_files:
@@ -1669,47 +1756,63 @@ class ControlPanel(QFrame):
 
         # ── Drop zone — matches .drop in CSS ─────────────────────────
         self._drop_zone = QFrame()
+        self._drop_zone.setObjectName("import-drop-zone")
+        self._drop_zone.setAcceptDrops(True)
         self._drop_zone.setCursor(Qt.CursorShape.PointingHandCursor)
-        self._drop_zone.setMinimumHeight(70)
-        self._drop_zone.setStyleSheet(
-            f"QFrame {{ border: 1.5px dashed {C.SB_BDR}; border-radius: 5px;"
-            f"  background: rgba(255,255,255,0.25); }}"
-            f"QFrame:hover {{ border-color: {C.OLIVE};"
-            f"  background: rgba(107,142,35,0.07); }}")
+        self._drop_zone.setMinimumHeight(48)
+        self._drop_zone.setMaximumHeight(58)
+        self._drop_zone.setStyleSheet(self._drop_zone_stylesheet(False))
         self._drop_zone.mousePressEvent = self._show_add_data_menu_for_drop_zone
+        self._drop_zone.dragEnterEvent = self._drop_zone_drag_enter
+        self._drop_zone.dragMoveEvent = self._drop_zone_drag_move
+        self._drop_zone.dragLeaveEvent = self._drop_zone_drag_leave
+        self._drop_zone.dropEvent = self._drop_zone_drop
+        self._drop_zone.setToolTip(
+            "Drop CSV/Excel/TXT files here. Click to choose processed or raw sieve import."
+        )
 
         dz_v = QVBoxLayout(self._drop_zone)
-        dz_v.setContentsMargins(10, 11, 10, 11)
-        dz_v.setSpacing(4)
+        dz_v.setContentsMargins(8, 6, 8, 6)
+        dz_v.setSpacing(2)
         dz_v.setAlignment(Qt.AlignmentFlag.AlignCenter)
 
         dz_icon = QLabel()
         try:
-            dz_icon.setPixmap(icon('fa6s.cloud-arrow-up', C.SB_MUTED).pixmap(17, 17))
+            dz_icon.setPixmap(icon('fa6s.cloud-arrow-up', C.SB_MUTED).pixmap(14, 14))
         except Exception:
             dz_icon.setText("\u2B06")
         dz_icon.setAlignment(Qt.AlignmentFlag.AlignCenter)
         dz_icon.setStyleSheet("background: transparent; border: none;")
+        dz_icon.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents, True)
         dz_v.addWidget(dz_icon)
 
-        dz_text = QLabel("Drop files or click to choose import path")
+        dz_text = QLabel("Drop files here")
         dz_text.setAlignment(Qt.AlignmentFlag.AlignCenter)
         dz_text.setStyleSheet(
-            f"font-size: 11px; color: {C.SB_MID};"
+            f"font-size: 10px; color: {C.SB_MID};"
             f"  background: transparent; border: none;")
+        dz_text.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents, True)
         dz_v.addWidget(dz_text)
 
-        dz_formats = QLabel("CSV \u00b7 XLSX \u00b7 TXT")
+        dz_formats = QLabel("Click for processed/raw import")
         dz_formats.setAlignment(Qt.AlignmentFlag.AlignCenter)
         dz_formats.setStyleSheet(
-            f"font-size: 9.5px; color: {C.SB_MUTED};"
+            f"font-size: 8.5px; color: {C.SB_MUTED};"
             f"  background: transparent; border: none;")
+        dz_formats.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents, True)
         dz_v.addWidget(dz_formats)
+
+        for drop_child in (dz_icon, dz_text, dz_formats):
+            drop_child.setAcceptDrops(True)
+            drop_child.dragEnterEvent = self._drop_zone_drag_enter
+            drop_child.dragMoveEvent = self._drop_zone_drag_move
+            drop_child.dragLeaveEvent = self._drop_zone_drag_leave
+            drop_child.dropEvent = self._drop_zone_drop
 
         drop_wrap = QWidget()
         drop_wrap.setStyleSheet(f"background: {C.SB};")
         drop_wrap_v = QHBoxLayout(drop_wrap)
-        drop_wrap_v.setContentsMargins(10, 8, 10, 4)
+        drop_wrap_v.setContentsMargins(10, 7, 10, 3)
         drop_wrap_v.addWidget(self._drop_zone)
         body_v.addWidget(drop_wrap)
 
@@ -1721,6 +1824,41 @@ class ControlPanel(QFrame):
         samples_hdr = body_v.itemAt(body_v.count() - 1).widget()
         if hasattr(samples_hdr, 'action_btn') and samples_hdr.action_btn:
             self._install_add_data_menu(samples_hdr.action_btn)
+
+        summary_w = QWidget()
+        summary_w.setFixedHeight(26)
+        summary_w.setStyleSheet(f"background: {C.SB};")
+        summary_h = QHBoxLayout(summary_w)
+        summary_h.setContentsMargins(10, 4, 10, 0)
+        summary_h.setSpacing(4)
+
+        _CHIP = (
+            f"QLabel {{ padding: 2px 7px; border-radius: 99px;"
+            f"  border: 1px solid {C.BORDER}; background: rgba(255,255,255,0.42);"
+            f"  font-family: '{F.MONO}'; font-size: 8.5px; color: {C.SB_MID}; }}"
+        )
+        _CHIP_WARN = (
+            f"QLabel {{ padding: 2px 7px; border-radius: 99px;"
+            f"  border: 1px solid rgba(208,128,32,0.28); background: rgba(208,128,32,0.08);"
+            f"  font-family: '{F.MONO}'; font-size: 8.5px; color: #7a5010; }}"
+        )
+        _CHIP_SEL = (
+            f"QLabel {{ padding: 2px 7px; border-radius: 99px;"
+            f"  border: 1px solid rgba(107,142,35,0.26); background: rgba(107,142,35,0.08);"
+            f"  font-family: '{F.MONO}'; font-size: 8.5px; color: {C.OLIVE}; }}"
+        )
+        self._chip_loaded = QLabel("0 loaded")
+        self._chip_loaded.setStyleSheet(_CHIP)
+        self._chip_selected = QLabel("0 included")
+        self._chip_selected.setStyleSheet(_CHIP_SEL)
+        self._chip_warnings = QLabel("")
+        self._chip_warnings.setStyleSheet(_CHIP_WARN)
+        self._chip_warnings.setVisible(False)
+        summary_h.addWidget(self._chip_loaded)
+        summary_h.addWidget(self._chip_selected)
+        summary_h.addWidget(self._chip_warnings)
+        summary_h.addStretch()
+        body_v.addWidget(summary_w)
 
         # Filter pills row — matches .s-filter-row in CSS
         pills_w = QWidget()
@@ -1818,17 +1956,17 @@ class ControlPanel(QFrame):
             f"  font-family: '{F.MONO}'; font-size: 9px; color: {C.OLIVE}; }}"
         )
 
-        self._chip_loaded = QLabel("0 loaded")
-        self._chip_loaded.setStyleSheet(_CHIP)
-        self._chip_selected = QLabel("0 included")
-        self._chip_selected.setStyleSheet(_CHIP_SEL)
-        self._chip_warnings = QLabel("")
-        self._chip_warnings.setStyleSheet(_CHIP_WARN)
-        self._chip_warnings.setVisible(False)
+        batch_chip_loaded = QLabel("0 loaded")
+        batch_chip_loaded.setStyleSheet(_CHIP)
+        batch_chip_selected = QLabel("0 included")
+        batch_chip_selected.setStyleSheet(_CHIP_SEL)
+        batch_chip_warnings = QLabel("")
+        batch_chip_warnings.setStyleSheet(_CHIP_WARN)
+        batch_chip_warnings.setVisible(False)
 
-        stats_row.addWidget(self._chip_loaded)
-        stats_row.addWidget(self._chip_selected)
-        stats_row.addWidget(self._chip_warnings)
+        stats_row.addWidget(batch_chip_loaded)
+        stats_row.addWidget(batch_chip_selected)
+        stats_row.addWidget(batch_chip_warnings)
         stats_row.addStretch()
         batch_v.addLayout(stats_row)
 
@@ -1872,6 +2010,7 @@ class ControlPanel(QFrame):
         batch_outer_v = QHBoxLayout(batch_outer)
         batch_outer_v.setContentsMargins(10, 6, 10, 2)
         batch_outer_v.addWidget(batch_box)
+        batch_outer.setVisible(False)
         body_v.addWidget(batch_outer)
 
         # ── 2d. PARAMETERS section ────────────────────────────────────
@@ -1880,7 +2019,8 @@ class ControlPanel(QFrame):
         div1.setFixedHeight(1)
         div1.setStyleSheet(f"background: {C.SB_BDR};")
         body_v.addWidget(div1)
-        body_v.addWidget(_SectionHeader("PARAMETERS"))
+        params_header = _SectionHeader("PARAMETERS")
+        body_v.addWidget(params_header)
 
         params_inner = QWidget()
         params_inner.setStyleSheet(f"background: {C.SB};")
@@ -1936,6 +2076,9 @@ class ControlPanel(QFrame):
             f"QPushButton:hover {{ background: {C.SB_ACT}; }}"
         )
         params_v.addWidget(self.porosity_settings_btn)
+        div1.setVisible(False)
+        params_header.setVisible(False)
+        params_inner.setVisible(False)
         body_v.addWidget(params_inner)
 
         # ── 2e. STRATIGRAPHY section ──────────────────────────────────
@@ -1957,10 +2100,14 @@ class ControlPanel(QFrame):
         strata_outer_v.setSpacing(0)
         self._strata_widget = _StratigraphyWidget()
         strata_outer_v.addWidget(self._strata_widget)
+        div2.setVisible(False)
+        strata_header.setVisible(False)
+        strata_outer.setVisible(False)
         body_v.addWidget(strata_outer)
 
         # ── 3. DTU box — matches .dtu-box in CSS ────────────────────────
         dtu_w = QWidget()
+        dtu_w.setObjectName("sidebar-credit-box")
         dtu_w.setStyleSheet(
             f"background: {C.SB_DN}; border-top: 1px solid {C.SB_BDR};")
         dtu_h = QHBoxLayout(dtu_w)
@@ -1969,13 +2116,30 @@ class ControlPanel(QFrame):
 
         # DTU red pill label — .dtu-logo in CSS
         dtu_pill = QLabel("DTU")
+        self._sidebar_credit_logo = dtu_pill
+        dtu_pill.setObjectName("sidebar-credit-logo")
         dtu_pill.setAlignment(Qt.AlignmentFlag.AlignCenter)
         dtu_pill.setStyleSheet(
-            f"background: {C.DTU_RED}; color: #fff;"
-            f"  font-family: '{F.UI}'; font-size: 13px; font-weight: 700;"
-            f"  letter-spacing: 0.04em; padding: 3px 6px 2px;"
-            f"  border-radius: 2px; line-height: 1.2;")
+            "background: #000; border-radius: 3px; border: 1px solid rgba(0,0,0,0.16);")
+        logo_px = QPixmap(self._resource_file("DTU_logo.png"))
+        if not logo_px.isNull():
+            dtu_pill.setText("")
+            dtu_pill.setPixmap(
+                logo_px.scaled(
+                    40,
+                    40,
+                    Qt.AspectRatioMode.KeepAspectRatio,
+                    Qt.TransformationMode.SmoothTransformation,
+                )
+            )
+        else:
+            dtu_pill.setStyleSheet(
+                f"background: {C.DTU_RED}; color: #fff;"
+                f"  font-family: '{F.UI}'; font-size: 13px; font-weight: 700;"
+                f"  letter-spacing: 0.04em; padding: 3px 6px 2px;"
+                f"  border-radius: 2px; line-height: 1.2;")
         dtu_pill.setSizePolicy(QSizePolicy.Policy.Fixed, QSizePolicy.Policy.Fixed)
+        dtu_pill.setFixedSize(44, 44)
         dtu_h.addWidget(dtu_pill)
 
         # Info column — .dtu-info in CSS
@@ -1985,11 +2149,20 @@ class ControlPanel(QFrame):
         dtu_prog.setStyleSheet(
             f"font-size: 10.5px; font-weight: 600; color: {C.SB_TEXT};"
             f"  background: transparent;")
-        dtu_dept = QLabel("DTU Sustain \u00b7 Oliver Lund")
-        dtu_dept.setFont(QFont(F.MONO, 7))
+        dtu_dept = QLabel(
+            "Developed by Oliver Lund\n"
+            "Inspired by HydrogeoSieveXL by J.F Devlin\n"
+            "Supervisor: Poul Løgstrup Bjerg\n"
+            "DTU Sustain"
+        )
+        self._sidebar_credit_text = dtu_dept
+        dtu_dept.setObjectName("sidebar-credit-text")
+        dtu_dept.setTextFormat(Qt.TextFormat.PlainText)
+        dtu_dept.setWordWrap(True)
+        dtu_dept.setFont(QFont(F.UI, 7))
         dtu_dept.setStyleSheet(
             f"color: {C.SB_MUTED}; background: transparent;"
-            f"  letter-spacing: 0.01em;")
+            f"  line-height: 1.2;")
         dtu_info.addWidget(dtu_prog)
         dtu_info.addWidget(dtu_dept)
         dtu_h.addLayout(dtu_info, 1)
@@ -2209,6 +2382,151 @@ class ControlPanel(QFrame):
         from gui.classification_dialog import ClassificationDialog
         dlg = ClassificationDialog(current_scheme=self._active_scheme, parent=self.window())
         dlg.scheme_selected.connect(self._on_scheme_changed)
+        dlg.exec()
+
+    def open_classification_dialog(self):
+        """Public Analysis-menu entry point for classification scheme settings."""
+        self._open_classification_dialog()
+
+    def analysis_settings_summary(self) -> str:
+        """Compact description of the active global analysis settings."""
+        scheme_name = getattr(self._active_scheme, "name", "Classification scheme")
+        return (
+            f"{self.temp_spinbox.value():.1f} C | "
+            f"{self.porosity_mode_combo.currentText()} | {scheme_name}"
+        )
+
+    def open_analysis_settings_dialog(self):
+        """Open global analysis settings from the top Analysis menu."""
+        dlg = QDialog(self.window())
+        dlg.setWindowTitle("Analysis Settings")
+        dlg.setMinimumWidth(420)
+
+        root = QVBoxLayout(dlg)
+        root.setContentsMargins(14, 12, 14, 12)
+        root.setSpacing(10)
+
+        title = QLabel("Analysis Settings")
+        title.setStyleSheet(
+            f"font-family: '{F.UI}'; font-size: 14px; font-weight: 700;"
+            f" color: {C.TEXT};"
+        )
+        root.addWidget(title)
+
+        intro = QLabel(
+            "These settings affect hydraulic conductivity calculations and "
+            "classification across loaded datasets."
+        )
+        intro.setWordWrap(True)
+        intro.setStyleSheet(f"color: {C.TEXT_MUTED}; font-size: 11px;")
+        root.addWidget(intro)
+
+        fields = QWidget()
+        fields_lay = QVBoxLayout(fields)
+        fields_lay.setContentsMargins(0, 2, 0, 0)
+        fields_lay.setSpacing(8)
+
+        row_style = (
+            f"QLabel {{ color: {C.TEXT_MID}; font-size: 11px; }}"
+            f"QComboBox, QDoubleSpinBox {{ background: rgba(255,255,255,0.55);"
+            f" border: 1px solid {C.BORDER}; border-radius: 4px;"
+            f" padding: 3px 6px; color: {C.TEXT}; }}"
+        )
+
+        temp_row = QWidget()
+        temp_row.setStyleSheet(row_style)
+        temp_lay = QHBoxLayout(temp_row)
+        temp_lay.setContentsMargins(0, 0, 0, 0)
+        temp_lbl = QLabel("Temperature")
+        temp = QDoubleSpinBox()
+        temp.setRange(self.temp_spinbox.minimum(), self.temp_spinbox.maximum())
+        temp.setDecimals(self.temp_spinbox.decimals())
+        temp.setSingleStep(self.temp_spinbox.singleStep())
+        temp.setSuffix(" \u00b0C")
+        temp.setValue(self.temp_spinbox.value())
+        temp.setFixedWidth(100)
+        temp_lay.addWidget(temp_lbl)
+        temp_lay.addStretch()
+        temp_lay.addWidget(temp)
+        fields_lay.addWidget(temp_row)
+
+        porosity_row = QWidget()
+        porosity_row.setStyleSheet(row_style)
+        porosity_lay = QVBoxLayout(porosity_row)
+        porosity_lay.setContentsMargins(0, 0, 0, 0)
+        porosity_lay.setSpacing(4)
+        porosity_lay.addWidget(QLabel("Calculated porosity mode"))
+        porosity_combo = QComboBox()
+        for i in range(self.porosity_mode_combo.count()):
+            porosity_combo.addItem(self.porosity_mode_combo.itemText(i))
+        porosity_combo.setCurrentText(self.porosity_mode_combo.currentText())
+        porosity_lay.addWidget(porosity_combo)
+        fields_lay.addWidget(porosity_row)
+
+        scheme_row = QWidget()
+        scheme_row.setStyleSheet(row_style)
+        scheme_lay = QHBoxLayout(scheme_row)
+        scheme_lay.setContentsMargins(0, 0, 0, 0)
+        scheme_lay.setSpacing(8)
+        scheme_lbl = QLabel("Classification scheme")
+        scheme_value = QLabel(getattr(self._active_scheme, "name", "Current scheme"))
+        scheme_value.setStyleSheet(
+            f"font-family: '{F.MONO}'; font-size: 9px; color: {C.TEXT_MUTED};"
+        )
+        scheme_lay.addWidget(scheme_lbl)
+        scheme_lay.addWidget(scheme_value, 1)
+        fields_lay.addWidget(scheme_row)
+        root.addWidget(fields)
+
+        actions = QWidget()
+        actions_lay = QHBoxLayout(actions)
+        actions_lay.setContentsMargins(0, 0, 0, 0)
+        actions_lay.setSpacing(6)
+        porosity_btn = QPushButton("Dataset Porosity...")
+        scheme_btn = QPushButton("Classification Scheme...")
+        for btn in (porosity_btn, scheme_btn):
+            btn.setStyleSheet(
+                f"QPushButton {{ background: {C.BG_RAISED}; border: 1px solid {C.BORDER};"
+                f" border-radius: 4px; padding: 5px 9px; color: {C.TEXT_MID}; }}"
+                f"QPushButton:hover {{ background: {C.BG_LOW}; color: {C.TEXT}; }}"
+            )
+        actions_lay.addWidget(porosity_btn)
+        actions_lay.addWidget(scheme_btn)
+        actions_lay.addStretch()
+        root.addWidget(actions)
+
+        buttons = QDialogButtonBox(
+            QDialogButtonBox.StandardButton.Ok
+            | QDialogButtonBox.StandardButton.Cancel
+        )
+        root.addWidget(buttons)
+
+        def apply_state() -> None:
+            self.temp_spinbox.setValue(temp.value())
+            idx = self.porosity_mode_combo.findText(porosity_combo.currentText())
+            if idx >= 0:
+                self.porosity_mode_combo.setCurrentIndex(idx)
+            self.sample_info_label.setText(
+                f"Analysis settings updated: {self.analysis_settings_summary()}"
+            )
+
+        def apply_and_accept() -> None:
+            apply_state()
+            dlg.accept()
+
+        def open_dataset_porosity() -> None:
+            apply_state()
+            self.open_porosity_dialog()
+
+        def open_scheme() -> None:
+            apply_state()
+            self._open_classification_dialog()
+            scheme_value.setText(getattr(self._active_scheme, "name", "Current scheme"))
+
+        porosity_btn.clicked.connect(open_dataset_porosity)
+        scheme_btn.clicked.connect(open_scheme)
+        buttons.accepted.connect(apply_and_accept)
+        buttons.rejected.connect(dlg.reject)
         dlg.exec()
 
     def _on_scheme_changed(self, scheme: GrainClassificationScheme):

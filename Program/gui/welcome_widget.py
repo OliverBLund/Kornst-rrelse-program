@@ -145,9 +145,17 @@ class WelcomeWidget(QWidget):
         self._hero_grid = None
         self._hero_primary = None
         self._hero_secondary = None
+        self._hero_title_label = None
+        self._hero_subtitle_label = None
+        self._hero_meta_row = None
         self._main_body_grid = None
+        self._main_body_host = None
         self._actions_grid = None
+        self._actions_version_chip = None
         self._guide_grid = None
+        self._content_layout = None
+        self._actions_strip = None
+        self._guides_strip = None
         self._recent_section = None
         self._whats_new_section = None
         self._recent_scroll = None
@@ -556,6 +564,7 @@ class WelcomeWidget(QWidget):
         scroll.setWidgetResizable(True)
         scroll.setFrameShape(QFrame.Shape.NoFrame)
         scroll.setAutoFillBackground(False)
+        scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
         scroll.setStyleSheet("QScrollArea { background: transparent; border: none; }")
         # Use custom no-paint widgets for viewport and content so the global
         # QSS "QWidget { background-color: C.BG }" cannot paint over our soil image.
@@ -566,6 +575,7 @@ class WelcomeWidget(QWidget):
         lay.setContentsMargins(10, 10, 10, 6)
         lay.setSpacing(8)
         lay.setAlignment(Qt.AlignmentFlag.AlignHCenter)
+        self._content_layout = lay
 
         self._title_card = self._build_title_card()
         self._main_card = self._build_main_card_concept_v2()
@@ -573,11 +583,11 @@ class WelcomeWidget(QWidget):
 
         lay.addWidget(self._title_card, 0, Qt.AlignmentFlag.AlignHCenter)
         lay.addWidget(self._main_card,  0, Qt.AlignmentFlag.AlignHCenter)
-        lay.addWidget(self._footer,     0, Qt.AlignmentFlag.AlignHCenter)
         lay.addStretch()
 
         scroll.setWidget(content)
         root.addWidget(scroll, 1)
+        root.addWidget(self._footer, 0, Qt.AlignmentFlag.AlignHCenter)
         self._outer_scroll = scroll
         self._sync_card_widths_v2()
 
@@ -885,6 +895,7 @@ class WelcomeWidget(QWidget):
             f'color: {C.TEXT}; font-family: "{F.DISP}"; font-size: 23pt;'
             ' font-weight: 700; letter-spacing: 0.01em; background: transparent; border: none;'
         )
+        self._hero_title_label = title
         primary_lay.addWidget(title)
 
         sub = QLabel("Hydraulic Conductivity Calculator")
@@ -893,6 +904,7 @@ class WelcomeWidget(QWidget):
             f"color: {C.TEXT_MID}; font-size: {F.SZ_MD}pt; font-weight: 600;"
             " background: transparent; border: none;"
         )
+        self._hero_subtitle_label = sub
         primary_lay.addWidget(sub)
 
         desc = QLabel(
@@ -917,6 +929,7 @@ class WelcomeWidget(QWidget):
         meta_lay.addWidget(self._build_hero_chip("fa6s.vial", "Bundled demo datasets"))
         meta_lay.addWidget(self._build_hero_chip("fa6s.file-export", "Shared plot export and reports"))
         meta_lay.addStretch()
+        self._hero_meta_row = meta_row
         primary_lay.addWidget(meta_row)
 
         attr = QLabel("Import reliability · shared plot rendering · structured export review")
@@ -974,11 +987,14 @@ class WelcomeWidget(QWidget):
         lay = QVBoxLayout(card)
         lay.setContentsMargins(12, 12, 12, 12)
         lay.setSpacing(10)
-        lay.addWidget(self._build_actions_strip())
-        lay.addWidget(self._build_guides_strip())
+        self._actions_strip = self._build_actions_strip()
+        self._guides_strip = self._build_guides_strip()
+        lay.addWidget(self._actions_strip)
+        lay.addWidget(self._guides_strip)
 
         body = QWidget()
         body.setStyleSheet("background: transparent; border: none;")
+        self._main_body_host = body
         grid = QGridLayout(body)
         grid.setContentsMargins(0, 0, 0, 0)
         grid.setHorizontalSpacing(10)
@@ -1137,6 +1153,7 @@ class WelcomeWidget(QWidget):
             " background: rgba(255,255,255,154); border: 1px solid rgba(212,196,168,0.86);"
             " border-radius: 999px; padding: 2px 8px;"
         )
+        self._actions_version_chip = version_chip
         header_lay.addWidget(version_chip)
         outer.addWidget(header)
 
@@ -2118,10 +2135,11 @@ class WelcomeWidget(QWidget):
         w = QWidget()
         w.setStyleSheet("background: transparent; border: none;")
         w.setMaximumWidth(_CARD_W)
+        w.setFixedHeight(26)
         w.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
 
         lay = QHBoxLayout(w)
-        lay.setContentsMargins(0, 0, 0, 0)
+        lay.setContentsMargins(0, 0, 0, 4)
         lay.setSpacing(7)
 
         dtu_pill = QLabel("DTU")
@@ -2186,15 +2204,64 @@ class WelcomeWidget(QWidget):
         if self.width() <= 0:
             return
 
-        target = min(_CARD_W, max(300, self.width() - 36))
-        compact_height = self.height() < 760
-        narrow = target < 860
-        stacked_actions = target < 640
+        short_height = self.height() < 820
+        dense_height = self.height() <= 720
+        tiny_height = self.height() <= 540
+        side_margin = 34 if short_height else 44
+        target = min(_CARD_W, max(280, self.width() - side_margin))
+        compact_height = self.height() < 820
+        narrow = target < (780 if short_height else 860)
+        stacked_actions = target < 520
         compact_guides = target < 760
+        hide_guides = short_height
+        hide_whats_new = tiny_height and target < 860
+
+        if self._content_layout is not None:
+            margin = 3 if dense_height else 6 if short_height else 10
+            self._content_layout.setContentsMargins(margin, margin, margin, 2 if dense_height else 4)
+            self._content_layout.setSpacing(3 if dense_height else 5 if short_height else 8)
 
         for widget in (self._title_card, self._main_card, self._footer):
             if widget is not None:
                 widget.setFixedWidth(target)
+
+        if self._hero_grid is not None:
+            if dense_height:
+                self._hero_grid.setContentsMargins(10, 6, 10, 6)
+                self._hero_grid.setHorizontalSpacing(8)
+                self._hero_grid.setVerticalSpacing(3)
+            elif short_height:
+                self._hero_grid.setContentsMargins(12, 8, 12, 8)
+                self._hero_grid.setHorizontalSpacing(10)
+                self._hero_grid.setVerticalSpacing(5)
+            else:
+                self._hero_grid.setContentsMargins(20, 18, 20, 16)
+                self._hero_grid.setHorizontalSpacing(22)
+                self._hero_grid.setVerticalSpacing(12)
+
+        if self._main_card is not None and self._main_card.layout() is not None:
+            main_margin = 5 if dense_height else 8 if short_height else 12
+            self._main_card.layout().setContentsMargins(
+                main_margin,
+                main_margin,
+                main_margin,
+                main_margin,
+            )
+            self._main_card.layout().setSpacing(4 if dense_height else 6 if short_height else 10)
+
+        if self._actions_strip is not None and self._actions_strip.layout() is not None:
+            action_margin_h = 6 if dense_height else 8 if short_height else 10
+            action_margin_v = 4 if dense_height else 6 if short_height else 9
+            self._actions_strip.layout().setContentsMargins(
+                action_margin_h,
+                action_margin_v,
+                action_margin_h,
+                action_margin_v,
+            )
+            self._actions_strip.layout().setSpacing(3 if dense_height else 5 if short_height else 8)
+
+        if self._guides_strip is not None:
+            self._guides_strip.setVisible(not hide_guides)
 
         if self._hero_grid is not None and self._hero_primary is not None and self._hero_secondary is not None:
             self._hero_grid.removeWidget(self._hero_primary)
@@ -2218,6 +2285,8 @@ class WelcomeWidget(QWidget):
         if self._actions_grid is not None and self._action_widgets:
             for widget in self._action_widgets:
                 self._actions_grid.removeWidget(widget)
+            self._actions_grid.setHorizontalSpacing(6 if dense_height else 8)
+            self._actions_grid.setVerticalSpacing(4 if dense_height else 8)
             if stacked_actions:
                 for row, widget in enumerate(self._action_widgets):
                     self._actions_grid.addWidget(widget, row, 0)
@@ -2236,7 +2305,7 @@ class WelcomeWidget(QWidget):
         if self._guide_grid is not None and self._guide_widgets:
             for widget in self._guide_widgets:
                 self._guide_grid.removeWidget(widget)
-            if compact_guides:
+            if compact_guides or short_height:
                 positions = [(0, 0), (0, 1), (1, 0), (1, 1)]
                 for widget, (row, col) in zip(self._guide_widgets, positions):
                     self._guide_grid.addWidget(widget, row, col)
@@ -2250,21 +2319,61 @@ class WelcomeWidget(QWidget):
         if self._main_body_grid is not None and self._recent_section is not None and self._whats_new_section is not None:
             self._main_body_grid.removeWidget(self._recent_section)
             self._main_body_grid.removeWidget(self._whats_new_section)
+            self._main_body_grid.setHorizontalSpacing(4 if dense_height else 6 if short_height else 10)
+            self._main_body_grid.setVerticalSpacing(4 if dense_height else 6 if short_height else 10)
+            self._whats_new_section.setVisible(not hide_whats_new)
             if narrow:
                 self._main_body_grid.addWidget(self._recent_section, 0, 0)
-                self._main_body_grid.addWidget(self._whats_new_section, 1, 0)
+                if not hide_whats_new:
+                    self._main_body_grid.addWidget(self._whats_new_section, 1, 0)
                 self._main_body_grid.setColumnStretch(0, 1)
                 self._main_body_grid.setColumnStretch(1, 0)
             else:
                 self._main_body_grid.addWidget(self._recent_section, 0, 0)
-                self._main_body_grid.addWidget(self._whats_new_section, 0, 1)
+                if not hide_whats_new:
+                    self._main_body_grid.addWidget(self._whats_new_section, 0, 1)
                 self._main_body_grid.setColumnStretch(0, 11)
-                self._main_body_grid.setColumnStretch(1, 8)
+                self._main_body_grid.setColumnStretch(1, 8 if not hide_whats_new else 0)
 
         if self._recent_scroll is not None:
-            self._recent_scroll.setMaximumHeight(120 if compact_height else 248)
+            if tiny_height:
+                self._recent_scroll.setMaximumHeight(62)
+            elif dense_height:
+                self._recent_scroll.setMaximumHeight(74)
+            elif short_height:
+                self._recent_scroll.setMaximumHeight(92)
+            else:
+                self._recent_scroll.setMaximumHeight(120 if compact_height else 248)
         if self._welcome_whats_new_scroll is not None:
-            self._welcome_whats_new_scroll.setMaximumHeight(120 if compact_height else 248)
+            if tiny_height:
+                self._welcome_whats_new_scroll.setMaximumHeight(62)
+            elif dense_height:
+                self._welcome_whats_new_scroll.setMaximumHeight(74)
+            elif short_height:
+                self._welcome_whats_new_scroll.setMaximumHeight(92)
+            else:
+                self._welcome_whats_new_scroll.setMaximumHeight(120 if compact_height else 248)
+
+        if self._hero_title_label is not None:
+            self._hero_title_label.setStyleSheet(
+                f'color: {C.TEXT}; font-family: "{F.DISP}"; font-size: {20 if dense_height else 21 if short_height else 23}pt;'
+                ' font-weight: 700; letter-spacing: 0.01em; background: transparent; border: none;'
+            )
+        if self._hero_subtitle_label is not None:
+            self._hero_subtitle_label.setStyleSheet(
+                f"color: {C.TEXT_MID}; font-size: {F.SZ_SM if dense_height else F.SZ_MD}pt; font-weight: 600;"
+                " background: transparent; border: none;"
+            )
+        if self._hero_meta_row is not None:
+            self._hero_meta_row.setVisible(not dense_height and target >= 700)
+        if self._actions_version_chip is not None:
+            self._actions_version_chip.setVisible(not dense_height)
+        if self._resume_hint is not None:
+            self._resume_hint.setVisible(not dense_height)
+        for index, widget in enumerate(self._action_widgets):
+            widget.setMinimumHeight(30 if dense_height else 36 if index == 0 else 34)
+        for widget in self._guide_widgets:
+            widget.setFixedHeight(26 if dense_height else 30)
 
         if self._title_desc is not None:
             self._title_desc.setVisible(not compact_height)
@@ -2278,6 +2387,13 @@ class WelcomeWidget(QWidget):
                 self._footer_attr.setText("Import · compare · export")
             else:
                 self._footer_attr.setText("Import · compare selected · export chosen scope")
+
+        if hasattr(self, "dont_show_checkbox") and self.dont_show_checkbox is not None:
+            self.dont_show_checkbox.setText(
+                "Don't show on startup"
+                if target < 760 or compact_height
+                else "Don't show this welcome screen on startup"
+            )
 
     def _resume_latest_session(self):
         if self.recent_sessions:

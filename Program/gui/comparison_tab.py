@@ -73,6 +73,14 @@ from unit_conversions import (
 
 from .comparison_plot_widget import ComparisonPlotWidget
 from .dataset_selection_dialog import DatasetSelectionDialog
+from .group_styles import (
+    dataset_line_style,
+    dataset_series_key,
+    default_line_style,
+    group_color_map,
+    line_style_label,
+)
+from .sidebar_controls import LineStylePreview
 
 # ── Internal ──────────────────────────────────────────────────────────────────
 from .matplotlib_canvas import FigureCanvas
@@ -481,6 +489,7 @@ class ComparisonTab(QWidget):
         # Main plot widget
         self._plot_widget = ComparisonPlotWidget()
         self._plot_widget.dataset_colors = DATASET_COLORS
+        self._plot_widget.plot_updated.connect(self._sync_plot_visibility_panel)
         h.addWidget(self._plot_widget, 1)
 
         # Right sidebar: plot-only visibility/focus controls.
@@ -566,6 +575,35 @@ class ComparisonTab(QWidget):
         h.addWidget(sidebar)
         return page
 
+    def _sync_plot_visibility_panel(self) -> None:
+        """Refresh the plot visibility rail after plot-side presentation changes."""
+        if not hasattr(self, "_pin_list_layout"):
+            return
+        self._refresh_pin_list()
+        self._update_header_count()
+
+    def _plot_widget_presentation(self) -> tuple[dict[str, str], dict[str, str]]:
+        """Return live ``sample_name -> color/style`` maps from the plot widget."""
+        colors: dict[str, str] = {}
+        line_styles: dict[str, str] = {}
+        plot_widget = getattr(self, "_plot_widget", None)
+        if plot_widget is None:
+            return colors, line_styles
+
+        datasets = list(getattr(plot_widget, "datasets", []) or [])
+        for index, dataset in enumerate(datasets):
+            name = str(getattr(dataset, "sample_name", "") or "")
+            if not name:
+                continue
+            effective_color = getattr(plot_widget, "_effective_color_for", None)
+            if callable(effective_color):
+                colors[name] = effective_color(name, index)
+            line_styles[name] = getattr(plot_widget, "_dataset_linestyles", {}).get(
+                name,
+                "-",
+            )
+        return colors, line_styles
+
     def _refresh_pin_list(self) -> None:
         """Rebuild plot-only visibility/focus controls from selected datasets."""
         while self._pin_list_layout.count() > 1:
@@ -580,6 +618,7 @@ class ComparisonTab(QWidget):
             group for group, _tabs in grouped_tabs if group != UNGROUPED_LABEL
         ]
         group_colors = self._group_color_map(named_groups)
+        live_colors, live_line_styles = self._plot_widget_presentation()
 
         if hasattr(self, "_pin_scope_label"):
             total = len(self.selected_datasets)
@@ -603,11 +642,16 @@ class ComparisonTab(QWidget):
             self._pin_list_layout.insertWidget(self._pin_list_layout.count() - 1, hint)
             return
 
+        group_member_counts: dict[str, int] = {}
         for group_index, (group_name, tabs) in enumerate(grouped_tabs):
-            color = group_colors.get(
+            names = [tab.get_dataset_name() for tab in tabs]
+            color = (
+                live_colors.get(names[0], "")
+                if group_name != UNGROUPED_LABEL and names
+                else ""
+            ) or group_colors.get(
                 group_name, DATASET_COLORS[group_index % len(DATASET_COLORS)]
             )
-            names = [tab.get_dataset_name() for tab in tabs]
             visible_count = sum(1 for name in names if name in plotted_names)
             hidden_all = bool(names) and all(
                 name in self._plot_hidden for name in names
@@ -631,10 +675,23 @@ class ComparisonTab(QWidget):
                 hidden = name in self._plot_hidden
                 focused = name in self._pinned
                 plotted = name in plotted_names
+                dataset_color = live_colors.get(name, color)
+                line_style = live_line_styles.get(name, "-")
+                if group_name != UNGROUPED_LABEL:
+                    member_index = group_member_counts.get(group_name, 0)
+                    group_member_counts[group_name] = member_index + 1
+                    line_style = live_line_styles.get(
+                        name,
+                        dataset_line_style(
+                            dataset_series_key(tab.get_dataset()),
+                            default_line_style(member_index),
+                        ),
+                    )
                 row = self._make_plot_dataset_row(
                     name=name,
                     group_name=group_name,
-                    color=color,
+                    color=dataset_color,
+                    line_style=line_style,
                     hidden=hidden,
                     focused=focused,
                     plotted=plotted,
@@ -744,6 +801,7 @@ class ComparisonTab(QWidget):
         name: str,
         group_name: str,
         color: str,
+        line_style: str,
         hidden: bool,
         focused: bool,
         plotted: bool,
@@ -758,12 +816,15 @@ class ComparisonTab(QWidget):
         layout.setContentsMargins(12, 0, 6, 0)
         layout.setSpacing(6)
 
-        dot = QFrame()
-        dot.setFixedSize(7, 7)
-        dot.setStyleSheet(
-            f"background: {color if not hidden else C.TEXT_MUTED}; border-radius: 3px; border: none;"
+        line_preview = LineStylePreview(
+            color if not hidden else C.TEXT_MUTED,
+            line_style,
+            muted=hidden,
+            width=28,
+            height=14,
         )
-        layout.addWidget(dot, 0, Qt.AlignmentFlag.AlignVCenter)
+        line_preview.setToolTip(f"Line style: {line_style_label(line_style)}")
+        layout.addWidget(line_preview, 0, Qt.AlignmentFlag.AlignVCenter)
 
         text_box = QWidget()
         text_lay = QVBoxLayout(text_box)
@@ -1809,10 +1870,27 @@ class ComparisonTab(QWidget):
         return metrics.elidedText(name, Qt.TextElideMode.ElideRight, max_width)
 
     def _group_color_map(self, group_names: list[str]) -> dict[str, str]:
-        return {
-            group_name: DATASET_COLORS[i % len(DATASET_COLORS)]
-            for i, group_name in enumerate(group_names)
-        }
+        return group_color_map(group_names, palette=DATASET_COLORS)
+
+    def _dataset_colors_for_tabs(self, tabs: list) -> list[str]:
+        group_names = [
+            dataset_group_name(tab.get_dataset())
+            for tab in tabs
+        ]
+        colors_by_group = self._group_color_map(group_names)
+        colors: list[str] = []
+        for index, tab in enumerate(tabs):
+            group_name = dataset_group_name(tab.get_dataset())
+            if group_name != UNGROUPED_LABEL:
+                colors.append(
+                    colors_by_group.get(
+                        group_name,
+                        DATASET_COLORS[index % len(DATASET_COLORS)],
+                    )
+                )
+            else:
+                colors.append(DATASET_COLORS[index % len(DATASET_COLORS)])
+        return colors
 
     def _stats_uses_group_scope(self) -> bool:
         return any(
@@ -4227,6 +4305,7 @@ class ComparisonTab(QWidget):
         tabs = self.selected_datasets
         n_ds = len(tabs)
         n_rows = len(self._GRAIN_ROWS)
+        dataset_colors = self._dataset_colors_for_tabs(tabs)
         self._grain_table.setSortingEnabled(False)
 
         # Column layout: Parameter | DS0 | DS1 | …
@@ -4237,7 +4316,7 @@ class ComparisonTab(QWidget):
         self._grain_table.setHorizontalHeaderItem(0, QTableWidgetItem("Parameter"))
         for col_i, tab in enumerate(tabs):
             name = tab.get_dataset_name()
-            color = DATASET_COLORS[col_i % len(DATASET_COLORS)]
+            color = dataset_colors[col_i]
             hdr_item = self._make_dataset_header_item(name, color)
             self._grain_table.setHorizontalHeaderItem(1 + col_i, hdr_item)
 
@@ -4285,7 +4364,7 @@ class ComparisonTab(QWidget):
                             tab.get_dataset().classify(scheme=self._active_scheme).label
                             or "—"
                         )
-                        color = DATASET_COLORS[col_i % len(DATASET_COLORS)]
+                        color = dataset_colors[col_i]
                         item = _SortableTableWidgetItem(val_str)
                         item.setData(Qt.ItemDataRole.UserRole, val_str.lower())
                         item.setData(_SORT_GROUP_ROLE, 1)
@@ -4306,7 +4385,7 @@ class ComparisonTab(QWidget):
                 elif label == "Class":
                     for col_i, tab in enumerate(tabs):
                         val_str = self._gradation_class(tab.get_dataset())
-                        color = DATASET_COLORS[col_i % len(DATASET_COLORS)]
+                        color = dataset_colors[col_i]
                         item = _SortableTableWidgetItem(val_str)
                         item.setData(Qt.ItemDataRole.UserRole, val_str.lower())
                         item.setData(_SORT_GROUP_ROLE, 1)
@@ -4333,7 +4412,7 @@ class ComparisonTab(QWidget):
             v_range = v_max - v_min if v_max != v_min else 1.0
 
             for col_i, val in enumerate(vals):
-                color = DATASET_COLORS[col_i % len(DATASET_COLORS)]
+                color = dataset_colors[col_i]
                 if val is None:
                     item = _SortableTableWidgetItem("—")
                     item.setData(Qt.ItemDataRole.UserRole, float("inf"))
@@ -4389,6 +4468,7 @@ class ComparisonTab(QWidget):
         """Rebuild the hydraulic conductivity comparison table."""
         tabs = self.selected_datasets
         n_ds = len(tabs)
+        dataset_colors = self._dataset_colors_for_tabs(tabs)
         self._k_table.setSortingEnabled(False)
         snapshot = self._build_comparison_snapshot()
         aggregation = snapshot.k
@@ -4417,7 +4497,7 @@ class ComparisonTab(QWidget):
         self._k_table.setHorizontalHeaderItem(0, QTableWidgetItem("Method"))
         for col_i, tab in enumerate(tabs):
             name = tab.get_dataset_name()
-            color = DATASET_COLORS[col_i % len(DATASET_COLORS)]
+            color = dataset_colors[col_i]
             hdr_item = self._make_dataset_header_item(name, color)
             self._k_table.setHorizontalHeaderItem(1 + col_i, hdr_item)
 
@@ -4460,7 +4540,7 @@ class ComparisonTab(QWidget):
                 v_min = v_max = v_range = 0.0
 
             for col_i, val in enumerate(vals):
-                color = DATASET_COLORS[col_i % len(DATASET_COLORS)]
+                color = dataset_colors[col_i]
                 if val is None or val <= 0:
                     item = _SortableTableWidgetItem("—")
                     item.setData(Qt.ItemDataRole.UserRole, float("inf"))
@@ -4530,7 +4610,7 @@ class ComparisonTab(QWidget):
             )
 
             for col_i, vk in enumerate(valid_k_per_ds):
-                color = DATASET_COLORS[col_i % len(DATASET_COLORS)]
+                color = dataset_colors[col_i]
                 if s_label == "K̄ geometric":
                     txt = (
                         self._format_k_value(float(np.exp(np.mean(np.log(vk)))))
@@ -4643,9 +4723,10 @@ class ComparisonTab(QWidget):
                 layout.insertWidget(layout.count() - 1, chip)
             return
 
+        dataset_colors = self._dataset_colors_for_tabs(self.selected_datasets)
         for i, tab in enumerate(self.selected_datasets):
             name = tab.get_dataset_name()
-            color = DATASET_COLORS[i % len(DATASET_COLORS)]
+            color = dataset_colors[i]
             chip = self._make_dataset_chip(
                 name, color, dataset_group_name(tab.get_dataset())
             )
@@ -5049,6 +5130,7 @@ class ComparisonTab(QWidget):
                 labels.append(self._short_dataset_name(label, max_width=88))
                 colors.append(color)
         else:
+            dataset_colors = self._dataset_colors_for_tabs(tabs)
             for i, tab in enumerate(tabs):
                 dataset_name = tab.get_dataset_name()
                 vals_m_s = [
@@ -5066,7 +5148,7 @@ class ComparisonTab(QWidget):
                 ]
                 data_per_ds.append(vals)
                 labels.append(self._short_dataset_name(dataset_name, max_width=88))
-                colors.append(DATASET_COLORS[i % len(DATASET_COLORS)])
+                colors.append(dataset_colors[i])
 
         if not any(data_per_ds):
             ax.text(
@@ -5198,9 +5280,7 @@ class ComparisonTab(QWidget):
                 self._short_dataset_name(tab.get_dataset_name(), max_width=84)
                 for tab in tabs
             ]
-            scope_colors = [
-                DATASET_COLORS[i % len(DATASET_COLORS)] for i, _tab in enumerate(tabs)
-            ]
+            scope_colors = self._dataset_colors_for_tabs(tabs)
             scope_dataset_counts = [1 for _tab in tabs]
 
         if not method_names or not scope_names:

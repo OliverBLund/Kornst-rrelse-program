@@ -8,8 +8,9 @@ import math
 from typing import List, Optional
 
 from PyQt6.QtCore import Qt, pyqtSignal
-from PyQt6.QtGui import QFont
+from PyQt6.QtGui import QColor, QFont
 from PyQt6.QtWidgets import (
+    QColorDialog,
     QFrame,
     QHBoxLayout,
     QLabel,
@@ -22,8 +23,9 @@ from PyQt6.QtWidgets import (
 )
 
 from gui.dialog_chrome import make_dialog_footer, make_dialog_header
+from gui.group_styles import group_color_map, set_group_color
 from gui.theme import C, F, SZ, icon as _icon
-from k_aggregation import dataset_group_name, normalize_group_name
+from k_aggregation import UNGROUPED_LABEL, dataset_group_name, normalize_group_name
 from qt_chrome.frameless_dialog_base import FramelessDialogBase
 
 
@@ -291,9 +293,14 @@ class DatasetSelectionDialog(FramelessDialogBase):
                     group_order.append(group_name)
                 grouped[group_name].append(row)
 
+            group_colors = group_color_map(group_order)
             for group_name in group_order:
                 rows = grouped[group_name]
-                header = self._make_group_header(group_name, rows)
+                header = self._make_group_header(
+                    group_name,
+                    rows,
+                    group_colors.get(group_name, C.TEXT_MUTED),
+                )
                 self._group_headers.append(header)
                 self._rows_layout.addWidget(header)
                 for row in rows:
@@ -304,7 +311,7 @@ class DatasetSelectionDialog(FramelessDialogBase):
         finally:
             self._rebuilding_rows = False
 
-    def _make_group_header(self, group_name: str, rows: list) -> QWidget:
+    def _make_group_header(self, group_name: str, rows: list, color: str) -> QWidget:
         header = QFrame(self._list_host)
         header.setObjectName("datasetGroupHeader")
         header.setFixedHeight(34)
@@ -314,6 +321,21 @@ class DatasetSelectionDialog(FramelessDialogBase):
         lay = QHBoxLayout(header)
         lay.setContentsMargins(14, 5, 12, 5)
         lay.setSpacing(8)
+
+        swatch = QPushButton()
+        swatch.setFixedSize(16, 20)
+        swatch.setCursor(Qt.CursorShape.PointingHandCursor)
+        swatch.setToolTip(
+            "Pick group color"
+            if group_name != UNGROUPED_LABEL
+            else "Ungrouped datasets keep individual colors"
+        )
+        swatch.setEnabled(group_name != UNGROUPED_LABEL)
+        self._style_group_swatch(swatch, color, enabled=group_name != UNGROUPED_LABEL)
+        swatch.clicked.connect(
+            lambda _checked=False, g=group_name: self._pick_group_color(g)
+        )
+        lay.addWidget(swatch, 0, Qt.AlignmentFlag.AlignVCenter)
 
         title = QLabel(group_name)
         title.setFont(QFont(F.UI, F.SZ_SM, QFont.Weight.DemiBold))
@@ -337,6 +359,26 @@ class DatasetSelectionDialog(FramelessDialogBase):
         lay.addWidget(all_btn)
         lay.addWidget(none_btn)
         return header
+
+    def _style_group_swatch(self, button: QPushButton, color: str, *, enabled: bool) -> None:
+        border = C.BORDER_DK if enabled else C.BORDER
+        button.setStyleSheet(
+            f"QPushButton {{ background: {color}; border: 1px solid {border}; "
+            f"border-radius: 4px; padding: 0; }}"
+            f"QPushButton:hover {{ border-color: {C.EARTH}; }}"
+            f"QPushButton:disabled {{ background: {color}; border-color: {C.BORDER}; }}"
+        )
+
+    def _pick_group_color(self, group_name: str) -> None:
+        if group_name == UNGROUPED_LABEL:
+            return
+        group_names = [row.group_name() for row in self._rows]
+        current = group_color_map(group_names).get(group_name, C.OLIVE)
+        chosen = QColorDialog.getColor(QColor(current), self, f"Color for {group_name}")
+        if not chosen.isValid():
+            return
+        set_group_color(group_name, chosen.name())
+        self._rebuild_rows_layout()
 
     def _set_rows_checked(self, rows: list, checked: bool) -> None:
         for row in rows:

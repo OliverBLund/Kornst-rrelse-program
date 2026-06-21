@@ -244,6 +244,7 @@ def render_distribution_overlay(
     labels: Optional[List[str]] = None,
     colors: Optional[List[str]] = None,
     linestyles: Optional[List[str]] = None,
+    markers: Optional[List[Optional[str]]] = None,
     style: PlotStyle = PROFESSIONAL_STYLE,
     show_grid: bool = True,
     show_legend: bool = True,
@@ -252,11 +253,13 @@ def render_distribution_overlay(
     """Draw overlaid grain-size curves for multiple samples."""
     _colors = colors or DATASET_COLORS
     _linestyles = linestyles or ["-"]
+    _markers = markers or [None]
     _labels = labels or [ds.sample_name for ds in datasets]
 
     for i, dataset in enumerate(datasets):
         c = _colors[i % len(_colors)]
         ls = _linestyles[i % len(_linestyles)]
+        configured_marker = _markers[i % len(_markers)] if _markers else None
         use_marker = len(dataset.particle_sizes) < 20
         ax.semilogx(
             dataset.particle_sizes,
@@ -265,7 +268,7 @@ def render_distribution_overlay(
             linestyle=ls,
             label=_labels[i],
             color=c,
-            marker="o" if use_marker else None,
+            marker=configured_marker or ("o" if use_marker else None),
             markersize=style.curve_markersize,
             markeredgecolor="white",
             markeredgewidth=style.curve_markeredgewidth,

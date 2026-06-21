@@ -1,0 +1,963 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>22 - Main Sidebar Options</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Playfair+Display:wght@600;700&family=Source+Sans+3:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;500;600;700&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.2/css/all.min.css">
+  <link rel="stylesheet" href="_shared.css">
+  <style>
+    :root{
+      --concept-bg:#f4efe7;
+      --paper:#fbf8f2;
+      --paper2:#f6f0e7;
+      --rail:#ddd3be;
+      --rail-up:#e5dcc8;
+      --rail-dn:#d0c4ac;
+      --line:#d4c4a8;
+      --line2:#c0ae90;
+      --ink:#33291d;
+      --mid:#66513a;
+      --muted:#927d62;
+      --olive:#6b8e23;
+      --blue:#3a7ea0;
+      --rust:#b46428;
+      --warn:#b98224;
+      --ok:#5a8f2b;
+      --ui:"Source Sans 3", system-ui, sans-serif;
+      --mono:"IBM Plex Mono", ui-monospace, monospace;
+      --display:"Playfair Display", Georgia, serif;
+    }
+    *{box-sizing:border-box}
+    html,body{min-height:100%}
+    body{
+      margin:0;
+      background:
+        radial-gradient(circle at top left, rgba(255,255,255,.55), transparent 34%),
+        linear-gradient(180deg,#faf6ef 0%,var(--concept-bg) 100%);
+      color:var(--ink);
+      font-family:var(--ui);
+      overflow:auto;
+    }
+    body::after{
+      content:"";
+      position:fixed;
+      inset:0;
+      pointer-events:none;
+      opacity:.12;
+      background-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='260' height='260'%3E%3Cfilter id='g'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='.72' numOctaves='4' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='260' height='260' filter='url(%23g)' opacity='.07'/%3E%3C/svg%3E");
+    }
+    button,input,select{font-family:inherit}
+    button{cursor:pointer}
+    .page{
+      min-height:100vh;
+      padding:18px;
+      display:flex;
+      flex-direction:column;
+      gap:16px;
+    }
+    .concept-head{
+      display:flex;
+      align-items:flex-end;
+      justify-content:space-between;
+      gap:18px;
+      max-width:1640px;
+      width:100%;
+      margin:0 auto;
+    }
+    .title-block h1{
+      margin:0;
+      font-family:var(--display);
+      font-size:28px;
+      line-height:1;
+      color:var(--ink);
+    }
+    .title-block p{
+      margin:7px 0 0;
+      color:var(--muted);
+      font-size:13px;
+      max-width:720px;
+    }
+    .decision{
+      display:flex;
+      align-items:center;
+      gap:8px;
+      min-height:30px;
+      padding:0 10px;
+      border:1px solid rgba(107,142,35,.25);
+      border-radius:5px;
+      background:rgba(107,142,35,.08);
+      color:#526d1d;
+      font-size:12px;
+      font-weight:700;
+      white-space:nowrap;
+    }
+    .options{
+      max-width:1640px;
+      width:100%;
+      margin:0 auto;
+      display:grid;
+      grid-template-columns:repeat(3,minmax(0,1fr));
+      gap:14px;
+      align-items:start;
+    }
+    .option{
+      min-width:0;
+      border:1px solid rgba(154,126,95,.18);
+      background:rgba(252,249,243,.82);
+      box-shadow:0 18px 40px rgba(69,48,25,.08);
+      overflow:hidden;
+    }
+    .option-head{
+      min-height:58px;
+      padding:10px 12px;
+      border-bottom:1px solid var(--line);
+      background:linear-gradient(180deg,rgba(255,255,255,.62),rgba(242,234,220,.74));
+      display:flex;
+      align-items:center;
+      justify-content:space-between;
+      gap:10px;
+    }
+    .option-title{
+      display:flex;
+      flex-direction:column;
+      gap:2px;
+      min-width:0;
+    }
+    .option-title strong{
+      display:flex;
+      align-items:center;
+      gap:7px;
+      font-size:14px;
+      color:var(--ink);
+      min-width:0;
+    }
+    .option-title span{
+      color:var(--muted);
+      font-family:var(--mono);
+      font-size:9px;
+      letter-spacing:.05em;
+      text-transform:uppercase;
+    }
+    .tag{
+      height:22px;
+      display:inline-flex;
+      align-items:center;
+      padding:0 8px;
+      border:1px solid rgba(107,142,35,.26);
+      border-radius:999px;
+      background:rgba(107,142,35,.08);
+      color:#526d1d;
+      font-family:var(--mono);
+      font-size:9px;
+      font-weight:700;
+      white-space:nowrap;
+    }
+    .mock{
+      height:650px;
+      display:grid;
+      grid-template-columns:226px minmax(0,1fr);
+      grid-template-rows:24px 1fr 22px;
+      grid-template-areas:"menubar menubar" "sidebar main" "status status";
+      background:var(--paper);
+      overflow:hidden;
+    }
+    .menubar{
+      grid-area:menubar;
+      height:24px;
+      display:flex;
+      align-items:center;
+      gap:12px;
+      padding:0 8px;
+      border-bottom:1px solid var(--line2);
+      background:#ede8de;
+      color:var(--mid);
+      font-size:11px;
+      position:relative;
+    }
+    .menubar .mi{
+      height:22px;
+      display:flex;
+      align-items:center;
+      padding:0 7px;
+      border-radius:3px;
+      color:var(--mid);
+    }
+    .menubar .mi.on{
+      background:rgba(107,142,35,.10);
+      color:var(--ink);
+      font-weight:700;
+    }
+    .menubar .spacer{margin-left:auto;color:var(--muted);font-family:var(--mono);font-size:9px}
+    .analysis-pop{
+      position:absolute;
+      top:23px;
+      left:105px;
+      width:242px;
+      z-index:5;
+      padding:5px 0;
+      background:#f2eadf;
+      border:1px solid var(--line);
+      box-shadow:0 10px 24px rgba(58,42,26,.15);
+    }
+    .analysis-pop .item{
+      min-height:27px;
+      display:flex;
+      align-items:center;
+      gap:9px;
+      padding:0 11px;
+      color:var(--mid);
+      font-size:11.5px;
+    }
+    .analysis-pop .item i{
+      width:14px;
+      color:var(--muted);
+      font-size:10px;
+    }
+    .analysis-pop .item strong{
+      margin-left:auto;
+      color:var(--ink);
+      font-family:var(--mono);
+      font-size:9px;
+      font-weight:700;
+    }
+    .analysis-pop .sep{
+      height:1px;
+      margin:4px 8px;
+      background:var(--line);
+    }
+    .sidebar{
+      grid-area:sidebar;
+      display:flex;
+      flex-direction:column;
+      min-width:0;
+      overflow:hidden;
+      background:var(--rail);
+      border-right:1px solid var(--line2);
+    }
+    .logo{
+      display:flex;
+      align-items:center;
+      gap:9px;
+      min-height:46px;
+      padding:8px 11px;
+      background:linear-gradient(160deg,#8e6e4a,#7a5e3e);
+      color:#f4ece0;
+      border-bottom:2px solid var(--line2);
+    }
+    .logo-mark{
+      width:28px;
+      height:28px;
+      display:grid;
+      place-items:center;
+      border:1px solid rgba(255,255,255,.22);
+      background:rgba(255,255,255,.12);
+      border-radius:4px;
+      flex:0 0 auto;
+    }
+    .logo strong{display:block;font-family:var(--display);font-size:13px;line-height:1}
+    .logo span{display:block;margin-top:2px;font-family:var(--mono);font-size:7.5px;color:#d8bd93;letter-spacing:.06em}
+    .side-scroll{
+      flex:1;
+      min-height:0;
+      overflow:auto;
+      padding-bottom:6px;
+    }
+    .compact-drop{
+      margin:8px 9px 5px;
+      min-height:44px;
+      display:grid;
+      grid-template-columns:28px 1fr auto;
+      align-items:center;
+      gap:7px;
+      padding:7px 8px;
+      border:1.5px dashed var(--line2);
+      border-radius:5px;
+      background:rgba(255,255,255,.28);
+      color:var(--mid);
+    }
+    .compact-drop i{
+      width:24px;
+      height:24px;
+      display:grid;
+      place-items:center;
+      border:1px solid rgba(192,174,144,.75);
+      border-radius:4px;
+      color:var(--muted);
+      background:rgba(255,255,255,.28);
+    }
+    .drop-text{min-width:0}
+    .drop-text strong{
+      display:block;
+      font-size:11px;
+      white-space:nowrap;
+      overflow:hidden;
+      text-overflow:ellipsis;
+      color:var(--mid);
+    }
+    .drop-text span{
+      display:block;
+      font-family:var(--mono);
+      font-size:8.5px;
+      color:var(--muted);
+    }
+    .drop-add{
+      height:22px;
+      padding:0 7px;
+      border:1px solid var(--line2);
+      border-radius:4px;
+      background:rgba(255,255,255,.5);
+      color:var(--mid);
+      font-size:10px;
+      font-weight:700;
+    }
+    .section-head{
+      min-height:29px;
+      display:flex;
+      align-items:center;
+      justify-content:space-between;
+      gap:8px;
+      padding:6px 11px 5px;
+      background:var(--rail-up);
+      border-top:1px solid rgba(255,255,255,.45);
+      border-bottom:1px solid var(--line2);
+      color:var(--muted);
+      font-family:var(--mono);
+      font-size:8.5px;
+      letter-spacing:.08em;
+      text-transform:uppercase;
+    }
+    .section-head .right{
+      color:var(--mid);
+      font-family:var(--ui);
+      font-size:10px;
+      letter-spacing:0;
+      text-transform:none;
+      font-weight:700;
+    }
+    .sample-tools{
+      display:flex;
+      align-items:center;
+      gap:4px;
+      padding:5px 9px 4px;
+      background:rgba(255,255,255,.12);
+    }
+    .pill,.small-btn{
+      height:22px;
+      display:inline-flex;
+      align-items:center;
+      justify-content:center;
+      border:1px solid var(--line);
+      border-radius:4px;
+      background:rgba(255,255,255,.38);
+      color:var(--mid);
+      font-size:10px;
+      padding:0 7px;
+      white-space:nowrap;
+    }
+    .pill.on{
+      background:rgba(107,142,35,.10);
+      border-color:rgba(107,142,35,.28);
+      color:#526d1d;
+      font-weight:700;
+    }
+    .small-btn.icon{width:24px;padding:0;color:var(--muted)}
+    .samples{
+      display:flex;
+      flex-direction:column;
+      gap:1px;
+      padding:4px 6px;
+    }
+    .sample{
+      display:grid;
+      grid-template-columns:20px minmax(0,1fr) 8px;
+      align-items:center;
+      gap:7px;
+      min-height:39px;
+      padding:6px 7px;
+      border:1px solid transparent;
+      border-radius:4px;
+      color:var(--mid);
+    }
+    .sample.on{
+      background:var(--sb-act,#c8ba9e);
+      border-color:var(--line2);
+      box-shadow:inset 0 1px 0 rgba(255,255,255,.38);
+    }
+    .sample i{
+      width:20px;
+      height:20px;
+      display:grid;
+      place-items:center;
+      color:var(--muted);
+      border:1px solid rgba(192,174,144,.72);
+      background:rgba(255,255,255,.25);
+      border-radius:3px;
+      font-size:10px;
+    }
+    .sample-name{
+      overflow:hidden;
+      white-space:nowrap;
+      text-overflow:ellipsis;
+      color:var(--ink);
+      font-size:11.5px;
+      font-weight:600;
+    }
+    .sample-meta{
+      margin-top:1px;
+      overflow:hidden;
+      white-space:nowrap;
+      text-overflow:ellipsis;
+      font-family:var(--mono);
+      font-size:8.4px;
+      color:var(--muted);
+    }
+    .led{
+      width:6px;
+      height:6px;
+      border-radius:50%;
+      background:var(--ok);
+      box-shadow:0 0 4px rgba(90,143,43,.4);
+    }
+    .led.warn{background:var(--warn)}
+    .dtu{
+      min-height:40px;
+      display:flex;
+      align-items:center;
+      gap:8px;
+      padding:7px 11px;
+      border-top:1px solid var(--line2);
+      background:var(--rail-dn);
+    }
+    .dtu-badge{
+      width:34px;
+      height:21px;
+      display:grid;
+      place-items:center;
+      background:#c4001a;
+      color:white;
+      font-weight:800;
+      font-size:12px;
+      border-radius:2px;
+    }
+    .dtu div:last-child{min-width:0}
+    .dtu strong{display:block;font-size:10px;color:var(--ink);line-height:1.1}
+    .dtu span{display:block;font-family:var(--mono);font-size:7.6px;color:var(--muted);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+    .status{
+      grid-area:status;
+      display:flex;
+      align-items:center;
+      gap:8px;
+      padding:0 8px;
+      background:#8b7355;
+      color:#f0e8d8;
+      font-size:10px;
+      border-top:1px solid rgba(70,45,22,.25);
+    }
+    .main{
+      grid-area:main;
+      min-width:0;
+      display:flex;
+      flex-direction:column;
+      overflow:hidden;
+      background:var(--paper);
+    }
+    .top-tabs{
+      height:36px;
+      display:flex;
+      align-items:flex-end;
+      gap:1px;
+      padding:0 10px;
+      border-bottom:1px solid var(--line);
+      background:var(--tb-bg,#e4d8c0);
+    }
+    .tab{
+      height:30px;
+      display:flex;
+      align-items:center;
+      gap:6px;
+      padding:0 10px;
+      border:1px solid transparent;
+      border-bottom:none;
+      border-radius:4px 4px 0 0;
+      font-size:11px;
+      color:var(--mid);
+      font-weight:600;
+    }
+    .tab.on{
+      background:var(--paper);
+      border-color:var(--line);
+      color:var(--ink);
+    }
+    .field{
+      height:25px;
+      display:flex;
+      align-items:center;
+      gap:6px;
+      padding:0 7px;
+      border:1px solid var(--line);
+      border-radius:4px;
+      background:rgba(255,255,255,.42);
+      color:var(--mid);
+      font-size:11px;
+      white-space:nowrap;
+    }
+    .field strong{color:var(--ink);font-family:var(--mono);font-size:10px}
+    .field.wide{min-width:142px}
+    .toolbar{
+      min-height:38px;
+      display:flex;
+      align-items:center;
+      gap:8px;
+      padding:6px 10px;
+      border-bottom:1px solid var(--line);
+      background:#eee8dc;
+    }
+    .canvas{
+      flex:1;
+      min-height:0;
+      display:flex;
+      align-items:center;
+      justify-content:center;
+      color:var(--muted);
+      font-size:12px;
+      position:relative;
+      overflow:hidden;
+      background:
+        linear-gradient(90deg,rgba(212,196,168,.25) 1px,transparent 1px) 0 0/48px 48px,
+        linear-gradient(180deg,rgba(212,196,168,.25) 1px,transparent 1px) 0 0/48px 48px,
+        #fbf8f2;
+    }
+    .plot-box{
+      width:82%;
+      height:62%;
+      border-left:1px solid var(--line2);
+      border-bottom:1px solid var(--line2);
+      position:relative;
+    }
+    .curve{
+      position:absolute;
+      left:8%;
+      right:8%;
+      top:24%;
+      height:38%;
+      border-bottom:3px solid var(--olive);
+      border-radius:0 0 80% 8%;
+      transform:skewX(-12deg);
+      opacity:.85;
+    }
+    .note{
+      padding:10px 12px;
+      display:grid;
+      grid-template-columns:1fr 1fr;
+      gap:8px;
+      border-top:1px solid var(--line);
+      background:rgba(246,240,231,.75);
+      min-height:94px;
+    }
+    .note-block strong{
+      display:block;
+      margin-bottom:3px;
+      color:var(--ink);
+      font-size:12px;
+    }
+    .note-block span{
+      display:block;
+      color:var(--muted);
+      font-size:11px;
+      line-height:1.25;
+    }
+    .accordion{
+      border-bottom:1px solid var(--line2);
+    }
+    .acc-head{
+      height:33px;
+      display:flex;
+      align-items:center;
+      gap:7px;
+      padding:0 11px;
+      background:var(--rail-up);
+      color:var(--mid);
+      border-top:1px solid rgba(255,255,255,.45);
+      font-weight:700;
+      font-size:11.5px;
+    }
+    .acc-head i:last-child{
+      margin-left:auto;
+      color:var(--muted);
+      font-size:10px;
+    }
+    .acc-summary{
+      margin-left:auto;
+      font-family:var(--mono);
+      font-size:8px;
+      color:var(--muted);
+      font-weight:600;
+    }
+    .acc-body{
+      padding:8px 11px 10px;
+      display:flex;
+      flex-direction:column;
+      gap:8px;
+      background:var(--rail);
+    }
+    .param-row{
+      display:flex;
+      align-items:center;
+      justify-content:space-between;
+      gap:10px;
+      color:var(--mid);
+      font-size:11px;
+    }
+    .param-value{
+      height:24px;
+      min-width:74px;
+      display:flex;
+      align-items:center;
+      justify-content:flex-end;
+      padding:0 7px;
+      border:1px solid var(--line);
+      border-radius:4px;
+      background:rgba(255,255,255,.42);
+      color:var(--ink);
+      font-family:var(--mono);
+      font-size:10px;
+    }
+    .class-strip{
+      display:grid;
+      grid-template-columns:3fr 1fr;
+      height:20px;
+      overflow:hidden;
+      border:1px solid var(--line2);
+      border-radius:4px;
+      background:#e9ddc8;
+    }
+    .class-strip div:first-child{background:#caa765}
+    .class-strip div:last-child{background:#b8b8a0}
+    .drawer{
+      margin:8px 10px;
+      border:1px solid var(--line);
+      background:rgba(255,255,255,.55);
+    }
+    .drawer-head{
+      min-height:31px;
+      display:flex;
+      align-items:center;
+      justify-content:space-between;
+      gap:10px;
+      padding:0 9px;
+      border-bottom:1px solid var(--line);
+      color:var(--ink);
+      font-weight:700;
+      font-size:12px;
+    }
+    .drawer-grid{
+      display:grid;
+      grid-template-columns:repeat(3,minmax(0,1fr));
+      gap:8px;
+      padding:9px;
+    }
+    .main-summary{
+      min-height:30px;
+      display:flex;
+      align-items:center;
+      gap:8px;
+      padding:0 10px;
+      border-bottom:1px solid var(--line);
+      background:#f3ece0;
+      color:var(--mid);
+      font-size:11px;
+    }
+    .summary-chip{
+      height:21px;
+      display:inline-flex;
+      align-items:center;
+      padding:0 7px;
+      border:1px solid var(--line);
+      border-radius:999px;
+      background:rgba(255,255,255,.45);
+      color:var(--mid);
+      font-family:var(--mono);
+      font-size:8.5px;
+    }
+    .menu-dot{
+      margin-left:auto;
+      width:24px;
+      height:22px;
+      border:1px solid var(--line);
+      border-radius:4px;
+      background:rgba(255,255,255,.42);
+      color:var(--muted);
+    }
+    @media (max-width:1300px){
+      .options{grid-template-columns:1fr}
+      .mock{height:620px}
+    }
+  </style>
+</head>
+<body>
+<div class="page">
+  <header class="concept-head">
+    <div class="title-block">
+      <h1>Main Sidebar Redesign Options</h1>
+      <p>Three implementation directions for simplifying the primary sidebar: smaller import area, no batch action box under Samples, and clearer placement for analysis parameters and stratigraphy controls.</p>
+    </div>
+    <div class="decision"><i class="fa-solid fa-check"></i> Recommended: Analysis menu</div>
+  </header>
+
+  <section class="options">
+    <article class="option">
+      <div class="option-head">
+        <div class="option-title">
+          <strong><i class="fa-solid fa-table-list"></i> Option A - Inventory Sidebar</strong>
+          <span>Parameters move into the existing Analysis menu</span>
+        </div>
+        <span class="tag">Recommended</span>
+      </div>
+      <div class="mock">
+        <div class="menubar">
+          <span class="mi">File</span>
+          <span class="mi">Edit</span>
+          <span class="mi">View</span>
+          <span class="mi on">Analysis</span>
+          <span class="mi">Help</span>
+          <div class="analysis-pop">
+            <div class="item"><i class="fa-solid fa-sliders"></i>Analysis settings<strong>20 C</strong></div>
+            <div class="item"><i class="fa-solid fa-water"></i>Porosity settings<strong>Simple</strong></div>
+            <div class="item"><i class="fa-solid fa-layer-group"></i>Classification scheme<strong>ISO</strong></div>
+            <div class="sep"></div>
+            <div class="item"><i class="fa-solid fa-square-root-variable"></i>Choose K methods</div>
+            <div class="item"><i class="fa-solid fa-rotate"></i>Recalculate K values</div>
+            <div class="item"><i class="fa-solid fa-code-compare"></i>Update comparison</div>
+          </div>
+          <span class="spacer">main sidebar concept</span>
+        </div>
+        <aside class="sidebar">
+          <div class="logo">
+            <div class="logo-mark"><i class="fa-solid fa-layer-group"></i></div>
+            <div><strong>GrainSize</strong><span>ANALYSIS v0.9-beta</span></div>
+          </div>
+          <div class="side-scroll">
+            <div class="compact-drop">
+              <i class="fa-solid fa-cloud-arrow-up"></i>
+              <div class="drop-text"><strong>Drop files or choose import path</strong><span>CSV / XLSX / TXT</span></div>
+              <button class="drop-add">Add</button>
+            </div>
+            <div class="section-head">
+              <span>Samples</span>
+              <span class="right">8 loaded / 8 included</span>
+            </div>
+            <div class="sample-tools">
+              <button class="pill on">All</button>
+              <button class="pill">Included</button>
+              <button class="pill">Review 1</button>
+              <button class="small-btn">Manage</button>
+              <button class="small-btn icon"><i class="fa-solid fa-ellipsis"></i></button>
+            </div>
+            <div class="samples">
+              <div class="sample on"><i class="fa-solid fa-vial"></i><div><div class="sample-name">NBAL-01 [English]</div><div class="sample-meta">D50 0.124 mm / Kgeo 2.9 m/d</div></div><span class="led"></span></div>
+              <div class="sample"><i class="fa-solid fa-vial"></i><div><div class="sample-name">NBAL-02 [English]</div><div class="sample-meta">D50 0.301 mm / Kgeo 33.8 m/d</div></div><span class="led"></span></div>
+              <div class="sample"><i class="fa-solid fa-vial"></i><div><div class="sample-name">NBAL-03 [English]</div><div class="sample-meta">D50 0.480 mm / Kgeo 11.4 m/d</div></div><span class="led warn"></span></div>
+              <div class="sample"><i class="fa-solid fa-vial"></i><div><div class="sample-name">NBAL-04 [English]</div><div class="sample-meta">D50 0.617 mm / Kgeo 39.2 m/d</div></div><span class="led"></span></div>
+              <div class="sample"><i class="fa-solid fa-vial"></i><div><div class="sample-name">sorptionsoil_sieving_120126</div><div class="sample-meta">D50 0.120 mm / Kgeo 2.9 m/d</div></div><span class="led"></span></div>
+            </div>
+          </div>
+          <div class="dtu"><div class="dtu-badge">DTU</div><div><strong>Grain Size Analysis</strong><span>DTU Sustain / Oliver Lund</span></div></div>
+        </aside>
+        <main class="main">
+          <div class="top-tabs">
+            <div class="tab on"><i class="fa-solid fa-chart-area"></i> Individual Samples</div>
+            <div class="tab"><i class="fa-solid fa-code-compare"></i> Comparison</div>
+            <div class="tab"><i class="fa-solid fa-file-contract"></i> Reports</div>
+            <div class="tab"><i class="fa-solid fa-file-export"></i> Export</div>
+          </div>
+          <div class="main-summary">
+            <span class="summary-chip">Analysis: 20.0 C</span>
+            <span class="summary-chip">Porosity Simple</span>
+            <span class="summary-chip">ISO 14688</span>
+            <span class="summary-chip">K methods 16</span>
+          </div>
+          <div class="toolbar">
+            <button class="pill on">Distribution</button>
+            <button class="pill">Histogram</button>
+            <button class="pill">K-values</button>
+            <button class="small-btn"><i class="fa-solid fa-sliders"></i> Controls</button>
+          </div>
+          <div class="canvas"><div class="plot-box"><div class="curve"></div></div></div>
+        </main>
+        <div class="status"><i class="fa-solid fa-circle-check"></i> Ready - 8 samples loaded - 1 sample needs review</div>
+      </div>
+      <div class="note">
+        <div class="note-block"><strong>Best for</strong><span>Making the sidebar a dataset inventory while using the existing Analysis menu for global calculation settings.</span></div>
+        <div class="note-block"><strong>Tradeoff</strong><span>Settings are menu-driven rather than always expanded, so the active state should remain visible through compact summary chips.</span></div>
+      </div>
+    </article>
+
+    <article class="option">
+      <div class="option-head">
+        <div class="option-title">
+          <strong><i class="fa-solid fa-bars-staggered"></i> Option B - Sidebar Accordions</strong>
+          <span>Keep settings in the sidebar, collapsed by default</span>
+        </div>
+        <span class="tag">Low risk</span>
+      </div>
+      <div class="mock">
+        <div class="menubar">File Edit View Analysis Help <span class="spacer">main sidebar concept</span></div>
+        <aside class="sidebar">
+          <div class="logo">
+            <div class="logo-mark"><i class="fa-solid fa-layer-group"></i></div>
+            <div><strong>GrainSize</strong><span>ANALYSIS v0.9-beta</span></div>
+          </div>
+          <div class="side-scroll">
+            <div class="compact-drop">
+              <i class="fa-solid fa-cloud-arrow-up"></i>
+              <div class="drop-text"><strong>Import data</strong><span>Drop or click</span></div>
+              <button class="drop-add">Add</button>
+            </div>
+            <div class="accordion">
+              <div class="acc-head"><i class="fa-solid fa-vials"></i> Samples <span class="acc-summary">8 / 8</span><i class="fa-solid fa-chevron-up"></i></div>
+              <div class="sample-tools">
+                <button class="pill on">All</button>
+                <button class="pill">Included</button>
+                <button class="pill">Review 1</button>
+                <button class="small-btn icon"><i class="fa-solid fa-ellipsis"></i></button>
+              </div>
+              <div class="samples">
+                <div class="sample on"><i class="fa-solid fa-vial"></i><div><div class="sample-name">NBAL-01 [English]</div><div class="sample-meta">D50 0.124 mm / Kgeo 2.9</div></div><span class="led"></span></div>
+                <div class="sample"><i class="fa-solid fa-vial"></i><div><div class="sample-name">NBAL-02 [English]</div><div class="sample-meta">D50 0.301 mm / Kgeo 33.8</div></div><span class="led"></span></div>
+                <div class="sample"><i class="fa-solid fa-vial"></i><div><div class="sample-name">NBAL-03 [English]</div><div class="sample-meta">D50 0.480 mm / warnings</div></div><span class="led warn"></span></div>
+              </div>
+            </div>
+            <div class="accordion">
+              <div class="acc-head"><i class="fa-solid fa-sliders"></i> Parameters <span class="acc-summary">20 C / Simple</span><i class="fa-solid fa-chevron-up"></i></div>
+              <div class="acc-body">
+                <div class="param-row"><span>Temperature</span><span class="param-value">20.0 C</span></div>
+                <div class="param-row"><span>Porosity mode</span><span class="param-value">Simple</span></div>
+                <button class="small-btn">Manage dataset porosity</button>
+              </div>
+            </div>
+            <div class="accordion">
+              <div class="acc-head"><i class="fa-solid fa-layer-group"></i> Stratigraphy <span class="acc-summary">ISO 14688</span><i class="fa-solid fa-chevron-up"></i></div>
+              <div class="acc-body">
+                <div class="class-strip"><div></div><div></div></div>
+                <div class="param-row"><span>Dominant class</span><span class="param-value">Sand</span></div>
+                <button class="small-btn">Classification scheme</button>
+              </div>
+            </div>
+          </div>
+          <div class="dtu"><div class="dtu-badge">DTU</div><div><strong>Grain Size Analysis</strong><span>DTU Sustain / Oliver Lund</span></div></div>
+        </aside>
+        <main class="main">
+          <div class="top-tabs">
+            <div class="tab on"><i class="fa-solid fa-chart-area"></i> Individual Samples</div>
+            <div class="tab"><i class="fa-solid fa-code-compare"></i> Comparison</div>
+            <div class="tab"><i class="fa-solid fa-file-contract"></i> Reports</div>
+            <div class="tab"><i class="fa-solid fa-file-export"></i> Export</div>
+          </div>
+          <div class="main-summary">
+            <span class="summary-chip">Temp 20.0 C</span>
+            <span class="summary-chip">Porosity Simple</span>
+            <span class="summary-chip">ISO 14688</span>
+          </div>
+          <div class="toolbar">
+            <button class="pill on">Distribution</button>
+            <button class="pill">Histogram</button>
+            <button class="pill">K-values</button>
+            <button class="small-btn"><i class="fa-solid fa-sliders"></i> Controls</button>
+          </div>
+          <div class="canvas"><div class="plot-box"><div class="curve"></div></div></div>
+        </main>
+        <div class="status"><i class="fa-solid fa-circle-check"></i> Ready - settings kept in sidebar accordions</div>
+      </div>
+      <div class="note">
+        <div class="note-block"><strong>Best for</strong><span>Small implementation step from the current code because it keeps Parameters and Stratigraphy inside `control_panel.py`.</span></div>
+        <div class="note-block"><strong>Tradeoff</strong><span>The sidebar remains mixed-purpose. It is better than today, but less clean than inventory-only.</span></div>
+      </div>
+    </article>
+
+    <article class="option">
+      <div class="option-head">
+        <div class="option-title">
+          <strong><i class="fa-solid fa-window-restore"></i> Option C - Analysis Drawer</strong>
+          <span>Inventory sidebar plus temporary settings drawer</span>
+        </div>
+        <span class="tag">Flexible</span>
+      </div>
+      <div class="mock">
+        <div class="menubar">File Edit View Analysis Help <span class="spacer">main sidebar concept</span></div>
+        <aside class="sidebar">
+          <div class="logo">
+            <div class="logo-mark"><i class="fa-solid fa-layer-group"></i></div>
+            <div><strong>GrainSize</strong><span>ANALYSIS v0.9-beta</span></div>
+          </div>
+          <div class="side-scroll">
+            <div class="compact-drop">
+              <i class="fa-solid fa-cloud-arrow-up"></i>
+              <div class="drop-text"><strong>Drop files or choose import path</strong><span>CSV / XLSX / TXT</span></div>
+              <button class="drop-add">Add</button>
+            </div>
+            <div class="section-head">
+              <span>Samples</span>
+              <span class="right">8 loaded</span>
+            </div>
+            <div class="sample-tools">
+              <button class="pill on">All</button>
+              <button class="pill">Included</button>
+              <button class="pill">Review 1</button>
+              <button class="small-btn icon"><i class="fa-solid fa-ellipsis"></i></button>
+            </div>
+            <div class="samples">
+              <div class="sample on"><i class="fa-solid fa-vial"></i><div><div class="sample-name">NBAL-01 [English]</div><div class="sample-meta">D50 0.124 mm / Kgeo 2.9</div></div><span class="led"></span></div>
+              <div class="sample"><i class="fa-solid fa-vial"></i><div><div class="sample-name">NBAL-02 [English]</div><div class="sample-meta">D50 0.301 mm / Kgeo 33.8</div></div><span class="led"></span></div>
+              <div class="sample"><i class="fa-solid fa-vial"></i><div><div class="sample-name">NBAL-03 [English]</div><div class="sample-meta">D50 0.480 mm / warnings</div></div><span class="led warn"></span></div>
+              <div class="sample"><i class="fa-solid fa-vial"></i><div><div class="sample-name">NBAL-04 [English]</div><div class="sample-meta">D50 0.617 mm / Kgeo 39.2</div></div><span class="led"></span></div>
+            </div>
+          </div>
+          <div class="dtu"><div class="dtu-badge">DTU</div><div><strong>Grain Size Analysis</strong><span>DTU Sustain / Oliver Lund</span></div></div>
+        </aside>
+        <main class="main">
+          <div class="top-tabs">
+            <div class="tab on"><i class="fa-solid fa-chart-area"></i> Individual Samples</div>
+            <div class="tab"><i class="fa-solid fa-code-compare"></i> Comparison</div>
+            <div class="tab"><i class="fa-solid fa-file-contract"></i> Reports</div>
+            <div class="tab"><i class="fa-solid fa-file-export"></i> Export</div>
+          </div>
+          <div class="main-summary">
+            <span class="summary-chip">8 included</span>
+            <span class="summary-chip">Temp 20.0 C</span>
+            <span class="summary-chip">ISO 14688</span>
+            <button class="small-btn"><i class="fa-solid fa-sliders"></i> Analysis settings</button>
+          </div>
+          <div class="drawer">
+            <div class="drawer-head">
+              <span><i class="fa-solid fa-sliders"></i> Analysis settings</span>
+              <button class="menu-dot"><i class="fa-solid fa-xmark"></i></button>
+            </div>
+            <div class="drawer-grid">
+              <div class="field">Temperature <strong>20.0 C</strong></div>
+              <div class="field">Porosity <strong>Simple</strong></div>
+              <div class="field">Scheme <strong>ISO 14688</strong></div>
+            </div>
+          </div>
+          <div class="toolbar">
+            <button class="pill on">Distribution</button>
+            <button class="pill">Histogram</button>
+            <button class="pill">K-values</button>
+            <button class="small-btn"><i class="fa-solid fa-sliders"></i> Controls</button>
+          </div>
+          <div class="canvas"><div class="plot-box"><div class="curve"></div></div></div>
+        </main>
+        <div class="status"><i class="fa-solid fa-circle-check"></i> Ready - analysis settings open as a drawer</div>
+      </div>
+      <div class="note">
+        <div class="note-block"><strong>Best for</strong><span>Keeping the workspace clean most of the time while still making settings easy to find from any top-level tab.</span></div>
+        <div class="note-block"><strong>Tradeoff</strong><span>More moving parts than Option A: drawer open/close state, persistence, and report/export integration cues.</span></div>
+      </div>
+    </article>
+  </section>
+</div>
+</body>
+</html>

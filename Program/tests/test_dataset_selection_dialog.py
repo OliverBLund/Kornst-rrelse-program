@@ -2,14 +2,17 @@ import os
 import sys
 import unittest
 from types import SimpleNamespace
+from unittest.mock import patch
 
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 sys.path.insert(0, "Program")
 
 from PyQt6.QtCore import Qt
+from PyQt6.QtGui import QColor
 from PyQt6.QtWidgets import QApplication, QPushButton
 
 from gui.dataset_selection_dialog import DatasetSelectionDialog
+from gui.group_styles import clear_group_color, group_color_map
 
 
 APP = QApplication.instance() or QApplication([])
@@ -257,6 +260,30 @@ class TestDatasetSelectionDialog(unittest.TestCase):
                 self.assertFalse(header.isWindow())
         finally:
             dialog.deleteLater()
+
+    def test_group_header_color_picker_updates_shared_group_color(self):
+        clear_group_color("Layer A")
+        tabs = [
+            DummyDatasetTab("Sample A", "A.csv", "Layer A"),
+            DummyDatasetTab("Sample B", "B.csv", "Layer A"),
+        ]
+        dialog = DatasetSelectionDialog(
+            tabs,
+            currently_selected=tabs,
+            minimum_selection=1,
+            allow_grouping=True,
+        )
+        try:
+            with patch(
+                "gui.dataset_selection_dialog.QColorDialog.getColor",
+                return_value=QColor("#123456"),
+            ):
+                dialog._pick_group_color("Layer A")
+
+            self.assertEqual(group_color_map(["Layer A"])["Layer A"], "#123456")
+        finally:
+            dialog.deleteLater()
+            clear_group_color("Layer A")
 
 
 if __name__ == "__main__":

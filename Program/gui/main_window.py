@@ -751,6 +751,27 @@ class MainWindow(FramelessMainWindowMixin, QMainWindow):
         # Analysis
         analysis_menu = QMenu("Analysis", self)
 
+        analysis_settings_action = QAction("&Analysis Settings...", self)
+        analysis_settings_action.setIcon(icon("fa6s.sliders", C.TEXT_MUTED))
+        analysis_settings_action.triggered.connect(
+            self.control_panel.open_analysis_settings_dialog
+        )
+        analysis_menu.addAction(analysis_settings_action)
+
+        porosity_settings_action = QAction("&Dataset Porosity...", self)
+        porosity_settings_action.setIcon(icon("fa6s.water", C.TEXT_MUTED))
+        porosity_settings_action.triggered.connect(self.control_panel.open_porosity_dialog)
+        analysis_menu.addAction(porosity_settings_action)
+
+        classification_action = QAction("&Classification Scheme...", self)
+        classification_action.setIcon(icon("fa6s.layer-group", C.TEXT_MUTED))
+        classification_action.triggered.connect(
+            self.control_panel.open_classification_dialog
+        )
+        analysis_menu.addAction(classification_action)
+
+        analysis_menu.addSeparator()
+
         calculate_action = QAction("&Recalculate K Values", self)
         calculate_action.setShortcut("Ctrl+K")
         calculate_action.setIcon(icon("fa6s.bolt", C.TEXT_MUTED))
@@ -769,7 +790,8 @@ class MainWindow(FramelessMainWindowMixin, QMainWindow):
         update_comparison_action.setIcon(icon("fa6s.rotate", C.TEXT_MUTED))
         update_comparison_action.triggered.connect(self.update_comparison)
         analysis_menu.addAction(update_comparison_action)
-        menu_layout.addWidget(self._make_menu_button("Analysis", analysis_menu))
+        self._analysis_menu_btn = self._make_menu_button("Analysis", analysis_menu)
+        menu_layout.addWidget(self._analysis_menu_btn)
 
         # View
         view_menu = QMenu("View", self)
@@ -2565,26 +2587,27 @@ class MainWindow(FramelessMainWindowMixin, QMainWindow):
             TourStep(
                 title="Check calculation inputs",
                 body=(
-                    "Temperature and porosity settings sit in the sidebar because they "
-                    "affect K calculations. K-values refresh automatically after loading "
-                    "and after supported parameter changes."
+                    "Use the Analysis menu for global calculation settings: temperature, "
+                    "porosity mode, classification scheme, K-method selection, and manual "
+                    "recalculation."
                 ),
-                target=lambda: getattr(self.control_panel, "temp_spinbox", self.control_panel),
+                target=lambda: getattr(self, "_analysis_menu_btn", self.control_panel),
                 tips=(
                     "Temperature affects water density and viscosity.",
                     "Dataset porosity can be managed separately when needed.",
-                    "Manual recalculation is still available from the Analysis menu.",
+                    "The sidebar stays focused on importing and navigating samples.",
                 ),
             ),
             TourStep(
-                title="Review stratigraphy",
+                title="Classification context",
                 body=(
-                    "The stratigraphy panel summarizes the active dataset's grain "
-                    "fractions, classification scheme, and permeability class."
+                    "Classification scheme and stratigraphy-related settings are part "
+                    "of the Analysis menu so reports, exports, plots, and tables share "
+                    "the same global context."
                 ),
-                target=lambda: getattr(self.control_panel, "_strata_widget", self.control_panel),
+                target=lambda: getattr(self, "_analysis_menu_btn", self.control_panel),
                 tips=(
-                    "The Scheme button changes the classification system.",
+                    "Use Analysis > Classification Scheme to change the scheme.",
                     "Plots such as the grain-size histogram should follow the selected scheme.",
                 ),
             ),
