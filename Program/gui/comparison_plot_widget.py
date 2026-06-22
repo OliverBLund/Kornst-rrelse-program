@@ -1837,6 +1837,13 @@ class ComparisonPlotWidget(QWidget):
         elif self.current_plot_type == "k-values":
             headers, rows = self._k_method_drawer_rows()
             self._set_drawer_rows("K method summary - OK only", headers, rows)
+        elif self.current_plot_type in {"distribution", "cumulative"}:
+            headers, rows = self._distribution_drawer_rows()
+            title = "Cumulative distribution curve data" if self.current_plot_type == "cumulative" else "Distribution curve data"
+            self._set_drawer_rows(title, headers, rows)
+        elif self.current_plot_type == "histogram":
+            headers, rows = self._histogram_drawer_rows()
+            self._set_drawer_rows("Histogram size-class data", headers, rows)
         else:
             headers, rows = self._grain_drawer_rows()
             self._set_drawer_rows("Grain summary", headers, rows)
@@ -1922,6 +1929,35 @@ class ComparisonPlotWidget(QWidget):
         for dataset_name in grain.dataset_names:
             if dataset_name in grain.by_dataset:
                 add_row(dataset_name, grain.by_dataset[dataset_name])
+        return headers, rows
+
+    def _distribution_drawer_rows(self) -> tuple[list[str], list[tuple]]:
+        headers = ["Dataset", "Particle size (mm)", "Percent passing (%)"]
+        rows: list[tuple] = []
+        for dataset in self.datasets:
+            for size, passing in zip(dataset.particle_sizes, dataset.percent_passing):
+                rows.append((
+                    dataset.sample_name,
+                    self._fmt_number(size, decimals=6),
+                    self._fmt_number(passing, decimals=4),
+                ))
+        return headers, rows
+
+    def _histogram_drawer_rows(self) -> tuple[list[str], list[tuple]]:
+        headers = ["Dataset", "Size class", "Particle size (mm)", "Weight (%)"]
+        rows: list[tuple] = []
+        for dataset in self.datasets:
+            sizes, weights = self._calculate_histogram_frequencies(
+                dataset.particle_sizes,
+                dataset.percent_passing,
+            )
+            for index, (size, weight) in enumerate(zip(sizes, weights), start=1):
+                rows.append((
+                    dataset.sample_name,
+                    str(index),
+                    self._fmt_number(size, decimals=6),
+                    self._fmt_number(weight, decimals=4),
+                ))
         return headers, rows
 
     def _k_scope_drawer_rows(self) -> tuple[list[str], list[tuple]]:

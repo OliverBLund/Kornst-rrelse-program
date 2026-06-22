@@ -599,12 +599,36 @@ class TestComparisonTabSelectionState(unittest.TestCase):
 
         self.assertIn('m/d', self.widget._stats_context.text())
         self.assertIn('m/d', self.widget._box_fig.axes[0].get_ylabel())
+        scope_headers = [
+            self.widget._stats_scope_table.horizontalHeaderItem(col).text()
+            for col in range(self.widget._stats_scope_table.columnCount())
+        ]
+        method_headers = [
+            self.widget._stats_method_table.horizontalHeaderItem(col).text()
+            for col in range(self.widget._stats_method_table.columnCount())
+        ]
+        self.assertTrue(any('m/d' in header for header in scope_headers))
+        self.assertTrue(any('m/d' in header for header in method_headers))
+        scope_value_md = self.widget._stats_scope_table.item(0, 3).text()
+        method_value_md = self.widget._stats_method_table.item(0, 6).text()
 
         source_index = self.widget._stats_unit_combo.findData(HydraulicConductivityUnit.M_PER_S)
         self.widget._stats_unit_combo.setCurrentIndex(source_index)
 
         self.assertIn('m/s', self.widget._stats_context.text())
         self.assertIn('m/s', self.widget._box_fig.axes[0].get_ylabel())
+        scope_headers = [
+            self.widget._stats_scope_table.horizontalHeaderItem(col).text()
+            for col in range(self.widget._stats_scope_table.columnCount())
+        ]
+        method_headers = [
+            self.widget._stats_method_table.horizontalHeaderItem(col).text()
+            for col in range(self.widget._stats_method_table.columnCount())
+        ]
+        self.assertTrue(any('m/s' in header for header in scope_headers))
+        self.assertTrue(any('m/s' in header for header in method_headers))
+        self.assertNotEqual(scope_value_md, self.widget._stats_scope_table.item(0, 3).text())
+        self.assertNotEqual(method_value_md, self.widget._stats_method_table.item(0, 6).text())
 
     def test_statistics_metric_toolbar_omits_ambiguous_range_button(self):
         self.widget.set_dataset_state(self.tabs, selected_tabs=self.tabs)

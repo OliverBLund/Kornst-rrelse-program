@@ -4571,17 +4571,10 @@ class ComparisonTab(QWidget):
                 )
 
         # ── Build per-dataset valid K lists ───────────────────────────────────
-        valid_k_per_ds: List[List[float]] = []
-        for tab in tabs:
-            dataset_name = tab.get_dataset_name()
-            col_vals = [
-                record.k_value
-                for record in aggregation.included_records
-                if record.dataset_name == dataset_name
-                and record.k_value is not None
-                and record.k_value > 0
-            ]
-            valid_k_per_ds.append(col_vals)
+        dataset_k_stats = [
+            aggregation.by_dataset.get(tab.get_dataset_name())
+            for tab in tabs
+        ]
 
         # ── Summary rows ──────────────────────────────────────────────────────
         summary_bg = QColor(C.BG_LOW)
@@ -4609,22 +4602,30 @@ class ComparisonTab(QWidget):
                 self._make_param_cell(s_label, detail, olive=is_geom, summary=True),
             )
 
-            for col_i, vk in enumerate(valid_k_per_ds):
+            for col_i, stats in enumerate(dataset_k_stats):
                 color = dataset_colors[col_i]
-                if s_label == "K̄ geometric":
-                    txt = (
-                        self._format_k_value(float(np.exp(np.mean(np.log(vk)))))
-                        if vk
-                        else "—"
-                    )
-                elif s_label == "K̄ arithmetic":
-                    txt = self._format_k_value(float(np.mean(vk))) if vk else "—"
+                if "geometric" in s_label:
+                    value = getattr(stats, "geometric_mean_m_s", None)
+                elif "arithmetic" in s_label:
+                    value = getattr(stats, "arithmetic_mean_m_s", None)
                 elif s_label == "K median":
-                    txt = self._format_k_value(float(np.median(vk))) if vk else "—"
+                    value = getattr(stats, "median_m_s", None)
                 elif s_label == "K std. dev.":
-                    txt = self._format_k_value(float(np.std(vk))) if vk else "—"
+                    value = getattr(stats, "std_dev_m_s", None)
                 elif s_label == "Perm. class":
-                    txt = _perm_class(float(np.exp(np.mean(np.log(vk))))) if vk else "—"
+                    value = getattr(stats, "geometric_mean_m_s", None)
+                else:
+                    value = None
+                if s_label == "K̄ geometric":
+                    txt = self._format_k_value(value) if value is not None else "—"
+                elif s_label == "K̄ arithmetic":
+                    txt = self._format_k_value(value) if value is not None else "—"
+                elif s_label == "K median":
+                    txt = self._format_k_value(value) if value is not None else "—"
+                elif s_label == "K std. dev.":
+                    txt = self._format_k_value(value) if value is not None else "—"
+                elif s_label == "Perm. class":
+                    txt = _perm_class(value) if value is not None else "—"
                 else:
                     txt = "—"
 
@@ -4638,17 +4639,8 @@ class ComparisonTab(QWidget):
                     cell.setData(Qt.ItemDataRole.UserRole, txt.lower())
                     cell.setData(_SORT_GROUP_ROLE, 1)
                     cell.setData(_SORT_PINNED_ORDER_ROLE, si)
-                elif vk:
-                    if s_label == "K̄ geometric":
-                        sort_val = float(np.exp(np.mean(np.log(vk))))
-                    elif s_label == "K̄ arithmetic":
-                        sort_val = float(np.mean(vk))
-                    elif s_label == "K median":
-                        sort_val = float(np.median(vk))
-                    elif s_label == "K std. dev.":
-                        sort_val = float(np.std(vk))
-                    else:
-                        sort_val = float("inf")
+                elif value is not None:
+                    sort_val = float(value)
                     cell.setData(Qt.ItemDataRole.UserRole, sort_val)
                     cell.setData(_SORT_GROUP_ROLE, 1)
                     cell.setData(_SORT_PINNED_ORDER_ROLE, si)
@@ -4656,9 +4648,11 @@ class ComparisonTab(QWidget):
                     cell.setData(Qt.ItemDataRole.UserRole, float("inf"))
                     cell.setData(_SORT_GROUP_ROLE, 1)
                     cell.setData(_SORT_PINNED_ORDER_ROLE, si)
-                if s_label == "Perm. class" and vk:
-                    cell.setForeground(QBrush(QColor(_perm_color(vk))))
-                elif is_geom and vk:
+                if s_label == "Perm. class" and value is not None:
+                    cell.setForeground(
+                        QBrush(QColor(_PERM_CLASS_COLOR.get(txt, C.TEXT_MID)))
+                    )
+                elif is_geom and value is not None:
                     # Bold colored dataset value for K̄ geometric
                     cell.setForeground(QBrush(QColor(color)))
                     bold_f = QFont(F.MONO, F.SZ_SM)
@@ -4667,10 +4661,10 @@ class ComparisonTab(QWidget):
                 else:
                     cell.setForeground(QBrush(QColor(C.TEXT_MID)))
                 self._k_table.setItem(row_i, 1 + col_i, cell)
-                if s_label == "Perm. class" and vk:
-                    text_color = _perm_color(vk)
+                if s_label == "Perm. class" and value is not None:
+                    text_color = _PERM_CLASS_COLOR.get(txt, C.TEXT_MID)
                     bold_value = False
-                elif is_geom and vk:
+                elif is_geom and value is not None:
                     text_color = color
                     bold_value = True
                 else:

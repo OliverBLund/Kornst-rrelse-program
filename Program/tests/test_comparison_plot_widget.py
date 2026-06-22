@@ -9,15 +9,18 @@ import tempfile
 import unittest
 from pathlib import Path
 from types import SimpleNamespace
+from unittest.mock import patch
 
 os.environ.setdefault('QT_QPA_PLATFORM', 'offscreen')
 sys.path.insert(0, 'Program')
 
+from matplotlib.figure import Figure
 from matplotlib.colors import to_hex
 from PyQt6.QtWidgets import QApplication, QFileDialog, QMessageBox
 
 from data_loader import GrainSizeData
 from gui.comparison_plot_widget import ComparisonPlotWidget
+from gui.plot_renderers import render_k_boxplot
 from gui.group_styles import (
     clear_dataset_line_style,
     clear_group_color,
@@ -170,6 +173,24 @@ class TestComparisonPlotWidget(unittest.TestCase):
         self.assertIn('Layer B', labels)
         self.assertIn('Overall Kgeo', labels)
 
+    def test_k_boxplot_renderer_excludes_warning_results(self):
+        figure = Figure()
+        ax = figure.add_subplot(1, 1, 1)
+        captured = {}
+        results = [
+            build_results(1.0, flagged_method='Beyer')[0],
+            build_results(100.0, flagged_method='Beyer')[1],
+        ]
+
+        def capture_boxplot(data, *args, **kwargs):
+            captured['data'] = data
+            return {}
+
+        with patch.object(ax, 'boxplot', side_effect=capture_boxplot):
+            render_k_boxplot(ax, {'Sample A': results})
+
+        self.assertEqual(captured['data'], [[1.0e-4]])
+
     def test_group_color_override_drives_grouped_dataset_colors(self):
         clear_group_color('Layer A')
         try:
@@ -263,6 +284,37 @@ class TestComparisonPlotWidget(unittest.TestCase):
         self.assertTrue(self.widget.drawer_visible)
         self.assertFalse(self.widget._drawer_table.isHidden())
         self.assertLessEqual(self.widget._drawer.maximumHeight(), 260)
+
+    def test_distribution_drawer_contains_visible_curve_points(self):
+        self.widget.on_plot_type_changed('Distribution')
+        self.widget.refresh_plot()
+
+        self.assertEqual(self.widget._drawer_title.text(), 'Distribution curve data')
+        self.assertEqual(
+            self.widget._drawer_headers,
+            ['Dataset', 'Particle size (mm)', 'Percent passing (%)'],
+        )
+        self.assertEqual(len(self.widget._drawer_rows), 14)
+        self.assertEqual(self.widget._drawer_rows[0], ('Sample A', '4.750000', '100.0000'))
+        self.assertEqual(self.widget._drawer_rows[7][0], 'Sample B')
+
+    def test_histogram_drawer_contains_visible_size_class_weights(self):
+        self.widget.on_plot_type_changed('Histogram')
+        self.widget.refresh_plot()
+
+        self.assertEqual(self.widget._drawer_title.text(), 'Histogram size-class data')
+        self.assertEqual(
+            self.widget._drawer_headers,
+            ['Dataset', 'Size class', 'Particle size (mm)', 'Weight (%)'],
+        )
+        sample_a_weights = [
+            float(row[3])
+            for row in self.widget._drawer_rows
+            if row[0] == 'Sample A'
+        ]
+
+        self.assertEqual(len(sample_a_weights), 7)
+        self.assertAlmostEqual(sum(sample_a_weights), 100.0, places=6)
 
     def test_comparison_drawer_exports_current_rows(self):
         self.widget.on_plot_type_changed('K-Values')

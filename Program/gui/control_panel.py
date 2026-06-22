@@ -704,7 +704,7 @@ class PorosityDialog(FramelessDialogBase):
 
         self.porosity_table = QTableWidget(0, 5)
         self.porosity_table.setHorizontalHeaderLabels([
-            "Dataset", "Auto", "Current", "Set Value", ""
+            "Dataset", "Auto Value", "Current", "Set Value", ""
         ])
         self.porosity_table.setAlternatingRowColors(True)
         self.porosity_table.verticalHeader().setVisible(False)
@@ -779,6 +779,11 @@ class PorosityDialog(FramelessDialogBase):
             dataset_name = dataset.sample_name
             calculated_porosity = getattr(dataset, 'calculated_porosity', None)
             current_porosity = getattr(dataset, 'current_porosity', None)
+            mode_label = (
+                dataset.calculated_porosity_mode_label()
+                if hasattr(dataset, 'calculated_porosity_mode_label')
+                else "Simple formula"
+            )
 
             if current_porosity is None:
                 current_porosity = calculated_porosity if calculated_porosity else 0.40
@@ -807,7 +812,9 @@ class PorosityDialog(FramelessDialogBase):
             )
             summary_layout.addWidget(name_label)
 
-            badge_label = QLabel("Manual override" if is_manual else "Automatic")
+            badge_label = QLabel("Manual override" if is_manual else f"Auto: {mode_label}")
+            if hasattr(dataset, 'porosity_source_label'):
+                badge_label.setToolTip(dataset.porosity_source_label())
             badge_label.setStyleSheet(
                 f"QLabel {{ padding: 1px 7px; border-radius: 99px; font-size: {F.SZ_XS}pt; "
                 f"font-weight: 600; color: {'#8f3525' if is_manual else C.OLIVE}; "
@@ -819,8 +826,10 @@ class PorosityDialog(FramelessDialogBase):
 
             if calculated_porosity:
                 calc_item = QTableWidgetItem(f"{calculated_porosity:.4f}")
+                calc_item.setToolTip(f"Automatic value from {mode_label}.")
             else:
                 calc_item = QTableWidgetItem("N/A")
+                calc_item.setToolTip("No automatic porosity value is available.")
             calc_item.setFlags(calc_item.flags() & ~Qt.ItemFlag.ItemIsEditable)
             calc_item.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
             calc_item.setFont(QFont(F.MONO, F.SZ_MD))
@@ -908,6 +917,7 @@ class PorosityDialog(FramelessDialogBase):
                 if hasattr(tab, 'dataset') and tab.dataset.sample_name == dataset_name:
                     # Update dataset porosity
                     tab.dataset.current_porosity = new_porosity
+                    tab.dataset.porosity = new_porosity
                     tab.porosity = new_porosity
 
                     # Update statistics tab if it exists
@@ -951,6 +961,7 @@ class PorosityDialog(FramelessDialogBase):
             tab = self.main_window.dataset_tabs_widget.widget(i)
             if hasattr(tab, 'dataset') and tab.dataset.sample_name == dataset_name:
                 tab.dataset.current_porosity = calculated_porosity
+                tab.dataset.porosity = calculated_porosity
                 tab.porosity = calculated_porosity
 
                 # Update statistics tab
@@ -1000,6 +1011,7 @@ class PorosityDialog(FramelessDialogBase):
                         tab = self.main_window.dataset_tabs_widget.widget(i)
                         if hasattr(tab, 'dataset') and tab.dataset.sample_name == dataset_name:
                             tab.dataset.current_porosity = new_porosity
+                            tab.dataset.porosity = new_porosity
                             tab.porosity = new_porosity
 
                             # Update statistics tab
@@ -3221,8 +3233,19 @@ class ControlPanel(QFrame):
         # Calculated porosity hint
         calc_por = getattr(dataset, 'calculated_porosity', None)
         if calc_por is not None:
-            hint = QLabel(f"Calculated (Urumovic): {calc_por:.4f}")
+            mode_label = (
+                dataset.calculated_porosity_mode_label()
+                if hasattr(dataset, 'calculated_porosity_mode_label')
+                else "Simple formula"
+            )
+            source_label = (
+                dataset.porosity_source_label()
+                if hasattr(dataset, 'porosity_source_label')
+                else f"Calculated ({mode_label})"
+            )
+            hint = QLabel(f"Auto ({mode_label}): {calc_por:.4f}\nUsing: {source_label}")
             hint.setStyleSheet(f"font-size: {F.SZ_XS}pt; color: {C.SB_MUTED};")
+            hint.setWordWrap(True)
             dlg_v.addWidget(hint)
 
         dlg_v.addSpacing(4)

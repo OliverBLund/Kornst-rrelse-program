@@ -101,6 +101,56 @@ class KAggregationReport:
     complete_methods: frozenset[str] = frozenset()
 
 
+def k_scope_value_series(
+    report: KAggregationReport,
+    *,
+    grouped: Optional[bool] = None,
+    include_overall: bool = True,
+) -> tuple[tuple[str, tuple[float, ...]], ...]:
+    """Return included positive K values by plotted comparison scope.
+
+    The Comparison > Statistics boxplot uses dataset scopes when no named
+    groups exist, and Overall + group scopes when at least one dataset has a
+    named group. Reports and exports should use this helper to match that
+    behavior instead of rebuilding scope membership locally.
+    """
+    use_group_scope = (
+        any(group != UNGROUPED_LABEL for group in report.group_names)
+        if grouped is None
+        else bool(grouped)
+    )
+    included = [
+        record
+        for record in report.included_records
+        if record.positive_value is not None
+    ]
+    series: list[tuple[str, tuple[float, ...]]] = []
+
+    if use_group_scope:
+        if include_overall:
+            series.append((
+                "Overall",
+                tuple(record.positive_value for record in included if record.positive_value is not None),
+            ))
+        for group_name in report.group_names:
+            values = tuple(
+                record.positive_value
+                for record in included
+                if record.group_name == group_name and record.positive_value is not None
+            )
+            series.append((group_name, values))
+        return tuple(series)
+
+    for dataset_name in report.dataset_names:
+        values = tuple(
+            record.positive_value
+            for record in included
+            if record.dataset_name == dataset_name and record.positive_value is not None
+        )
+        series.append((dataset_name, values))
+    return tuple(series)
+
+
 def normalize_group_name(value: object) -> str:
     text = str(value or "").strip()
     return text or UNGROUPED_LABEL
@@ -124,6 +174,13 @@ def _dataset_name(tab: object, dataset: object) -> str:
     if hasattr(tab, "get_dataset_name"):
         return str(tab.get_dataset_name())
     return str(getattr(dataset, "sample_name", "Dataset"))
+
+
+def _group_name(tab: object, dataset: object) -> str:
+    explicit = getattr(tab, "group_name", None)
+    if explicit:
+        return normalize_group_name(explicit)
+    return dataset_group_name(dataset)
 
 
 def _results_from_tab(tab: object) -> Sequence[object]:
@@ -248,7 +305,7 @@ def build_k_aggregation(dataset_tabs: Sequence[object], options: KAggregationOpt
     for tab in dataset_tabs:
         dataset = _dataset_from_tab(tab)
         dataset_name = _dataset_name(tab, dataset)
-        group_name = dataset_group_name(dataset)
+        group_name = _group_name(tab, dataset)
         dataset_names.append(dataset_name)
         group_by_dataset[dataset_name] = group_name
         for result in _results_from_tab(tab):

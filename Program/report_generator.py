@@ -20,7 +20,12 @@ from analysis.comparison_snapshot import (
     build_comparison_snapshot,
 )
 from k_calculations import KCalculationResult
-from k_aggregation import KAggregationOptions, build_k_result_summary
+from k_aggregation import (
+    KAggregationOptions,
+    UNGROUPED_LABEL,
+    build_k_result_summary,
+    k_scope_value_series,
+)
 from grain_classification import (
     ISO14688,
     cu_label as _gc_cu_label,
@@ -517,6 +522,32 @@ class ReportGenerator:
     @staticmethod
     def _esc(value: Any) -> str:
         return escape("" if value is None else str(value), quote=True)
+
+    @staticmethod
+    def _effective_porosity_value(dataset: GrainSizeData) -> Optional[float]:
+        if hasattr(dataset, "effective_porosity"):
+            return dataset.effective_porosity()
+        current = getattr(dataset, "current_porosity", None)
+        if current is not None:
+            return current
+        calculated = getattr(dataset, "calculated_porosity", None)
+        if calculated is not None:
+            return calculated
+        return getattr(dataset, "porosity", None)
+
+    def _porosity_display(self, dataset: GrainSizeData, value: Optional[float] = None) -> str:
+        porosity = self._effective_porosity_value(dataset) if value is None else value
+        if porosity is None:
+            return "N/A"
+        try:
+            return f"{float(porosity):.4f}"
+        except (TypeError, ValueError):
+            return self._esc(porosity)
+
+    def _porosity_source_display(self, dataset: GrainSizeData) -> str:
+        if hasattr(dataset, "porosity_source_label"):
+            return dataset.porosity_source_label()
+        return "Current dataset value"
 
     def _note_html(self, value: Any) -> str:
         return self._esc(value).replace("\n", "<br>")
@@ -1164,11 +1195,17 @@ class ReportGenerator:
         methods = [r.method_name for r in valid_results]
         k_values = [r.k_value for r in valid_results]
         flagged = {r.method_name for r in valid_results if classify_k_status(r) != "OK"}
+        reference_values = [
+            r.k_value
+            for r in valid_results
+            if classify_k_status(r) == "OK"
+        ]
 
         pe = _get_plot_export()
         return pe.export_k_bar_chart(
             methods, k_values,
             flagged_methods=flagged,
+            reference_values=reference_values,
             title="Hydraulic Conductivity Estimates by Method",
         )
 
@@ -1189,6 +1226,50 @@ class ReportGenerator:
         if not k_results_dict:
             return ""
         return _get_plot_export().export_k_boxplot(k_results_dict)
+
+    def _comparison_uses_grouped_k_scope(self, comparison_snapshot) -> bool:
+        return any(group != UNGROUPED_LABEL for group in comparison_snapshot.k.group_names)
+
+    def _k_scope_plot_colors(self, comparison_snapshot, series) -> List[str]:
+        if not self._comparison_uses_grouped_k_scope(comparison_snapshot):
+            return []
+
+        group_colors: Dict[str, str] = {}
+        try:
+            from gui.group_styles import group_color_map
+            group_colors = group_color_map(comparison_snapshot.k.group_names)
+        except Exception:
+            fallback = ("#3a7ea0", "#6b8e23", "#b46428", "#2a9d8f", "#8b4580", "#a03a30")
+            group_colors = {
+                group: fallback[index % len(fallback)]
+                for index, group in enumerate(comparison_snapshot.k.group_names)
+            }
+
+        colors = []
+        for label, _values in series:
+            if label == "Overall":
+                colors.append("#8c6f45")
+            else:
+                colors.append(group_colors.get(label, "#777777"))
+        return colors
+
+    def _create_comparison_k_scope_boxplot(self, comparison_snapshot) -> str:
+        """Create the report K boxplot from the shared comparison aggregation."""
+        series = k_scope_value_series(comparison_snapshot.k)
+        if not any(values for _label, values in series):
+            return ""
+
+        grouped = self._comparison_uses_grouped_k_scope(comparison_snapshot)
+        title = (
+            "Hydraulic Conductivity Distribution by Group"
+            if grouped
+            else "Hydraulic Conductivity Distribution by Dataset"
+        )
+        return _get_plot_export().export_k_scope_boxplot(
+            series,
+            colors=self._k_scope_plot_colors(comparison_snapshot, series),
+            title=title,
+        )
 
     def _create_method_reliability_matrix(self, k_results_dict: Dict[str, List[KCalculationResult]]) -> str:
         """Create method reliability matrix for comparison report."""
@@ -1345,7 +1426,9 @@ class ReportGenerator:
         <div class="metadata-label">Temperature:</div>
         <div class="metadata-value">{dataset.temperature}°C</div>
         <div class="metadata-label">Porosity:</div>
-        <div class="metadata-value">{dataset.porosity}</div>
+        <div class="metadata-value">{self._porosity_display(dataset)}</div>
+        <div class="metadata-label">Porosity Source:</div>
+        <div class="metadata-value">{self._esc(self._porosity_source_display(dataset))}</div>
         <div class="metadata-label">Data Points:</div>
         <div class="metadata-value">{len(dataset.particle_sizes)}</div>
     </div>
@@ -1647,7 +1730,9 @@ class ReportGenerator:
         <div class="metadata-label">Temperature:</div>
         <div class="metadata-value">{temperature}°C</div>
         <div class="metadata-label">Porosity:</div>
-        <div class="metadata-value">{porosity}</div>
+        <div class="metadata-value">{self._porosity_display(dataset, porosity)}</div>
+        <div class="metadata-label">Porosity Source:</div>
+        <div class="metadata-value">{self._esc(self._porosity_source_display(dataset))}</div>
         <div class="metadata-label">Methods Evaluated:</div>
         <div class="metadata-value">{len(k_results)} empirical methods</div>
         <div class="metadata-label">Valid Results:</div>
@@ -1934,6 +2019,7 @@ class ReportGenerator:
                     "label": label,
                     "dataset": dataset,
                     "k_results": list(k_results_dict.get(label, [])),
+                    "group_name": getattr(dataset, "group_name", "Ungrouped"),
                     "temperature": temperature,
                     "porosity": porosity,
                     "plot_context": None,
@@ -1948,6 +2034,7 @@ class ReportGenerator:
                     "label": item.get("label") or dataset.sample_name or f"Sample {index + 1}",
                     "dataset": dataset,
                     "k_results": list(item.get("k_results") or []),
+                    "group_name": item.get("group_name") or getattr(dataset, "group_name", "Ungrouped"),
                     "temperature": item.get("temperature"),
                     "porosity": item.get("porosity"),
                     "plot_context": item.get("plot_context"),
@@ -1965,7 +2052,7 @@ class ReportGenerator:
                 label=str(item["label"]),
                 dataset=item["dataset"],
                 k_results=tuple(item.get("k_results") or ()),
-                group_name=getattr(item["dataset"], "group_name", "Ungrouped"),
+                group_name=item.get("group_name") or getattr(item["dataset"], "group_name", "Ungrouped"),
                 temperature=item.get("temperature"),
                 porosity=item.get("porosity"),
                 plot_context=item.get("plot_context"),
@@ -2125,6 +2212,7 @@ class ReportGenerator:
                 html += f"<h3>Grain Parameters Comparison</h3>{self._create_grain_parameters_comparison_table(datasets, sample_labels)}"
 
             if sections.get('k_statistics', True) and plot_results_dict:
+                html += f"<h3>K-Value Aggregate Summary</h3>{self._create_comparison_k_scope_summary_table(comparison_snapshot)}"
                 html += f"<h3>K-Value Calculations by Dataset and Method</h3>{self._create_comparison_k_statistics_table(plot_results_dict)}"
                 html += f"<h3>Permeability Classification Summary</h3>{self._create_permeability_classification_table(plot_results_dict)}"
 
@@ -2134,6 +2222,8 @@ class ReportGenerator:
             html += f"""
             <div style="page-break-before: auto;">
             <h2>K-Value Results</h2>
+            <h3>K-Value Aggregate Summary</h3>
+            {self._create_comparison_k_scope_summary_table(comparison_snapshot)}
             <h3>K-Value Calculations by Dataset and Method</h3>
             {self._create_comparison_k_statistics_table(plot_results_dict)}
             <h3>Permeability Classification Summary</h3>
@@ -2143,7 +2233,7 @@ class ReportGenerator:
 
         if sections.get('plots', True):
             comparison_plot = self._create_comparison_grain_size_plot(datasets, sample_labels)
-            k_boxplot = self._create_k_value_boxplot(plot_results_dict)
+            k_boxplot = self._create_comparison_k_scope_boxplot(comparison_snapshot)
             reliability_matrix = self._create_method_reliability_matrix(plot_results_dict)
 
             if comparison_plot:
@@ -2365,6 +2455,80 @@ class ReportGenerator:
         html += "</table>"
         return html
 
+    def _create_comparison_k_scope_summary_table(self, comparison_snapshot) -> str:
+        """Generate grouped/dataset K summaries from the shared aggregation snapshot."""
+        k_report = comparison_snapshot.k
+        grouped = self._comparison_uses_grouped_k_scope(comparison_snapshot)
+        rows = [("Overall", k_report.overall)]
+        if grouped:
+            rows.extend(
+                (group_name, k_report.by_group.get(group_name))
+                for group_name in k_report.group_names
+            )
+        else:
+            rows.extend(
+                (dataset_name, k_report.by_dataset.get(dataset_name))
+                for dataset_name in k_report.dataset_names
+            )
+
+        def fmt_k(value):
+            return "N/A" if value is None else f"{value:.2e}"
+
+        def fmt_float(value, precision=2):
+            return "N/A" if value is None else f"{value:.{precision}f}"
+
+        html = """
+        <table>
+            <thead>
+                <tr>
+                    <th>Scope</th>
+                    <th>Datasets</th>
+                    <th>K geometric mean (m/s)</th>
+                    <th>K arithmetic mean (m/s)</th>
+                    <th>K median (m/s)</th>
+                    <th>ln(K) std dev</th>
+                    <th>Included K cells</th>
+                    <th>Warning cells</th>
+                    <th>Permeability class</th>
+                </tr>
+            </thead>
+            <tbody>
+        """
+
+        written = 0
+        for scope_name, stats in rows:
+            if stats is None:
+                continue
+            permeability = (
+                _gc_perm_class(stats.geometric_mean_m_s)
+                if stats.geometric_mean_m_s is not None
+                else "N/A"
+            )
+            html += f"""
+                <tr>
+                    <td><strong>{self._esc(scope_name)}</strong></td>
+                    <td style="text-align: right;">{stats.dataset_count}</td>
+                    <td style="text-align: right;">{fmt_k(stats.geometric_mean_m_s)}</td>
+                    <td style="text-align: right;">{fmt_k(stats.arithmetic_mean_m_s)}</td>
+                    <td style="text-align: right;">{fmt_k(stats.median_m_s)}</td>
+                    <td style="text-align: right;">{fmt_float(stats.ln_std_dev, 3)}</td>
+                    <td style="text-align: center;">{stats.included_count} / {stats.total_cells}</td>
+                    <td style="text-align: center;">{stats.warning_count}</td>
+                    <td>{self._esc(permeability)}</td>
+                </tr>
+            """
+            written += 1
+
+        if written == 0:
+            html += """
+                <tr>
+                    <td colspan="9" style="text-align: center;">No included K-value results available</td>
+                </tr>
+            """
+
+        html += "</tbody></table>"
+        return html
+
     def _create_comparison_k_statistics_table(self, k_results_dict: Dict[str, List[KCalculationResult]]) -> str:
         """Generate a multi-sample table with one row per K method result."""
         html = """
@@ -2491,6 +2655,85 @@ class ReportGenerator:
     def _create_grain_parameters_comparison_table(self, datasets: List[GrainSizeData],
                                                   sample_labels: Optional[List[str]] = None) -> str:
         """Generate HTML comparison table with color-coded cells showing D10, D50, D60, Cu, Cc for all samples"""
+        labels = sample_labels or [dataset.sample_name for dataset in datasets]
+        param_specs = [
+            ("D10 (mm)", lambda ds: ds.get_d10(), ".3f"),
+            ("D50 (mm)", lambda ds: ds.get_d50(), ".3f"),
+            ("D60 (mm)", lambda ds: ds.get_d60(), ".3f"),
+            ("Cu", lambda ds: ds.get_uniformity_coefficient(), ".2f"),
+            ("Cc", lambda ds: ds.get_coefficient_of_curvature(), ".2f"),
+        ]
+
+        def fmt_value(value: Optional[float], fmt: str) -> str:
+            return "-" if value is None else format(value, fmt)
+
+        values_by_param = []
+        for param, getter, fmt in param_specs:
+            values = []
+            for dataset in datasets:
+                try:
+                    values.append(getter(dataset))
+                except Exception:
+                    values.append(None)
+            valid_values = [v for v in values if v is not None]
+            if valid_values:
+                mean = float(np.mean(valid_values))
+                std = float(np.std(valid_values))
+                summary = f"Mean: {format(mean, fmt)}<br>Std: {format(std, fmt)}"
+            else:
+                summary = "-"
+            values_by_param.append((param, fmt, values, summary))
+
+        if len(datasets) > 6:
+            html = """
+            <table class="table-compact">
+                <thead>
+                    <tr>
+                        <th>Parameter</th>
+                        <th>Sample</th>
+                        <th>Value</th>
+                    </tr>
+                </thead>
+                <tbody>
+            """
+            for param, fmt, values, summary in values_by_param:
+                for label, value in zip(labels, values):
+                    html += f"""
+                    <tr>
+                        <td><strong>{self._esc(param)}</strong></td>
+                        <td>{self._esc(label)}</td>
+                        <td style="text-align: right;">{self._esc(fmt_value(value, fmt))}</td>
+                    </tr>
+                    """
+                html += f"""
+                <tr>
+                    <td><strong>{self._esc(param)} summary</strong></td>
+                    <td>Included samples</td>
+                    <td style="text-align: right;">{summary}</td>
+                </tr>
+                """
+            html += "</tbody></table>"
+            return html
+
+        html = """
+        <table class="table-compact table-wide">
+            <thead>
+                <tr>
+                    <th>Parameter</th>
+        """
+        for label in labels:
+            html += f"<th>{self._esc(label)}</th>"
+        html += "<th>Statistics</th></tr></thead><tbody>"
+
+        for param, fmt, values, summary in values_by_param:
+            html += f"<tr><td style='font-weight: bold;'>{self._esc(param)}</td>"
+            for value in values:
+                html += f"<td style='text-align: center;'>{self._esc(fmt_value(value, fmt))}</td>"
+            html += f"<td style='text-align: center; font-size: 9pt;'>{summary}</td></tr>"
+
+        html += "</tbody></table>"
+        return html
+
         html = """
         <table class="table-compact table-wide">
             <thead>

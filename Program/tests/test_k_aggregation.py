@@ -12,6 +12,7 @@ from k_aggregation import (
     build_k_aggregation,
     build_k_result_summary,
     dataset_group_name,
+    k_scope_value_series,
 )
 from k_calculations_v2 import CalculationStatus, KCalculationResult
 
@@ -114,6 +115,26 @@ class TestKAggregation(unittest.TestCase):
         self.assertEqual(report.by_group["Layer 1"].included_count, 1)
         self.assertEqual(report.by_group["Layer 2"].included_count, 2)
         self.assertEqual(dataset_group_name(SimpleNamespace()), "Ungrouped")
+
+    def test_scope_series_uses_overall_and_groups_when_groups_exist(self):
+        report = build_k_aggregation(self.tabs)
+
+        series = k_scope_value_series(report)
+
+        self.assertEqual([label for label, _values in series], ["Overall", "Layer 1", "Layer 2"])
+        self.assertEqual([len(values) for _label, values in series], [3, 1, 2])
+
+    def test_explicit_input_group_name_overrides_dataset_metadata(self):
+        tab = SimpleNamespace(
+            dataset=SimpleNamespace(sample_name="Sample C", group_name="Dataset group"),
+            group_name="Input group",
+            current_results=[result("Hazen", 1.0e-4)],
+        )
+
+        report = build_k_aggregation([tab])
+
+        self.assertEqual(report.group_names, ("Input group",))
+        self.assertIn("Input group", report.by_group)
 
     def test_single_result_summary_uses_same_ok_only_policy(self):
         results = [

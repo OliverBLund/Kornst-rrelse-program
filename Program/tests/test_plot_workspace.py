@@ -344,6 +344,21 @@ class TestPlotWorkspaceWiring(unittest.TestCase):
         self.assertTrue(any(label.startswith('Arithmetic mean:') for label in labels))
         self.assertTrue(any(label.startswith('Geometric mean:') for label in labels))
 
+    def test_k_value_plot_mean_lines_exclude_flagged_methods(self):
+        self.workspace.add_k_results(
+            {'Hazen': 1.0e-4, 'Kruger': 1.0e-2},
+            flagged_methods={'Kruger'},
+        )
+        self.workspace.current_plot_type = 'k-values'
+
+        self.workspace.refresh_plot()
+
+        labels = self.workspace.plot_widget.current_ax.get_legend_handles_labels()[1]
+        self.assertIn('Arithmetic mean: 8.64e+00', labels)
+        self.assertIn('Geometric mean: 8.64e+00', labels)
+        self.assertFalse(any('4.36e+02' in label for label in labels))
+        self.assertFalse(any('8.64e+01' in label for label in labels))
+
     def test_k_value_label_toggle_hides_bar_value_labels(self):
         self.workspace.add_k_results({'Hazen': 1.0e-4, 'Beyer': 1.5e-4})
         self.workspace.current_plot_type = 'k-values'

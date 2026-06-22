@@ -12,7 +12,12 @@ from matplotlib.figure import Figure
 
 from data_loader import GrainSizeData
 from k_calculations_v2 import KCalculationResult
-from k_aggregation import KAggregationOptions, build_k_result_summary
+from analysis.comparison_snapshot import (
+    ComparisonSnapshotOptions,
+    DatasetAnalysisInput,
+    build_comparison_snapshot,
+)
+from k_aggregation import KAggregationOptions, build_k_result_summary, k_scope_value_series
 from grain_classification import ISO14688
 from method_registry import DEFAULT_METHOD_ORDER, METHOD_CATEGORY_MAP, ordered_methods
 from .plot_renderers import (
@@ -21,8 +26,8 @@ from .plot_renderers import (
     render_distribution_overlay,
     render_grain_size_distribution,
     render_k_bar_chart,
-    render_k_boxplot,
     render_k_overlay,
+    render_k_scope_boxplot,
     render_reliability_matrix,
 )
 from .plot_context import (
@@ -142,6 +147,23 @@ class ExportManager:
             return get_percentile(percentile_num)
         return None
 
+    def _effective_porosity(self, dataset: GrainSizeData) -> Optional[float]:
+        """Return the porosity value used by calculations."""
+        if hasattr(dataset, 'effective_porosity'):
+            return dataset.effective_porosity()
+        current = getattr(dataset, 'current_porosity', None)
+        if current is not None:
+            return current
+        calculated = getattr(dataset, 'calculated_porosity', None)
+        if calculated is not None:
+            return calculated
+        return getattr(dataset, 'porosity', None)
+
+    def _porosity_source_label(self, dataset: GrainSizeData) -> str:
+        if hasattr(dataset, 'porosity_source_label'):
+            return dataset.porosity_source_label()
+        return "Current dataset value"
+
     def _format_converted_value(self, k_value: float, unit_spec: tuple) -> str:
         """Format a conductivity value in the requested unit."""
         _, _, _, _, multiplier, fmt = unit_spec
@@ -175,6 +197,51 @@ class ExportManager:
             return filtered
         return [result for result in filtered if result.method_name in selected]
 
+    def _k_aggregation_options(self, config: Dict) -> KAggregationOptions:
+        """Build shared K aggregation options from export settings."""
+        return KAggregationOptions.from_methods(
+            self._selected_method_names(config),
+            include_warnings=bool(config.get('include_warning_k_statistics', False)),
+            include_errors=bool(config.get('include_error_k_statistics', False)),
+            method_order=tuple(self.DEFAULT_METHOD_ORDER),
+        )
+
+    def _build_comparison_snapshot_for_export(self, datasets: List[tuple], config: Dict):
+        inputs = [
+            DatasetAnalysisInput(
+                label=str(name),
+                dataset=dataset,
+                k_results=tuple(results or ()),
+                group_name=getattr(dataset, 'group_name', 'Ungrouped'),
+            )
+            for name, dataset, results in datasets
+        ]
+        return build_comparison_snapshot(
+            inputs,
+            ComparisonSnapshotOptions(
+                k_options=self._k_aggregation_options(config),
+                classification_scheme=self._scheme,
+            ),
+        )
+
+    def _k_scope_plot_colors(self, snapshot, series) -> List[str]:
+        uses_group_scope = any(group != 'Ungrouped' for group in snapshot.k.group_names)
+        if not uses_group_scope:
+            return []
+        try:
+            from .group_styles import group_color_map
+            group_colors = group_color_map(snapshot.k.group_names)
+        except Exception:
+            fallback = ("#3a7ea0", "#6b8e23", "#b46428", "#2a9d8f", "#8b4580", "#a03a30")
+            group_colors = {
+                group: fallback[index % len(fallback)]
+                for index, group in enumerate(snapshot.k.group_names)
+            }
+        return [
+            "#8c6f45" if label == "Overall" else group_colors.get(label, "#777777")
+            for label, _values in series
+        ]
+
     def _collect_method_names(self, datasets: List[tuple], config: Dict) -> List[str]:
         """Collect method names visible in the current export selection."""
         method_names = []
@@ -204,11 +271,7 @@ class ExportManager:
         filtered_results = self._filter_results(results, config)
         summary = build_k_result_summary(
             filtered_results,
-            KAggregationOptions(
-                include_warnings=bool(config.get('include_warning_k_statistics', False)),
-                include_errors=bool(config.get('include_error_k_statistics', False)),
-                method_order=tuple(self.DEFAULT_METHOD_ORDER),
-            ),
+            self._k_aggregation_options(config),
         )
 
         if summary.geometric_mean_m_s is None:
@@ -235,7 +298,7 @@ class ExportManager:
     ) -> None:
         """Append non-method dataset columns shared by CSV Long and Wide."""
         if include_environmental:
-            row.extend([dataset.temperature, dataset.current_porosity or dataset.porosity])
+            row.extend([dataset.temperature, self._effective_porosity(dataset)])
 
         for _key, _label, percentile_num in percentile_specs:
             value = self._percentile_value(dataset, percentile_num)
@@ -373,7 +436,7 @@ class ExportManager:
 
             row = [name]
             if include_environmental:
-                row.extend([dataset.temperature, dataset.current_porosity or dataset.porosity])
+                row.extend([dataset.temperature, self._effective_porosity(dataset)])
 
             for _key, _label, percentile_num in percentile_specs:
                 value = self._percentile_value(dataset, percentile_num)
@@ -587,12 +650,20 @@ class ExportManager:
             if not getattr(result, 'conditions_met', True)
             or getattr(getattr(result, 'status', None), 'name', 'OK') != 'OK'
         }
+        reference_values = [
+            result.k_value
+            for result in filtered_results
+            if result.method_name not in flagged_methods
+            and result.k_value is not None
+            and result.k_value > 0
+        ]
 
         render_k_bar_chart(
             ax,
             methods,
             k_values,
             flagged_methods=flagged_methods,
+            reference_values=reference_values,
             style=style,
             show_grid=config.get('plot_include_grid', True),
             show_legend=config.get('plot_include_legend', True),
@@ -679,11 +750,20 @@ class ExportManager:
             return figure
 
         if plot_type == 'statistical_boxplots':
-            render_k_boxplot(
+            snapshot = self._build_comparison_snapshot_for_export(datasets, config)
+            series = k_scope_value_series(snapshot.k)
+            uses_group_scope = any(group != 'Ungrouped' for group in snapshot.k.group_names)
+            render_k_scope_boxplot(
                 ax,
-                {name: self._filter_results(results, config) for name, _, results in datasets},
+                series,
+                colors=self._k_scope_plot_colors(snapshot, series),
                 style=style,
                 show_grid=config.get('plot_include_grid', True),
+                title=(
+                    "Hydraulic Conductivity Distribution by Group"
+                    if uses_group_scope
+                    else "Hydraulic Conductivity Distribution by Dataset"
+                ),
             )
             figure.tight_layout()
             return figure
@@ -1057,7 +1137,7 @@ class ExportManager:
                 # Sample info
                 row.append(name)
                 row.append(dataset.temperature)
-                row.append(dataset.current_porosity or dataset.porosity)
+                row.append(self._effective_porosity(dataset))
 
                 # Grain size percentiles - only selected ones
                 for p_key in selected_percentiles:
@@ -1221,7 +1301,8 @@ class ExportManager:
             writer.writerow(['Parameter', 'Value'])
             writer.writerow(['Sample Name', dataset.sample_name])
             writer.writerow(['Temperature (°C)', dataset.temperature])
-            writer.writerow(['Porosity', dataset.current_porosity or dataset.porosity])
+            writer.writerow(['Porosity', self._effective_porosity(dataset)])
+            writer.writerow(['Porosity Source', self._porosity_source_label(dataset)])
             writer.writerow([])
 
             # Grain Size Percentiles
@@ -1374,7 +1455,8 @@ class ExportManager:
                     writer.writerow(['Sample Name', dataset.sample_name])
                 if include_environmental:
                     writer.writerow(['Temperature (C)', dataset.temperature])
-                    writer.writerow(['Porosity', dataset.current_porosity or dataset.porosity])
+                    writer.writerow(['Porosity', self._effective_porosity(dataset)])
+                    writer.writerow(['Porosity Source', self._porosity_source_label(dataset)])
                 if include_timestamp:
                     writer.writerow(['Export Timestamp', self._get_export_timestamp(config)])
                 writer.writerow([])
@@ -1567,7 +1649,12 @@ class ExportManager:
         row += 1
 
         ws[f'A{row}'] = 'Porosity:'
-        ws[f'B{row}'] = dataset.current_porosity or dataset.porosity
+        ws[f'B{row}'] = self._effective_porosity(dataset)
+        ws[f'A{row}'].font = Font(bold=True)
+        row += 1
+
+        ws[f'A{row}'] = 'Porosity Source:'
+        ws[f'B{row}'] = self._porosity_source_label(dataset)
         ws[f'A{row}'].font = Font(bold=True)
         row += 2
 
@@ -1935,7 +2022,8 @@ class ExportManager:
             'sample_name': name,
             'metadata': {
                 'temperature': dataset.temperature,
-                'porosity': dataset.current_porosity or dataset.porosity,
+                'porosity': self._effective_porosity(dataset),
+                'porosity_source': self._porosity_source_label(dataset),
                 'file_path': dataset.file_path if hasattr(dataset, 'file_path') else None,
             }
         }
@@ -2048,7 +2136,12 @@ class ExportManager:
             row += 1
 
             ws[f'A{row}'] = 'Porosity:'
-            ws[f'B{row}'] = dataset.current_porosity or dataset.porosity
+            ws[f'B{row}'] = self._effective_porosity(dataset)
+            ws[f'A{row}'].font = Font(bold=True)
+            row += 1
+
+            ws[f'A{row}'] = 'Porosity Source:'
+            ws[f'B{row}'] = self._porosity_source_label(dataset)
             ws[f'A{row}'].font = Font(bold=True)
             row += 1
 
@@ -2271,7 +2364,8 @@ class ExportManager:
             metadata['file_path'] = dataset.file_path
         if self._metadata_enabled(config, 'environmental'):
             metadata['temperature'] = dataset.temperature
-            metadata['porosity'] = dataset.current_porosity or dataset.porosity
+            metadata['porosity'] = self._effective_porosity(dataset)
+            metadata['porosity_source'] = self._porosity_source_label(dataset)
         if self._metadata_enabled(config, 'export_timestamp'):
             metadata['exported_at'] = self._get_export_timestamp(config)
         if metadata:

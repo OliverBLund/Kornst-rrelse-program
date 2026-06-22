@@ -1,6 +1,6 @@
 # GrainSize Analysis - Pre-QA Roadmap
 
-Last updated: 2026-06-17
+Last updated: 2026-06-22
 
 Goal: get the program stable enough for the next tester round and then produce a release-candidate `.exe`. This roadmap is intentionally focused on remaining release work, not future feature ideas.
 
@@ -19,22 +19,46 @@ Goal: get the program stable enough for the next tester round and then produce a
 
 ## P0 - Correctness And Release Blockers
 
-- [ ] Verify data loading end-to-end for processed CSV, raw sieve CSV, processed Excel, raw sieve Excel, irregular Excel mapper, and multisheet Excel.
-- [ ] Verify wrong-mode imports clearly report how the data was actually interpreted.
-- [ ] Confirm calculated K geometric mean and arithmetic mean match HydrogeoSieveXL2 expectations for the demo/test datasets.
-- [ ] Confirm warning/error K-method inclusion rules are identical everywhere: Results, Details, Statistics, Comparison plots, Reports, and Export.
-- [ ] Verify aggregate K statistics use the shared backend aggregation model, not UI-local recalculation.
-- [ ] Verify grouped aggregate statistics use the same backend model as overall aggregate statistics.
-- [ ] Fix or explicitly document the calculated porosity workflow:
+- [x] Verify data loading end-to-end for processed CSV, raw sieve CSV, processed Excel, raw sieve Excel, irregular Excel mapper, and multisheet Excel.
+  - Covered by `Program.tests.test_load_process_worker`, `Program.tests.test_column_mapper`, and focused multisheet/remap tests in `Program.tests.test_remap_replacement`.
+  - Added direct worker coverage for processed CSV batch import and raw-sieve CSV import from a stored mapper state.
+- [x] Verify wrong-mode imports clearly report how the data was actually interpreted.
+  - Covered by worker tests for processed intent loading raw-sieve data and raw intent falling back to processed-curve data, including activity-log warning context.
+- [x] Confirm calculated K geometric mean and arithmetic mean match HydrogeoSieveXL2 expectations for the demo/test datasets.
+  - Verified with `python -B Program/test_k_calculations.py --unittest`.
+  - Covers per-method reference values, DATASET_2 warning parity, and OK-only GEOMEAN/AVERAGE summaries.
+- [x] Confirm warning/error K-method inclusion rules are identical everywhere: Results, Details, Statistics, Comparison plots, Reports, and Export.
+  - Shared OK-only K summaries are covered by `Program.tests.test_k_aggregation`, `Program.tests.test_dataset_tab`, `Program.tests.test_comparison_tab`, `Program.tests.test_report_generator`, and `Program.tests.test_export_manager`.
+  - Single-sample K plot mean reference lines and report/export K bar reference lines now use OK-only values while still showing warning/error bars as flagged.
+  - K boxplots now exclude warning/error method values; reliability/applicability plots still show warning/error status explicitly.
+- [x] Verify aggregate K statistics use the shared backend aggregation model, not UI-local recalculation.
+  - `k_aggregation.py` remains the K aggregation source of truth for per-dataset, overall, group, and method summaries.
+  - Comparison Details/Statistics read from `build_comparison_snapshot()` / `build_k_aggregation()`; per-dataset K summary rows now use `aggregation.by_dataset` instead of recomputing from included records in the UI.
+- [x] Verify grouped aggregate statistics use the same backend model as overall aggregate statistics.
+  - Group aggregates are built in the same `build_k_aggregation()` pass as overall aggregates and are exercised by comparison snapshot/tab tests.
+- [x] Fix or explicitly document the calculated porosity workflow:
   - Decide whether both "Simple Formula" and "Urumovic Polynomial" should remain visible.
   - Make the default and impact on K calculations clear.
   - Confirm report/export include the porosity value actually used for calculations.
-- [ ] Audit generated reports for correctness:
+  - Both automatic formulas remain available. New datasets default to Simple Formula (Excel Compatible); switching to Urumovic Polynomial preserves manual overrides.
+  - `GrainSizeData.effective_porosity()` and `porosity_source_label()` now provide the shared value/source used by UI, reports, and exports.
+  - Reports and metadata-style exports show the effective porosity plus whether it is calculated or manually overridden.
+  - Covered by `Program.tests.test_porosity_mode`, `Program.tests.test_porosity_dialog`, `Program.tests.test_report_generator`, `Program.tests.test_export_manager`, and `Program.tests.test_load_process_worker`.
+- [x] Audit generated reports for correctness:
   - Tables do not go off page.
   - Report plots match the same renderers/settings used in the app where possible.
   - No stray page-number text appears.
   - Report generation works repeatedly in the same session.
-- [ ] Verify export outputs include the exact visible plot/table data where relevant, especially single-plot and comparison-plot table drawers.
+  - Grain-parameter comparison tables now switch to a long, page-safe layout when more than six datasets are included.
+  - Grain distribution report plots already use the shared `plot_export` context path; K/report comparison plots are routed through shared plot export helpers.
+  - Comparison K boxplots in reports/exports now use the same grouped/dataset K scope series as Comparison > Statistics.
+  - Comparison reports now include a K-value aggregate summary table for Overall + Groups, or Overall + Datasets when no groups exist.
+  - Added regression coverage for no literal `Page #` output and repeat generation on the same `ReportGenerator`.
+- [x] Verify export outputs include the exact visible plot/table data where relevant, especially single-plot and comparison-plot table drawers.
+  - Single-sample drawers already export the active drawer rows; covered for K-values and histogram retained-percent data in `Program.tests.test_plot_workspace`.
+  - Comparison distribution drawers now expose/export plotted curve points (`Dataset`, `Particle size`, `% passing`) instead of a generic grain summary.
+  - Comparison histogram drawers now expose/export plotted size-class retained weights (`Dataset`, `Size class`, `Particle size`, `Weight %`).
+  - Covered by `Program.tests.test_comparison_plot_widget`.
 
 ## P1 - UI/UX Hardening Before Final QA
 
@@ -163,16 +187,15 @@ Goal: get the program stable enough for the next tester round and then produce a
 
 ## Next Immediate Task
 
-Details and Statistics sidebars have passed manual QA. Next, continue the remaining P0/P1 release checks, especially plots, reports, export, porosity behavior, and end-to-end data-loading verification.
+P0 correctness/release-blocker items are complete. Start P1 with UI hardening and plot behavior:
 
+1. Review the main sidebar Samples section sizing on small and normal screens.
+2. Recheck plot sidebars and drawer behavior across common screen sizes.
+3. Continue the P1 plot audit: distribution curve defaults, K-value bar plot clarity, grain-size histogram labels/data, and comparison plot group/aggregate behavior.
+4. Continue Reports/Export P1 review for group scope, selected methods, and unit handling.
 
-Make sure export / report respects groups, chosen methods etc
-Units in statistics table don’t seem to work
-
-Finish the “Help” dialog and read it through.
-Ensure references to articles for individual methods etc are correct
-Lognormal fordeling plot fra Poul powerpoint
-Fix program header resizing on one click
-
-Next step: 
-Per Loll kan måske teste og finde folk der kan teste?
+Open notes still to fold into P1/P2:
+- Units in the Statistics table may not update correctly.
+- Finish and proofread the Help dialog.
+- Verify method article references.
+- Add/finish the lognormal K distribution plot from Poul's notes.

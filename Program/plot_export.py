@@ -36,6 +36,7 @@ render_k_bar_chart             = _renderers.render_k_bar_chart
 render_distribution_overlay    = _renderers.render_distribution_overlay
 render_k_overlay               = _renderers.render_k_overlay
 render_k_boxplot               = _renderers.render_k_boxplot
+render_k_scope_boxplot         = _renderers.render_k_scope_boxplot
 render_applicability_heatmap   = _renderers.render_applicability_heatmap
 render_reliability_matrix      = _renderers.render_reliability_matrix
 apply_legend_aware_layout      = _renderers.apply_legend_aware_layout
@@ -132,6 +133,7 @@ def export_k_bar_chart(
     k_values: list[float],
     *,
     flagged_methods: Set[str] = frozenset(),
+    reference_values: Optional[list[float]] = None,
     style: PlotStyle = PROFESSIONAL_STYLE,
     figsize: tuple[float, float] = (12, 6),
     dpi: int = 150,
@@ -151,6 +153,7 @@ def export_k_bar_chart(
     render_k_bar_chart(
         ax, methods, k_values,
         flagged_methods=flagged_methods,
+        reference_values=reference_values,
         style=style,
         show_grid=show_grid,
         show_legend=show_legend,
@@ -255,6 +258,33 @@ def export_k_boxplot(
 
 
 # ── Single-sample applicability heatmap ──────────────────────
+
+def export_k_scope_boxplot(
+    scope_values,
+    *,
+    colors: Optional[List[str]] = None,
+    style: PlotStyle = PROFESSIONAL_STYLE,
+    figsize: tuple[float, float] = (12, 7),
+    dpi: int = 150,
+    show_grid: bool = True,
+    title: str = "Hydraulic Conductivity Distribution by Scope",
+) -> str:
+    """Return a base64-encoded PNG of grouped/dataset K-value boxplots."""
+    apply_matplotlib_style()
+    fig, ax = plt.subplots(figsize=figsize)
+
+    render_k_scope_boxplot(
+        ax,
+        scope_values,
+        colors=colors,
+        style=style,
+        show_grid=show_grid,
+        title=title,
+    )
+
+    fig.tight_layout()
+    return _fig_to_base64(fig, dpi=dpi)
+
 
 def export_applicability_heatmap(
     k_results: list,

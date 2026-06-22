@@ -14,7 +14,7 @@ from __future__ import annotations
 
 import math
 import warnings
-from typing import Dict, List, Optional, Sequence, Set
+from typing import Dict, List, Mapping, Optional, Sequence, Set
 
 import numpy as np
 from matplotlib.axes import Axes
@@ -145,6 +145,7 @@ def render_k_bar_chart(
     k_values: Sequence[float],
     *,
     flagged_methods: Set[str] = frozenset(),
+    reference_values: Optional[Sequence[float]] = None,
     style: PlotStyle = PROFESSIONAL_STYLE,
     show_grid: bool = True,
     show_legend: bool = True,
@@ -160,7 +161,9 @@ def render_k_bar_chart(
     """Draw a K-value bar chart on *ax*.
 
     *methods* and *k_values* must be parallel sequences (already
-    converted to display units if required).
+    converted to display units if required).  ``reference_values`` can be used
+    for the OK-only population behind the mean reference lines while still
+    drawing warning/error bars in the chart.
     """
     if not methods:
         return
@@ -211,7 +214,8 @@ def render_k_bar_chart(
                 linewidth=style.grid_linewidth)
 
     # Reference lines ─────────────────────────────────────────────
-    positive = [v for v in k_values if v and v > 0]
+    reference_source = k_values if reference_values is None else reference_values
+    positive = [v for v in reference_source if v and v > 0]
     if show_reference_lines and positive:
         arithmetic_mean = float(np.mean(positive))
         geometric_mean = float(np.exp(np.mean(np.log(positive))))
@@ -505,7 +509,13 @@ def render_k_boxplot(
     labels: list[str] = []
 
     for sample_name, results in k_results_dict.items():
-        k_vals = [r.k_value for r in results if r.k_value is not None and r.k_value > 0]
+        k_vals = [
+            r.k_value
+            for r in results
+            if r.k_value is not None
+            and r.k_value > 0
+            and classify_k_status(r) == "OK"
+        ]
         if k_vals:
             data_for_plot.append(k_vals)
             labels.append(sample_name)
@@ -544,6 +554,90 @@ def render_k_boxplot(
 # ═══════════════════════════════════════════════════════════════════
 # Applicability heatmap (single sample)
 # ═══════════════════════════════════════════════════════════════════
+
+def render_k_scope_boxplot(
+    ax: Axes,
+    scope_values: Mapping[str, Sequence[float]] | Sequence[tuple[str, Sequence[float]]],
+    *,
+    colors: Optional[Sequence[str]] = None,
+    style: PlotStyle = PROFESSIONAL_STYLE,
+    show_grid: bool = True,
+    title: str = "Hydraulic Conductivity Distribution by Scope",
+    x_label: str = "Scope",
+    y_label: str = "Hydraulic Conductivity (m/s)",
+) -> None:
+    """Draw K-value boxplots from pre-aggregated comparison scopes."""
+    raw_items = list(scope_values.items()) if isinstance(scope_values, Mapping) else list(scope_values)
+
+    data_for_plot: list[list[float]] = []
+    labels: list[str] = []
+    plot_colors: list[str] = []
+    color_list = list(colors or [])
+
+    for index, (label, values) in enumerate(raw_items):
+        clean_values = []
+        for value in values or []:
+            try:
+                numeric = float(value)
+            except (TypeError, ValueError):
+                continue
+            if np.isfinite(numeric) and numeric > 0:
+                clean_values.append(numeric)
+        if not clean_values:
+            continue
+        labels.append(str(label))
+        data_for_plot.append(clean_values)
+        if index < len(color_list):
+            plot_colors.append(color_list[index])
+        else:
+            plot_colors.append(DATASET_COLORS[len(plot_colors) % len(DATASET_COLORS)])
+
+    if not data_for_plot:
+        return
+
+    edge_color = getattr(style, "legend_edgecolor", "#777777")
+    muted_color = "#777777"
+    boxplot_kwargs = dict(
+        patch_artist=True,
+        showmeans=True,
+        meanline=True,
+        medianprops=dict(color=style.d10_color, linewidth=2),
+        meanprops=dict(color=style.d30_color, linewidth=2, linestyle="--"),
+        whiskerprops=dict(color=edge_color, linewidth=1.1),
+        capprops=dict(color=edge_color, linewidth=1.1),
+        flierprops=dict(
+            marker="o",
+            markersize=3,
+            markerfacecolor=muted_color,
+            markeredgecolor=muted_color,
+            alpha=0.45,
+        ),
+    )
+    try:
+        box_artists = ax.boxplot(data_for_plot, tick_labels=labels, **boxplot_kwargs)
+    except TypeError:
+        box_artists = ax.boxplot(data_for_plot, labels=labels, **boxplot_kwargs)
+
+    for patch, color in zip(box_artists.get("boxes", []), plot_colors):
+        patch.set_facecolor(color)
+        patch.set_edgecolor(color)
+        patch.set_alpha(0.45)
+
+    ax.set_yscale("log")
+    ax.set_ylabel(y_label, fontsize=style.label_fontsize, fontfamily=style.font_family)
+    ax.set_xlabel(x_label, fontsize=style.label_fontsize, fontfamily=style.font_family)
+    ax.set_title(
+        title,
+        fontsize=style.title_fontsize,
+        fontweight=style.title_fontweight,
+        fontfamily=style.font_family,
+    )
+
+    if show_grid:
+        ax.grid(True, axis="y", alpha=0.3, linestyle="--")
+    if len(labels) > 5 or any(len(label) > 14 for label in labels):
+        ax.set_xticklabels(labels, rotation=35, ha="right", fontsize=style.tick_fontsize)
+
 
 def render_applicability_heatmap(
     ax: Axes,

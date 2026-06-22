@@ -50,19 +50,23 @@ class GrainSizeData:
     """Data class for grain size distribution data"""
     sample_name: str
     temperature: float
-    porosity: float  # Will be replaced by calculated_porosity
+    porosity: float  # Imported/default value; current_porosity is used for K calculations
     particle_sizes: List[float]  # mm
     percent_passing: List[float]  # %
     comments: Optional[str] = None
     file_path: Optional[str] = None
     validation_messages: List[ValidationMessage] = field(default_factory=list)
-    calculated_porosity: Optional[float] = field(default=None)  # Urumovic calculation
+    calculated_porosity: Optional[float] = field(default=None)  # Automatic calculation
     current_porosity: Optional[float] = field(default=None)  # User can override this
+    calculated_porosity_mode: str = field(default="simple")  # simple or urumovic
     group_name: str = "Ungrouped"  # Optional comparison/report grouping label
 
     def __post_init__(self):
         """Validate data after initialization"""
         self.group_name = str(self.group_name or "Ungrouped").strip() or "Ungrouped"
+        self.calculated_porosity_mode = self._normalize_porosity_mode(
+            self.calculated_porosity_mode
+        )
 
         if len(self.particle_sizes) != len(self.percent_passing):
             raise ValueError("Particle sizes and percent passing must have same length")
@@ -150,8 +154,9 @@ class GrainSizeData:
                 impact="Used directly in some hydraulic conductivity formulas"
             ))
 
-        # Calculate porosity using simple Excel formula by default
+        # Calculate porosity using simple Excel-compatible formula by default.
         self.calculated_porosity = self._calculate_simple_porosity()
+        self.calculated_porosity_mode = "simple"
 
         # Set current porosity to calculated value (can be overridden by user)
         if self.current_porosity is None:
@@ -418,6 +423,45 @@ class GrainSizeData:
         """
         return self.classify().label
 
+    @staticmethod
+    def _normalize_porosity_mode(mode: Optional[str]) -> str:
+        """Normalize porosity mode labels from UI/storage into stable keys."""
+        mode_text = str(mode or "simple").strip().lower()
+        if "urumovic" in mode_text:
+            return "urumovic"
+        return "simple"
+
+    def calculated_porosity_mode_label(self) -> str:
+        """Human-readable label for the current automatic porosity formula."""
+        if self._normalize_porosity_mode(self.calculated_porosity_mode) == "urumovic":
+            return "Urumovic polynomial"
+        return "Simple formula"
+
+    def effective_porosity(self) -> Optional[float]:
+        """Return the porosity value used for K calculations."""
+        if self.current_porosity is not None:
+            return self.current_porosity
+        if self.calculated_porosity is not None:
+            return self.calculated_porosity
+        return self.porosity
+
+    def has_manual_porosity_override(self, tolerance: float = 1e-9) -> bool:
+        """Return True when current porosity differs from the automatic value."""
+        if self.current_porosity is None:
+            return False
+        if self.calculated_porosity is None:
+            return True
+        return abs(float(self.current_porosity) - float(self.calculated_porosity)) > tolerance
+
+    def porosity_source_label(self) -> str:
+        """Describe how the effective porosity value was obtained."""
+        if self.calculated_porosity is None:
+            return "Imported/default value"
+        mode_label = self.calculated_porosity_mode_label()
+        if self.has_manual_porosity_override():
+            return f"Manual override (auto {mode_label}: {self.calculated_porosity:.4f})"
+        return f"Calculated ({mode_label})"
+
     def _calculate_simple_porosity(self) -> Optional[float]:
         """
         Calculate porosity using simple Excel formula
@@ -468,6 +512,7 @@ class GrainSizeData:
         preserve_manual_override: bool = True,
     ) -> Optional[float]:
         """Recalculate automatic porosity while respecting manual overrides."""
+        mode = self._normalize_porosity_mode(mode)
         old_calculated = self.calculated_porosity
         old_current = self.current_porosity
 
@@ -479,6 +524,7 @@ class GrainSizeData:
             raise ValueError(f"Unknown porosity mode: {mode}")
 
         self.calculated_porosity = new_porosity
+        self.calculated_porosity_mode = mode
 
         if old_current is None:
             should_apply_to_current = True
@@ -1079,7 +1125,10 @@ class DataLoader:
         summary = {
             'sample_name': dataset.sample_name,
             'temperature': dataset.temperature,
-            'porosity': dataset.porosity,
+            'porosity': dataset.effective_porosity()
+                if hasattr(dataset, "effective_porosity") else dataset.porosity,
+            'porosity_source': dataset.porosity_source_label()
+                if hasattr(dataset, "porosity_source_label") else "Current dataset value",
             'data_points': len(dataset.particle_sizes),
             'size_range': (min(dataset.particle_sizes), max(dataset.particle_sizes)),
             'percent_range': (min(dataset.percent_passing), max(dataset.percent_passing)),

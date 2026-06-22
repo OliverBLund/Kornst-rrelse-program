@@ -114,6 +114,97 @@ class TestLoadProcessWorker(unittest.TestCase):
         self.assertTrue(dataset._precomputed_k_results)
         self.assertTrue(all(result.temperature == 12.5 for result in dataset._precomputed_k_results))
 
+    def test_batch_import_loads_processed_csv_through_standard_loader(self):
+        with tempfile.TemporaryDirectory() as tempdir:
+            csv_path = os.path.join(tempdir, "processed.csv")
+            with open(csv_path, "w", encoding="utf-8") as handle:
+                handle.write("size,passing\n")
+                handle.write("2.0,100\n")
+                handle.write("1.0,68\n")
+                handle.write("0.5,24\n")
+                handle.write("0.25,6\n")
+
+            queue = _ListQueue()
+            run_batch_import([csv_path], queue, temperature=11.0)
+
+        loaded_events = [event for event in queue.events if event[0] == "item_loaded"]
+        failed_events = [event for event in queue.events if event[0] == "item_failed"]
+        log_events = [event for event in queue.events if event[0] == "log_event"]
+
+        self.assertEqual(failed_events, [])
+        self.assertEqual(len(loaded_events), 1)
+        _, file_key, dataset, status, sample_name = loaded_events[0]
+        self.assertEqual(file_key, csv_path)
+        self.assertEqual(status, "loaded")
+        self.assertEqual(sample_name, "processed")
+        self.assertEqual(dataset.particle_sizes, [2.0, 1.0, 0.5, 0.25])
+        self.assertEqual(dataset.percent_passing, [100.0, 68.0, 24.0, 6.0])
+        self.assertTrue(dataset._precomputed_k_results)
+        self.assertTrue(
+            any(
+                event[1]["context"]["pathway"] == "standard file loader"
+                and event[1]["context"]["data_type"] == "processed_curve"
+                and event[1]["level"] == "INFO"
+                for event in log_events
+            )
+        )
+
+    def test_external_load_loads_raw_sieve_csv_from_mapping_state(self):
+        with tempfile.TemporaryDirectory() as tempdir:
+            csv_path = os.path.join(tempdir, "raw.csv")
+            with open(csv_path, "w", encoding="utf-8") as handle:
+                handle.write("size,full,empty\n")
+                handle.write("2.0,110,100\n")
+                handle.write("1.0,130,100\n")
+                handle.write("0.5,145,100\n")
+                handle.write("Pan,105,100\n")
+
+            source = {
+                "file_key": csv_path,
+                "file_path": csv_path,
+                "sample_name": "Raw CSV",
+                "import_provenance": {
+                    "source": "manual_mapping",
+                    "intent": "raw_sieve",
+                    "data_type": "raw_sieve",
+                    "selection_method": "column",
+                    "intent_matched": True,
+                },
+                "mapping_state": {
+                    "raw_sieve_mode": True,
+                    "header_row": 0,
+                    "column_indices": {
+                        "raw_size": 1,
+                        "sieve_sample": 2,
+                        "empty_sieve": 3,
+                    },
+                },
+            }
+            queue = _ListQueue()
+            run_external_load([source], stage_title="Opening file", result_queue=queue)
+
+        loaded_events = [event for event in queue.events if event[0] == "file_loaded"]
+        failed_events = [event for event in queue.events if event[0] == "file_failed"]
+        log_events = [event for event in queue.events if event[0] == "log_event"]
+
+        self.assertEqual(failed_events, [])
+        self.assertEqual(len(loaded_events), 1)
+        _, file_key, dataset = loaded_events[0]
+        self.assertEqual(file_key, csv_path)
+        self.assertEqual(dataset.sample_name, "Raw CSV")
+        self.assertEqual(dataset.particle_sizes, [2.0, 1.0, 0.5])
+        self.assertEqual(dataset.percent_passing, [88.888889, 55.555556, 5.555556])
+        self.assertTrue(dataset._source_mapping_state["raw_sieve_mode"])
+        self.assertTrue(dataset._precomputed_k_results)
+        self.assertTrue(
+            any(
+                event[1]["context"]["pathway"] == "manual mapping"
+                and event[1]["context"]["data_type"] == "raw_sieve"
+                and event[1]["level"] == "INFO"
+                for event in log_events
+            )
+        )
+
     def test_mapped_cell_range_source_can_be_restored_without_dialog(self):
         with tempfile.TemporaryDirectory() as tempdir:
             csv_path = os.path.join(tempdir, "mapped.csv")

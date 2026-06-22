@@ -316,6 +316,48 @@ class TestReportGeneratorAppendices(unittest.TestCase):
         self.assertIn('from 2 OK methods', html)
         self.assertIn('K Arithmetic Mean', html)
 
+    def test_reports_show_effective_porosity_and_source(self):
+        self.dataset.calculated_porosity = 0.3123
+        self.dataset.current_porosity = 0.5000
+        self.dataset.porosity = 0.3500
+
+        grain_html = self.generator.generate_grain_size_report(
+            self.dataset,
+            sections={
+                'cover_page': False,
+                'executive_summary': False,
+                'methodology': False,
+                'results': False,
+                'plots': False,
+                'raw_data': False,
+                'interpretation': False,
+                'percentiles': False,
+                'gradation': False,
+                'data_quality': False,
+            },
+        )
+        k_html = self.generator.generate_k_value_report(
+            self.dataset,
+            self.results,
+            temperature=20.0,
+            porosity=0.5,
+            sections={
+                'cover_page': False,
+                'executive_summary': False,
+                'methodology': False,
+                'results': False,
+                'plots': False,
+                'interpretation': False,
+                'k_statistics': False,
+            },
+        )
+
+        self.assertIn('<div class="metadata-value">0.5000</div>', grain_html)
+        self.assertIn('Porosity Source:', grain_html)
+        self.assertIn('Manual override', grain_html)
+        self.assertIn('<div class="metadata-value">0.5000</div>', k_html)
+        self.assertIn('Porosity Source:', k_html)
+
     def test_k_value_report_can_show_method_table_without_results_section(self):
         html = self.generator.generate_k_value_report(
             self.dataset,
@@ -390,6 +432,153 @@ class TestReportGeneratorAppendices(unittest.TestCase):
         self.assertIn('Hazen', html)
         self.assertIn('USBR', html)
         self.assertNotIn('Sample Overview', html)
+
+    def test_comparison_report_uses_grouped_k_scope_for_summary_and_boxplot(self):
+        sample_b = build_dataset('Sample B')
+        results_b = [
+            KCalculationResult(
+                method_name='USBR',
+                k_value=2.0e-4,
+                formula_used='k = f(d20)',
+                status=CalculationStatus.OK,
+                status_message='',
+                conditions_met=True,
+                temperature=20.0,
+                porosity=0.35,
+                grain_size_used='D20',
+            ),
+        ]
+
+        with patch('plot_export.export_distribution_overlay', return_value='grain-plot'), \
+             patch('plot_export.export_reliability_matrix', return_value=''), \
+             patch('plot_export.export_k_scope_boxplot', return_value='scope-plot') as boxplot:
+            html = self.generator.generate_comparison_report(
+                [self.dataset, sample_b],
+                sections={
+                    'cover_page': False,
+                    'executive_summary': False,
+                    'methodology': False,
+                    'results': True,
+                    'plots': True,
+                    'interpretation': False,
+                    'k_statistics': True,
+                },
+                sample_details=[
+                    {
+                        'label': 'Sample A',
+                        'dataset': self.dataset,
+                        'k_results': self.results,
+                        'group_name': 'Layer A',
+                        'temperature': 20.0,
+                        'porosity': 0.35,
+                    },
+                    {
+                        'label': 'Sample B',
+                        'dataset': sample_b,
+                        'k_results': results_b,
+                        'group_name': 'Layer B',
+                        'temperature': 20.0,
+                        'porosity': 0.35,
+                    },
+                ],
+            )
+
+        self.assertIn('K-Value Aggregate Summary', html)
+        self.assertIn('Layer A', html)
+        self.assertIn('Layer B', html)
+        self.assertIn('Included K cells', html)
+        self.assertIn('scope-plot', html)
+        series = boxplot.call_args[0][0]
+        self.assertEqual([label for label, _values in series], ['Overall', 'Layer A', 'Layer B'])
+
+    def test_large_grain_parameter_comparison_uses_long_table(self):
+        datasets = [build_dataset(f'Sample {idx:02d}') for idx in range(1, 10)]
+        labels = [dataset.sample_name for dataset in datasets]
+
+        html = self.generator._create_grain_parameters_comparison_table(datasets, labels)
+
+        self.assertIn('<th>Sample</th>', html)
+        self.assertIn('<th>Value</th>', html)
+        self.assertIn('D10 (mm) summary', html)
+        self.assertNotIn('table-wide', html)
+
+    def test_generated_reports_do_not_emit_literal_page_number_placeholder(self):
+        grain_html = self.generator.generate_grain_size_report(
+            self.dataset,
+            sections={
+                'cover_page': False,
+                'executive_summary': True,
+                'methodology': False,
+                'results': True,
+                'plots': False,
+                'raw_data': False,
+                'interpretation': False,
+                'percentiles': False,
+                'gradation': False,
+                'data_quality': False,
+            },
+        )
+        comparison_html = self.generator.generate_comparison_report(
+            [self.dataset, build_dataset('Sample B')],
+            sections={
+                'cover_page': False,
+                'executive_summary': True,
+                'methodology': False,
+                'results': True,
+                'plots': False,
+                'interpretation': False,
+                'k_statistics': True,
+            },
+            sample_details=[
+                {
+                    'label': 'Sample A',
+                    'dataset': self.dataset,
+                    'k_results': self.results,
+                    'temperature': 20.0,
+                    'porosity': 0.35,
+                },
+                {
+                    'label': 'Sample B',
+                    'dataset': build_dataset('Sample B'),
+                    'k_results': self.results,
+                    'temperature': 20.0,
+                    'porosity': 0.35,
+                },
+            ],
+        )
+
+        self.assertNotIn('Page #', grain_html)
+        self.assertNotIn('Page #', comparison_html)
+
+    def test_report_generation_is_repeatable_on_same_generator(self):
+        sections = {
+            'cover_page': False,
+            'executive_summary': True,
+            'methodology': False,
+            'results': True,
+            'plots': False,
+            'interpretation': False,
+            'k_statistics': True,
+        }
+
+        first = self.generator.generate_k_value_report(
+            self.dataset,
+            self.results,
+            temperature=20.0,
+            porosity=0.35,
+            sections=sections,
+        )
+        second = self.generator.generate_k_value_report(
+            self.dataset,
+            self.results,
+            temperature=20.0,
+            porosity=0.35,
+            sections=sections,
+        )
+
+        self.assertIn('Hydraulic Conductivity Analysis Report', first)
+        self.assertIn('Hydraulic Conductivity Analysis Report', second)
+        self.assertIn('K-Value Calculations by Method', second)
 
 
 if __name__ == '__main__':

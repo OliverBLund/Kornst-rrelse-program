@@ -2,6 +2,9 @@
 Dataset tab containing plot workspace, results, and statistics for a single dataset
 """
 
+import html
+import re
+
 from PyQt6.QtWidgets import (
     QWidget,
     QVBoxLayout,
@@ -33,6 +36,68 @@ from k_calculations import KCalculator, KCalculationResult, CalculationStatus
 from k_aggregation import build_k_result_summary
 from method_registry import normalize_method_selection
 from .stack_fade import TabFadeInController
+
+
+_SUPERSCRIPT_CHARS = {
+    "⁰": "0",
+    "¹": "1",
+    "²": "2",
+    "³": "3",
+    "⁴": "4",
+    "⁵": "5",
+    "⁶": "6",
+    "⁷": "7",
+    "⁸": "8",
+    "⁹": "9",
+    "⁺": "+",
+    "⁻": "-",
+    "·": ".",
+}
+
+_SUBSCRIPT_CHARS = {
+    "₀": "0",
+    "₁": "1",
+    "₂": "2",
+    "₃": "3",
+    "₄": "4",
+    "₅": "5",
+    "₆": "6",
+    "₇": "7",
+    "₈": "8",
+    "₉": "9",
+    "₊": "+",
+    "₋": "-",
+    "ₑ": "e",
+}
+
+
+def _replace_unicode_script_runs(text: str, mapping: dict[str, str], tag: str) -> str:
+    chars = "".join(re.escape(char) for char in mapping)
+    pattern = re.compile(f"[{chars}]+")
+
+    def repl(match: re.Match[str]) -> str:
+        rendered = "".join(mapping.get(char, char) for char in match.group(0))
+        return f"<{tag}>{rendered}</{tag}>"
+
+    return pattern.sub(repl, text)
+
+
+def _format_formula_html(formula: str) -> str:
+    """Return a Qt-rich-text display version of a stored formula string."""
+    rendered = html.escape(str(formula or "").strip())
+    rendered = rendered.replace(" * ", " &middot; ")
+    rendered = rendered.replace("×", "&times;")
+
+    rendered = re.sub(r"\^\{([^{}]+)\}", r"<sup>\1</sup>", rendered)
+    rendered = re.sub(r"\^\(([^()]*)\)", r"<sup>\1</sup>", rendered)
+    rendered = re.sub(r"\^([A-Za-z0-9.+\-]+)", r"<sup>\1</sup>", rendered)
+    rendered = re.sub(r"\b([Dd])([0-9]{1,2})\b", r"\1<sub>\2</sub>", rendered)
+
+    rendered = _replace_unicode_script_runs(rendered, _SUPERSCRIPT_CHARS, "sup")
+    rendered = _replace_unicode_script_runs(rendered, _SUBSCRIPT_CHARS, "sub")
+    rendered = rendered.replace("·", "&middot;")
+
+    return rendered
 
 
 _METHOD_META = {
@@ -369,8 +434,9 @@ class DatasetTab(QWidget):
 
         self._res_splitter.addWidget(table_container)
         self._res_splitter.addWidget(self.detail_panel)
-        self._res_splitter.setStretchFactor(0, 60)
-        self._res_splitter.setStretchFactor(1, 40)
+        self._res_splitter.setStretchFactor(0, 70)
+        self._res_splitter.setStretchFactor(1, 30)
+        self._res_splitter.setSizes([720, 400])
 
         layout.addWidget(self._res_splitter, 1)
         return widget
@@ -419,8 +485,8 @@ class DatasetTab(QWidget):
         from .theme import C, F
         panel = QFrame()
         panel.setObjectName("detail-panel")
-        panel.setMinimumWidth(210)
-        panel.setMaximumWidth(320)
+        panel.setMinimumWidth(300)
+        panel.setMaximumWidth(460)
         panel.setStyleSheet(f"""
             QFrame#detail-panel {{
                 background: {C.BG_RAISED};
@@ -442,7 +508,7 @@ class DatasetTab(QWidget):
         self._detail_content.setStyleSheet(f"background: {C.BG_RAISED};")
         self._detail_layout = QVBoxLayout(self._detail_content)
         self._detail_layout.setContentsMargins(0, 0, 0, 0)
-        self._detail_layout.setSpacing(0)
+        self._detail_layout.setSpacing(2)
         self._detail_layout.setAlignment(Qt.AlignmentFlag.AlignTop)
 
         # Placeholder when nothing selected
@@ -492,16 +558,17 @@ class DatasetTab(QWidget):
 
         # ── Header section ──────────────────────────────────────────────────────
         header = QFrame()
+        header.setObjectName("detail-header")
         header.setStyleSheet(f"""
-            QFrame {{
-                background: {C.BG_LOW};
-                border-bottom: 1px solid {C.BORDER};
+            QFrame#detail-header {{
+                background: {C.BG_RAISED};
+                border: none;
             }}
-            QFrame QLabel {{ background: transparent; }}
+            QFrame#detail-header QLabel {{ background: transparent; }}
         """)
         hdr_layout = QVBoxLayout(header)
-        hdr_layout.setContentsMargins(14, 12, 14, 10)
-        hdr_layout.setSpacing(2)
+        hdr_layout.setContentsMargins(18, 16, 18, 12)
+        hdr_layout.setSpacing(3)
 
         name_lbl = QLabel(result.method_name)
         name_lbl.setStyleSheet(
@@ -516,6 +583,27 @@ class DatasetTab(QWidget):
         )
         hdr_layout.addWidget(cat_lbl)
 
+        k_block = QFrame()
+        k_block.setObjectName("detail-k-block")
+        k_block.setStyleSheet(f"""
+            QFrame#detail-k-block {{
+                background: {C.BG_LOW};
+                border: 1px solid rgba(212,196,168,0.65);
+                border-radius: 4px;
+            }}
+            QFrame#detail-k-block QLabel {{ background: transparent; }}
+        """)
+        k_layout = QVBoxLayout(k_block)
+        k_layout.setContentsMargins(10, 7, 10, 8)
+        k_layout.setSpacing(2)
+
+        k_label = QLabel("K VALUE")
+        k_label.setStyleSheet(
+            f"font-family: '{F.UI}'; font-size: {F.SZ_XS}pt; font-weight: 700; "
+            f"color: {C.TEXT_MUTED}; letter-spacing: 0.07em;"
+        )
+        k_layout.addWidget(k_label)
+
         if result.k_value is not None and result.k_value > 0:
             k_m_s = result.k_value
             k_m_d = k_m_s * 86400.0
@@ -523,37 +611,41 @@ class DatasetTab(QWidget):
 
             k_big = QLabel(f"{k_m_s:.3e} m/s")
             k_big.setStyleSheet(
-                f"font-family: '{F.MONO}'; font-size: 15pt; font-weight: 500; color: {C.K_BLUE}; margin-top: 6px;"
+                f"font-family: '{F.MONO}'; font-size: 15pt; font-weight: 600; color: {C.K_BLUE};"
             )
-            hdr_layout.addWidget(k_big)
+            k_layout.addWidget(k_big)
 
             k_units = QLabel(f"{k_m_d:.2f} m/d  ·  {k_cm_s:.3e} cm/s")
             k_units.setStyleSheet(
                 f"font-family: '{F.MONO}'; font-size: {F.SZ_XS}pt; color: {C.TEXT_MUTED};"
             )
-            hdr_layout.addWidget(k_units)
+            k_layout.addWidget(k_units)
         else:
             no_k = QLabel("No valid K-value")
             no_k.setStyleSheet(
-                f"font-family: '{F.UI}'; font-size: {F.SZ_MD}pt; color: {C.LED_ERR}; font-weight: 600; margin-top: 6px;"
+                f"font-family: '{F.UI}'; font-size: {F.SZ_MD}pt; color: {C.LED_ERR}; font-weight: 600;"
             )
-            hdr_layout.addWidget(no_k)
+            k_layout.addWidget(no_k)
+        hdr_layout.addWidget(k_block)
 
         self._detail_layout.addWidget(header)
 
         # ── Status alert (if message present) ───────────────────────────────────
         if result.status_message or not included_in_mean:
             alert = QFrame()
+            alert.setObjectName("detail-alert")
             alert.setStyleSheet(f"""
-                QFrame {{
+                QFrame#detail-alert {{
                     background: {status_bg};
                     border-left: 3px solid {status_color};
-                    border-bottom: 1px solid {C.BORDER};
+                    border-top: none;
+                    border-right: none;
+                    border-bottom: none;
                 }}
-                QFrame QLabel {{ background: transparent; }}
+                QFrame#detail-alert QLabel {{ background: transparent; }}
             """)
             al = QVBoxLayout(alert)
-            al.setContentsMargins(12, 8, 12, 8)
+            al.setContentsMargins(14, 9, 16, 9)
             if included_in_mean:
                 detail_message = result.status_message
             elif result.status_message:
@@ -619,18 +711,19 @@ class DatasetTab(QWidget):
         self._detail_layout.addStretch()
 
     def _make_detail_section(self, title: str, rows: list) -> "QFrame":
-        """Create a detail panel section with label-value rows."""
+        """Create a compact detail section with a drawer-style two-column table."""
         from .theme import C, F
         section = QFrame()
+        section.setObjectName("detail-section")
         section.setStyleSheet(f"""
-            QFrame {{
-                border-bottom: 1px solid rgba(212,196,168,0.4);
+            QFrame#detail-section {{
                 background: transparent;
+                border: none;
             }}
-            QFrame QLabel {{ background: transparent; }}
+            QFrame#detail-section QLabel {{ background: transparent; }}
         """)
         layout = QVBoxLayout(section)
-        layout.setContentsMargins(14, 10, 14, 10)
+        layout.setContentsMargins(18, 11, 18, 9)
         layout.setSpacing(4)
 
         lbl = QLabel(title.upper())
@@ -640,27 +733,71 @@ class DatasetTab(QWidget):
         )
         layout.addWidget(lbl)
 
+        table = QFrame()
+        table.setObjectName("detail-param-table")
+        table.setStyleSheet(f"""
+            QFrame#detail-param-table {{
+                background: {C.BG};
+                border: 1px solid rgba(212,196,168,0.55);
+                border-radius: 4px;
+            }}
+            QFrame#detail-param-header {{
+                background: {C.BG_LOW};
+                border: none;
+                border-bottom: 1px solid {C.BORDER};
+            }}
+            QFrame#detail-param-row {{
+                background: transparent;
+                border: none;
+                border-bottom: 1px solid rgba(212,196,168,0.28);
+            }}
+        """)
+        table_layout = QVBoxLayout(table)
+        table_layout.setContentsMargins(0, 0, 0, 0)
+        table_layout.setSpacing(0)
+
+        header = QFrame()
+        header.setObjectName("detail-param-header")
+        header_layout = QHBoxLayout(header)
+        header_layout.setContentsMargins(7, 4, 7, 4)
+        header_layout.setSpacing(8)
+        for text, alignment in (
+            ("Parameter", Qt.AlignmentFlag.AlignLeft),
+            ("Value", Qt.AlignmentFlag.AlignRight),
+        ):
+            header_lbl = QLabel(text)
+            header_lbl.setStyleSheet(
+                f"font-family: '{F.UI}'; font-size: {F.SZ_XS}pt; font-weight: 700; color: {C.TEXT_MID};"
+            )
+            header_lbl.setAlignment(alignment | Qt.AlignmentFlag.AlignVCenter)
+            header_layout.addWidget(header_lbl, 1)
+        table_layout.addWidget(header)
+
         for row_label, row_value in rows:
-            row_frame = QFrame()
-            row_frame.setStyleSheet("QFrame { background: transparent; }")
-            row_layout = QHBoxLayout(row_frame)
-            row_layout.setContentsMargins(0, 0, 0, 0)
-            row_layout.setSpacing(4)
+            row = QFrame()
+            row.setObjectName("detail-param-row")
+            row_layout = QHBoxLayout(row)
+            row_layout.setContentsMargins(7, 3, 7, 3)
+            row_layout.setSpacing(8)
 
-            rl = QLabel(row_label)
-            rl.setStyleSheet(
-                f"font-family: '{F.UI}'; font-size: {F.SZ_SM}pt; color: {C.TEXT_MID};"
+            label = QLabel(str(row_label))
+            label.setStyleSheet(
+                f"font-family: '{F.UI}'; font-size: {F.SZ_SM}pt; color: {C.TEXT_MID}; background: transparent;"
             )
-            rv = QLabel(row_value)
-            rv.setStyleSheet(
-                f"font-family: '{F.MONO}'; font-size: {F.SZ_SM}pt; color: {C.TEXT};"
-            )
-            rv.setAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
+            label.setAlignment(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter)
 
-            row_layout.addWidget(rl)
-            row_layout.addStretch()
-            row_layout.addWidget(rv)
-            layout.addWidget(row_frame)
+            value = QLabel(str(row_value))
+            value.setStyleSheet(
+                f"font-family: '{F.MONO}'; font-size: {F.SZ_SM}pt; color: {C.TEXT}; background: transparent;"
+            )
+            value.setAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
+            value.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
+
+            row_layout.addWidget(label, 1)
+            row_layout.addWidget(value, 1)
+            table_layout.addWidget(row)
+
+        layout.addWidget(table)
 
         return section
 
@@ -668,15 +805,16 @@ class DatasetTab(QWidget):
         """Create a detail panel section with a text block."""
         from .theme import C, F
         section = QFrame()
+        section.setObjectName("detail-section")
         section.setStyleSheet(f"""
-            QFrame {{
-                border-bottom: 1px solid rgba(212,196,168,0.4);
+            QFrame#detail-section {{
                 background: transparent;
+                border: none;
             }}
-            QFrame QLabel {{ background: transparent; }}
+            QFrame#detail-section QLabel {{ background: transparent; }}
         """)
         layout = QVBoxLayout(section)
-        layout.setContentsMargins(14, 10, 14, 10)
+        layout.setContentsMargins(18, 11, 18, 9)
         layout.setSpacing(6)
 
         lbl = QLabel(title.upper())
@@ -686,17 +824,20 @@ class DatasetTab(QWidget):
         )
         layout.addWidget(lbl)
 
-        content_lbl = QLabel(text)
+        display_text = _format_formula_html(text) if monospace else text
+        content_lbl = QLabel(display_text)
         content_lbl.setWordWrap(True)
         if monospace:
+            content_lbl.setTextFormat(Qt.TextFormat.RichText)
+            content_lbl.setToolTip(str(text))
             content_lbl.setStyleSheet(f"""
                 font-family: '{F.MONO}';
-                font-size: {F.SZ_SM}pt;
-                color: {C.TEXT_MID};
+                font-size: {F.SZ_MD}pt;
+                color: {C.TEXT};
                 background: {C.BG_LOW};
                 border: 1px solid {C.BORDER};
-                border-radius: 3px;
-                padding: 6px 8px;
+                border-radius: 4px;
+                padding: 8px 10px;
                 line-height: 1.7;
             """)
         else:
@@ -847,6 +988,7 @@ class DatasetTab(QWidget):
         """Update porosity parameter (called from statistics tab)"""
         self.porosity = porosity
         self.dataset.current_porosity = porosity
+        self.dataset.porosity = porosity
         # Recalculate K-values if we have methods selected
         if self.current_results:
             self.calculate_k_values()

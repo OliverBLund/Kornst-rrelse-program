@@ -875,15 +875,18 @@ class StatisticsTab(QWidget):
     def update_environmental_parameters(self):
         """Update environmental parameters display (READ-ONLY)"""
         text = f"Temperature: {self.temperature}°C\n"
-        text += f"Porosity: {self.porosity:.4f}"
-        if (
-            hasattr(self.dataset, "calculated_porosity")
-            and self.dataset.calculated_porosity
-        ):
-            if abs(self.porosity - self.dataset.calculated_porosity) < 0.001:
-                text += " (calculated)"
-            else:
-                text += f" (modified from {self.dataset.calculated_porosity:.4f})"
+        effective_porosity = (
+            self.dataset.effective_porosity()
+            if hasattr(self.dataset, "effective_porosity")
+            else self.porosity
+        )
+        if effective_porosity is None:
+            text += "Porosity: N/A"
+        else:
+            self.porosity = effective_porosity
+            text += f"Porosity: {effective_porosity:.4f}"
+        if hasattr(self.dataset, "porosity_source_label"):
+            text += f" ({self.dataset.porosity_source_label()})"
         text += "\n\nNote: Edit porosity in the Results tab"
         self.env_text.setPlainText(text)
 

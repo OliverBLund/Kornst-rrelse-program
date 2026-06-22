@@ -353,6 +353,31 @@ class TestExportManagerExports(unittest.TestCase):
             self.assertEqual(set(payload['percentiles'].keys()), {'D10', 'D95'})
             self.assertEqual(set(payload['statistics'].keys()), {'median_k_cm_s', 'valid_count'})
 
+    def test_json_export_records_effective_porosity_and_source(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            dataset = build_dataset()
+            dataset.calculated_porosity = 0.3123
+            dataset.current_porosity = 0.5000
+            dataset.porosity = 0.3500
+            datasets = [(dataset.sample_name, dataset, self.results)]
+            config = self.make_config(
+                temp_dir,
+                csv=False,
+                json=True,
+                statistics=False,
+                include_metadata={
+                    'sample_info': True,
+                    'environmental': True,
+                    'export_timestamp': False,
+                },
+            )
+
+            exported = ExportManager().export(datasets, config)
+            payload = read_json(exported[0])
+
+            self.assertEqual(payload['metadata']['porosity'], 0.5)
+            self.assertIn('Manual override', payload['metadata']['porosity_source'])
+
     def test_export_statistics_use_shared_ok_only_summary(self):
         warning_result = KCalculationResult(
             method_name='Kruger',
@@ -600,6 +625,28 @@ class TestExportManagerExports(unittest.TestCase):
             self.assertTrue(any(name.endswith('_k_value_boxplot.png') for name in basenames))
             self.assertTrue(any(name.endswith('_reliability_matrix.png') for name in basenames))
             self.assertTrue(all(name.startswith('all_datasets_results_') for name in basenames))
+
+    def test_grouped_statistical_boxplot_uses_grouped_scope_series(self):
+        dataset_b = build_dataset('Sample B')
+        self.dataset.group_name = 'Layer A'
+        dataset_b.group_name = 'Layer B'
+        datasets = [
+            (self.dataset.sample_name, self.dataset, self.results),
+            (dataset_b.sample_name, dataset_b, self.results),
+        ]
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            config = self.make_config(temp_dir, csv=False, png=True, plots=True)
+            with patch('gui.export_manager.render_k_scope_boxplot') as renderer:
+                ExportManager()._build_collection_plot_figure(
+                    'statistical_boxplots',
+                    datasets,
+                    config,
+                )
+
+        series = renderer.call_args[0][1]
+        self.assertEqual([label for label, _values in series], ['Overall', 'Layer A', 'Layer B'])
+        self.assertIn('Group', renderer.call_args.kwargs['title'])
 
     def test_progress_counts_actual_exported_files_not_export_batches(self):
         dataset_b = build_dataset('Sample B')

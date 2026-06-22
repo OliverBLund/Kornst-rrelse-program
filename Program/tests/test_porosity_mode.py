@@ -86,6 +86,13 @@ def _build_dataset() -> GrainSizeData:
 
 
 class TestPorosityMode(unittest.TestCase):
+    def test_new_dataset_tracks_simple_formula_as_default_source(self):
+        dataset = _build_dataset()
+
+        self.assertEqual(dataset.calculated_porosity_mode, "simple")
+        self.assertIn("Simple formula", dataset.porosity_source_label())
+        self.assertEqual(dataset.effective_porosity(), dataset.current_porosity)
+
     def test_recalculate_porosity_updates_auto_managed_dataset(self):
         dataset = _build_dataset()
         old_simple = dataset.calculated_porosity
@@ -96,6 +103,8 @@ class TestPorosityMode(unittest.TestCase):
         harness.on_porosity_mode_changed("Urumovic Polynomial (Research)")
 
         self.assertNotEqual(old_simple, expected)
+        self.assertEqual(dataset.calculated_porosity_mode, "urumovic")
+        self.assertIn("Urumovic polynomial", dataset.porosity_source_label())
         self.assertEqual(dataset.calculated_porosity, expected)
         self.assertEqual(dataset.current_porosity, expected)
         self.assertEqual(tab.porosity, expected)
@@ -117,6 +126,9 @@ class TestPorosityMode(unittest.TestCase):
         harness.on_porosity_mode_changed("Urumovic Polynomial (Research)")
 
         self.assertEqual(dataset.calculated_porosity, expected)
+        self.assertEqual(dataset.calculated_porosity_mode, "urumovic")
+        self.assertIn("Manual override", dataset.porosity_source_label())
+        self.assertIn("Urumovic polynomial", dataset.porosity_source_label())
         self.assertEqual(dataset.current_porosity, previous_manual)
         self.assertEqual(tab.porosity, previous_manual)
         self.assertEqual(tab.statistics_tab.porosity, previous_manual)

@@ -68,6 +68,19 @@ class PlotWidget(QWidget):
         self.method_colors = METHOD_COLORS
         
         self.setup_ui()
+
+    def _reference_k_values_for_display(
+        self,
+        methods: list[str],
+        k_values_display: list[float],
+    ) -> list[float]:
+        """Return displayed K values that are included in OK-only K means."""
+        flagged = set(getattr(self, "flagged_methods", set()) or set())
+        return [
+            value
+            for method, value in zip(methods, k_values_display)
+            if method not in flagged and value is not None and value > 0
+        ]
         
     def setup_ui(self):
         """Setup the matplotlib widget layout"""
@@ -280,6 +293,7 @@ class PlotWidget(QWidget):
             render_k_bar_chart(
                 ax2, methods, k_values,
                 flagged_methods=flagged,
+                reference_values=self._reference_k_values_for_display(methods, k_values),
                 style=self.current_style,
                 show_grid=self.show_grid,
                 show_legend=self.show_legend,
@@ -336,6 +350,7 @@ class PlotWidget(QWidget):
             methods,
             k_values,
             flagged_methods=flagged,
+            reference_values=self._reference_k_values_for_display(methods, k_values),
             style=self.current_style,
             show_grid=self.show_grid,
             show_legend=self.show_legend,

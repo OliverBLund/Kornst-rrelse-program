@@ -45,6 +45,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Active K-method selection now applies consistently to Results, plots, comparison summaries, reports, and export while keeping all methods cached internally.
 - Main sidebar footer now shows a compact DTU logo and attribution block for Oliver Lund, HydrogeoSieveXL inspiration, Poul Løgstrup Bjerg, and DTU Sustain.
 
+- Individual Results method details now use a wider, quieter inspector panel with a clearer K-value block, drawer-style parameter table, and richer formula formatting.
+
 ### Fixed
 - Raw sieve auto-detection no longer silently accepts obviously invalid columns such as loss-percent rows or numeric header artifacts as sieve/weight columns.
 - HydrogeoSieveXL2 warning parity for DATASET_2: Hazen, Hazen_1892, Kruger, and USBR are warned; Terzaghi and Kozeny-Carman remain included.
