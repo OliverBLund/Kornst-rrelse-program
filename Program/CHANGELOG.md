@@ -61,6 +61,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Individual-sample Statistics no longer shows placeholder in-tab Excel/CSV export buttons; export remains handled through the Export tab and plot/data drawers.
 - Report and export K summaries now draw from the same shared calculation results used by the live UI.
 - Main sidebar import drop-zone now accepts drops on the visible target itself, including drops over its icon/text labels, and handles supported file extensions case-insensitively.
+- Program header behavior now follows normal title-bar expectations: single click/drag moves the window, while double-clicking blank header space maximizes/restores it.
 
 ### Manual QA Checklist
 - Start the app and confirm the welcome quick actions, readable hover help, Help pages, and Full Changelog window.

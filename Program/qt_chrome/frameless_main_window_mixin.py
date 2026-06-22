@@ -33,7 +33,11 @@ except Exception:  # pragma: no cover - optional module in some environments
 
 from .mask import apply_frameless_round_mask
 from .mode import resolve_window_chrome_mode
-from .platform import enable_windows_frameless_snap_styles, enable_windows_soft_corners
+from .platform import (
+    enable_windows_frameless_snap_styles,
+    enable_windows_soft_corners,
+    suppress_windows_window_border,
+)
 from .window_helper import FramelessWindowChromeHelper
 
 
@@ -184,6 +188,7 @@ class FramelessMainWindowMixin:
         taskbar_gap_px: int = 0,
         maximize_inset_px: int = 0,
         enable_edge_resize: bool = True,
+        enable_windows_snap_styles: bool = True,
     ) -> None:
         """Initialize chrome state and apply initial mode."""
         self._window_chrome_mode = "native"
@@ -199,7 +204,7 @@ class FramelessMainWindowMixin:
         self._chrome_resize_margin = int(resize_margin)
         self._chrome_top_resize_margin = int(top_resize_margin)
         self._chrome_enable_edge_resize = bool(enable_edge_resize)
-        self._chrome_enable_windows_snap_styles = True
+        self._chrome_enable_windows_snap_styles = bool(enable_windows_snap_styles)
         self._frameless_drag_filters = []
 
         self.window_chrome = None
@@ -496,6 +501,9 @@ class FramelessMainWindowMixin:
     def _enable_windows_snap_styles(self) -> None:
         enable_windows_frameless_snap_styles(self)
 
+    def _suppress_windows_window_border(self) -> None:
+        suppress_windows_window_border(self)
+
     def resizeEvent(self, event):
         super().resizeEvent(event)
         self._apply_frameless_round_mask()
@@ -524,6 +532,9 @@ class FramelessMainWindowMixin:
         if not getattr(self, "_soft_corners_applied", False):
             self._enable_windows_soft_corners()
             self._soft_corners_applied = True
+        if self._is_frameless_mode() and not getattr(self, "_window_border_suppressed", False):
+            self._suppress_windows_window_border()
+            self._window_border_suppressed = True
         if getattr(self, "_pending_frameless_maximize", False):
             self._pending_frameless_maximize = False
             self._set_frameless_maximized()

@@ -99,6 +99,9 @@ class FramelessWindowChromeHelper(QObject):
     def _handle_mouse_press(self, event):
         if event.button() != Qt.MouseButton.LeftButton or self.window.isMinimized():
             return False
+        if self._is_window_effectively_maximized() or self.window.isFullScreen():
+            self._maybe_reset_cursor()
+            return False
 
         global_pos = self._event_global_pos(event)
         local_pos = self.window.mapFromGlobal(global_pos)
@@ -107,12 +110,6 @@ class FramelessWindowChromeHelper(QObject):
             return False
 
         if self._start_system_resize(edges):
-            event.accept()
-            return True
-
-        if self._is_window_effectively_maximized() or self.window.isFullScreen():
-            self.window.showNormal()
-            self._maybe_reset_cursor()
             event.accept()
             return True
 

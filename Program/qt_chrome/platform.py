@@ -41,6 +41,30 @@ def enable_windows_soft_corners(window) -> None:
         pass
 
 
+def suppress_windows_window_border(window) -> None:
+    """Best-effort remove the Windows 11 DWM border around frameless windows."""
+    try:
+        import ctypes
+
+        hwnd = _window_hwnd(window)
+        if not hwnd:
+            return
+
+        DWMWA_BORDER_COLOR = 34
+        DWMWA_COLOR_NONE = 0xFFFFFFFE
+        color = ctypes.c_uint(DWMWA_COLOR_NONE)
+
+        dwmapi = ctypes.WinDLL("dwmapi", use_last_error=True)
+        dwmapi.DwmSetWindowAttribute(
+            ctypes.c_void_p(hwnd),
+            ctypes.c_uint(DWMWA_BORDER_COLOR),
+            ctypes.byref(color),
+            ctypes.sizeof(color),
+        )
+    except Exception:
+        pass
+
+
 def disable_windows_window_transitions(window) -> None:
     """Best-effort disable DWM show/hide transitions for a window."""
     try:

@@ -5,13 +5,14 @@ Regression tests for the top-level application toolbar.
 import os
 import sys
 import unittest
+import inspect
 
 os.environ.setdefault('QT_QPA_PLATFORM', 'offscreen')
 sys.path.insert(0, 'Program')
 
 from PyQt6.QtWidgets import QApplication, QPushButton
 
-from gui.main_window import _AppToolbar
+from gui.main_window import MainWindow, _AppToolbar
 
 
 APP = QApplication.instance() or QApplication([])
@@ -80,6 +81,16 @@ class TestAppToolbar(unittest.TestCase):
 
         self.assertGreater(badge.font().pointSize(), 0)
         self.assertEqual(badge.font().pixelSize(), -1)
+
+    def test_header_drag_binding_keeps_double_click_on_blank_header_only(self):
+        init_source = inspect.getsource(MainWindow.__init__)
+        setup_source = inspect.getsource(MainWindow.setup_menus)
+
+        self.assertIn("top_resize_margin=2", init_source)
+        self.assertIn("include_children=False", setup_source)
+        self.assertIn("_chrome_drag_spacer", setup_source)
+        self.assertIn("bind_frameless_drag_widget(spacer", setup_source)
+        self.assertIn("allow_double_click_maximize=True", setup_source)
 
 
 if __name__ == '__main__':

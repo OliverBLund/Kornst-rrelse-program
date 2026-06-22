@@ -466,9 +466,10 @@ class MainWindow(FramelessMainWindowMixin, QMainWindow):
             default_windows="frameless",
             default_other="native",
             resize_margin=8,
-            top_resize_margin=6,
+            top_resize_margin=2,
             corner_radius_px=10,
             enable_edge_resize=True,
+            enable_windows_snap_styles=False,
         )
 
         # Apply matplotlib styling before any plots are created
@@ -887,9 +888,13 @@ class MainWindow(FramelessMainWindowMixin, QMainWindow):
 
         self.setMenuWidget(menu_widget)
         self._chrome_menu_widget = menu_widget
+        self._chrome_drag_spacer = spacer
         self._chrome_controls = controls
         self._chrome_title_label = title_label
-        self.bind_frameless_drag_widget(menu_widget, allow_double_click_maximize=True, include_children=True)
+        # Header blank areas behave like a title bar: drag on hold/move,
+        # double-click to maximize/restore. Buttons remain normal controls.
+        self.bind_frameless_drag_widget(menu_widget, allow_double_click_maximize=True, include_children=False)
+        self.bind_frameless_drag_widget(spacer, allow_double_click_maximize=True, include_children=False)
         self.on_window_chrome_state_changed(self._is_frameless_mode(), self.is_window_effectively_maximized())
 
     def _make_menu_button(self, label: str, menu: QMenu) -> QToolButton:

@@ -1,0 +1,546 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Individual Sample Statistics - Layout Concepts</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Source+Sans+3:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/all.min.css">
+<style>
+:root{
+  --bg:#f5f5f0;
+  --bg-raised:#eee8dc;
+  --bg-low:#e8e0d0;
+  --surface:#fffdf8;
+  --border:#d4c4a8;
+  --border-dk:#c0ae90;
+  --text:#2f2f2f;
+  --text-mid:#5d4e37;
+  --text-muted:#9a8c78;
+  --olive:#6b8e23;
+  --olive-dk:#4f6a1a;
+  --earth:#8b7355;
+  --amber:#c4a574;
+  --blue:#3a7ea0;
+  --warn:#d08020;
+  --err:#c03828;
+  --fu:'Source Sans 3',system-ui,sans-serif;
+  --fm:'JetBrains Mono',monospace;
+  --r:6px;
+}
+*,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
+html,body{height:100%;overflow:hidden}
+body{font-family:var(--fu);font-size:13px;background:var(--bg);color:var(--text);-webkit-font-smoothing:antialiased}
+button{font:inherit}
+::-webkit-scrollbar{width:6px;height:6px}
+::-webkit-scrollbar-track{background:transparent}
+::-webkit-scrollbar-thumb{background:var(--amber);border-radius:3px}
+
+.app{height:100vh;display:grid;grid-template-rows:30px 34px 1fr 24px;overflow:hidden}
+.subtabs{display:flex;align-items:center;height:30px;background:var(--bg);border-bottom:1px solid var(--border);padding:0 12px;gap:18px}
+.tab{height:30px;display:flex;align-items:center;gap:6px;border:none;background:transparent;color:var(--text-muted);font-size:11px;font-weight:600;padding:0 2px;border-bottom:2px solid transparent}
+.tab.active{color:var(--text);border-bottom-color:var(--earth)}
+.tab i{font-size:10px}
+
+.switcher{height:34px;display:flex;align-items:center;background:var(--bg-raised);border-bottom:1px solid var(--border-dk);padding:0 12px;gap:8px}
+.switch-label{font-size:9px;font-weight:700;color:var(--text-muted);letter-spacing:.09em;text-transform:uppercase;margin-right:4px}
+.switch{height:24px;border:1px solid transparent;background:transparent;color:var(--text-mid);font-size:11px;font-weight:700;padding:0 11px;border-radius:var(--r);cursor:pointer}
+.switch:hover{background:rgba(255,255,255,.45);border-color:var(--border)}
+.switch.active{background:var(--surface);border-color:var(--border-dk);color:var(--olive-dk)}
+.switch-note{margin-left:auto;font-family:var(--fm);font-size:9px;color:var(--text-muted)}
+
+.panel{display:none;min-height:0;overflow:hidden}
+.panel.active{display:flex}
+
+.status{height:24px;background:var(--earth);color:#f0e8d8;display:flex;align-items:center;padding:0 12px;font-family:var(--fm);font-size:10px;gap:16px}
+.status b{color:#a0d070;font-weight:600}
+.status .muted{color:#c4a882}
+
+.metric-strip{display:flex;align-items:stretch;background:var(--bg-raised);border-bottom:1px solid var(--border);min-height:54px;flex-shrink:0}
+.metric{min-width:116px;padding:7px 13px;border-right:1px solid var(--border);display:flex;flex-direction:column;justify-content:center}
+.metric.wide{min-width:210px}
+.metric.grow{flex:1}
+.metric-label{font-size:9px;font-weight:800;color:var(--text-muted);letter-spacing:.07em;text-transform:uppercase;line-height:1.1}
+.metric-value{font-family:var(--fm);font-size:14px;font-weight:650;color:var(--text);line-height:1.2;margin-top:2px}
+.metric-value.ok{color:var(--olive-dk)}
+.metric-value.blue{color:var(--blue)}
+.metric-sub{font-family:var(--fm);font-size:9px;color:var(--text-muted);margin-top:1px}
+
+.card{background:var(--surface);border:1px solid var(--border);border-radius:var(--r);overflow:hidden;min-width:0}
+.card-head{height:30px;display:flex;align-items:center;padding:0 10px;background:var(--bg-raised);border-bottom:1px solid var(--border);gap:7px}
+.card-head i{font-size:11px;color:var(--text-muted);width:14px;text-align:center}
+.card-title{font-size:10px;font-weight:800;color:var(--text-mid);letter-spacing:.07em;text-transform:uppercase;flex:1}
+.card-meta{font-family:var(--fm);font-size:9px;color:var(--text-muted)}
+.card-body{padding:10px}
+
+.pill{display:inline-flex;align-items:center;height:18px;padding:0 7px;border-radius:99px;border:1px solid var(--border);font-size:9px;font-weight:800;letter-spacing:.03em}
+.pill.ok{background:rgba(107,142,35,.09);border-color:rgba(107,142,35,.25);color:var(--olive-dk)}
+.pill.warn{background:rgba(208,128,32,.10);border-color:rgba(208,128,32,.27);color:#8a5817}
+.pill.info{background:rgba(58,126,160,.08);border-color:rgba(58,126,160,.22);color:#2b6078}
+
+.data-table{width:100%;border-collapse:collapse}
+.data-table th{height:25px;padding:0 8px;background:var(--bg-raised);border-bottom:1px solid var(--border);font-size:9px;font-weight:800;color:var(--text-muted);letter-spacing:.06em;text-transform:uppercase;text-align:right}
+.data-table th:first-child{text-align:left}
+.data-table td{height:27px;padding:0 8px;border-bottom:1px solid rgba(212,196,168,.38);font-family:var(--fm);font-size:11px;text-align:right;color:var(--text-mid)}
+.data-table td:first-child{text-align:left;font-family:var(--fu);font-size:11px;font-weight:700;color:var(--text)}
+.data-table tr.key td{background:rgba(107,142,35,.055)}
+.data-table tr.key td:first-child,.data-table tr.key td:nth-child(2){color:var(--olive-dk)}
+.data-table tr:last-child td{border-bottom:none}
+
+.bar{height:8px;background:var(--bg-low);border:1px solid var(--border);border-radius:99px;overflow:hidden}
+.bar-fill{height:100%;background:var(--olive)}
+.bar-fill.blue{background:var(--blue)}
+.bar-fill.warn{background:var(--warn)}
+
+.fraction-bar{height:24px;border:1px solid var(--border-dk);border-radius:var(--r);overflow:hidden;display:flex;background:var(--bg-low)}
+.frac{height:100%;display:flex;align-items:center;justify-content:center;font-size:9px;font-weight:800;color:#fff;min-width:20px}
+.clay{background:#7a9bbd}
+.silt{background:#b09870}
+.sand{background:#d4b86a;color:#4e3c18}
+.gravel{background:#a09080}
+.fines{background:#8d7660}
+.legend{display:flex;gap:10px;flex-wrap:wrap;margin-top:8px}
+.leg{display:flex;align-items:center;gap:5px;font-size:10px;color:var(--text-muted)}
+.swatch{width:9px;height:9px;border-radius:2px;border:1px solid rgba(0,0,0,.12)}
+
+/* Concept A */
+.dash{flex-direction:column;min-height:0}
+.dash-body{min-height:0;flex:1;display:grid;grid-template-columns:minmax(600px,1fr) 360px;gap:10px;padding:10px;overflow:hidden}
+.dash-main,.dash-side{min-height:0;overflow:auto;display:flex;flex-direction:column;gap:10px}
+.overview-grid{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:8px}
+.fact{padding:9px;background:var(--bg);border:1px solid var(--border);border-radius:var(--r)}
+.fact-k{font-size:9px;font-weight:800;color:var(--text-muted);letter-spacing:.06em;text-transform:uppercase}
+.fact-v{font-family:var(--fm);font-size:19px;font-weight:650;color:var(--text);line-height:1.15;margin-top:2px}
+.fact-v.ok{color:var(--olive-dk)}
+.fact-sub{font-size:10px;color:var(--text-muted);margin-top:3px}
+.insight{display:flex;gap:8px;padding:9px 10px;border-bottom:1px solid rgba(212,196,168,.45)}
+.insight:last-child{border-bottom:none}
+.insight i{width:18px;color:var(--olive);font-size:12px;margin-top:2px}
+.insight-title{font-size:11px;font-weight:800;color:var(--text)}
+.insight-body{font-size:11px;color:var(--text-mid);line-height:1.35;margin-top:1px}
+.quality-row{display:grid;grid-template-columns:96px 1fr 54px;align-items:center;gap:8px;height:31px;border-bottom:1px solid rgba(212,196,168,.35)}
+.quality-row:last-child{border-bottom:none}
+.quality-name{font-size:11px;font-weight:700;color:var(--text-mid)}
+.quality-state{font-size:10px;color:var(--text-muted);text-align:right}
+.compact-pct{display:grid;grid-template-columns:repeat(6,1fr);gap:1px;border:1px solid var(--border);border-radius:var(--r);overflow:hidden;background:var(--border);margin-top:10px}
+.compact-pct .pct{background:var(--surface);padding:6px 7px;min-height:40px}
+.compact-pct .pct.key{background:rgba(107,142,35,.06)}
+.compact-pct .pct span{display:block;font-family:var(--fm);font-size:9px;font-weight:800;color:var(--text-muted)}
+.compact-pct .pct.key span{color:var(--olive-dk)}
+.compact-pct .pct b{display:block;font-family:var(--fm);font-size:11px;color:var(--text);margin-top:3px}
+
+/* Concept B */
+.sheet{flex-direction:column;min-height:0}
+.sheet-body{min-height:0;flex:1;display:grid;grid-template-columns:1fr 320px;gap:10px;padding:10px;overflow:hidden}
+.sheet-left,.sheet-right{min-height:0;overflow:auto;display:flex;flex-direction:column;gap:10px}
+.section-band{display:flex;align-items:center;height:34px;background:var(--bg-raised);border:1px solid var(--border);border-radius:var(--r);padding:0 10px;gap:8px}
+.section-band i{color:var(--olive);font-size:12px}
+.section-band b{font-size:11px;color:var(--text)}
+.section-band span{font-family:var(--fm);font-size:9px;color:var(--text-muted);margin-left:auto}
+.percentile-grid{display:grid;grid-template-columns:repeat(6,1fr);gap:1px;border:1px solid var(--border);border-radius:var(--r);overflow:hidden;background:var(--border)}
+.pct-cell{background:var(--surface);padding:7px 8px;min-height:46px}
+.pct-cell.key{background:rgba(107,142,35,.055)}
+.pct-l{font-family:var(--fm);font-size:10px;font-weight:800;color:var(--text-muted)}
+.pct-cell.key .pct-l{color:var(--olive-dk)}
+.pct-v{font-family:var(--fm);font-size:13px;font-weight:650;color:var(--text);margin-top:3px}
+.method-map{display:grid;grid-template-columns:82px 1fr;gap:0;border:1px solid var(--border);border-radius:var(--r);overflow:hidden}
+.map-row{display:contents}
+.map-k,.map-v{border-bottom:1px solid rgba(212,196,168,.45);padding:7px 9px;font-size:11px}
+.map-row:last-child .map-k,.map-row:last-child .map-v{border-bottom:none}
+.map-k{font-family:var(--fm);font-weight:800;color:var(--olive-dk);background:rgba(107,142,35,.055)}
+.map-v{color:var(--text-mid);background:var(--surface)}
+.side-stat{display:flex;align-items:baseline;justify-content:space-between;padding:7px 0;border-bottom:1px solid rgba(212,196,168,.4)}
+.side-stat:last-child{border-bottom:none}
+.side-stat span{font-size:11px;color:var(--text-mid)}
+.side-stat b{font-family:var(--fm);font-size:12px;color:var(--text)}
+
+/* Concept C */
+.guided{flex-direction:column;min-height:0}
+.guided-body{min-height:0;flex:1;display:grid;grid-template-columns:260px 1fr 350px;overflow:hidden}
+.rail{background:#efe8da;border-right:1px solid var(--border-dk);padding:10px;overflow:auto}
+.rail-title{font-size:9px;font-weight:800;color:var(--text-muted);letter-spacing:.09em;text-transform:uppercase;margin-bottom:8px}
+.rail-step{display:flex;gap:8px;padding:9px 8px;border:1px solid transparent;border-radius:var(--r);margin-bottom:5px}
+.rail-step.active{background:var(--surface);border-color:var(--border-dk)}
+.step-num{width:22px;height:22px;border-radius:50%;display:flex;align-items:center;justify-content:center;background:var(--bg-low);border:1px solid var(--border);font-family:var(--fm);font-size:10px;font-weight:800;color:var(--text-mid);flex-shrink:0}
+.rail-step.active .step-num{background:var(--olive);border-color:var(--olive-dk);color:white}
+.step-title{font-size:11px;font-weight:800;color:var(--text)}
+.step-sub{font-size:10px;color:var(--text-muted);line-height:1.25;margin-top:1px}
+.guided-main{overflow:auto;padding:12px;display:flex;flex-direction:column;gap:12px}
+.guided-aside{background:var(--surface);border-left:1px solid var(--border);overflow:auto;display:flex;flex-direction:column}
+.aside-head{height:38px;display:flex;align-items:center;padding:0 12px;background:var(--bg-raised);border-bottom:1px solid var(--border);font-size:10px;font-weight:800;color:var(--text-mid);letter-spacing:.07em;text-transform:uppercase}
+.callout{padding:11px 12px;border-bottom:1px solid rgba(212,196,168,.45)}
+.callout-label{font-size:9px;font-weight:800;color:var(--text-muted);letter-spacing:.06em;text-transform:uppercase}
+.callout-main{font-size:13px;font-weight:800;color:var(--text);margin-top:2px}
+.callout-body{font-size:11px;color:var(--text-mid);line-height:1.35;margin-top:4px}
+.compare-row{display:grid;grid-template-columns:120px 1fr 74px;align-items:center;gap:8px;height:34px;border-bottom:1px solid rgba(212,196,168,.35)}
+.compare-row:last-child{border-bottom:none}
+.compare-name{font-size:11px;font-weight:800;color:var(--text)}
+.compare-value{font-family:var(--fm);font-size:11px;color:var(--text-mid);text-align:right}
+
+@media (max-width:1100px){
+  .dash-body,.sheet-body{grid-template-columns:1fr}
+  .guided-body{grid-template-columns:220px 1fr}
+  .guided-aside{display:none}
+  .overview-grid{grid-template-columns:repeat(2,1fr)}
+  .percentile-grid{grid-template-columns:repeat(3,1fr)}
+}
+</style>
+</head>
+<body>
+<div class="app">
+  <div class="subtabs">
+    <button class="tab"><i class="fa-solid fa-chart-line"></i>Plot</button>
+    <button class="tab"><i class="fa-solid fa-table"></i>Results</button>
+    <button class="tab active"><i class="fa-solid fa-chart-column"></i>Statistics</button>
+  </div>
+
+  <div class="switcher">
+    <div class="switch-label">Statistics Concepts</div>
+    <button class="switch active" data-target="concept-a">A. Sample Summary</button>
+    <button class="switch" data-target="concept-b">B. Analysis Sheet</button>
+    <button class="switch" data-target="concept-c">C. Guided Interpretation</button>
+    <div class="switch-note">single sample · no per-method K table duplication</div>
+  </div>
+
+  <section id="concept-a" class="panel dash active">
+    <div class="metric-strip">
+      <div class="metric wide">
+        <div class="metric-label">Sample</div>
+        <div class="metric-value">Thomson_SERDP_Borden_Sand</div>
+        <div class="metric-sub">151 gradation points</div>
+      </div>
+      <div class="metric">
+        <div class="metric-label">Soil</div>
+        <div class="metric-value ok">Poorly graded sand</div>
+        <div class="metric-sub">ISO 14688</div>
+      </div>
+      <div class="metric">
+        <div class="metric-label">D50</div>
+        <div class="metric-value">0.180 mm</div>
+        <div class="metric-sub">fine sand</div>
+      </div>
+      <div class="metric">
+        <div class="metric-label">Cu</div>
+        <div class="metric-value">2.79</div>
+        <div class="metric-sub">uniform</div>
+      </div>
+      <div class="metric">
+        <div class="metric-label">K geo. mean</div>
+        <div class="metric-value blue">5.01e-05</div>
+        <div class="metric-sub">m/s · 11 OK methods</div>
+      </div>
+      <div class="metric grow">
+        <div class="metric-label">What this tab should answer</div>
+        <div class="metric-value">Sample summary</div>
+        <div class="metric-sub">Results tab remains method-by-method K output and warnings</div>
+      </div>
+    </div>
+
+    <div class="dash-body">
+      <div class="dash-main">
+        <div class="card">
+          <div class="card-head"><i class="fa-solid fa-ruler-horizontal"></i><div class="card-title">Key Grain Distribution</div><div class="card-meta">mm</div></div>
+          <div class="card-body">
+            <div class="overview-grid">
+              <div class="fact"><div class="fact-k">D10</div><div class="fact-v">0.070</div><div class="fact-sub">effective size</div></div>
+              <div class="fact"><div class="fact-k">D30</div><div class="fact-v">0.146</div><div class="fact-sub">shape control</div></div>
+              <div class="fact"><div class="fact-k">D60</div><div class="fact-v">0.195</div><div class="fact-sub">uniformity basis</div></div>
+              <div class="fact"><div class="fact-k">D90</div><div class="fact-v">0.335</div><div class="fact-sub">coarse tail</div></div>
+            </div>
+            <table class="data-table" style="margin-top:10px">
+              <thead><tr><th>Percentile</th><th>Size</th><th>Use</th><th>Status</th></tr></thead>
+              <tbody>
+                <tr><td>D5</td><td>0.050 mm</td><td>Barr</td><td><span class="pill info">specific</span></td></tr>
+                <tr class="key"><td>D10</td><td>0.070 mm</td><td>Most K methods</td><td><span class="pill ok">critical</span></td></tr>
+                <tr class="key"><td>D50</td><td>0.180 mm</td><td>Median, Shepherd</td><td><span class="pill ok">critical</span></td></tr>
+                <tr class="key"><td>D60</td><td>0.195 mm</td><td>Cu, Beyer, Barr</td><td><span class="pill ok">critical</span></td></tr>
+                <tr><td>D95</td><td>0.400 mm</td><td>Span, Krumbein-Monk</td><td><span class="pill info">specific</span></td></tr>
+              </tbody>
+            </table>
+            <div class="compact-pct">
+              <div class="pct"><span>D5</span><b>0.050</b></div>
+              <div class="pct key"><span>D10</span><b>0.070</b></div>
+              <div class="pct"><span>D15</span><b>0.089</b></div>
+              <div class="pct"><span>D16</span><b>0.093</b></div>
+              <div class="pct"><span>D17</span><b>0.098</b></div>
+              <div class="pct"><span>D20</span><b>0.108</b></div>
+              <div class="pct"><span>D25</span><b>0.127</b></div>
+              <div class="pct key"><span>D30</span><b>0.146</b></div>
+              <div class="pct"><span>D40</span><b>0.164</b></div>
+              <div class="pct key"><span>D50</span><b>0.180</b></div>
+              <div class="pct key"><span>D60</span><b>0.195</b></div>
+              <div class="pct"><span>D70</span><b>0.211</b></div>
+              <div class="pct"><span>D75</span><b>0.219</b></div>
+              <div class="pct"><span>D80</span><b>0.227</b></div>
+              <div class="pct"><span>D84</span><b>0.269</b></div>
+              <div class="pct"><span>D85</span><b>0.269</b></div>
+              <div class="pct"><span>D90</span><b>0.335</b></div>
+              <div class="pct"><span>D95</span><b>0.400</b></div>
+            </div>
+          </div>
+        </div>
+
+        <div class="card">
+          <div class="card-head"><i class="fa-solid fa-layer-group"></i><div class="card-title">Classification And Fractions</div><div class="card-meta">distribution only</div></div>
+          <div class="card-body">
+            <div class="fraction-bar">
+              <div class="frac fines" style="width:2%">2%</div>
+              <div class="frac sand" style="width:96%">Sand 96%</div>
+              <div class="frac gravel" style="width:2%">2%</div>
+            </div>
+            <div class="legend">
+              <div class="leg"><span class="swatch fines"></span>Fines 2.1%</div>
+              <div class="leg"><span class="swatch sand"></span>Sand 96.0%</div>
+              <div class="leg"><span class="swatch gravel"></span>Gravel 1.9%</div>
+            </div>
+            <div class="overview-grid" style="margin-top:10px">
+              <div class="fact"><div class="fact-k">Cu</div><div class="fact-v ok">2.79</div><div class="fact-sub">uniform to poorly graded</div></div>
+              <div class="fact"><div class="fact-k">Cc</div><div class="fact-v">1.56</div><div class="fact-sub">within 1-3 range</div></div>
+              <div class="fact"><div class="fact-k">Sorting</div><div class="fact-v">1.66</div><div class="fact-sub">well sorted</div></div>
+              <div class="fact"><div class="fact-k">Span</div><div class="fact-v">8.0</div><div class="fact-sub">D95/D5</div></div>
+            </div>
+          </div>
+        </div>
+
+        <div class="card">
+          <div class="card-head"><i class="fa-solid fa-water"></i><div class="card-title">Hydraulic Conductivity Summary</div><div class="card-meta">aggregates from Results</div></div>
+          <div class="card-body">
+            <table class="data-table">
+              <thead><tr><th>Statistic</th><th>m/s</th><th>cm/s</th><th>m/d</th></tr></thead>
+              <tbody>
+                <tr class="key"><td>Geometric mean</td><td>5.01e-05</td><td>5.01e-03</td><td>4.3</td></tr>
+                <tr><td>Arithmetic mean</td><td>5.53e-05</td><td>5.53e-03</td><td>4.8</td></tr>
+                <tr><td>Median</td><td>5.44e-05</td><td>5.44e-03</td><td>4.7</td></tr>
+                <tr><td>Range</td><td>2.53e-05 - 9.16e-05</td><td>2.53e-03 - 9.16e-03</td><td>2.2 - 7.9</td></tr>
+                <tr><td>ln(K) std. dev.</td><td>0.45</td><td>dimensionless</td><td>log spread</td></tr>
+                <tr><td>Included methods</td><td>11 / 16</td><td>5 warnings excluded</td><td>0 errors</td></tr>
+              </tbody>
+            </table>
+          </div>
+        </div>
+      </div>
+
+      <aside class="dash-side">
+        <div class="card">
+          <div class="card-head"><i class="fa-solid fa-circle-info"></i><div class="card-title">Interpretation</div></div>
+          <div>
+            <div class="insight"><i class="fa-solid fa-check"></i><div><div class="insight-title">The sample is clean, fine sand</div><div class="insight-body">Sand dominates the distribution and the fines fraction is low, so grain-size K methods are a reasonable screening tool.</div></div></div>
+            <div class="insight"><i class="fa-solid fa-arrow-trend-up"></i><div><div class="insight-title">Method spread is moderate</div><div class="insight-body">ln(K) standard deviation is 0.45 across included methods. The geometric mean is reported as the primary aggregate.</div></div></div>
+            <div class="insight"><i class="fa-solid fa-triangle-exclamation"></i><div><div class="insight-title">Warnings belong in Results</div><div class="insight-body">5 methods are excluded from means. The detailed reason stays in the Results tab row detail.</div></div></div>
+          </div>
+        </div>
+
+        <div class="card">
+          <div class="card-head"><i class="fa-solid fa-gauge-high"></i><div class="card-title">Data Support</div><div class="card-meta">no score, just checks</div></div>
+          <div class="card-body">
+            <table class="data-table">
+              <tbody>
+                <tr><td>Monotonicity</td><td>0 reversals</td></tr>
+                <tr><td>Particle-size range</td><td>0.002 - 10 mm</td></tr>
+                <tr><td>Percent-passing range</td><td>0 - 100%</td></tr>
+                <tr><td>Point count</td><td>151</td></tr>
+                <tr><td>Validation messages</td><td>0 errors</td></tr>
+              </tbody>
+            </table>
+          </div>
+        </div>
+
+        <div class="card">
+          <div class="card-head"><i class="fa-solid fa-flask"></i><div class="card-title">Calculation Context</div></div>
+          <div class="card-body">
+            <table class="data-table">
+              <tbody>
+                <tr><td>Temperature</td><td>20.0 °C</td></tr>
+                <tr><td>Porosity</td><td>0.4065</td></tr>
+                <tr><td>Porosity source</td><td>Calculated</td></tr>
+                <tr><td>Permeability class</td><td>Moderate</td></tr>
+              </tbody>
+            </table>
+          </div>
+        </div>
+      </aside>
+    </div>
+  </section>
+
+  <section id="concept-b" class="panel sheet">
+    <div class="metric-strip">
+      <div class="metric wide"><div class="metric-label">Analysis Sheet</div><div class="metric-value">Grain distribution first</div><div class="metric-sub">for users who want the numbers visible</div></div>
+      <div class="metric"><div class="metric-label">Primary label</div><div class="metric-value ok">Sand</div><div class="metric-sub">poorly graded</div></div>
+      <div class="metric"><div class="metric-label">K summary</div><div class="metric-value blue">4.3 m/d</div><div class="metric-sub">geometric mean</div></div>
+      <div class="metric grow"><div class="metric-label">Design bias</div><div class="metric-value">Table-like, but controlled</div><div class="metric-sub">no scrollable text boxes inside scrollable pages</div></div>
+    </div>
+    <div class="sheet-body">
+      <main class="sheet-left">
+        <div class="section-band"><i class="fa-solid fa-ruler"></i><b>Percentile summary</b><span>critical K inputs highlighted</span></div>
+        <div class="percentile-grid">
+          <div class="pct-cell"><div class="pct-l">D5</div><div class="pct-v">0.050</div></div>
+          <div class="pct-cell key"><div class="pct-l">D10</div><div class="pct-v">0.070</div></div>
+          <div class="pct-cell"><div class="pct-l">D16</div><div class="pct-v">0.093</div></div>
+          <div class="pct-cell"><div class="pct-l">D20</div><div class="pct-v">0.108</div></div>
+          <div class="pct-cell key"><div class="pct-l">D30</div><div class="pct-v">0.146</div></div>
+          <div class="pct-cell key"><div class="pct-l">D50</div><div class="pct-v">0.180</div></div>
+          <div class="pct-cell key"><div class="pct-l">D60</div><div class="pct-v">0.195</div></div>
+          <div class="pct-cell"><div class="pct-l">D75</div><div class="pct-v">0.219</div></div>
+          <div class="pct-cell"><div class="pct-l">D84</div><div class="pct-v">0.269</div></div>
+          <div class="pct-cell"><div class="pct-l">D90</div><div class="pct-v">0.335</div></div>
+          <div class="pct-cell"><div class="pct-l">D95</div><div class="pct-v">0.400</div></div>
+          <div class="pct-cell"><div class="pct-l">Dmean</div><div class="pct-v">0.1588</div></div>
+        </div>
+
+        <div class="card">
+          <div class="card-head"><i class="fa-solid fa-list-check"></i><div class="card-title">Gradation descriptors</div></div>
+          <div class="card-body">
+            <table class="data-table">
+              <thead><tr><th>Descriptor</th><th>Formula</th><th>Value</th><th>Interpretation</th></tr></thead>
+              <tbody>
+                <tr class="key"><td>Cu</td><td>D60 / D10</td><td>2.79</td><td>Uniform to poorly graded</td></tr>
+                <tr><td>Cc</td><td>D30² / (D10 x D60)</td><td>1.56</td><td>Inside 1-3 range</td></tr>
+                <tr><td>Sorting coefficient</td><td>sqrt(D84 / D16)</td><td>1.66</td><td>Well sorted</td></tr>
+                <tr><td>Span ratio</td><td>D95 / D5</td><td>8.0</td><td>Narrow distribution</td></tr>
+              </tbody>
+            </table>
+          </div>
+        </div>
+
+        <div class="card">
+          <div class="card-head"><i class="fa-solid fa-diagram-project"></i><div class="card-title">Which numbers feed which calculations?</div></div>
+          <div class="card-body">
+            <div class="method-map">
+              <div class="map-row"><div class="map-k">D10</div><div class="map-v">Hazen, Slichter, Terzaghi, Beyer, Kozeny-Carman, Zunker, Zamarin, Chapuis, Alyamani-Sen</div></div>
+              <div class="map-row"><div class="map-k">D50</div><div class="map-v">Kruger, Alyamani-Sen, Shepherd, median sample descriptor</div></div>
+              <div class="map-row"><div class="map-k">D60</div><div class="map-v">Cu, Beyer, Barr</div></div>
+              <div class="map-row"><div class="map-k">Full curve</div><div class="map-v">Kruger, Kozeny-Carman, Zunker, Zamarin, Krumbein-Monk</div></div>
+            </div>
+          </div>
+        </div>
+      </main>
+
+      <aside class="sheet-right">
+        <div class="card">
+          <div class="card-head"><i class="fa-solid fa-layer-group"></i><div class="card-title">Classification</div></div>
+          <div class="card-body">
+            <div class="fraction-bar"><div class="frac fines" style="width:2%"></div><div class="frac sand" style="width:96%">Sand</div><div class="frac gravel" style="width:2%"></div></div>
+            <div class="side-stat"><span>Primary type</span><b>Sand</b></div>
+            <div class="side-stat"><span>Gradation</span><b>Poorly graded</b></div>
+            <div class="side-stat"><span>Label</span><b style="font-size:11px">Poorly-graded sand</b></div>
+          </div>
+        </div>
+        <div class="card">
+          <div class="card-head"><i class="fa-solid fa-water"></i><div class="card-title">K aggregate</div></div>
+          <div class="card-body">
+            <div class="side-stat"><span>Geometric mean</span><b>5.01e-05 m/s</b></div>
+            <div class="side-stat"><span>Median</span><b>5.44e-05 m/s</b></div>
+            <div class="side-stat"><span>ln(K) std.</span><b>0.45</b></div>
+            <div class="side-stat"><span>Included</span><b>11 / 16</b></div>
+          </div>
+        </div>
+        <div class="card">
+          <div class="card-head"><i class="fa-solid fa-circle-info"></i><div class="card-title">Note</div></div>
+          <div class="card-body" style="font-size:11px;color:var(--text-mid);line-height:1.4">
+            This option keeps the Statistics tab numerical, but makes hierarchy explicit. It suits report checking and defensible review.
+          </div>
+        </div>
+      </aside>
+    </div>
+  </section>
+
+  <section id="concept-c" class="panel guided">
+    <div class="guided-body">
+      <nav class="rail">
+        <div class="rail-title">Sample interpretation</div>
+        <div class="rail-step active"><div class="step-num">1</div><div><div class="step-title">Distribution</div><div class="step-sub">Percentiles and spread</div></div></div>
+        <div class="rail-step"><div class="step-num">2</div><div><div class="step-title">Classification</div><div class="step-sub">Fractions and gradation</div></div></div>
+        <div class="rail-step"><div class="step-num">3</div><div><div class="step-title">K aggregate</div><div class="step-sub">Mean, spread, coverage</div></div></div>
+        <div class="rail-step"><div class="step-num">4</div><div><div class="step-title">Data support</div><div class="step-sub">Quality basis</div></div></div>
+      </nav>
+
+      <main class="guided-main">
+        <div class="card">
+          <div class="card-head"><i class="fa-solid fa-chart-area"></i><div class="card-title">Distribution signature</div><div class="card-meta">Fine, well sorted sand</div></div>
+          <div class="card-body">
+            <div class="overview-grid">
+              <div class="fact"><div class="fact-k">Effective size</div><div class="fact-v">D10 0.070</div><div class="fact-sub">used by most K methods</div></div>
+              <div class="fact"><div class="fact-k">Median</div><div class="fact-v">D50 0.180</div><div class="fact-sub">fine sand center</div></div>
+              <div class="fact"><div class="fact-k">Uniformity</div><div class="fact-v ok">Cu 2.79</div><div class="fact-sub">narrow distribution</div></div>
+              <div class="fact"><div class="fact-k">Span</div><div class="fact-v">8.0</div><div class="fact-sub">D95/D5</div></div>
+            </div>
+          </div>
+        </div>
+
+        <div class="card">
+          <div class="card-head"><i class="fa-solid fa-scale-balanced"></i><div class="card-title">Calculation Coverage</div></div>
+          <div class="card-body">
+            <table class="data-table">
+              <thead><tr><th>Check</th><th>Value</th><th>Use</th></tr></thead>
+              <tbody>
+                <tr><td>OK methods</td><td>11 / 16</td><td>Included in K aggregates</td></tr>
+                <tr><td>Warnings</td><td>5 / 16</td><td>Review in Results tab</td></tr>
+                <tr><td>Errors</td><td>0 / 16</td><td>No failed method outputs</td></tr>
+                <tr><td>ln(K) std. dev.</td><td>0.45</td><td>Spread of included K values</td></tr>
+              </tbody>
+            </table>
+          </div>
+        </div>
+
+        <div class="card">
+          <div class="card-head"><i class="fa-solid fa-table-list"></i><div class="card-title">Compact audit values</div></div>
+          <div class="card-body">
+            <table class="data-table">
+              <thead><tr><th>Group</th><th>Value</th><th>Meaning</th></tr></thead>
+              <tbody>
+                <tr><td>Classification</td><td>Poorly-graded sand</td><td>Dominant sand fraction, narrow gradation</td></tr>
+                <tr class="key"><td>K geometric mean</td><td>5.01e-05 m/s</td><td>Primary aggregate from OK methods</td></tr>
+                <tr><td>K coverage</td><td>11 / 16</td><td>5 methods excluded from aggregate</td></tr>
+                <tr><td>Data support</td><td>0 reversals, 151 points</td><td>Monotone curve and dense point coverage</td></tr>
+              </tbody>
+            </table>
+          </div>
+        </div>
+      </main>
+
+      <aside class="guided-aside">
+        <div class="aside-head">Interpretive summary</div>
+        <div class="callout">
+          <div class="callout-label">Primary statement</div>
+          <div class="callout-main">Clean fine sand with moderate hydraulic conductivity.</div>
+          <div class="callout-body">The narrow gradation supports the methods intended for uniform sand. The K aggregate is reasonably stable.</div>
+        </div>
+        <div class="callout">
+          <div class="callout-label">Use this value</div>
+          <div class="callout-main">Kgeo = 5.01e-05 m/s</div>
+          <div class="callout-body">Prefer the geometric mean because K values are log-distributed and span roughly one order of magnitude.</div>
+        </div>
+        <div class="callout">
+          <div class="callout-label">Check in Results</div>
+          <div class="callout-main">5 excluded methods</div>
+          <div class="callout-body">Open the Results tab for per-method formulas, warning reasons, and references.</div>
+        </div>
+      </aside>
+    </div>
+  </section>
+
+  <div class="status">
+    <b>Ready</b>
+    <span class="muted">SAMPLE</span> Thomson_SERDP_Borden_Sand
+    <span class="muted">D50</span> 0.180 mm
+    <span class="muted">K</span> 5.01e-05 m/s
+    <span class="muted">METHODS</span> 11 / 16 OK
+  </div>
+</div>
+
+<script>
+const buttons = document.querySelectorAll('.switch');
+const panels = document.querySelectorAll('.panel');
+buttons.forEach(button => {
+  button.addEventListener('click', () => {
+    buttons.forEach(btn => btn.classList.remove('active'));
+    panels.forEach(panel => panel.classList.remove('active'));
+    button.classList.add('active');
+    document.getElementById(button.dataset.target).classList.add('active');
+  });
+});
+</script>
+</body>
+</html>
