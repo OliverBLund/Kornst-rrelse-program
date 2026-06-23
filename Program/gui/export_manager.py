@@ -44,6 +44,9 @@ from .plot_context import (
     plot_context_value,
     plot_style_from_context,
 )
+from .comparison_plot_capture import build_comparison_spec
+from .comparison_plot_spec import render_comparison
+from .report_plot_style import resolve_report_style
 from .theme import apply_matplotlib_style
 
 
@@ -842,6 +845,46 @@ class ExportManager:
         figure.tight_layout()
         return figure
 
+    def _build_export_comparison_spec(
+        self,
+        datasets: List[tuple],
+        config: Dict,
+        context: Optional[Dict],
+        *,
+        plot_type: str,
+        style,
+        display_mode: str = "overlay",
+    ):
+        """Capture a ComparisonPlotSpec for a collection export figure.
+
+        Mirrors ``report_generator._build_comparison_spec`` so exports render the
+        same group-aware, palette-matched comparison plots as the report and the
+        Comparison tab.
+        """
+        ds_objects = [dataset for _, dataset, _ in datasets]
+        results_by_name = {
+            dataset.sample_name: list(results or [])
+            for _, dataset, results in datasets
+        }
+        dataset_groups = {
+            dataset.sample_name: getattr(dataset, "group_name", None) or "Ungrouped"
+            for _, dataset, _ in datasets
+        }
+        snapshot = self._build_comparison_snapshot_for_export(datasets, config)
+        return build_comparison_spec(
+            ds_objects,
+            results_by_name,
+            comparison_snapshot=snapshot,
+            dataset_groups=dataset_groups,
+            current_plot_type=plot_type,
+            display_mode=display_mode,
+            style=style,
+            show_grid=config.get('plot_include_grid', True),
+            show_legend=config.get('plot_include_legend', True),
+            log_k_y_scale=bool(plot_context_value(context, 'log_k_y_scale', False)),
+            display_unit=k_display_unit_from_context(context),
+        )
+
     def _build_collection_plot_figure(
         self,
         plot_type: str,
@@ -850,22 +893,26 @@ class ExportManager:
         context: Optional[Dict] = None,
     ) -> Figure:
         apply_matplotlib_style()
-        style = plot_style_from_context(context)
+        # Default to the global report/export style when the live tab context
+        # carries none, so exports honor the "restyle once" report setting.
+        style = plot_style_from_context(context, resolve_report_style())
+
+        if plot_type == 'distribution_overlay':
+            # Render through the shared comparison spec so exports get the same
+            # group-aware breakdown, palette and styling as the Comparison tab
+            # and the report (instead of a flat overlay).
+            spec = self._build_export_comparison_spec(
+                datasets, config, context, plot_type='distribution', style=style,
+            )
+            figure = Figure(figsize=config.get('plot_figsize', (12, 7)))
+            figure.patch.set_facecolor(style.figure_facecolor)
+            render_comparison(figure, spec)
+            apply_legend_aware_layout(figure, style)
+            return figure
+
         figure = Figure(figsize=config.get('plot_figsize', (12, 7)))
         figure.patch.set_facecolor(style.figure_facecolor)
         ax = figure.add_subplot(1, 1, 1)
-
-        if plot_type == 'distribution_overlay':
-            render_distribution_overlay(
-                ax,
-                [dataset for _, dataset, _ in datasets],
-                labels=[name for name, _, _ in datasets],
-                style=style,
-                show_grid=config.get('plot_include_grid', True),
-                show_legend=config.get('plot_include_legend', True),
-            )
-            apply_legend_aware_layout(figure, style)
-            return figure
 
         if plot_type == 'k_value_comparison':
             k_results_dict = {}

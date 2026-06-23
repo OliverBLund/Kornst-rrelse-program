@@ -134,6 +134,37 @@ class TestReportGeneratorAppendices(unittest.TestCase):
         self.assertIn('Grain Size Distribution Comparison', html)
         self.assertIn('Hydraulic Conductivity by Method', html)
 
+    def test_comparison_report_honors_per_plot_breakdown(self):
+        sample_b = build_dataset('Sample B')
+        details = [
+            {'label': 'Sample A', 'dataset': self.dataset, 'k_results': self.results,
+             'group_name': 'Layer A', 'temperature': 20.0, 'porosity': 0.35},
+            {'label': 'Sample B', 'dataset': sample_b, 'k_results': self.results,
+             'group_name': 'Layer B', 'temperature': 20.0, 'porosity': 0.35},
+        ]
+        captured = []
+
+        def fake_spec(spec, **kwargs):
+            captured.append(spec)
+            return 'data:image/png;base64,spec'
+
+        with patch('plot_export.export_comparison_spec', side_effect=fake_spec):
+            self.generator.generate_comparison_report(
+                [self.dataset, sample_b],
+                sections={'plots': True, 'k_statistics': False,
+                          'results': False, 'interpretation': False},
+                sample_details=details,
+                selected_plots={'distribution_overlay', 'k_value_comparison'},
+                plot_breakdowns={'distribution_overlay': 'dataset',
+                                 'k_value_comparison': 'group'},
+            )
+
+        by_type = {spec.current_plot_type: spec for spec in captured}
+        # Forced per-dataset distribution flattens the breakdown even though the
+        # samples carry named groups; the K bars stay grouped.
+        self.assertFalse(by_type['distribution'].use_group_breakdown)
+        self.assertTrue(by_type['k-values'].use_group_breakdown)
+
     def test_comparison_report_can_omit_k_value_bar(self):
         sample_b = build_dataset('Sample B')
         details = [

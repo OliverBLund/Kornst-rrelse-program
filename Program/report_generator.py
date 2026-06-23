@@ -1243,15 +1243,19 @@ class ReportGenerator:
         )
 
     def _build_comparison_spec(self, sample_details, comparison_snapshot, *,
-                               plot_type: str, display_mode: str = "overlay"):
+                               plot_type: str, display_mode: str = "overlay",
+                               breakdown: Optional[str] = None,
+                               plot_style=None):
         """Capture a widget-free ComparisonPlotSpec for the report's samples.
 
         Comparison plots render through the same pipeline as the Comparison tab
         (group breakdown, group colours, per-dataset line styles), keyed to the
         report's own selected samples. K is shown in m/s to match the report's
-        tables and K boxplot.
+        tables and K boxplot. *breakdown* forces ``"group"``/``"dataset"`` (None
+        = auto: group when named groups exist).
         """
         from gui.comparison_plot_capture import build_comparison_spec
+        from gui.plot_styles import PROFESSIONAL_STYLE
         from unit_conversions import HydraulicConductivityUnit
 
         datasets = [item["dataset"] for item in sample_details]
@@ -1274,20 +1278,28 @@ class ReportGenerator:
             dataset_groups=dataset_groups,
             current_plot_type=plot_type,
             display_mode=display_mode,
+            breakdown=breakdown,
+            style=plot_style or PROFESSIONAL_STYLE,
             display_unit=HydraulicConductivityUnit.M_PER_S,
         )
 
-    def _create_comparison_grain_size_plot(self, sample_details, comparison_snapshot) -> str:
+    def _create_comparison_grain_size_plot(self, sample_details, comparison_snapshot,
+                                           breakdown: Optional[str] = None,
+                                           plot_style=None) -> str:
         """Grain-size distribution comparison, matching the Comparison tab."""
         spec = self._build_comparison_spec(
-            sample_details, comparison_snapshot, plot_type="distribution"
+            sample_details, comparison_snapshot,
+            plot_type="distribution", breakdown=breakdown, plot_style=plot_style,
         )
         return _get_plot_export().export_comparison_spec(spec)
 
-    def _create_comparison_k_value_bar(self, sample_details, comparison_snapshot) -> str:
+    def _create_comparison_k_value_bar(self, sample_details, comparison_snapshot,
+                                       breakdown: Optional[str] = None,
+                                       plot_style=None) -> str:
         """Grouped K-value bar comparison (one bar series per dataset/group)."""
         spec = self._build_comparison_spec(
-            sample_details, comparison_snapshot, plot_type="k-values"
+            sample_details, comparison_snapshot,
+            plot_type="k-values", breakdown=breakdown, plot_style=plot_style,
         )
         if not spec.k_results_dict:
             return ""
@@ -1346,11 +1358,15 @@ class ReportGenerator:
             title=title,
         )
 
-    def _create_method_reliability_matrix(self, k_results_dict: Dict[str, List[KCalculationResult]]) -> str:
+    def _create_method_reliability_matrix(self, k_results_dict: Dict[str, List[KCalculationResult]],
+                                          plot_style=None) -> str:
         """Create method reliability matrix for comparison report."""
         if not k_results_dict:
             return ""
-        return _get_plot_export().export_reliability_matrix(k_results_dict)
+        pe = _get_plot_export()
+        if plot_style is not None:
+            return pe.export_reliability_matrix(k_results_dict, style=plot_style)
+        return pe.export_reliability_matrix(k_results_dict)
 
     def _format_metadata_section(self, metadata: Dict[str, str]) -> str:
         """Format project metadata section with modern grid layout"""
@@ -2108,8 +2124,17 @@ class ReportGenerator:
                                   sections: Optional[Dict[str, bool]] = None,
                                   brand=None,
                                   sample_details: Optional[List[Dict[str, Any]]] = None,
-                                  selected_plots: Optional[set] = None) -> str:
-        """Generate a comparison report for multiple samples."""
+                                  selected_plots: Optional[set] = None,
+                                  plot_breakdowns: Optional[Dict[str, str]] = None,
+                                  plot_style=None) -> str:
+        """Generate a comparison report for multiple samples.
+
+        *plot_breakdowns* optionally maps a comparison plot key
+        (``distribution_overlay`` / ``k_value_comparison``) to ``"group"`` or
+        ``"dataset"``; omitted keys fall back to auto (group when groups exist).
+        *plot_style* is the global report/export ``PlotStyle`` themed once on the
+        report tab; ``None`` keeps the default preset.
+        """
         if metadata is None:
             metadata = {}
         if sections is None:
@@ -2354,12 +2379,21 @@ class ReportGenerator:
                 else {'distribution_overlay', 'k_value_comparison',
                       'statistical_boxplots', 'reliability_matrix'}
             )
+            breakdowns = plot_breakdowns or {}
             comparison_plot = (
-                self._create_comparison_grain_size_plot(sample_details, comparison_snapshot)
+                self._create_comparison_grain_size_plot(
+                    sample_details, comparison_snapshot,
+                    breakdown=breakdowns.get('distribution_overlay'),
+                    plot_style=plot_style,
+                )
                 if 'distribution_overlay' in selected else ""
             )
             k_value_bar = (
-                self._create_comparison_k_value_bar(sample_details, comparison_snapshot)
+                self._create_comparison_k_value_bar(
+                    sample_details, comparison_snapshot,
+                    breakdown=breakdowns.get('k_value_comparison'),
+                    plot_style=plot_style,
+                )
                 if 'k_value_comparison' in selected else ""
             )
             k_boxplot = (
@@ -2367,7 +2401,7 @@ class ReportGenerator:
                 if 'statistical_boxplots' in selected else ""
             )
             reliability_matrix = (
-                self._create_method_reliability_matrix(plot_results_dict)
+                self._create_method_reliability_matrix(plot_results_dict, plot_style=plot_style)
                 if 'reliability_matrix' in selected else ""
             )
 

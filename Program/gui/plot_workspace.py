@@ -37,7 +37,11 @@ from .plot_text_options import (
     GlobalPlotStylingPlaceholderDialog,
     PlotTextOptionsDialog,
 )
-from unit_conversions import HydraulicConductivityUnit, HydraulicConductivityConverter
+from unit_conversions import (
+    HydraulicConductivityUnit,
+    HydraulicConductivityConverter,
+    get_default_plot_unit,
+)
 
 
 # ─────────────────────────────────────────────────────────────
@@ -364,7 +368,7 @@ class PlotWorkspace(QWidget):
 
         self.plot_widget = PlotWidget()
         self.plot_widget.set_style(self._effective_style())
-        self.plot_widget.set_display_unit(HydraulicConductivityUnit.M_PER_DAY)
+        self.plot_widget.set_display_unit(get_default_plot_unit())
         self.plot_widget.axes_view_changed.connect(self._sync_axis_inputs_from_ax)
         chart_lay.addWidget(self.plot_widget, 1)
 
@@ -720,7 +724,7 @@ class PlotWorkspace(QWidget):
         all_units = HydraulicConductivityConverter.get_all_units()
         for unit, symbol in all_units.items():
             self._unit_combo.addItem(symbol, unit)
-        default_index = list(all_units.keys()).index(HydraulicConductivityUnit.M_PER_DAY)
+        default_index = list(all_units.keys()).index(get_default_plot_unit())
         self._unit_combo.setCurrentIndex(default_index)
         self._unit_combo.currentIndexChanged.connect(self._on_unit_changed)
         self._row_units = QWidget()
@@ -1117,7 +1121,7 @@ class PlotWorkspace(QWidget):
         self._lbl_xmin.setText("X min (mm)" if is_distribution_like else "X min")
         self._lbl_xmax.setText("X max (mm)" if is_distribution_like else "X max")
         if is_k_plot:
-            unit = self._unit_combo.currentData() or HydraulicConductivityUnit.M_PER_DAY
+            unit = self._unit_combo.currentData() or get_default_plot_unit()
             symbol = HydraulicConductivityConverter.UNIT_SYMBOLS[unit]
             self._lbl_ymin.setText(f"Y min ({symbol})")
             self._lbl_ymax.setText(f"Y max ({symbol})")
@@ -1381,7 +1385,7 @@ class PlotWorkspace(QWidget):
         return "Grain-size histogram data", headers, rows
 
     def _k_values_table(self) -> tuple[str, list[str], list[tuple]]:
-        unit = self._unit_combo.currentData() or HydraulicConductivityUnit.M_PER_DAY
+        unit = self._unit_combo.currentData() or get_default_plot_unit()
         symbol = HydraulicConductivityConverter.UNIT_SYMBOLS[unit]
         headers = ["Method", f"K ({symbol})", "Status"]
         rows: list[tuple] = []
@@ -1399,7 +1403,7 @@ class PlotWorkspace(QWidget):
         return "K-value bar chart data", headers, rows
 
     def _combined_table(self) -> tuple[str, list[str], list[tuple]]:
-        unit = self._unit_combo.currentData() or HydraulicConductivityUnit.M_PER_DAY
+        unit = self._unit_combo.currentData() or get_default_plot_unit()
         symbol = HydraulicConductivityConverter.UNIT_SYMBOLS[unit]
         headers = [
             "Panel",

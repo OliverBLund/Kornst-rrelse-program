@@ -149,9 +149,13 @@ class HydraulicConductivityConverter:
 
 def get_default_plot_unit() -> HydraulicConductivityUnit:
     """
-    Get the default unit for plotting (m/d as specified by user)
+    Get the default unit for plotting.
+
+    m/s is the program-wide default so plots agree with the report/export
+    tables (which also default to m/s); users can still switch any tab's unit
+    locally via its unit dropdown.
     """
-    return HydraulicConductivityUnit.M_PER_DAY
+    return HydraulicConductivityUnit.M_PER_S
 
 
 def get_default_table_unit() -> HydraulicConductivityUnit:

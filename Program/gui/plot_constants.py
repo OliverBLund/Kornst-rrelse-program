@@ -36,10 +36,22 @@ METHOD_COLORS: Dict[str, str] = {
 
 # ── Dataset colours ───────────────────────────────────────────
 # Used when multiple datasets share the same axes (comparison plots).
+# Single source of truth (warm-earth, consistent with the design spec): the
+# Comparison tab, the comparison plot widget, the headless report/export spec
+# builder and the renderer fallbacks all draw from this one palette so GUI and
+# report/export colours match by construction.
 
 DATASET_COLORS: List[str] = [
-    "#1f77b4", "#ff7f0e", "#2ca02c", "#d62728", "#9467bd",
-    "#8c564b", "#e377c2", "#7f7f7f", "#bcbd22", "#17becf",
+    "#3a7ea0",
+    "#6b8e23",
+    "#b46428",
+    "#2a9d8f",
+    "#8b4513",
+    "#c45c2e",
+    "#4a6fa5",
+    "#5e7b1a",
+    "#8b6914",
+    "#2e6b7d",
 ]
 
 

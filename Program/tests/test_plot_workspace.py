@@ -289,8 +289,8 @@ class TestPlotWorkspaceWiring(unittest.TestCase):
         self.assertTrue(self.workspace._row_dlines.isHidden())
         self.assertTrue(self.workspace._row_fill.isHidden())
         self.assertTrue(self.workspace._row_markers.isHidden())
-        self.assertEqual(self.workspace._lbl_ymin.text(), 'Y min (m/d)')
-        self.assertEqual(self.workspace._lbl_ymax.text(), 'Y max (m/d)')
+        self.assertEqual(self.workspace._lbl_ymin.text(), 'Y min (m/s)')
+        self.assertEqual(self.workspace._lbl_ymax.text(), 'Y max (m/s)')
 
     def test_distribution_sidebar_context_hides_k_value_units(self):
         self.workspace.current_plot_type = 'distribution'
@@ -353,11 +353,14 @@ class TestPlotWorkspaceWiring(unittest.TestCase):
 
         self.workspace.refresh_plot()
 
+        # Default unit is m/s: OK-only population is [1.0e-4 m/s], so both means
+        # equal 1.00e-04. The values that would appear if the flagged Kruger were
+        # wrongly included (arith 5.05e-03, geo 1.00e-03) must be absent.
         labels = self.workspace.plot_widget.current_ax.get_legend_handles_labels()[1]
-        self.assertIn('Arithmetic mean: 8.64e+00', labels)
-        self.assertIn('Geometric mean: 8.64e+00', labels)
-        self.assertFalse(any('4.36e+02' in label for label in labels))
-        self.assertFalse(any('8.64e+01' in label for label in labels))
+        self.assertIn('Arithmetic mean: 1.00e-04', labels)
+        self.assertIn('Geometric mean: 1.00e-04', labels)
+        self.assertFalse(any('5.05e-03' in label for label in labels))
+        self.assertFalse(any('1.00e-03' in label for label in labels))
 
     def test_k_value_label_toggle_hides_bar_value_labels(self):
         self.workspace.add_k_results({'Hazen': 1.0e-4, 'Beyer': 1.5e-4})
@@ -419,8 +422,8 @@ class TestPlotWorkspaceWiring(unittest.TestCase):
         self.workspace.refresh_plot()
 
         self.assertEqual(self.workspace._drawer_title.text(), 'K-value bar chart data')
-        self.assertEqual(self.workspace._drawer_headers, ['Method', 'K (m/d)', 'Status'])
-        self.assertIn(('Beyer', '12.96', 'Warning'), self.workspace._drawer_rows)
+        self.assertEqual(self.workspace._drawer_headers, ['Method', 'K (m/s)', 'Status'])
+        self.assertIn(('Beyer', '1.50e-04', 'Warning'), self.workspace._drawer_rows)
         self.assertFalse(self.workspace._drawer_table.wordWrap())
         self.assertEqual(self.workspace._drawer_table.verticalHeader().defaultSectionSize(), 24)
         self.assertEqual(self.workspace._drawer_table.rowHeight(0), 24)
@@ -442,8 +445,8 @@ class TestPlotWorkspaceWiring(unittest.TestCase):
             with out_path.with_suffix('.csv').open(newline='') as handle:
                 rows = list(csv.reader(handle))
 
-        self.assertEqual(rows[0], ['Method', 'K (m/d)', 'Status'])
-        self.assertIn(['Beyer', '12.96', 'Warning'], rows)
+        self.assertEqual(rows[0], ['Method', 'K (m/s)', 'Status'])
+        self.assertIn(['Beyer', '1.50e-04', 'Warning'], rows)
 
     def test_combined_plot_shows_k_side_legend(self):
         self.workspace.add_k_results({'Hazen': 1.0e-4, 'Beyer': 1.5e-4})

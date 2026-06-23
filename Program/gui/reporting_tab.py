@@ -10,9 +10,9 @@ from PyQt6.QtGui import (
     QColor, QPainter, QPen, QBrush, QPageLayout, QPageSize, QCursor, QPixmap,
 )
 from PyQt6.QtWidgets import (
-    QAbstractItemView, QButtonGroup, QCheckBox, QComboBox, QFileDialog, QFrame,
-    QGridLayout, QHBoxLayout, QHeaderView, QLabel, QLineEdit, QMessageBox,
-    QPushButton, QScrollArea, QSizePolicy, QSplitter, QTableWidget,
+    QAbstractItemView, QButtonGroup, QCheckBox, QComboBox, QDialog, QDialogButtonBox,
+    QFileDialog, QFrame, QGridLayout, QHBoxLayout, QHeaderView, QLabel, QLineEdit,
+    QMessageBox, QPushButton, QScrollArea, QSizePolicy, QSplitter, QTableWidget,
     QTableWidgetItem, QTextEdit, QVBoxLayout, QWidget,
 )
 from PyQt6.QtCore import QMarginsF
@@ -28,6 +28,12 @@ except ImportError as exc:
 from .theme import C, F, icon as theme_icon
 from .report_brand import ReportBrand
 from .plot_context import build_plot_context_from_tab
+from .plot_styles import get_available_style_names
+from .report_plot_style import (
+    get_report_style_preset,
+    resolve_report_style,
+    set_report_style_preset,
+)
 from report_generator import ReportGenerator
 from grain_classification import ISO14688
 
@@ -332,11 +338,12 @@ class _TypeCard(QFrame):
 # ═══════════════════════════════════════════════════════════════
 
 class _SectionRow(QFrame):
-    """Toggleable section row: icon + label [+ required pill] + toggle."""
+    """Toggleable section row: icon + label [+ required pill] [+ breakdown] + toggle."""
 
     toggled = pyqtSignal(bool)
 
-    def __init__(self, fa_name: str, label: str, required: bool = False, parent=None):
+    def __init__(self, fa_name: str, label: str, required: bool = False,
+                 breakdown: bool = False, parent=None):
         super().__init__(parent)
         self.setCursor(Qt.CursorShape.PointingHandCursor)
         self.setFixedHeight(30)
@@ -355,8 +362,31 @@ class _SectionRow(QFrame):
 
         self._pill = QLabel("required") if required else None
 
+        # Optional per-plot breakdown selector (comparison plots only). "Per
+        # group" is the auto default — it renders grouped when named groups
+        # exist and per-dataset otherwise, matching the Comparison tab.
+        self._breakdown_combo = None
+        if breakdown:
+            self._breakdown_combo = QComboBox()
+            self._breakdown_combo.addItem("Per group", "group")
+            self._breakdown_combo.addItem("Per dataset", "dataset")
+            self._breakdown_combo.setCursor(Qt.CursorShape.PointingHandCursor)
+            self._breakdown_combo.setFixedHeight(20)
+            self._breakdown_combo.setToolTip(
+                "Per group: one aggregate curve/bar series per named group "
+                "(per dataset when ungrouped).\nPer dataset: every dataset drawn "
+                "individually."
+            )
+            self._breakdown_combo.setStyleSheet(
+                f'QComboBox {{ color: {C.TEXT_MID}; background: {C.BG_LOW}; '
+                f'border: 1px solid {C.BORDER}; border-radius: 4px; padding: 0 6px; '
+                f'font-family: "{F.UI}"; font-size: {F.SZ_XS}pt; }}'
+                f'QComboBox:focus {{ border-color: {C.OLIVE}; }}'
+            )
+
         self._toggle = _TogglePill(True)
         self._toggle.toggled.connect(self.toggled.emit)
+        self._toggle.toggled.connect(self._sync_breakdown_enabled)
 
         lay.addWidget(self._icon)
         lay.addWidget(self._lbl)
@@ -374,6 +404,8 @@ class _SectionRow(QFrame):
             """)
             lay.addWidget(self._pill)
         lay.addStretch()
+        if self._breakdown_combo is not None:
+            lay.addWidget(self._breakdown_combo)
         lay.addWidget(self._toggle)
 
         self._apply_style(False)
@@ -383,6 +415,17 @@ class _SectionRow(QFrame):
 
     def set_checked(self, value: bool) -> None:
         self._toggle.setChecked(value)
+        self._sync_breakdown_enabled(value)
+
+    def breakdown(self) -> Optional[str]:
+        """Return the chosen breakdown ("group"/"dataset"), or None if N/A."""
+        if self._breakdown_combo is None:
+            return None
+        return self._breakdown_combo.currentData()
+
+    def _sync_breakdown_enabled(self, checked: bool) -> None:
+        if self._breakdown_combo is not None:
+            self._breakdown_combo.setEnabled(checked)
 
     def mousePressEvent(self, event):
         # Clicking the row (but not directly on the toggle) flips the toggle
@@ -435,18 +478,20 @@ class ReportingTab(QWidget):
         ("interp",  "fa6s.chart-area", "B \u2014 Full-Size Plots"),
         ("quality", "fa6s.scroll",     "C \u2014 Method Details"),
     ]
-    # Per-plot selection (key, icon, label, default-on). Keys match the export
-    # plot-type vocabulary so reports and exports share one set of plot names.
+    # Per-plot selection (key, icon, label, default-on, breakdown-capable). Keys
+    # match the export plot-type vocabulary so reports and exports share one set
+    # of plot names. "breakdown" adds a per-dataset/per-group selector to the row
+    # (comparison plots rendered through the shared ComparisonPlotSpec).
     SINGLE_PLOT_KEYS = [
-        ("grain_size_curve",      "fa6s.chart-line",   "Grain size distribution",     True),
-        ("k_value_bar",           "fa6s.bolt",         "K-value bar chart",           True),
-        ("applicability_heatmap", "fa6s.table-cells",  "Method applicability heatmap", False),
+        ("grain_size_curve",      "fa6s.chart-line",   "Grain size distribution",      True,  False),
+        ("k_value_bar",           "fa6s.bolt",         "K-value bar chart",            True,  False),
+        ("applicability_heatmap", "fa6s.table-cells",  "Method applicability heatmap", False, False),
     ]
     COLLECTION_PLOT_KEYS = [
-        ("distribution_overlay",  "fa6s.chart-area",   "Grain size comparison",       True),
-        ("k_value_comparison",    "fa6s.bolt",         "K-value comparison (bars)",   True),
-        ("statistical_boxplots",  "fa6s.chart-column", "K distribution (by scope)",   True),
-        ("reliability_matrix",    "fa6s.table-cells",  "Method reliability matrix",   False),
+        ("distribution_overlay",  "fa6s.chart-area",   "Grain size comparison",        True,  True),
+        ("k_value_comparison",    "fa6s.bolt",         "K-value comparison (bars)",    True,  True),
+        ("statistical_boxplots",  "fa6s.chart-column", "K distribution (by scope)",    True,  False),
+        ("reliability_matrix",    "fa6s.table-cells",  "Method reliability matrix",    False, False),
     ]
     # Outline page hints (must match order: main sections then appendices)
     OUTLINE_PAGES = [1, 2, 3, 5, 7, 9, 11, 13, 15, 17]
@@ -921,12 +966,19 @@ class ReportingTab(QWidget):
             ("single", self.SINGLE_PLOT_KEYS),
             ("collection", self.COLLECTION_PLOT_KEYS),
         ):
-            for key, fa, label, default_on in specs:
-                row = _SectionRow(fa, label)
+            for key, fa, label, default_on, has_breakdown in specs:
+                row = _SectionRow(fa, label, breakdown=has_breakdown)
                 row.set_checked(default_on)
                 self._plot_rows[scope][key] = row
                 alay.addWidget(row)
         self._sync_plot_rows_visibility()
+
+        # Plot style — global preset + custom tweaks applied to every report
+        # (and reused by exports) so the user themes plots once.
+        alay.addWidget(self._uc_header_with_icon(
+            "fa6s.palette", "PLOT STYLE", top_margin=12
+        ))
+        self._build_plot_style_group(alay)
 
         # Appendices
         alay.addWidget(self._uc_header_with_icon("fa6s.paperclip", "APPENDICES", top_margin=12))
@@ -2045,6 +2097,8 @@ class ReportingTab(QWidget):
             metadata=metadata, sections=sections, brand=brand,
             sample_details=sample_details,
             selected_plots=self._collect_selected_plots("collection"),
+            plot_breakdowns=self._collect_plot_breakdowns("collection"),
+            plot_style=self._resolve_report_plot_style(),
         )
 
     def _gen_full(self, brand, metadata, sections) -> str:
@@ -2066,6 +2120,8 @@ class ReportingTab(QWidget):
             metadata=metadata, sections=sections, brand=brand,
             sample_details=sample_details,
             selected_plots=self._collect_selected_plots("collection"),
+            plot_breakdowns=self._collect_plot_breakdowns("collection"),
+            plot_style=self._resolve_report_plot_style(),
         )
 
     def _collect_selected_plots(self, scope: str) -> set:
@@ -2082,6 +2138,145 @@ class ReportingTab(QWidget):
         if not rows:
             return set(defaults)
         return {key for key, row in rows.items() if row.is_checked()}
+
+    def _collect_plot_breakdowns(self, scope: str) -> dict:
+        """Return ``{plot_key: "group"|"dataset"}`` for breakdown-capable rows."""
+        rows = getattr(self, "_plot_rows", {}).get(scope) or {}
+        breakdowns = {}
+        for key, row in rows.items():
+            choice = row.breakdown()
+            if choice is not None:
+                breakdowns[key] = choice
+        return breakdowns
+
+    def _resolve_report_plot_style(self):
+        """Resolve the global report/export PlotStyle (preset + saved overrides)."""
+        return resolve_report_style()
+
+    def _build_plot_style_group(self, alay: QVBoxLayout) -> None:
+        """Preset dropdown + Customize button for the global report/export style."""
+        row = QWidget()
+        row.setStyleSheet("background: transparent;")
+        rlay = QHBoxLayout(row)
+        rlay.setContentsMargins(9, 2, 9, 2)
+        rlay.setSpacing(7)
+
+        lbl = QLabel("Preset")
+        lbl.setStyleSheet(
+            f'color: {C.TEXT_MID}; font-family: "{F.UI}"; font-size: {F.SZ_MD}pt; '
+            f'background: transparent;'
+        )
+        rlay.addWidget(lbl)
+
+        self._style_preset_combo = QComboBox()
+        self._style_preset_combo.addItems(get_available_style_names())
+        current = get_report_style_preset()
+        idx = self._style_preset_combo.findText(current)
+        if idx >= 0:
+            self._style_preset_combo.setCurrentIndex(idx)
+        self._style_preset_combo.currentTextChanged.connect(self._on_report_style_preset_changed)
+        rlay.addWidget(self._style_preset_combo, 1)
+
+        self._style_customize_btn = QPushButton("Customize…")
+        self._style_customize_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        self._style_customize_btn.clicked.connect(self._open_report_style_dialog)
+        rlay.addWidget(self._style_customize_btn)
+
+        alay.addWidget(row)
+
+    def _on_report_style_preset_changed(self, name: str) -> None:
+        set_report_style_preset(name)
+
+    def _open_report_style_dialog(self) -> None:
+        """Compact typography/legend override panel for the global report style."""
+        from .sidebar_controls import (
+            LEGEND_LOCATIONS as _LOCS,
+            LEGEND_LAYOUTS as _LAYOUTS,
+            make_combo_row, make_dspin_row, make_spin_row,
+        )
+        from .report_plot_style import (
+            get_report_style_overrides,
+            set_report_style_overrides,
+            clear_report_style_overrides,
+        )
+
+        style = resolve_report_style()
+        dlg = QDialog(self.window())
+        dlg.setWindowTitle("Report Plot Style")
+        dlg.setMinimumWidth(320)
+        root = QVBoxLayout(dlg)
+        root.setContentsMargins(12, 12, 12, 12)
+        root.setSpacing(4)
+
+        intro = QLabel(
+            f"Custom tweaks on top of the '{get_report_style_preset()}' preset. "
+            "Applied to every report and export plot."
+        )
+        intro.setWordWrap(True)
+        intro.setStyleSheet(f"color: {C.TEXT_MUTED}; font-size: {F.SZ_XS}pt;")
+        root.addWidget(intro)
+
+        row_loc, loc_combo = make_combo_row("Legend position", [lbl for _, _, lbl in _LOCS])
+        loc_idx = next((i for i, (loc, bbox, _l) in enumerate(_LOCS)
+                        if loc == style.legend_loc and bbox == style.legend_bbox_to_anchor), 0)
+        loc_combo.setCurrentIndex(loc_idx)
+        root.addWidget(row_loc)
+
+        row_layout, layout_combo = make_combo_row("Legend layout", [lbl for _, lbl in _LAYOUTS])
+        layout_idx = next((i for i, (ncol, _l) in enumerate(_LAYOUTS)
+                           if ncol == getattr(style, "legend_ncol", 1)), 0)
+        layout_combo.setCurrentIndex(layout_idx)
+        root.addWidget(row_layout)
+
+        row_alpha, alpha_spin = make_dspin_row("Legend opacity", 0.0, 1.0, 0.05, 2)
+        alpha_spin.setValue(float(style.legend_framealpha))
+        root.addWidget(row_alpha)
+
+        row_title, title_spin = make_spin_row("Title size", 6, 36)
+        title_spin.setValue(int(style.title_fontsize))
+        root.addWidget(row_title)
+
+        row_label, label_spin = make_spin_row("Axis label size", 6, 36)
+        label_spin.setValue(int(style.label_fontsize))
+        root.addWidget(row_label)
+
+        row_tick, tick_spin = make_spin_row("Tick size", 5, 24)
+        tick_spin.setValue(int(style.tick_fontsize))
+        root.addWidget(row_tick)
+
+        row_legend, legend_spin = make_spin_row("Legend size", 5, 24)
+        legend_spin.setValue(int(style.legend_fontsize))
+        root.addWidget(row_legend)
+
+        buttons = QDialogButtonBox()
+        reset_btn = buttons.addButton("Reset to preset", QDialogButtonBox.ButtonRole.ResetRole)
+        buttons.addButton(QDialogButtonBox.StandardButton.Save)
+        buttons.addButton(QDialogButtonBox.StandardButton.Cancel)
+        root.addWidget(buttons)
+
+        def on_reset():
+            clear_report_style_overrides()
+            dlg.reject()
+
+        def on_save():
+            loc, bbox, _l = _LOCS[loc_combo.currentIndex()]
+            ncol, _l2 = _LAYOUTS[layout_combo.currentIndex()]
+            set_report_style_overrides({
+                "legend_loc": loc,
+                "legend_bbox_to_anchor": bbox,
+                "legend_ncol": ncol,
+                "legend_framealpha": alpha_spin.value(),
+                "title_fontsize": title_spin.value(),
+                "label_fontsize": label_spin.value(),
+                "tick_fontsize": tick_spin.value(),
+                "legend_fontsize": legend_spin.value(),
+            })
+            dlg.accept()
+
+        reset_btn.clicked.connect(on_reset)
+        buttons.accepted.connect(on_save)
+        buttons.rejected.connect(dlg.reject)
+        dlg.exec()
 
     # ══════════════════════════════════════════════════════════
     # Preview-topbar actions

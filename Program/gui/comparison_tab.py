@@ -170,18 +170,11 @@ class _SortableTableWidgetItem(QTableWidgetItem):
 
 
 # ── Dataset color palette (warm-earth, consistent with design spec) ────────────
-DATASET_COLORS: List[str] = [
-    "#3a7ea0",
-    "#6b8e23",
-    "#b46428",
-    "#2a9d8f",
-    "#8b4513",
-    "#c45c2e",
-    "#4a6fa5",
-    "#5e7b1a",
-    "#8b6914",
-    "#2e6b7d",
-]
+# Single source of truth lives in plot_constants so the Comparison tab, the plot
+# widget and the headless report/export spec builder all share one palette and
+# their colours match. Re-exported here under the original name for the existing
+# references in this module.
+from .plot_constants import DATASET_COLORS
 
 
 # ─────────────────────────────────────────────────────────────────────────────
