@@ -93,7 +93,7 @@ class PlotWidget(QWidget):
 
         # Create matplotlib figure
         self.figure = Figure(figsize=(12, 8), tight_layout=True)
-        self.figure.patch.set_facecolor("#ffffff")
+        self.figure.patch.set_facecolor(self.current_style.figure_facecolor)
 
         # Create canvas
         self.canvas = FigureCanvas(self.figure)
@@ -128,7 +128,9 @@ class PlotWidget(QWidget):
 
     def setup_plots(self):
         """Setup initial empty plot area."""
+        style = self.current_style
         self.figure.clear()
+        self.figure.patch.set_facecolor(style.figure_facecolor)
         ax = self.figure.add_subplot(1, 1, 1)
         self.current_ax = ax
         self.grain_size_ax = ax
@@ -141,15 +143,17 @@ class PlotWidget(QWidget):
         ax.set_xscale('log')
         ax.set_xlim(0.001, 100)
         ax.set_ylim(0, self._DIST_Y_MAX)
-        ax.set_facecolor('#ffffff')
-        ax.grid(True, which='major', linestyle='-',
-                color='#000000', linewidth=0.5, alpha=0.18)
+        ax.set_facecolor(style.axes_facecolor)
+        if style.grid_show:
+            ax.grid(True, which='major', linestyle=style.grid_linestyle,
+                    color=style.grid_color, linewidth=style.grid_linewidth,
+                    alpha=style.grid_alpha)
 
         ax.text(
             0.5, 0.5, 'Load grain size data to view distribution curve',
             transform=ax.transAxes,
             ha='center', va='center', fontsize=11,
-            color='#000000', fontstyle='italic',
+            color=C.TEXT_MUTED, fontstyle='italic',
         )
 
         self.interactions.prime_current_ax()

@@ -5,6 +5,11 @@ from __future__ import annotations
 from typing import Any, Dict, Iterable, Optional
 
 from grain_classification import ISO14688
+from unit_conversions import (
+    HydraulicConductivityConverter,
+    HydraulicConductivityUnit,
+    get_default_plot_unit,
+)
 
 from .plot_styles import PROFESSIONAL_STYLE, PlotStyle
 from .plot_text_options import (
@@ -27,6 +32,30 @@ def plot_style_from_context(
 ) -> PlotStyle:
     style = plot_context_value(context, "style", default_style)
     return style if style is not None else PROFESSIONAL_STYLE
+
+
+def k_display_unit_from_context(
+    context: Optional[Dict[str, Any]],
+) -> HydraulicConductivityUnit:
+    """Return the captured K display unit, or the program default."""
+    unit = plot_context_value(context, "display_unit", None)
+    return unit if unit is not None else get_default_plot_unit()
+
+
+def convert_k_to_display(
+    value: Optional[float],
+    unit: HydraulicConductivityUnit,
+) -> Optional[float]:
+    """Convert a K value (m/s) to the chosen display unit (None passes through)."""
+    if value is None:
+        return None
+    return HydraulicConductivityConverter.convert_from_m_per_s(value, unit)
+
+
+def k_axis_label_for_unit(unit: HydraulicConductivityUnit) -> str:
+    """Y-axis label for a K bar chart in the given display unit."""
+    symbol = HydraulicConductivityConverter.UNIT_SYMBOLS[unit]
+    return f"Hydraulic Conductivity K ({symbol})"
 
 
 def plot_text_renderer_kwargs_from_context(
@@ -146,6 +175,7 @@ def build_plot_context_from_tab(tab: Any, default_scheme: Any = None) -> Dict[st
             "fill_curve": getattr(workspace, "fill_curve", False),
             "fill_zone_labels": getattr(workspace, "fill_zone_labels", False),
             "log_k_y_scale": getattr(workspace, "log_k_y_scale", False),
+            "display_unit": getattr(plot_widget, "display_unit", None),
             "classification_scheme": getattr(
                 plot_widget,
                 "_scheme",

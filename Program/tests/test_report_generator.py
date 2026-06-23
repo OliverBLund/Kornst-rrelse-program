@@ -13,6 +13,7 @@ sys.path.insert(0, 'Program')
 from data_loader import GrainSizeData
 from k_calculations import CalculationStatus, KCalculationResult
 from report_generator import ReportGenerator
+from unit_conversions import HydraulicConductivityUnit
 
 
 def build_dataset(name: str = 'Sample A') -> GrainSizeData:
@@ -46,6 +47,109 @@ class TestReportGeneratorAppendices(unittest.TestCase):
         self.generator = ReportGenerator()
         self.dataset = build_dataset()
         self.results = build_results()
+
+    def test_k_value_bar_chart_respects_plot_context_unit(self):
+        ms_uri = self.generator._create_k_value_bar_chart(
+            self.results, {'display_unit': HydraulicConductivityUnit.M_PER_S}
+        )
+        md_uri = self.generator._create_k_value_bar_chart(
+            self.results, {'display_unit': HydraulicConductivityUnit.M_PER_DAY}
+        )
+
+        self.assertTrue(ms_uri.startswith('data:image/png;base64,'))
+        self.assertTrue(md_uri.startswith('data:image/png;base64,'))
+        # Different display unit -> different rendered chart.
+        self.assertNotEqual(ms_uri, md_uri)
+
+    def test_individual_report_includes_k_bar_when_selected(self):
+        html = self.generator.generate_grain_size_report(
+            self.dataset,
+            sections={'plots': True},
+            k_results=self.results,
+            selected_plots={'grain_size_curve', 'k_value_bar'},
+        )
+        self.assertIn('Grain Size Distribution Curve', html)
+        self.assertIn('Hydraulic Conductivity by Method', html)
+
+    def test_individual_report_omits_k_bar_when_not_selected(self):
+        html = self.generator.generate_grain_size_report(
+            self.dataset,
+            sections={'plots': True},
+            k_results=self.results,
+            selected_plots={'grain_size_curve'},
+        )
+        self.assertIn('Grain Size Distribution Curve', html)
+        self.assertNotIn('Hydraulic Conductivity by Method', html)
+
+    def test_comparison_report_can_omit_reliability_matrix(self):
+        sample_b = build_dataset('Sample B')
+        details = [
+            {'label': 'Sample A', 'dataset': self.dataset, 'k_results': self.results,
+             'temperature': 20.0, 'porosity': 0.35},
+            {'label': 'Sample B', 'dataset': sample_b, 'k_results': self.results,
+             'temperature': 20.0, 'porosity': 0.35},
+        ]
+        html = self.generator.generate_comparison_report(
+            [self.dataset, sample_b],
+            sections={'plots': True},
+            sample_details=details,
+            selected_plots={'distribution_overlay', 'statistical_boxplots'},
+        )
+        self.assertIn('Grain Size Distribution Comparison', html)
+        self.assertNotIn('Reliability Matrix', html)
+
+    def test_comparison_report_renders_plots_via_shared_spec(self):
+        sample_b = build_dataset('Sample B')
+        details = [
+            {'label': 'Sample A', 'dataset': self.dataset, 'k_results': self.results,
+             'group_name': 'Layer A', 'temperature': 20.0, 'porosity': 0.35},
+            {'label': 'Sample B', 'dataset': sample_b, 'k_results': self.results,
+             'group_name': 'Layer B', 'temperature': 20.0, 'porosity': 0.35},
+        ]
+        captured = []
+
+        def fake_spec(spec, **kwargs):
+            captured.append(spec)
+            return 'data:image/png;base64,spec'
+
+        with patch('plot_export.export_comparison_spec', side_effect=fake_spec):
+            html = self.generator.generate_comparison_report(
+                [self.dataset, sample_b],
+                sections={'plots': True, 'k_statistics': False,
+                          'results': False, 'interpretation': False},
+                sample_details=details,
+                selected_plots={'distribution_overlay', 'k_value_comparison'},
+            )
+
+        by_type = {spec.current_plot_type: spec for spec in captured}
+        # Both comparison plots route through the shared render_comparison spec.
+        self.assertIn('distribution', by_type)
+        self.assertIn('k-values', by_type)
+        # Named groups -> group-aware breakdown, matching the Comparison tab.
+        self.assertTrue(by_type['distribution'].use_group_breakdown)
+        # K bars use m/s, consistent with the report's K tables/boxplot.
+        self.assertEqual(
+            by_type['k-values'].display_unit, HydraulicConductivityUnit.M_PER_S
+        )
+        self.assertIn('Grain Size Distribution Comparison', html)
+        self.assertIn('Hydraulic Conductivity by Method', html)
+
+    def test_comparison_report_can_omit_k_value_bar(self):
+        sample_b = build_dataset('Sample B')
+        details = [
+            {'label': 'Sample A', 'dataset': self.dataset, 'k_results': self.results,
+             'temperature': 20.0, 'porosity': 0.35},
+            {'label': 'Sample B', 'dataset': sample_b, 'k_results': self.results,
+             'temperature': 20.0, 'porosity': 0.35},
+        ]
+        html = self.generator.generate_comparison_report(
+            [self.dataset, sample_b],
+            sections={'plots': True},
+            sample_details=details,
+            selected_plots={'distribution_overlay'},
+        )
+        self.assertIn('Grain Size Distribution Comparison', html)
+        self.assertNotIn('Hydraulic Conductivity by Method', html)
 
     def test_percentile_appendix_uses_curve_interpolation(self):
         html = self.generator._create_percentiles_table(self.dataset)

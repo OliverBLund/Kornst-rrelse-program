@@ -72,6 +72,11 @@ class PlotStyle:
     legend_bbox_to_anchor: Optional[Tuple[float, float]] = None
     legend_ncol: int = 1
 
+    # K-value mean reference lines (arithmetic / geometric). Defaulted so every
+    # preset keeps its current look while the colors become style-driven.
+    k_mean_arith_color: str = "#b83232"
+    k_mean_geo_color: str = "#5c3d8f"
+
 
 # Preset style templates
 

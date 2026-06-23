@@ -65,7 +65,17 @@
       "Bash(rm -f _khist4.png)",
       "Bash(QT_QPA_PLATFORM=offscreen python -m pytest tests/test_comparison_plot_widget.py tests/test_comparison_tab.py tests/test_report_generator.py tests/test_export_manager.py -q)",
       "Bash(rm -f _khist5.png)",
-      "Bash(QT_QPA_PLATFORM=offscreen python -m pytest tests/test_comparison_plot_widget.py tests/test_report_generator.py tests/test_export_manager.py -q)"
+      "Bash(QT_QPA_PLATFORM=offscreen python -m pytest tests/test_comparison_plot_widget.py tests/test_report_generator.py tests/test_export_manager.py -q)",
+      "Bash(QT_QPA_PLATFORM=offscreen python -m pytest tests/test_comparison_plot_widget.py tests/test_plot_workspace.py tests/test_theme.py -q)",
+      "Bash(QT_QPA_PLATFORM=offscreen python -m pytest tests/test_comparison_plot_widget.py tests/test_plot_workspace.py tests/test_theme.py tests/test_report_generator.py tests/test_export_manager.py -q)",
+      "Bash(QT_QPA_PLATFORM=offscreen python -m pytest tests/test_report_generator.py tests/test_export_manager.py tests/test_plot_workspace.py -q)",
+      "Bash(QT_QPA_PLATFORM=offscreen python -m pytest tests/test_report_generator.py tests/test_export_manager.py tests/test_plot_workspace.py tests/test_comparison_plot_widget.py -q)",
+      "Bash(QT_QPA_PLATFORM=offscreen python -m pytest tests/test_report_generator.py tests/test_export_manager.py tests/test_reporting_tab.py tests/test_plot_workspace.py -q)",
+      "Bash(QT_QPA_PLATFORM=offscreen python -m pytest tests/test_report_generator.py tests/test_reporting_tab.py tests/test_export_manager.py -q)",
+      "Bash(QT_QPA_PLATFORM=offscreen python -m pytest tests/test_report_generator.py tests/test_export_manager.py tests/test_reporting_tab.py tests/test_plot_workspace.py tests/test_comparison_plot_widget.py tests/test_comparison_tab.py -q)",
+      "Bash(QT_QPA_PLATFORM=offscreen python -c \"import gui.comparison_plot_spec as cps; print\\('OK', cps.ComparisonPlotSpec\\(\\).__class__.__name__, cps.render_comparison.__name__\\)\")",
+      "Bash(QT_QPA_PLATFORM=offscreen python *)",
+      "Bash(python *)"
     ],
     "deny": [],
     "ask": []

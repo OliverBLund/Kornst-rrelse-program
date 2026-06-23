@@ -3,7 +3,6 @@ Enhanced plot widget for comparison tab with multiple display modes
 """
 
 import dataclasses
-import math
 from PyQt6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QFrame, QPushButton,
     QComboBox, QLabel, QButtonGroup, QSizePolicy, QScrollArea,
@@ -13,26 +12,15 @@ from PyQt6.QtWidgets import (
 from PyQt6.QtCore import Qt, pyqtSignal, QSize, QPropertyAnimation, QEasingCurve
 from PyQt6.QtGui import QColor, QFontMetrics
 from matplotlib.figure import Figure
-from matplotlib.patches import Patch
 import numpy as np
 from typing import List, Dict, Optional
 from .collapsible_section import CollapsibleSection
-from .k_plot_helpers import apply_linear_bar_limits, apply_log_bar_limits, format_method_label
 from .matplotlib_canvas import FigureCanvas
 from .plot_interactions import AxesInteractionController
 from .plot_constants import METHOD_COLORS, DATASET_COLORS, DEFAULT_METHOD_ORDER, ordered_methods
-from .plot_renderers import (
-    apply_legend_aware_layout,
-    build_legend_kwargs,
-    render_distribution_groups,
-    render_distribution_overlay,
-    render_k_distribution_function,
-    render_k_histogram,
-    render_k_overlay,
-    _style_k_bar_simple,
-    _add_flagged_legend_handle,
-)
+from .plot_renderers import apply_legend_aware_layout
 from .plot_styles import PlotStyle, PROFESSIONAL_STYLE, get_style, get_available_style_names
+from . import comparison_plot_spec as cps
 from .sidebar_controls import (
     LEGEND_LOCATIONS as _CMP_LEGEND_LOCATIONS,
     LEGEND_LAYOUTS as _CMP_LEGEND_LAYOUTS,
@@ -46,7 +34,6 @@ from .group_styles import (
     dataset_series_key,
     group_color_map,
     line_style_label,
-    series_style_parts,
     set_dataset_line_style,
     set_group_color,
 )
@@ -120,6 +107,9 @@ class ComparisonPlotWidget(QWidget):
     # Soft cap on faceted subplots; beyond this we surface an overflow note
     # rather than silently dropping datasets/groups.
     MAX_FACET_PANELS = 16
+    # Fixed height (px) given to each grid row; the canvas scroll area scrolls
+    # when the total exceeds the viewport instead of squishing the subplots.
+    GRID_ROW_HEIGHT = 260
     
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -244,10 +234,35 @@ class ComparisonPlotWidget(QWidget):
         self.canvas.mpl_connect("motion_notify_event", self._on_canvas_motion)
         self.canvas.mpl_connect("button_release_event", self._on_canvas_release)
         self.canvas.setMinimumHeight(220)
-        chart_lay.addWidget(self.canvas, 1)
+
+        # Scrollable viewport: grid layouts grow tall (a fixed height per row)
+        # and scroll, instead of squishing every subplot into the visible area.
+        self._canvas_scroll = QScrollArea()
+        self._canvas_scroll.setObjectName("cmp-canvas-scroll")
+        self._canvas_scroll.setWidgetResizable(True)
+        self._canvas_scroll.setFrameShape(QFrame.Shape.NoFrame)
+        self._canvas_scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+        self._canvas_scroll.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAsNeeded)
+        self._canvas_scroll.setStyleSheet("background: transparent;")
+        self._canvas_scroll.setWidget(self.canvas)
+        chart_lay.addWidget(self._canvas_scroll, 1)
 
         self._drawer = self._build_data_drawer()
         chart_lay.addWidget(self._drawer, 0)
+
+        # Interaction hint — a slim footer under the plot, not in the toolbar.
+        self._interaction_hint = QLabel(
+            "<b>Plot controls:</b> Wheel zoom  ·  Shift-drag pan  ·  Double-click reset"
+        )
+        self._interaction_hint.setObjectName("cmp-interaction-hint")
+        self._interaction_hint.setTextFormat(Qt.TextFormat.RichText)
+        self._interaction_hint.setStyleSheet(
+            "color: #8a816f; font-size: 10px; padding: 2px 8px; background: transparent;"
+        )
+        self._interaction_hint.setAlignment(
+            Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter
+        )
+        chart_lay.addWidget(self._interaction_hint, 0)
 
         self._toggle_handle = QPushButton(self._chart_area)
         self._toggle_handle.setObjectName("pw-toggle-handle")
@@ -529,11 +544,8 @@ class ComparisonPlotWidget(QWidget):
         self.reset_btn.clicked.connect(self.reset_view)
         row.addWidget(self.reset_btn)
 
-        row.addWidget(_cmp_sep())
-
-        self._interaction_hint = QLabel("Wheel zoom  |  Shift-drag pan  |  Double-click reset")
-        self._interaction_hint.setStyleSheet("color: #8a816f; font-size: 10px;")
-        row.addWidget(self._interaction_hint)
+        # NOTE: the interaction hint moved out of the toolbar into a slim footer
+        # below the plot (see init_ui) so it no longer competes for toolbar space.
 
         row.addStretch(1)
         return toolbar
@@ -548,8 +560,6 @@ class ComparisonPlotWidget(QWidget):
 
     def _update_responsive_chrome(self) -> None:
         width = self.width()
-        if hasattr(self, "_interaction_hint"):
-            self._interaction_hint.setVisible(width >= 900)
         for label_name in ("_tb_plot_label", "_tb_mode_label", "_tb_style_label"):
             label = getattr(self, label_name, None)
             if label is not None:
@@ -1141,15 +1151,6 @@ class ComparisonPlotWidget(QWidget):
             for ds in self.datasets
         ]
 
-    def _effective_dataset_plot_styles(self) -> tuple[List[str], List[Optional[str]]]:
-        line_styles: list[str] = []
-        markers: list[Optional[str]] = []
-        for style_key in self._effective_dataset_linestyles():
-            line_style, marker = series_style_parts(style_key)
-            line_styles.append(line_style)
-            markers.append(marker)
-        return line_styles, markers
-
     # ── Group breakdown & faceting ──────────────────────────────────
 
     def _has_named_groups(self) -> bool:
@@ -1166,235 +1167,24 @@ class ComparisonPlotWidget(QWidget):
         """
         return self.breakdown == "group" and self._has_named_groups()
 
+    # ── Comparison "what to draw" helpers ───────────────────────────
+    # The orchestration itself lives in gui/comparison_plot_spec.py (shared by
+    # the GUI, reports and exports). These thin wrappers build a spec from the
+    # live widget state so external callers/tests keep a stable surface.
+
     def _group_overlay_inputs(
         self,
     ) -> tuple[Dict[str, Dict[str, float]], List[str], Dict[str, set]]:
-        """Per-group K aggregates for the K-Values overlay (in m/s).
-
-        Named groups collapse to one geometric-mean series each (OK-only, from
-        the comparison snapshot); ungrouped datasets stay individual so no scope
-        is dropped. Returns parallel ``(results_m_s, colors, flagged_by_scope)``.
-        """
-        results: Dict[str, Dict[str, float]] = {}
-        colors: List[str] = []
-        flagged: Dict[str, set] = {}
-
-        snapshot = self._comparison_snapshot
-        buckets: Dict[str, Dict[str, list]] = {}
-        if snapshot is not None:
-            for record in snapshot.k.included_records:
-                if record.group_name == UNGROUPED_LABEL or record.positive_value is None:
-                    continue
-                buckets.setdefault(record.group_name, {}).setdefault(
-                    record.method_name, []
-                ).append(record.positive_value)
-
-        dataset_index = {ds.sample_name: i for i, ds in enumerate(self.datasets)}
-        group_order = list(snapshot.k.group_names) if snapshot is not None else []
-
-        def emit_group(group_name: str) -> None:
-            method_means = {
-                method: math.exp(sum(map(math.log, values)) / len(values))
-                for method, values in buckets.get(group_name, {}).items()
-                if values
-            }
-            if not method_means:
-                return
-            results[group_name] = method_means
-            colors.append(self._group_color_map.get(group_name, self.dataset_colors[0]))
-            flagged[group_name] = set()
-
-        for group_name in group_order:
-            if group_name != UNGROUPED_LABEL:
-                emit_group(group_name)
-                continue
-            # Expand Ungrouped into its member datasets so each keeps identity.
-            for ds in self.datasets:
-                name = ds.sample_name
-                if self._dataset_groups.get(name, UNGROUPED_LABEL) != UNGROUPED_LABEL:
-                    continue
-                k_dict = self.k_results_dict.get(name)
-                if not k_dict:
-                    continue
-                results[name] = dict(k_dict)
-                colors.append(
-                    self._effective_color_for(name, dataset_index.get(name, 0))
-                )
-                flagged[name] = set(self.flagged_methods_dict.get(name, set()))
-
-        return results, colors, flagged
-
-    def _group_order(self) -> List[str]:
-        """Group labels in first-seen dataset order (named groups + Ungrouped)."""
-        order: list[str] = []
-        for ds in self.datasets:
-            group = self._dataset_groups.get(ds.sample_name, UNGROUPED_LABEL)
-            if group not in order:
-                order.append(group)
-        return order
-
-    def _distribution_units(self) -> list[dict]:
-        """Faceting units for distribution plots.
-
-        Per dataset → one single-member unit each. Per group → one multi-member
-        unit per named group (members feed the aggregate curve + band), with
-        ungrouped datasets kept as individual single-member units.
-        """
-        colors = self._effective_dataset_colors()
-        color_by_name = {
-            ds.sample_name: colors[i] for i, ds in enumerate(self.datasets)
-        }
-
-        def member(ds) -> tuple:
-            return (ds.particle_sizes, ds.percent_passing)
-
-        if not self._use_group_breakdown():
-            return [
-                {
-                    "label": ds.sample_name,
-                    "color": color_by_name.get(ds.sample_name, self.dataset_colors[0]),
-                    "members": [member(ds)],
-                }
-                for ds in self.datasets
-            ]
-
-        units: list[dict] = []
-        for group_name in self._group_order():
-            members = [
-                ds for ds in self.datasets
-                if self._dataset_groups.get(ds.sample_name, UNGROUPED_LABEL) == group_name
-            ]
-            if group_name == UNGROUPED_LABEL:
-                units.extend(
-                    {
-                        "label": ds.sample_name,
-                        "color": color_by_name.get(ds.sample_name, self.dataset_colors[0]),
-                        "members": [member(ds)],
-                    }
-                    for ds in members
-                )
-            else:
-                units.append({
-                    "label": group_name,
-                    "color": self._group_color_map.get(group_name, self.dataset_colors[0]),
-                    "members": [member(ds) for ds in members],
-                })
-        return units
-
-    def _k_grid_units(self) -> tuple[Dict[str, Dict[str, float]], Dict[str, set]]:
-        """Return ``(display_results, flagged_by_scope)`` for K grid facets.
-
-        Honours the breakdown: per-dataset cells use raw per-dataset results;
-        per-group cells use the group geometric-mean aggregates.
-        """
-        if self._use_group_breakdown():
-            results_m_s, _colors, flagged = self._group_overlay_inputs()
-            display = {
-                name: self._convert_k_dict(k_dict)
-                for name, k_dict in results_m_s.items()
-            }
-            return display, flagged
-        return self._display_k_results_dict(), self.flagged_methods_dict
-
-    def _group_mean_passing(self, members) -> tuple[list, list]:
-        """Mean % passing across group members on the union of their sizes.
-
-        Each member is interpolated (log-x) onto the shared size union and
-        averaged, giving a monotonic aggregate curve whose retained
-        differences stay non-negative — safe to feed the histogram helper.
-        """
-        sizes_set = {
-            float(size)
-            for sizes, _pcts in members
-            for size in sizes
-            if size is not None and float(size) > 0
-        }
-        union = sorted(sizes_set)
-        if not union:
-            return [], []
-        log_grid = np.log10(union)
-        stacked = []
-        for sizes, pcts in members:
-            pairs = sorted(
-                (float(s), float(p))
-                for s, p in zip(sizes, pcts)
-                if s is not None and float(s) > 0 and p is not None
-            )
-            if len(pairs) < 2:
-                continue
-            xs = np.log10([s for s, _ in pairs])
-            ys = np.array([p for _, p in pairs], dtype=float)
-            stacked.append(np.interp(log_grid, xs, ys))
-        if not stacked:
-            return [], []
-        mean_passing = np.mean(np.vstack(stacked), axis=0)
-        return union, mean_passing.tolist()
+        """Per-group K aggregates for the K-Values overlay (in m/s)."""
+        return cps.group_overlay_inputs(self._build_spec())
 
     def _histogram_units(self) -> list[dict]:
         """Faceting units for the grain histogram (per dataset or per group)."""
-        colors = self._effective_dataset_colors()
-        color_by_name = {
-            ds.sample_name: colors[i] for i, ds in enumerate(self.datasets)
-        }
-
-        def dataset_unit(ds) -> dict:
-            sizes, freq = self._calculate_histogram_frequencies(
-                ds.particle_sizes, ds.percent_passing
-            )
-            return {
-                "label": ds.sample_name,
-                "color": color_by_name.get(ds.sample_name, self.dataset_colors[0]),
-                "sizes": sizes,
-                "freq": freq,
-            }
-
-        if not self._use_group_breakdown():
-            return [dataset_unit(ds) for ds in self.datasets]
-
-        units: list[dict] = []
-        for group_name in self._group_order():
-            members = [
-                ds for ds in self.datasets
-                if self._dataset_groups.get(ds.sample_name, UNGROUPED_LABEL) == group_name
-            ]
-            if group_name == UNGROUPED_LABEL:
-                units.extend(dataset_unit(ds) for ds in members)
-                continue
-            usizes, mean_passing = self._group_mean_passing(
-                [(ds.particle_sizes, ds.percent_passing) for ds in members]
-            )
-            sizes, freq = self._calculate_histogram_frequencies(usizes, mean_passing)
-            units.append({
-                "label": group_name,
-                "color": self._group_color_map.get(group_name, self.dataset_colors[0]),
-                "sizes": sizes,
-                "freq": freq,
-            })
-        return units
+        return cps.histogram_units(self._build_spec())
 
     def _combined_facets(self) -> list[dict]:
-        """Faceting units for the combined view: distribution + K per unit.
-
-        Joins each distribution unit to its K values by label — group geo-mean
-        aggregates per group, or raw per-dataset results otherwise.
-        """
-        if self._use_group_breakdown():
-            k_results_m_s, _colors, flagged_by_scope = self._group_overlay_inputs()
-        else:
-            k_results_m_s = self.k_results_dict
-            flagged_by_scope = self.flagged_methods_dict
-
-        facets: list[dict] = []
-        for unit in self._distribution_units():
-            label = unit["label"]
-            facets.append({
-                "label": label,
-                "color": unit["color"],
-                "members": unit["members"],
-                "k": k_results_m_s.get(label, {}),
-                "flagged": flagged_by_scope.get(label, set()),
-            })
-        return facets
+        """Faceting units for the combined view: distribution + K per unit."""
+        return cps.combined_facets(self._build_spec())
 
     def reset_presentation_state(self) -> None:
         """Forget accumulated color/style ordering and the breakdown choice.
@@ -1465,28 +1255,19 @@ class ComparisonPlotWidget(QWidget):
             _sync_cmp_seg(button, on)
 
     def _facet_dims(self, count: int) -> tuple[int, int, int, int]:
-        """Return ``(rows, cols, shown, hidden)`` fitting *count* faceted panels.
+        """Return ``(rows, cols, shown, hidden)`` fitting *count* faceted panels."""
+        return cps.facet_dims(self._build_spec(), count)
 
-        Columns follow the layout selector; rows expand to fit every unit so
-        nothing is silently dropped. A soft cap keeps pathological counts
-        readable, surfacing the remainder through an overflow note.
-        """
-        cols = max(1, self.grid_layout[1])
-        shown = max(0, min(count, self.MAX_FACET_PANELS))
-        hidden = max(0, count - shown)
-        rows = max(1, math.ceil(max(shown, 1) / cols))
-        return rows, cols, shown, hidden
+    def _grow_canvas_for_rows(self, rows: int) -> None:
+        """Give each grid row a fixed height so the scroll area scrolls when the
+        total exceeds the viewport, rather than squishing every subplot."""
+        if hasattr(self, "canvas"):
+            self.canvas.setMinimumHeight(max(1, rows) * self.GRID_ROW_HEIGHT)
 
-    def _draw_facet_overflow_note(self, hidden: int) -> None:
-        """Annotate the figure when the soft panel cap hid some units."""
-        if hidden <= 0:
-            return
-        self.figure.text(
-            0.5, 0.005,
-            f"+{hidden} more not shown — narrow the comparison scope to see them",
-            ha="center", va="bottom",
-            fontsize=8, color=C.TEXT_MUTED, fontstyle="italic",
-        )
+    def _reset_canvas_height(self) -> None:
+        """Let the canvas fill the viewport (single/overlay plots, no scroll)."""
+        if hasattr(self, "canvas"):
+            self.canvas.setMinimumHeight(220)
 
     def _rebuild_group_style_maps(self) -> None:
         self._dataset_groups = {}
@@ -1644,36 +1425,6 @@ class ComparisonPlotWidget(QWidget):
         freq = np.maximum(0.0, passing - next_passing)
         return sizes, freq
 
-    def _style_k_bar(self, bar, color: str, flagged: bool):
-        """Apply warning styling to flagged K-value bars."""
-        if flagged:
-            bar.set_facecolor('none')
-            bar.set_edgecolor(color)
-            bar.set_linewidth(2.0)
-            bar.set_hatch('////')
-            bar.set_alpha(1.0)
-        else:
-            bar.set_edgecolor('black')
-            bar.set_linewidth(0.5)
-
-    def _legend_kwargs(self, label_count: Optional[int] = None) -> dict:
-        """Build legend kwargs from the active PlotStyle so loc/bbox/fontsize are honoured."""
-        return build_legend_kwargs(self.current_style, label_count)
-
-    def _add_flagged_legend_handle(self, ax):
-        """Append a warning-state legend entry when flagged methods are present."""
-        handles, labels = ax.get_legend_handles_labels()
-        handles = handles + [
-            Patch(
-                facecolor='none',
-                edgecolor=C.TEXT,
-                hatch='////',
-                label='Flagged / Warning',
-            )
-        ]
-        labels = labels + ['Flagged / Warning']
-        ax.legend(handles, labels, **self._legend_kwargs(len(labels)))
-
     def on_grid_layout_changed(self, text: str):
         """Handle grid layout change"""
         layouts = {
@@ -1719,29 +1470,12 @@ class ComparisonPlotWidget(QWidget):
     def _unit_symbol(self) -> str:
         return HydraulicConductivityConverter.UNIT_SYMBOLS[self.display_unit]
 
-    def _k_axis_label(self) -> str:
-        return f"Hydraulic Conductivity K ({self._unit_symbol()})"
-
     def _convert_k_value(self, value_m_s: Optional[float]) -> Optional[float]:
         if value_m_s is None:
             return None
         return HydraulicConductivityConverter.convert_from_m_per_s(
             value_m_s, self.display_unit
         )
-
-    def _convert_k_dict(self, k_dict: Dict[str, float]) -> Dict[str, float]:
-        converted: Dict[str, float] = {}
-        for method, value in k_dict.items():
-            display_value = self._convert_k_value(value)
-            if display_value is not None:
-                converted[method] = display_value
-        return converted
-
-    def _display_k_results_dict(self) -> Dict[str, Dict[str, float]]:
-        return {
-            name: self._convert_k_dict(k_dict)
-            for name, k_dict in self.k_results_dict.items()
-        }
 
     def _on_legend_loc_changed(self, index: int) -> None:
         if index < 0 or index >= len(_CMP_LEGEND_LOCATIONS):
@@ -1843,25 +1577,64 @@ class ComparisonPlotWidget(QWidget):
         self._sync_breakdown_controls()
         self._rebuild_dataset_color_rows()
 
+    def _build_spec(self) -> cps.ComparisonPlotSpec:
+        """Capture the live, resolved plot state into a widget-free render spec.
+
+        All Qt/``group_styles``/``QSettings`` lookups happen here so the shared
+        ``render_comparison`` pipeline (GUI + reports + exports) is a pure
+        function of the returned spec.
+        """
+        colors = self._effective_dataset_colors()
+        color_by_name = {
+            ds.sample_name: colors[i] for i, ds in enumerate(self.datasets)
+        }
+        return cps.ComparisonPlotSpec(
+            datasets=list(self.datasets),
+            k_results_dict=self.k_results_dict,
+            flagged_methods_dict=self.flagged_methods_dict,
+            comparison_snapshot=self._comparison_snapshot,
+            current_plot_type=self.current_plot_type,
+            display_mode=self.display_mode,
+            use_group_breakdown=self._use_group_breakdown(),
+            grid_cols=self.grid_layout[1],
+            max_facet_panels=self.MAX_FACET_PANELS,
+            dataset_groups=dict(self._dataset_groups),
+            group_color_map=dict(self._group_color_map),
+            effective_colors=colors,
+            color_by_name=color_by_name,
+            dataset_linestyles={
+                ds.sample_name: self._dataset_linestyles.get(ds.sample_name, "-")
+                for ds in self.datasets
+            },
+            palette=list(self.dataset_colors),
+            known_dataset_order=list(self._known_dataset_order),
+            known_group_order=list(self._known_group_order),
+            known_dataset_group=dict(self._known_dataset_group),
+            style=self.current_style,
+            show_grid=self.show_grid,
+            show_legend=self.show_legend,
+            log_k_y_scale=self.log_k_y_scale,
+            display_unit=self.display_unit,
+            k_dist_view=self.k_dist_view,
+            k_hist_axis=self.k_hist_axis,
+            k_hist_bins=self.k_hist_bins,
+        )
+
     def refresh_plot(self):
         """Refresh the plot based on current settings"""
         if not self.datasets:
             self.show_empty_state()
             return
-        
-        self.figure.clear()
-        
-        if self.current_plot_type == "distribution":
-            self.plot_distribution()
-        elif self.current_plot_type == "k-values":
-            self.plot_k_values()
-        elif self.current_plot_type == "k-distribution":
-            self.plot_k_distribution()
-        elif self.current_plot_type == "combined":
-            self.plot_combined()
-        elif self.current_plot_type == "histogram":
-            self.plot_histogram()
-        
+
+        # Default to a viewport-filling canvas; grid plots grow it per row.
+        self._reset_canvas_height()
+
+        # The shared spec pipeline owns the figure drawing; the widget keeps the
+        # interactions, drawer, sidebar and canvas height around it.
+        rows_used = cps.render_comparison(self.figure, self._build_spec())
+        if rows_used:
+            self._grow_canvas_for_rows(rows_used)
+
         self._prime_current_ax()
         self._capture_default_limits()
         self._apply_active_axes_styling()
@@ -1931,324 +1704,6 @@ class ComparisonPlotWidget(QWidget):
     def _on_canvas_release(self, _event) -> None:
         self._interactions.on_release(_event)
     
-    def plot_distribution(self):
-        """Plot grain size distribution"""
-        if self.display_mode == "overlay":
-            ax = self.figure.add_subplot(1, 1, 1)
-            if self._use_group_breakdown():
-                self.plot_distribution_overlay_groups(ax)
-            else:
-                self.plot_distribution_overlay(ax)
-        else:  # grid mode
-            self.plot_distribution_grid()
-
-    def plot_distribution_overlay(self, ax):
-        """Plot all distributions on single axes via shared renderer."""
-        linestyles, markers = self._effective_dataset_plot_styles()
-        render_distribution_overlay(
-            ax, self.datasets,
-            colors=self._effective_dataset_colors(),
-            linestyles=linestyles,
-            markers=markers,
-            style=self.current_style,
-            show_grid=self.show_grid,
-            show_legend=self.show_legend,
-        )
-
-    def plot_distribution_overlay_groups(self, ax):
-        """Overlay one aggregate curve + spread band + faint members per group."""
-        render_distribution_groups(
-            ax, self._distribution_units(),
-            style=self.current_style,
-            show_grid=self.show_grid,
-            show_legend=self.show_legend,
-            title="Grain Size Distribution by Group",
-        )
-
-    def plot_distribution_grid(self):
-        """Plot distributions in a grid — one panel per dataset or per group."""
-        units = self._distribution_units()
-        rows, cols, shown, hidden = self._facet_dims(len(units))
-
-        for i, unit in enumerate(units[:shown]):
-            ax = self.figure.add_subplot(rows, cols, i + 1)
-            render_distribution_groups(
-                ax, [unit],
-                style=self.current_style,
-                show_grid=self.show_grid,
-                show_legend=False,
-                title=unit["label"],
-            )
-            ax.title.set_fontsize(9)
-            ax.set_xlabel('Size (mm)', fontsize=8)
-            ax.set_ylabel('% Passing', fontsize=8)
-            ax.tick_params(labelsize=7)
-        self._draw_facet_overflow_note(hidden)
-
-    def plot_k_values(self):
-        """Plot K-values comparison"""
-        if not self.k_results_dict:
-            self.show_empty_state("No K-values calculated")
-            return
-
-        if self.display_mode == "overlay":
-            self.plot_k_values_overlay()
-        else:  # grid
-            self.plot_k_values_grid()
-    
-    def plot_k_values_overlay(self):
-        """Plot K-values as grouped bars via shared renderer.
-
-        When dataset groups exist, each named group collapses to a single
-        geometric-mean bar series (one bar per group per method) so same-group
-        members no longer render as indistinguishable same-colour bars.
-        """
-        ax = self.figure.add_subplot(1, 1, 1)
-
-        if self._use_group_breakdown():
-            results_m_s, colors, flagged = self._group_overlay_inputs()
-            display = {
-                name: self._convert_k_dict(k_dict)
-                for name, k_dict in results_m_s.items()
-            }
-            render_k_overlay(
-                ax, display,
-                flagged_methods_dict=flagged,
-                colors=colors,
-                style=self.current_style,
-                show_grid=self.show_grid,
-                show_legend=self.show_legend,
-                show_value_labels=True,
-                log_y_scale=self.log_k_y_scale,
-                y_label=f"K ({self._unit_symbol()})",
-                title="Hydraulic Conductivity by Group (geometric mean)",
-            )
-            return
-
-        render_k_overlay(
-            ax, self._display_k_results_dict(),
-            flagged_methods_dict=self.flagged_methods_dict,
-            colors=self._effective_dataset_colors(),
-            style=self.current_style,
-            show_grid=self.show_grid,
-            show_legend=self.show_legend,
-            show_value_labels=True,
-            log_y_scale=self.log_k_y_scale,
-            y_label=f"K ({self._unit_symbol()})",
-        )
-
-    def plot_k_values_grid(self):
-        """Plot K-values in a grid — one panel per dataset or per group."""
-        display, flagged_by_scope = self._k_grid_units()
-        rows, cols, shown, hidden = self._facet_dims(len(display))
-
-        for i, (name, k_dict) in enumerate(display.items()):
-            if i >= shown:
-                break
-
-            ax = self.figure.add_subplot(rows, cols, i + 1)
-
-            methods = self._ordered_methods(k_dict.keys())
-            values = [k_dict[m] for m in methods]
-            colors = [self.method_colors.get(m, '#888888') for m in methods]
-            flagged_methods = flagged_by_scope.get(name, set())
-            
-            bars = ax.bar(range(len(methods)), values, color=colors, 
-                         alpha=0.8, edgecolor='black', linewidth=0.5)
-            ax.set_axisbelow(True)
-            for bar, method, color in zip(bars, methods, colors):
-                self._style_k_bar(bar, color, method in flagged_methods)
-            
-            ax.set_title(name, fontsize=9, fontweight='bold')
-            ax.set_xlabel('Method', fontsize=8)
-            ax.set_ylabel(f"K ({self._unit_symbol()})", fontsize=8)
-            ax.set_xticks(range(len(methods)))
-            ax.set_xticklabels(
-                [format_method_label(method, tiny=True) for method in methods],
-                rotation=45,
-                ha='right',
-                fontsize=6,
-            )
-            if self.log_k_y_scale:
-                apply_log_bar_limits(ax, values)
-            else:
-                apply_linear_bar_limits(ax, values)
-            ax.tick_params(labelsize=7)
-
-            if self.show_grid:
-                ax.grid(True, axis='y', alpha=0.3)
-        self._draw_facet_overflow_note(hidden)
-
-    def plot_k_distribution(self):
-        """Plot aggregate/group empirical distribution functions for K."""
-        if not self._comparison_snapshot or not self._comparison_snapshot.k.included_records:
-            self.show_empty_state("No K-values available for K distribution")
-            return
-
-        scopes = self._k_distribution_scopes()
-        if not scopes:
-            self.show_empty_state("No positive K-values available for K distribution")
-            return
-
-        ax = self.figure.add_subplot(1, 1, 1)
-        if self.k_dist_view == "histogram":
-            if self._use_group_breakdown():
-                hist_scopes = [s for s in scopes if not s.get("is_overall")] or scopes
-            else:
-                hist_scopes = [s for s in scopes if s.get("is_overall")] or scopes
-            render_k_histogram(
-                ax,
-                hist_scopes,
-                axis=self.k_hist_axis,
-                bins=self.k_hist_bins,
-                unit_symbol=self._unit_symbol(),
-                style=self.current_style,
-                show_grid=self.show_grid,
-                show_legend=self.show_legend,
-                title="K Distribution (lognormal)",
-            )
-            return
-
-        render_k_distribution_function(
-            ax,
-            scopes,
-            style=self.current_style,
-            show_grid=self.show_grid,
-            show_legend=self.show_legend,
-            x_label=self._k_axis_label(),
-            title="K Distribution Function",
-        )
-
-    def _k_distribution_scopes(self) -> list[dict]:
-        snapshot = self._comparison_snapshot
-        if snapshot is None:
-            return []
-
-        records = [
-            record for record in snapshot.k.included_records
-            if record.positive_value is not None
-        ]
-        if not records:
-            return []
-
-        scopes: list[dict] = [{
-            "label": "Overall",
-            "values": [self._convert_k_value(record.positive_value) for record in records],
-            "color": "#3d4a1f",
-            "linestyle": "-",
-            "is_overall": True,
-        }]
-
-        named_groups = [
-            group for group in snapshot.k.group_names
-            if group and group != UNGROUPED_LABEL
-        ]
-        for index, group_name in enumerate(named_groups):
-            values = [
-                self._convert_k_value(record.positive_value)
-                for record in records
-                if record.group_name == group_name and record.positive_value is not None
-            ]
-            if not values:
-                continue
-            scopes.append({
-                "label": group_name,
-                "values": values,
-                "color": self._group_color_map.get(
-                    group_name,
-                    self.dataset_colors[index % len(self.dataset_colors)],
-                ),
-                "linestyle": "-",
-                "is_overall": False,
-            })
-        return scopes
-    
-    def plot_combined(self):
-        """Plot combined distribution + K view, faceted per dataset or per group."""
-        facets = self._combined_facets()
-        rows, cols, shown, hidden = self._facet_dims(len(facets))
-
-        for i, facet in enumerate(facets[:shown]):
-            ax1 = self.figure.add_subplot(rows, cols * 2, i * 2 + 1)
-            ax2 = self.figure.add_subplot(rows, cols * 2, i * 2 + 2)
-
-            # Left — distribution (aggregate + band + faint members for groups).
-            render_distribution_groups(
-                ax1,
-                [{"label": facet["label"], "color": facet["color"], "members": facet["members"]}],
-                style=self.current_style,
-                show_grid=self.show_grid,
-                show_legend=False,
-                title=f'{facet["label"]} - Dist',
-            )
-            ax1.title.set_fontsize(8)
-            ax1.set_xlabel('Size (mm)', fontsize=7)
-            ax1.set_ylabel('% Pass', fontsize=7)
-            ax1.tick_params(labelsize=6)
-
-            # Right — K-values (group geo-mean or per-dataset).
-            k_dict = self._convert_k_dict(facet["k"])
-            if k_dict:
-                methods = self._ordered_methods(k_dict.keys())[:5]  # cap for space
-                values = [k_dict[m] for m in methods]
-                flagged_methods = facet["flagged"]
-
-                bars = ax2.bar(range(len(methods)), values, alpha=0.8)
-                ax2.set_axisbelow(True)
-                for bar, method in zip(bars, methods):
-                    self._style_k_bar(
-                        bar, self.method_colors.get(method, '#888888'),
-                        method in flagged_methods,
-                    )
-                ax2.set_title(f'{facet["label"]} - K', fontsize=8)
-                ax2.set_xticks(range(len(methods)))
-                ax2.set_xticklabels(
-                    [format_method_label(method, tiny=True) for method in methods],
-                    rotation=45,
-                    fontsize=6,
-                )
-                ax2.set_ylabel(f"K ({self._unit_symbol()})", fontsize=7)
-                if self.log_k_y_scale:
-                    apply_log_bar_limits(ax2, values)
-                else:
-                    apply_linear_bar_limits(ax2, values)
-                ax2.tick_params(labelsize=6)
-                if self.show_grid:
-                    ax2.grid(True, axis='y', alpha=0.3)
-            else:
-                ax2.text(0.5, 0.5, 'No K-values', transform=ax2.transAxes,
-                        ha='center', va='center', fontsize=8)
-                ax2.set_xticks([])
-                ax2.set_yticks([])
-        self._draw_facet_overflow_note(hidden)
-
-    def plot_histogram(self):
-        """Plot grain histogram, faceted per dataset or per group (mean retained)."""
-        units = self._histogram_units()
-        rows, cols, shown, hidden = self._facet_dims(len(units))
-
-        for i, unit in enumerate(units[:shown]):
-            ax = self.figure.add_subplot(rows, cols, i + 1)
-            sizes, freq = unit["sizes"], unit["freq"]
-
-            ax.bar(range(len(sizes)), freq, color=unit["color"], alpha=0.8)
-
-            ax.set_title(unit["label"], fontsize=9, fontweight='bold')
-            ax.set_xlabel('Size class', fontsize=8)
-            ax.set_ylabel('Weight (%)', fontsize=8)
-            if len(sizes):
-                step = max(1, len(sizes) // 5)
-                ax.set_xticks(range(0, len(sizes), step))
-                ax.set_xticklabels(
-                    [f'{s:.2f}' for s in sizes[::step]],
-                    rotation=45, ha='right', fontsize=6,
-                )
-            ax.tick_params(labelsize=7)
-
-            if self.show_grid:
-                ax.grid(True, axis='y', alpha=0.3)
-        self._draw_facet_overflow_note(hidden)
-
     def show_empty_state(self, message: str = "No datasets to compare"):
         """Show empty state message"""
         self.figure.clear()

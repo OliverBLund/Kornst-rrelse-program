@@ -33,6 +33,13 @@ from grain_classification import (
     cc_label as _gc_cc_label,
 )
 from gui.plot_constants import DATASET_COLORS, classify_k_status
+from gui.plot_context import (
+    convert_k_to_display,
+    k_axis_label_for_unit,
+    k_display_unit_from_context,
+    plot_context_value,
+    plot_style_from_context,
+)
 
 
 def _get_plot_export():
@@ -1186,17 +1193,26 @@ class ReportGenerator:
             classification_scheme=self._scheme,
         )
 
-    def _create_k_value_bar_chart(self, k_results: List[KCalculationResult]) -> str:
-        """Create K-value comparison bar chart with error indication."""
+    def _create_k_value_bar_chart(
+        self,
+        k_results: List[KCalculationResult],
+        plot_context: Optional[Dict[str, Any]] = None,
+    ) -> str:
+        """Create K-value comparison bar chart, honouring the live plot state.
+
+        Style, log-K axis, grid/legend and the chosen display unit are taken
+        from the captured plot context so the report matches the GUI.
+        """
         valid_results = [r for r in k_results if r.k_value is not None and r.k_value > 0]
         if not valid_results:
             return ""
 
+        unit = k_display_unit_from_context(plot_context)
         methods = [r.method_name for r in valid_results]
-        k_values = [r.k_value for r in valid_results]
+        k_values = [convert_k_to_display(r.k_value, unit) for r in valid_results]
         flagged = {r.method_name for r in valid_results if classify_k_status(r) != "OK"}
         reference_values = [
-            r.k_value
+            convert_k_to_display(r.k_value, unit)
             for r in valid_results
             if classify_k_status(r) == "OK"
         ]
@@ -1206,20 +1222,76 @@ class ReportGenerator:
             methods, k_values,
             flagged_methods=flagged,
             reference_values=reference_values,
+            style=plot_style_from_context(plot_context),
+            show_grid=bool(plot_context_value(plot_context, "show_grid", True)),
+            show_legend=bool(plot_context_value(plot_context, "show_legend", True)),
+            log_y_scale=bool(plot_context_value(plot_context, "log_k_y_scale", False)),
+            y_label=k_axis_label_for_unit(unit),
             title="Hydraulic Conductivity Estimates by Method",
         )
 
-    def _create_method_applicability_heatmap(self, k_results: List[KCalculationResult]) -> str:
-        """Create method applicability status heatmap."""
+    def _create_method_applicability_heatmap(
+        self,
+        k_results: List[KCalculationResult],
+        plot_context: Optional[Dict[str, Any]] = None,
+    ) -> str:
+        """Create method applicability status heatmap (styled from context)."""
         if not k_results:
             return ""
-        return _get_plot_export().export_applicability_heatmap(k_results)
+        return _get_plot_export().export_applicability_heatmap(
+            k_results, style=plot_style_from_context(plot_context)
+        )
 
-    def _create_comparison_grain_size_plot(self, datasets: List[GrainSizeData],
-                                           sample_labels: Optional[List[str]] = None) -> str:
-        """Create side-by-side grain size curves for comparison."""
-        labels = sample_labels or [ds.sample_name for ds in datasets]
-        return _get_plot_export().export_distribution_overlay(datasets, labels=labels)
+    def _build_comparison_spec(self, sample_details, comparison_snapshot, *,
+                               plot_type: str, display_mode: str = "overlay"):
+        """Capture a widget-free ComparisonPlotSpec for the report's samples.
+
+        Comparison plots render through the same pipeline as the Comparison tab
+        (group breakdown, group colours, per-dataset line styles), keyed to the
+        report's own selected samples. K is shown in m/s to match the report's
+        tables and K boxplot.
+        """
+        from gui.comparison_plot_capture import build_comparison_spec
+        from unit_conversions import HydraulicConductivityUnit
+
+        datasets = [item["dataset"] for item in sample_details]
+        results_by_name = {
+            item["dataset"].sample_name: list(item.get("k_results") or [])
+            for item in sample_details
+        }
+        dataset_groups = {
+            item["dataset"].sample_name: (
+                item.get("group_name")
+                or getattr(item["dataset"], "group_name", None)
+                or "Ungrouped"
+            )
+            for item in sample_details
+        }
+        return build_comparison_spec(
+            datasets,
+            results_by_name,
+            comparison_snapshot=comparison_snapshot,
+            dataset_groups=dataset_groups,
+            current_plot_type=plot_type,
+            display_mode=display_mode,
+            display_unit=HydraulicConductivityUnit.M_PER_S,
+        )
+
+    def _create_comparison_grain_size_plot(self, sample_details, comparison_snapshot) -> str:
+        """Grain-size distribution comparison, matching the Comparison tab."""
+        spec = self._build_comparison_spec(
+            sample_details, comparison_snapshot, plot_type="distribution"
+        )
+        return _get_plot_export().export_comparison_spec(spec)
+
+    def _create_comparison_k_value_bar(self, sample_details, comparison_snapshot) -> str:
+        """Grouped K-value bar comparison (one bar series per dataset/group)."""
+        spec = self._build_comparison_spec(
+            sample_details, comparison_snapshot, plot_type="k-values"
+        )
+        if not spec.k_results_dict:
+            return ""
+        return _get_plot_export().export_comparison_spec(spec)
 
     def _create_k_value_boxplot(self, k_results_dict: Dict[str, List[KCalculationResult]]) -> str:
         """Create box plots for K-value comparison across samples."""
@@ -1309,7 +1381,9 @@ class ReportGenerator:
                                   report_template: str = "standard",
                                   brand=None,
                                   appendix_label_config: Optional[Any] = None,
-                                  plot_context: Optional[Dict[str, Any]] = None) -> str:
+                                  plot_context: Optional[Dict[str, Any]] = None,
+                                  k_results: Optional[List[KCalculationResult]] = None,
+                                  selected_plots: Optional[set] = None) -> str:
         """
         Generate a grain size analysis report for a single sample
 
@@ -1564,18 +1638,54 @@ class ReportGenerator:
 
             html += "</div>"
 
-        # Visual Charts
+        # Visual Charts — each plot is individually selectable.
         if sections.get('plots', True):
-            grain_plot = self._create_grain_size_plot(dataset, plot_context)
-            html += f"""
+            selected = (
+                selected_plots if selected_plots is not None
+                else {'grain_size_curve', 'k_value_bar'}
+            )
+            figure_no = 1
+
+            if 'grain_size_curve' in selected:
+                grain_plot = self._create_grain_size_plot(dataset, plot_context)
+                html += f"""
 <div class="page-break">
 <h2>Grain Size Distribution Curve</h2>
 <div class="plot-container">
     <img src="{grain_plot}" alt="Grain Size Distribution" />
-    <div class="figure-caption">Figure 1: Cumulative grain size distribution curve for {dataset.sample_name}</div>
+    <div class="figure-caption">Figure {figure_no}: Cumulative grain size distribution curve for {dataset.sample_name}</div>
 </div>
 </div>
 """
+                figure_no += 1
+
+            if k_results and 'k_value_bar' in selected:
+                k_bar_chart = self._create_k_value_bar_chart(k_results, plot_context)
+                if k_bar_chart:
+                    html += f"""
+<div class="page-break">
+<h2>Hydraulic Conductivity by Method</h2>
+<div class="plot-container">
+    <img src="{k_bar_chart}" alt="K-Value Bar Chart" />
+    <div class="figure-caption">Figure {figure_no}: Estimated hydraulic conductivity by method for {dataset.sample_name}</div>
+</div>
+</div>
+"""
+                    figure_no += 1
+
+            if k_results and 'applicability_heatmap' in selected:
+                method_heatmap = self._create_method_applicability_heatmap(k_results, plot_context)
+                if method_heatmap:
+                    html += f"""
+<div class="page-break">
+<h2>Method Applicability Status</h2>
+<div class="plot-container">
+    <img src="{method_heatmap}" alt="Method Applicability Heatmap" />
+    <div class="figure-caption">Figure {figure_no}: Method applicability for {dataset.sample_name}</div>
+</div>
+</div>
+"""
+                    figure_no += 1
 
         # Interpretation
         if sections.get('interpretation', True):
@@ -1860,8 +1970,8 @@ class ReportGenerator:
 
         # Visual Charts
         if sections.get('plots', True):
-            k_bar_chart = self._create_k_value_bar_chart(k_results)
-            method_heatmap = self._create_method_applicability_heatmap(k_results)
+            k_bar_chart = self._create_k_value_bar_chart(k_results, plot_context)
+            method_heatmap = self._create_method_applicability_heatmap(k_results, plot_context)
 
             if k_bar_chart:
                 html += f"""
@@ -1997,7 +2107,8 @@ class ReportGenerator:
                                   metadata: Optional[Dict[str, str]] = None,
                                   sections: Optional[Dict[str, bool]] = None,
                                   brand=None,
-                                  sample_details: Optional[List[Dict[str, Any]]] = None) -> str:
+                                  sample_details: Optional[List[Dict[str, Any]]] = None,
+                                  selected_plots: Optional[set] = None) -> str:
         """Generate a comparison report for multiple samples."""
         if metadata is None:
             metadata = {}
@@ -2235,9 +2346,30 @@ class ReportGenerator:
             """
 
         if sections.get('plots', True):
-            comparison_plot = self._create_comparison_grain_size_plot(datasets, sample_labels)
-            k_boxplot = self._create_comparison_k_scope_boxplot(comparison_snapshot)
-            reliability_matrix = self._create_method_reliability_matrix(plot_results_dict)
+            # Each comparison plot is individually selectable; default omits the
+            # reliability matrix (rarely wanted) but keeps the overlay, K-value
+            # bars and K boxplot.
+            selected = (
+                selected_plots if selected_plots is not None
+                else {'distribution_overlay', 'k_value_comparison',
+                      'statistical_boxplots', 'reliability_matrix'}
+            )
+            comparison_plot = (
+                self._create_comparison_grain_size_plot(sample_details, comparison_snapshot)
+                if 'distribution_overlay' in selected else ""
+            )
+            k_value_bar = (
+                self._create_comparison_k_value_bar(sample_details, comparison_snapshot)
+                if 'k_value_comparison' in selected else ""
+            )
+            k_boxplot = (
+                self._create_comparison_k_scope_boxplot(comparison_snapshot)
+                if 'statistical_boxplots' in selected else ""
+            )
+            reliability_matrix = (
+                self._create_method_reliability_matrix(plot_results_dict)
+                if 'reliability_matrix' in selected else ""
+            )
 
             if comparison_plot:
                 html += f"""
@@ -2245,6 +2377,16 @@ class ReportGenerator:
                 <h2>Grain Size Distribution Comparison</h2>
                 <div class="plot-container">
                     <img src="{comparison_plot}" alt="Grain Size Comparison" style="max-width: 100%; height: auto;">
+                </div>
+                </div>
+                """
+
+            if k_value_bar:
+                html += f"""
+                <div style="page-break-before: auto;">
+                <h2>Hydraulic Conductivity by Method</h2>
+                <div class="plot-container">
+                    <img src="{k_value_bar}" alt="K-Value Comparison" style="max-width: 100%; height: auto;">
                 </div>
                 </div>
                 """

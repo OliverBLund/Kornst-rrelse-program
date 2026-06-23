@@ -37,7 +37,10 @@ from .plot_renderers import (
 )
 from .plot_context import (
     apply_axis_limits_from_context,
+    convert_k_to_display,
     grain_size_renderer_kwargs_from_context,
+    k_axis_label_for_unit,
+    k_display_unit_from_context,
     plot_context_value,
     plot_style_from_context,
 )
@@ -783,8 +786,9 @@ class ExportManager:
         ax = figure.add_subplot(1, 1, 1)
 
         filtered_results = self._filter_results(results, config)
+        unit = k_display_unit_from_context(context)
         methods = [result.method_name for result in filtered_results]
-        k_values = [result.k_value for result in filtered_results]
+        k_values = [convert_k_to_display(result.k_value, unit) for result in filtered_results]
         flagged_methods = {
             result.method_name
             for result in filtered_results
@@ -792,7 +796,7 @@ class ExportManager:
             or getattr(getattr(result, 'status', None), 'name', 'OK') != 'OK'
         }
         reference_values = [
-            result.k_value
+            convert_k_to_display(result.k_value, unit)
             for result in filtered_results
             if result.method_name not in flagged_methods
             and result.k_value is not None
@@ -809,6 +813,7 @@ class ExportManager:
             show_grid=config.get('plot_include_grid', True),
             show_legend=config.get('plot_include_legend', True),
             log_y_scale=bool(plot_context_value(context, 'log_k_y_scale', False)),
+            y_label=k_axis_label_for_unit(unit),
             sample_name=name,
         )
         apply_legend_aware_layout(figure, style)

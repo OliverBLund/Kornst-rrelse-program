@@ -1,0 +1,926 @@
+"""Widget-free comparison-plot rendering pipeline.
+
+This module owns the comparison "what to draw" logic that used to live inside
+``ComparisonPlotWidget``.  A :class:`ComparisonPlotSpec` carries the *resolved*
+presentation (datasets, colours, line styles, units, options) so the renderer
+needs no Qt, no ``group_styles``/``QSettings`` lookups, and no theme import.
+
+``render_comparison(figure, spec)`` draws onto any matplotlib ``Figure`` — the
+interactive ``ComparisonPlotWidget`` renders onto its Qt canvas, while headless
+report/export code renders onto an Agg figure → byte-identical output.
+
+The widget keeps everything stateful (interactions, drawer, sidebar, canvas
+height, export); it builds a spec and hands it here.  ``render_comparison``
+returns the number of faceted grid rows used (``0`` for single/overlay plots)
+so the widget can grow its scroll canvas.
+"""
+
+from __future__ import annotations
+
+import math
+from dataclasses import dataclass, field
+from typing import Any, Dict, List, Optional
+
+import numpy as np
+from matplotlib.patches import Patch
+
+from .plot_renderers import (
+    build_legend_kwargs,
+    render_distribution_groups,
+    render_distribution_overlay,
+    render_k_distribution_function,
+    render_k_histogram,
+    render_k_overlay,
+)
+from .plot_styles import PlotStyle, PROFESSIONAL_STYLE
+from .plot_constants import METHOD_COLORS, ordered_methods
+from .k_plot_helpers import (
+    apply_linear_bar_limits,
+    apply_log_bar_limits,
+    format_method_label,
+)
+from k_aggregation import UNGROUPED_LABEL
+from unit_conversions import (
+    HydraulicConductivityConverter,
+    HydraulicConductivityUnit,
+    get_default_plot_unit,
+)
+
+
+# Theme colours, duplicated as literals so this module stays widget-free (the
+# ``theme`` module imports PyQt6/qtawesome).  Keep in sync with theme.C.
+_FACET_OVERFLOW_COLOR = "#9a8c78"   # C.TEXT_MUTED
+_GROUP_LEGEND_FALLBACK = "#5d4e37"  # C.TEXT_MID
+
+
+@dataclass
+class ComparisonPlotSpec:
+    """Resolved, Qt-free description of a comparison plot to render.
+
+    Built by ``ComparisonPlotWidget._build_spec`` (and, in later increments, by
+    report/export capture code).  All presentation is pre-resolved so the
+    renderer is a pure function of this spec.
+    """
+
+    # ── Data ────────────────────────────────────────────────────────
+    datasets: List[Any] = field(default_factory=list)
+    k_results_dict: Dict[str, Dict[str, float]] = field(default_factory=dict)  # m/s
+    flagged_methods_dict: Dict[str, set] = field(default_factory=dict)
+    comparison_snapshot: Optional[Any] = None
+
+    # ── Plot selection / layout ─────────────────────────────────────
+    current_plot_type: str = "distribution"
+    display_mode: str = "overlay"  # overlay | grid
+    use_group_breakdown: bool = False
+    grid_cols: int = 2
+    max_facet_panels: int = 16
+
+    # ── Resolved presentation ───────────────────────────────────────
+    dataset_groups: Dict[str, str] = field(default_factory=dict)
+    group_color_map: Dict[str, str] = field(default_factory=dict)
+    effective_colors: List[str] = field(default_factory=list)       # by dataset order
+    color_by_name: Dict[str, str] = field(default_factory=dict)
+    dataset_linestyles: Dict[str, str] = field(default_factory=dict)  # by sample name
+    palette: List[str] = field(default_factory=list)                  # categorical fallback
+    known_dataset_order: List[str] = field(default_factory=list)
+    known_group_order: List[str] = field(default_factory=list)
+    known_dataset_group: Dict[str, str] = field(default_factory=dict)
+
+    # ── Style / options ─────────────────────────────────────────────
+    style: PlotStyle = field(default_factory=lambda: PROFESSIONAL_STYLE)
+    show_grid: bool = True
+    show_legend: bool = True
+    log_k_y_scale: bool = False
+    display_unit: HydraulicConductivityUnit = field(default_factory=get_default_plot_unit)
+
+    # ── K Distribution sub-view ─────────────────────────────────────
+    k_dist_view: str = "cdf"     # cdf | histogram
+    k_hist_axis: str = "lnk"     # lnk | k
+    k_hist_bins: str = "auto"    # auto | off | digit string
+
+
+# ═══════════════════════════════════════════════════════════════════
+# Public entry point
+# ═══════════════════════════════════════════════════════════════════
+
+def render_comparison(figure, spec: ComparisonPlotSpec) -> int:
+    """Draw *spec* onto *figure*; return the grid row count (0 = no scroll grow).
+
+    Single-axes / overlay plots return ``0``; faceted grids return their row
+    count so the caller can size a scroll canvas.
+    """
+    figure.clear()
+    plot_type = spec.current_plot_type
+
+    if plot_type == "distribution":
+        return _plot_distribution(figure, spec)
+    if plot_type == "k-values":
+        return _plot_k_values(figure, spec)
+    if plot_type == "k-distribution":
+        return _plot_k_distribution(figure, spec)
+    if plot_type == "combined":
+        return _plot_combined(figure, spec)
+    if plot_type == "histogram":
+        return _plot_histogram(figure, spec)
+    return 0
+
+
+# ═══════════════════════════════════════════════════════════════════
+# Unit / conversion helpers
+# ═══════════════════════════════════════════════════════════════════
+
+def unit_symbol(spec: ComparisonPlotSpec) -> str:
+    return HydraulicConductivityConverter.UNIT_SYMBOLS[spec.display_unit]
+
+
+def k_axis_label(spec: ComparisonPlotSpec) -> str:
+    return f"Hydraulic Conductivity K ({unit_symbol(spec)})"
+
+
+def convert_k_value(spec: ComparisonPlotSpec, value_m_s: Optional[float]) -> Optional[float]:
+    if value_m_s is None:
+        return None
+    return HydraulicConductivityConverter.convert_from_m_per_s(value_m_s, spec.display_unit)
+
+
+def convert_k_dict(spec: ComparisonPlotSpec, k_dict: Dict[str, float]) -> Dict[str, float]:
+    converted: Dict[str, float] = {}
+    for method, value in k_dict.items():
+        display_value = convert_k_value(spec, value)
+        if display_value is not None:
+            converted[method] = display_value
+    return converted
+
+
+def display_k_results_dict(spec: ComparisonPlotSpec) -> Dict[str, Dict[str, float]]:
+    return {
+        name: convert_k_dict(spec, k_dict)
+        for name, k_dict in spec.k_results_dict.items()
+    }
+
+
+# ═══════════════════════════════════════════════════════════════════
+# Presentation helpers (resolved-state, Qt-free)
+# ═══════════════════════════════════════════════════════════════════
+
+def _has_named_groups(spec: ComparisonPlotSpec) -> bool:
+    """True when at least one plotted dataset carries a real group label."""
+    return any(group != UNGROUPED_LABEL for group in spec.dataset_groups.values())
+
+
+def _series_style_parts(line_style: str) -> tuple[str, Optional[str]]:
+    """Return matplotlib ``(linestyle, marker)`` for a stored style key.
+
+    Mirrors ``group_styles.series_style_parts`` (pure string logic) so the
+    renderer needs no PyQt6 import via ``group_styles``.
+    """
+    valid_lines = {"-", "--", ":", "-."}
+    valid_markers = {"o", "s", "^", "D"}
+    text = str(line_style or "-").strip()
+    line_part, marker_part = (text.split("|", 1) + [""])[:2]
+    line = line_part if line_part in valid_lines else "-"
+    marker = marker_part if marker_part in valid_markers else None
+    return line, marker
+
+
+def _effective_dataset_linestyles(spec: ComparisonPlotSpec) -> List[str]:
+    return [spec.dataset_linestyles.get(ds.sample_name, "-") for ds in spec.datasets]
+
+
+def _effective_dataset_plot_styles(
+    spec: ComparisonPlotSpec,
+) -> tuple[List[str], List[Optional[str]]]:
+    line_styles: list[str] = []
+    markers: list[Optional[str]] = []
+    for style_key in _effective_dataset_linestyles(spec):
+        line_style, marker = _series_style_parts(style_key)
+        line_styles.append(line_style)
+        markers.append(marker)
+    return line_styles, markers
+
+
+def _ordered_methods(method_names) -> List[str]:
+    return ordered_methods(method_names)
+
+
+def group_order(spec: ComparisonPlotSpec) -> List[str]:
+    """Group labels in first-seen dataset order (named groups + Ungrouped)."""
+    order: list[str] = []
+    for ds in spec.datasets:
+        group = spec.dataset_groups.get(ds.sample_name, UNGROUPED_LABEL)
+        if group not in order:
+            order.append(group)
+    return order
+
+
+def group_overlay_inputs(
+    spec: ComparisonPlotSpec,
+) -> tuple[Dict[str, Dict[str, float]], List[str], Dict[str, set]]:
+    """Per-group K aggregates for the K-Values overlay (in m/s).
+
+    Named groups collapse to one geometric-mean series each (OK-only, from the
+    comparison snapshot); ungrouped datasets stay individual so no scope is
+    dropped. Returns parallel ``(results_m_s, colors, flagged_by_scope)``.
+    """
+    results: Dict[str, Dict[str, float]] = {}
+    colors: List[str] = []
+    flagged: Dict[str, set] = {}
+
+    snapshot = spec.comparison_snapshot
+    buckets: Dict[str, Dict[str, list]] = {}
+    if snapshot is not None:
+        for record in snapshot.k.included_records:
+            if record.group_name == UNGROUPED_LABEL or record.positive_value is None:
+                continue
+            buckets.setdefault(record.group_name, {}).setdefault(
+                record.method_name, []
+            ).append(record.positive_value)
+
+    group_names = list(snapshot.k.group_names) if snapshot is not None else []
+    palette_fallback = spec.palette[0] if spec.palette else "#1f77b4"
+
+    def emit_group(group_name: str) -> None:
+        method_means = {
+            method: math.exp(sum(map(math.log, values)) / len(values))
+            for method, values in buckets.get(group_name, {}).items()
+            if values
+        }
+        if not method_means:
+            return
+        results[group_name] = method_means
+        colors.append(spec.group_color_map.get(group_name, palette_fallback))
+        flagged[group_name] = set()
+
+    for group_name in group_names:
+        if group_name != UNGROUPED_LABEL:
+            emit_group(group_name)
+            continue
+        # Expand Ungrouped into its member datasets so each keeps identity.
+        for ds in spec.datasets:
+            name = ds.sample_name
+            if spec.dataset_groups.get(name, UNGROUPED_LABEL) != UNGROUPED_LABEL:
+                continue
+            k_dict = spec.k_results_dict.get(name)
+            if not k_dict:
+                continue
+            results[name] = dict(k_dict)
+            colors.append(spec.color_by_name.get(name, palette_fallback))
+            flagged[name] = set(spec.flagged_methods_dict.get(name, set()))
+
+    return results, colors, flagged
+
+
+def distribution_units(spec: ComparisonPlotSpec) -> list[dict]:
+    """Faceting units for distribution plots.
+
+    Per dataset → one single-member unit each. Per group → one multi-member
+    unit per named group (members feed the aggregate curve + band), with
+    ungrouped datasets kept as individual single-member units.
+    """
+    color_by_name = spec.color_by_name
+    palette_fallback = spec.palette[0] if spec.palette else "#1f77b4"
+
+    def member(ds) -> tuple:
+        return (ds.particle_sizes, ds.percent_passing)
+
+    if not spec.use_group_breakdown:
+        return [
+            {
+                "label": ds.sample_name,
+                "color": color_by_name.get(ds.sample_name, palette_fallback),
+                "members": [member(ds)],
+            }
+            for ds in spec.datasets
+        ]
+
+    units: list[dict] = []
+    for group_name in group_order(spec):
+        members = [
+            ds for ds in spec.datasets
+            if spec.dataset_groups.get(ds.sample_name, UNGROUPED_LABEL) == group_name
+        ]
+        if group_name == UNGROUPED_LABEL:
+            units.extend(
+                {
+                    "label": ds.sample_name,
+                    "color": color_by_name.get(ds.sample_name, palette_fallback),
+                    "members": [member(ds)],
+                }
+                for ds in members
+            )
+        else:
+            units.append({
+                "label": group_name,
+                "color": spec.group_color_map.get(group_name, palette_fallback),
+                "members": [member(ds) for ds in members],
+            })
+    return units
+
+
+def _k_grid_units(
+    spec: ComparisonPlotSpec,
+) -> tuple[Dict[str, Dict[str, float]], Dict[str, set]]:
+    """Return ``(display_results, flagged_by_scope)`` for K grid facets.
+
+    Honours the breakdown: per-dataset cells use raw per-dataset results;
+    per-group cells use the group geometric-mean aggregates.
+    """
+    if spec.use_group_breakdown:
+        results_m_s, _colors, flagged = group_overlay_inputs(spec)
+        display = {
+            name: convert_k_dict(spec, k_dict)
+            for name, k_dict in results_m_s.items()
+        }
+        return display, flagged
+    return display_k_results_dict(spec), spec.flagged_methods_dict
+
+
+def _group_mean_passing(members) -> tuple[list, list]:
+    """Mean % passing across group members on the union of their sizes.
+
+    Each member is interpolated (log-x) onto the shared size union and
+    averaged, giving a monotonic aggregate curve whose retained differences
+    stay non-negative — safe to feed the histogram helper.
+    """
+    sizes_set = {
+        float(size)
+        for sizes, _pcts in members
+        for size in sizes
+        if size is not None and float(size) > 0
+    }
+    union = sorted(sizes_set)
+    if not union:
+        return [], []
+    log_grid = np.log10(union)
+    stacked = []
+    for sizes, pcts in members:
+        pairs = sorted(
+            (float(s), float(p))
+            for s, p in zip(sizes, pcts)
+            if s is not None and float(s) > 0 and p is not None
+        )
+        if len(pairs) < 2:
+            continue
+        xs = np.log10([s for s, _ in pairs])
+        ys = np.array([p for _, p in pairs], dtype=float)
+        stacked.append(np.interp(log_grid, xs, ys))
+    if not stacked:
+        return [], []
+    mean_passing = np.mean(np.vstack(stacked), axis=0)
+    return union, mean_passing.tolist()
+
+
+def _calculate_histogram_frequencies(particle_sizes, percent_passing):
+    """Convert cumulative percent passing to retained fractions per size class."""
+    pairs = sorted(zip(particle_sizes, percent_passing), key=lambda pair: pair[0], reverse=True)
+    if not pairs:
+        return np.array([]), np.array([])
+
+    sizes = np.array([size for size, _ in pairs], dtype=float)
+    passing = np.array([passing for _, passing in pairs], dtype=float)
+    next_passing = np.append(passing[1:], 0.0)
+    freq = np.maximum(0.0, passing - next_passing)
+    return sizes, freq
+
+
+def histogram_units(spec: ComparisonPlotSpec) -> list[dict]:
+    """Faceting units for the grain histogram (per dataset or per group)."""
+    color_by_name = spec.color_by_name
+    palette_fallback = spec.palette[0] if spec.palette else "#1f77b4"
+
+    def dataset_unit(ds) -> dict:
+        sizes, freq = _calculate_histogram_frequencies(
+            ds.particle_sizes, ds.percent_passing
+        )
+        return {
+            "label": ds.sample_name,
+            "color": color_by_name.get(ds.sample_name, palette_fallback),
+            "sizes": sizes,
+            "freq": freq,
+        }
+
+    if not spec.use_group_breakdown:
+        return [dataset_unit(ds) for ds in spec.datasets]
+
+    units: list[dict] = []
+    for group_name in group_order(spec):
+        members = [
+            ds for ds in spec.datasets
+            if spec.dataset_groups.get(ds.sample_name, UNGROUPED_LABEL) == group_name
+        ]
+        if group_name == UNGROUPED_LABEL:
+            units.extend(dataset_unit(ds) for ds in members)
+            continue
+        usizes, mean_passing = _group_mean_passing(
+            [(ds.particle_sizes, ds.percent_passing) for ds in members]
+        )
+        sizes, freq = _calculate_histogram_frequencies(usizes, mean_passing)
+        units.append({
+            "label": group_name,
+            "color": spec.group_color_map.get(group_name, palette_fallback),
+            "sizes": sizes,
+            "freq": freq,
+        })
+    return units
+
+
+def combined_facets(spec: ComparisonPlotSpec) -> list[dict]:
+    """Faceting units for the combined view: distribution + K per unit.
+
+    Joins each distribution unit to its K values by label — group geo-mean
+    aggregates per group, or raw per-dataset results otherwise.
+    """
+    if spec.use_group_breakdown:
+        k_results_m_s, _colors, flagged_by_scope = group_overlay_inputs(spec)
+    else:
+        k_results_m_s = spec.k_results_dict
+        flagged_by_scope = spec.flagged_methods_dict
+
+    facets: list[dict] = []
+    for unit in distribution_units(spec):
+        label = unit["label"]
+        facets.append({
+            "label": label,
+            "color": unit["color"],
+            "members": unit["members"],
+            "k": k_results_m_s.get(label, {}),
+            "flagged": flagged_by_scope.get(label, set()),
+        })
+    return facets
+
+
+def k_distribution_scopes(spec: ComparisonPlotSpec) -> list[dict]:
+    snapshot = spec.comparison_snapshot
+    if snapshot is None:
+        return []
+
+    records = [
+        record for record in snapshot.k.included_records
+        if record.positive_value is not None
+    ]
+    if not records:
+        return []
+
+    scopes: list[dict] = [{
+        "label": "Overall",
+        "values": [convert_k_value(spec, record.positive_value) for record in records],
+        "color": "#3d4a1f",
+        "linestyle": "-",
+        "is_overall": True,
+    }]
+
+    named_groups = [
+        group for group in snapshot.k.group_names
+        if group and group != UNGROUPED_LABEL
+    ]
+    palette = spec.palette or ["#1f77b4"]
+    for index, group_name in enumerate(named_groups):
+        values = [
+            convert_k_value(spec, record.positive_value)
+            for record in records
+            if record.group_name == group_name and record.positive_value is not None
+        ]
+        if not values:
+            continue
+        scopes.append({
+            "label": group_name,
+            "values": values,
+            "color": spec.group_color_map.get(
+                group_name,
+                palette[index % len(palette)],
+            ),
+            "linestyle": "-",
+            "is_overall": False,
+        })
+    return scopes
+
+
+# ═══════════════════════════════════════════════════════════════════
+# Faceting / layout helpers
+# ═══════════════════════════════════════════════════════════════════
+
+def facet_dims(spec: ComparisonPlotSpec, count: int) -> tuple[int, int, int, int]:
+    """Return ``(rows, cols, shown, hidden)`` fitting *count* faceted panels.
+
+    Columns follow the layout selector; rows expand to fit every unit so
+    nothing is silently dropped. A soft cap keeps pathological counts readable,
+    surfacing the remainder through an overflow note.
+    """
+    cols = max(1, spec.grid_cols)
+    shown = max(0, min(count, spec.max_facet_panels))
+    hidden = max(0, count - shown)
+    rows = max(1, math.ceil(max(shown, 1) / cols))
+    return rows, cols, shown, hidden
+
+
+def _draw_facet_overflow_note(figure, hidden: int) -> None:
+    """Annotate the figure when the soft panel cap hid some units."""
+    if hidden <= 0:
+        return
+    figure.text(
+        0.5, 0.005,
+        f"+{hidden} more not shown — narrow the comparison scope to see them",
+        ha="center", va="bottom",
+        fontsize=8, color=_FACET_OVERFLOW_COLOR, fontstyle="italic",
+    )
+
+
+# ═══════════════════════════════════════════════════════════════════
+# Legend / bar styling helpers
+# ═══════════════════════════════════════════════════════════════════
+
+def _legend_kwargs(spec: ComparisonPlotSpec, label_count: Optional[int] = None) -> dict:
+    """Build legend kwargs from the active PlotStyle (loc/bbox/fontsize honoured)."""
+    return build_legend_kwargs(spec.style, label_count)
+
+
+def _style_k_bar(bar, color: str, flagged: bool) -> None:
+    """Apply warning styling to flagged K-value bars."""
+    if flagged:
+        bar.set_facecolor('none')
+        bar.set_edgecolor(color)
+        bar.set_linewidth(2.0)
+        bar.set_hatch('////')
+        bar.set_alpha(1.0)
+    else:
+        bar.set_edgecolor('black')
+        bar.set_linewidth(0.5)
+
+
+def _apply_group_structured_legend(spec: ComparisonPlotSpec, ax) -> None:
+    """Re-draw the legend grouped by dataset group: a bold group header followed
+    by its indented members; ungrouped series and any non-dataset entries (e.g. a
+    flag marker) are listed plainly at the end.
+    """
+    handles, labels = ax.get_legend_handles_labels()
+    if not handles:
+        return
+
+    grouped: dict[str, list[tuple]] = {}
+    extras: list[tuple] = []
+    for handle, label in zip(handles, labels):
+        group = spec.dataset_groups.get(label)
+        if group is None:
+            extras.append((handle, label))
+        else:
+            grouped.setdefault(group, []).append((handle, label))
+
+    order = [g for g in spec.known_group_order if g in grouped]
+    if UNGROUPED_LABEL in grouped:
+        order.append(UNGROUPED_LABEL)
+
+    new_handles: list = []
+    new_labels: list[str] = []
+    header_rows: list[int] = []
+    for group in order:
+        members = grouped[group]
+        if group != UNGROUPED_LABEL:
+            # A filled group-colour swatch as the header handle keeps every row's
+            # glyph at the same left edge (an empty handle would leave the header
+            # text indented relative to the member line samples).
+            group_color = spec.group_color_map.get(group, _GROUP_LEGEND_FALLBACK)
+            new_handles.append(Patch(facecolor=group_color, edgecolor="none"))
+            new_labels.append(group)
+            header_rows.append(len(new_labels) - 1)
+        for handle, label in members:
+            new_handles.append(handle)
+            new_labels.append(label)
+    for handle, label in extras:
+        new_handles.append(handle)
+        new_labels.append(label)
+
+    legend_kwargs = _legend_kwargs(spec, len(new_labels))
+    legend_kwargs["alignment"] = "left"
+    legend = ax.legend(new_handles, new_labels, **legend_kwargs)
+    for row in header_rows:
+        texts = legend.get_texts()
+        if row < len(texts):
+            texts[row].set_fontweight("bold")
+
+
+# ═══════════════════════════════════════════════════════════════════
+# Empty state
+# ═══════════════════════════════════════════════════════════════════
+
+def _draw_empty_state(figure, message: str) -> int:
+    """Draw a centred placeholder message; return 0 (no grid growth)."""
+    ax = figure.add_subplot(1, 1, 1)
+    ax.text(0.5, 0.5, message, transform=ax.transAxes,
+            ha='center', va='center', fontsize=12, color='gray')
+    ax.set_xticks([])
+    ax.set_yticks([])
+    return 0
+
+
+# ═══════════════════════════════════════════════════════════════════
+# Distribution
+# ═══════════════════════════════════════════════════════════════════
+
+def _plot_distribution(figure, spec: ComparisonPlotSpec) -> int:
+    if spec.display_mode == "overlay":
+        ax = figure.add_subplot(1, 1, 1)
+        if spec.use_group_breakdown:
+            _plot_distribution_overlay_groups(ax, spec)
+        else:
+            _plot_distribution_overlay(ax, spec)
+        return 0
+    return _plot_distribution_grid(figure, spec)
+
+
+def _plot_distribution_overlay(ax, spec: ComparisonPlotSpec) -> None:
+    """Plot all distributions on single axes via shared renderer.
+
+    When named groups exist (per-dataset breakdown), members share a group
+    colour and differ only by line style, so a flat legend reads as repeated
+    colours. We then render a group-structured legend instead.
+    """
+    linestyles, markers = _effective_dataset_plot_styles(spec)
+    structured = spec.show_legend and _has_named_groups(spec)
+    render_distribution_overlay(
+        ax, spec.datasets,
+        colors=spec.effective_colors,
+        linestyles=linestyles,
+        markers=markers,
+        style=spec.style,
+        show_grid=spec.show_grid,
+        show_legend=spec.show_legend and not structured,
+    )
+    if structured:
+        _apply_group_structured_legend(spec, ax)
+
+
+def _plot_distribution_overlay_groups(ax, spec: ComparisonPlotSpec) -> None:
+    """Overlay one aggregate curve + spread band + faint members per group."""
+    render_distribution_groups(
+        ax, distribution_units(spec),
+        style=spec.style,
+        show_grid=spec.show_grid,
+        show_legend=spec.show_legend,
+        title="Grain Size Distribution by Group",
+    )
+
+
+def _plot_distribution_grid(figure, spec: ComparisonPlotSpec) -> int:
+    """Plot distributions in a grid — one panel per dataset or per group."""
+    units = distribution_units(spec)
+    rows, cols, shown, hidden = facet_dims(spec, len(units))
+
+    for i, unit in enumerate(units[:shown]):
+        ax = figure.add_subplot(rows, cols, i + 1)
+        render_distribution_groups(
+            ax, [unit],
+            style=spec.style,
+            show_grid=spec.show_grid,
+            show_legend=False,
+            title=unit["label"],
+        )
+        ax.title.set_fontsize(9)
+        ax.set_xlabel('Size (mm)', fontsize=8)
+        ax.set_ylabel('% Passing', fontsize=8)
+        ax.tick_params(labelsize=7)
+    _draw_facet_overflow_note(figure, hidden)
+    return rows
+
+
+# ═══════════════════════════════════════════════════════════════════
+# K-values
+# ═══════════════════════════════════════════════════════════════════
+
+def _plot_k_values(figure, spec: ComparisonPlotSpec) -> int:
+    if not spec.k_results_dict:
+        return _draw_empty_state(figure, "No K-values calculated")
+    if spec.display_mode == "overlay":
+        _plot_k_values_overlay(figure, spec)
+        return 0
+    return _plot_k_values_grid(figure, spec)
+
+
+def _plot_k_values_overlay(figure, spec: ComparisonPlotSpec) -> None:
+    """Plot K-values as grouped bars via shared renderer.
+
+    When dataset groups exist, each named group collapses to a single
+    geometric-mean bar series (one bar per group per method) so same-group
+    members no longer render as indistinguishable same-colour bars.
+    """
+    ax = figure.add_subplot(1, 1, 1)
+
+    if spec.use_group_breakdown:
+        results_m_s, colors, flagged = group_overlay_inputs(spec)
+        display = {
+            name: convert_k_dict(spec, k_dict)
+            for name, k_dict in results_m_s.items()
+        }
+        render_k_overlay(
+            ax, display,
+            flagged_methods_dict=flagged,
+            colors=colors,
+            style=spec.style,
+            show_grid=spec.show_grid,
+            show_legend=spec.show_legend,
+            show_value_labels=True,
+            log_y_scale=spec.log_k_y_scale,
+            y_label=f"K ({unit_symbol(spec)})",
+            title="Hydraulic Conductivity by Group (geometric mean)",
+        )
+        return
+
+    render_k_overlay(
+        ax, display_k_results_dict(spec),
+        flagged_methods_dict=spec.flagged_methods_dict,
+        colors=spec.effective_colors,
+        style=spec.style,
+        show_grid=spec.show_grid,
+        show_legend=spec.show_legend,
+        show_value_labels=True,
+        log_y_scale=spec.log_k_y_scale,
+        y_label=f"K ({unit_symbol(spec)})",
+    )
+
+
+def _plot_k_values_grid(figure, spec: ComparisonPlotSpec) -> int:
+    """Plot K-values in a grid — one panel per dataset or per group."""
+    display, flagged_by_scope = _k_grid_units(spec)
+    rows, cols, shown, hidden = facet_dims(spec, len(display))
+
+    for i, (name, k_dict) in enumerate(display.items()):
+        if i >= shown:
+            break
+
+        ax = figure.add_subplot(rows, cols, i + 1)
+
+        methods = _ordered_methods(k_dict.keys())
+        values = [k_dict[m] for m in methods]
+        colors = [METHOD_COLORS.get(m, '#888888') for m in methods]
+        flagged_methods = flagged_by_scope.get(name, set())
+
+        bars = ax.bar(range(len(methods)), values, color=colors,
+                      alpha=0.8, edgecolor='black', linewidth=0.5)
+        ax.set_axisbelow(True)
+        for bar, method, color in zip(bars, methods, colors):
+            _style_k_bar(bar, color, method in flagged_methods)
+
+        ax.set_title(name, fontsize=9, fontweight='bold')
+        ax.set_xlabel('Method', fontsize=8)
+        ax.set_ylabel(f"K ({unit_symbol(spec)})", fontsize=8)
+        ax.set_xticks(range(len(methods)))
+        ax.set_xticklabels(
+            [format_method_label(method, tiny=True) for method in methods],
+            rotation=45,
+            ha='right',
+            fontsize=6,
+        )
+        if spec.log_k_y_scale:
+            apply_log_bar_limits(ax, values)
+        else:
+            apply_linear_bar_limits(ax, values)
+        ax.tick_params(labelsize=7)
+
+        if spec.show_grid:
+            ax.grid(True, axis='y', alpha=0.3)
+    _draw_facet_overflow_note(figure, hidden)
+    return rows
+
+
+# ═══════════════════════════════════════════════════════════════════
+# K distribution
+# ═══════════════════════════════════════════════════════════════════
+
+def _plot_k_distribution(figure, spec: ComparisonPlotSpec) -> int:
+    """Plot aggregate/group empirical distribution functions for K."""
+    snapshot = spec.comparison_snapshot
+    if not snapshot or not snapshot.k.included_records:
+        return _draw_empty_state(figure, "No K-values available for K distribution")
+
+    scopes = k_distribution_scopes(spec)
+    if not scopes:
+        return _draw_empty_state(
+            figure, "No positive K-values available for K distribution"
+        )
+
+    ax = figure.add_subplot(1, 1, 1)
+    if spec.k_dist_view == "histogram":
+        if spec.use_group_breakdown:
+            hist_scopes = [s for s in scopes if not s.get("is_overall")] or scopes
+        else:
+            hist_scopes = [s for s in scopes if s.get("is_overall")] or scopes
+        render_k_histogram(
+            ax,
+            hist_scopes,
+            axis=spec.k_hist_axis,
+            bins=spec.k_hist_bins,
+            unit_symbol=unit_symbol(spec),
+            style=spec.style,
+            show_grid=spec.show_grid,
+            show_legend=spec.show_legend,
+            title="K Distribution (lognormal)",
+        )
+        return 0
+
+    render_k_distribution_function(
+        ax,
+        scopes,
+        style=spec.style,
+        show_grid=spec.show_grid,
+        show_legend=spec.show_legend,
+        x_label=k_axis_label(spec),
+        title="K Distribution Function",
+    )
+    return 0
+
+
+# ═══════════════════════════════════════════════════════════════════
+# Combined
+# ═══════════════════════════════════════════════════════════════════
+
+def _plot_combined(figure, spec: ComparisonPlotSpec) -> int:
+    """Plot combined distribution + K view, faceted per dataset or per group."""
+    facets = combined_facets(spec)
+    rows, cols, shown, hidden = facet_dims(spec, len(facets))
+
+    for i, facet in enumerate(facets[:shown]):
+        ax1 = figure.add_subplot(rows, cols * 2, i * 2 + 1)
+        ax2 = figure.add_subplot(rows, cols * 2, i * 2 + 2)
+
+        # Left — distribution (aggregate + band + faint members for groups).
+        render_distribution_groups(
+            ax1,
+            [{"label": facet["label"], "color": facet["color"], "members": facet["members"]}],
+            style=spec.style,
+            show_grid=spec.show_grid,
+            show_legend=False,
+            title=f'{facet["label"]} - Dist',
+        )
+        ax1.title.set_fontsize(8)
+        ax1.set_xlabel('Size (mm)', fontsize=7)
+        ax1.set_ylabel('% Pass', fontsize=7)
+        ax1.tick_params(labelsize=6)
+
+        # Right — K-values (group geo-mean or per-dataset).
+        k_dict = convert_k_dict(spec, facet["k"])
+        if k_dict:
+            methods = _ordered_methods(k_dict.keys())[:5]  # cap for space
+            values = [k_dict[m] for m in methods]
+            flagged_methods = facet["flagged"]
+
+            bars = ax2.bar(range(len(methods)), values, alpha=0.8)
+            ax2.set_axisbelow(True)
+            for bar, method in zip(bars, methods):
+                _style_k_bar(
+                    bar, METHOD_COLORS.get(method, '#888888'),
+                    method in flagged_methods,
+                )
+            ax2.set_title(f'{facet["label"]} - K', fontsize=8)
+            ax2.set_xticks(range(len(methods)))
+            ax2.set_xticklabels(
+                [format_method_label(method, tiny=True) for method in methods],
+                rotation=45,
+                fontsize=6,
+            )
+            ax2.set_ylabel(f"K ({unit_symbol(spec)})", fontsize=7)
+            if spec.log_k_y_scale:
+                apply_log_bar_limits(ax2, values)
+            else:
+                apply_linear_bar_limits(ax2, values)
+            ax2.tick_params(labelsize=6)
+            if spec.show_grid:
+                ax2.grid(True, axis='y', alpha=0.3)
+        else:
+            ax2.text(0.5, 0.5, 'No K-values', transform=ax2.transAxes,
+                     ha='center', va='center', fontsize=8)
+            ax2.set_xticks([])
+            ax2.set_yticks([])
+    _draw_facet_overflow_note(figure, hidden)
+    return rows
+
+
+# ═══════════════════════════════════════════════════════════════════
+# Histogram
+# ═══════════════════════════════════════════════════════════════════
+
+def _plot_histogram(figure, spec: ComparisonPlotSpec) -> int:
+    """Plot grain histogram, faceted per dataset or per group (mean retained)."""
+    units = histogram_units(spec)
+    rows, cols, shown, hidden = facet_dims(spec, len(units))
+
+    for i, unit in enumerate(units[:shown]):
+        ax = figure.add_subplot(rows, cols, i + 1)
+        sizes, freq = unit["sizes"], unit["freq"]
+
+        ax.bar(range(len(sizes)), freq, color=unit["color"], alpha=0.8)
+
+        ax.set_title(unit["label"], fontsize=9, fontweight='bold')
+        ax.set_xlabel('Size class', fontsize=8)
+        ax.set_ylabel('Weight (%)', fontsize=8)
+        if len(sizes):
+            step = max(1, len(sizes) // 5)
+            ax.set_xticks(range(0, len(sizes), step))
+            ax.set_xticklabels(
+                [f'{s:.2f}' for s in sizes[::step]],
+                rotation=45, ha='right', fontsize=6,
+            )
+        ax.tick_params(labelsize=7)
+
+        if spec.show_grid:
+            ax.grid(True, axis='y', alpha=0.3)
+    _draw_facet_overflow_note(figure, hidden)
+    return rows

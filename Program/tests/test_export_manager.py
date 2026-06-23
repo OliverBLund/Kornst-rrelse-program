@@ -20,6 +20,7 @@ from gui.export_tab import ExportTab
 from gui.export_manager import ExportManager
 from gui.plot_styles import PROFESSIONAL_STYLE
 from k_calculations_v2 import CalculationStatus, KCalculationResult
+from unit_conversions import HydraulicConductivityConverter, HydraulicConductivityUnit
 
 APP = QApplication.instance() or QApplication([])
 
@@ -853,6 +854,28 @@ class TestExportManagerExports(unittest.TestCase):
         self.assertAlmostEqual(ax.get_xlim()[1], 10.0)
         self.assertAlmostEqual(ax.get_ylim()[0], 5.0)
         self.assertAlmostEqual(ax.get_ylim()[1], 95.0)
+        figure.clear()
+
+    def test_k_value_bar_figure_uses_display_unit_from_context(self):
+        manager = ExportManager()
+        results = build_results()
+
+        figure = manager._build_k_value_bar_figure(
+            'Sample A',
+            results,
+            self.make_config(output_dir='unused', csv=False),
+            {'display_unit': HydraulicConductivityUnit.M_PER_DAY},
+        )
+        ax = figure.axes[0]
+
+        self.assertIn('m/d', ax.get_ylabel())
+        # Bars should be in m/d, i.e. converted from the stored m/s values.
+        max_k_m_s = max(r.k_value for r in results)
+        expected = HydraulicConductivityConverter.convert_from_m_per_s(
+            max_k_m_s, HydraulicConductivityUnit.M_PER_DAY
+        )
+        bar_heights = [patch.get_height() for patch in ax.patches]
+        self.assertAlmostEqual(max(bar_heights), expected, places=6)
         figure.clear()
 
     def test_plot_export_applies_shared_text_options_from_context(self):

@@ -219,9 +219,9 @@ def render_k_bar_chart(
     if show_reference_lines and positive:
         arithmetic_mean = float(np.mean(positive))
         geometric_mean = float(np.exp(np.mean(np.log(positive))))
-        ax.axhline(arithmetic_mean, color="#b83232", linestyle="-", alpha=0.62,
+        ax.axhline(arithmetic_mean, color=style.k_mean_arith_color, linestyle="-", alpha=0.62,
                    label=f"Arithmetic mean: {arithmetic_mean:.2e}")
-        ax.axhline(geometric_mean, color="#5c3d8f", linestyle="--", alpha=0.68,
+        ax.axhline(geometric_mean, color=style.k_mean_geo_color, linestyle="--", alpha=0.68,
                    label=f"Geometric mean: {geometric_mean:.2e}")
 
     # Bar labels ──────────────────────────────────────────────────
@@ -287,6 +287,7 @@ def render_distribution_overlay(
     x_min, x_max, y_min, y_max = _overlay_distribution_limits(datasets)
     ax.set_xlim(x_min, x_max)
     ax.set_ylim(y_min, y_max)
+    ax.tick_params(labelsize=style.tick_fontsize)
 
     _apply_grid(ax, style, show_grid, which="both")
 
@@ -380,6 +381,7 @@ def render_distribution_groups(
                  fontweight=style.title_fontweight, fontfamily=style.font_family)
     ax.set_xlim(x_min, x_max)
     ax.set_ylim(y_min, y_max)
+    ax.tick_params(labelsize=style.tick_fontsize)
     _apply_grid(ax, style, show_grid, which="both")
     if show_legend:
         _apply_styled_legend(ax, style)
@@ -452,6 +454,7 @@ def render_k_overlay(
         [format_method_label(m, compact=True) for m in methods],
         rotation=45, ha="right", fontsize=8,
     )
+    ax.tick_params(axis="y", labelsize=style.tick_fontsize)
     max_label_level = max(label_levels, default=0)
     if log_y_scale:
         apply_log_bar_limits(ax, positive_values, max_label_level=max_label_level)
@@ -571,6 +574,7 @@ def render_k_distribution_function(
     ax.set_title(title, fontsize=style.title_fontsize,
                  fontweight=style.title_fontweight, fontfamily=style.font_family)
     ax.set_ylim(0, 100)
+    ax.tick_params(labelsize=style.tick_fontsize)
 
     if plotted_values:
         xmin, xmax = min(plotted_values), max(plotted_values)
@@ -722,6 +726,7 @@ def render_k_histogram(
     ax.set_title(title, fontsize=style.title_fontsize,
                  fontweight=style.title_fontweight, fontfamily=style.font_family)
     ax.set_ylim(bottom=0)
+    ax.tick_params(labelsize=style.tick_fontsize)
 
     _apply_grid(ax, style, show_grid)
 

@@ -435,6 +435,19 @@ class ReportingTab(QWidget):
         ("interp",  "fa6s.chart-area", "B \u2014 Full-Size Plots"),
         ("quality", "fa6s.scroll",     "C \u2014 Method Details"),
     ]
+    # Per-plot selection (key, icon, label, default-on). Keys match the export
+    # plot-type vocabulary so reports and exports share one set of plot names.
+    SINGLE_PLOT_KEYS = [
+        ("grain_size_curve",      "fa6s.chart-line",   "Grain size distribution",     True),
+        ("k_value_bar",           "fa6s.bolt",         "K-value bar chart",           True),
+        ("applicability_heatmap", "fa6s.table-cells",  "Method applicability heatmap", False),
+    ]
+    COLLECTION_PLOT_KEYS = [
+        ("distribution_overlay",  "fa6s.chart-area",   "Grain size comparison",       True),
+        ("k_value_comparison",    "fa6s.bolt",         "K-value comparison (bars)",   True),
+        ("statistical_boxplots",  "fa6s.chart-column", "K distribution (by scope)",   True),
+        ("reliability_matrix",    "fa6s.table-cells",  "Method reliability matrix",   False),
+    ]
     # Outline page hints (must match order: main sections then appendices)
     OUTLINE_PAGES = [1, 2, 3, 5, 7, 9, 11, 13, 15, 17]
 
@@ -497,6 +510,8 @@ class ReportingTab(QWidget):
         self._sample_contexts: list[dict] = []
         self._sample_selected: list[bool] = []
         self._section_rows: dict[str, _SectionRow] = {}
+        # Per-plot checkbox rows, keyed by scope ("single"/"collection") then key.
+        self._plot_rows: dict[str, dict[str, _SectionRow]] = {"single": {}, "collection": {}}
         self._outline_items: list[tuple[QLabel, QLabel, bool]] = []  # (label, page, appendix?)
         self.current_report_html = ""
         self.brand = ReportBrand.load()
@@ -896,6 +911,22 @@ class ReportingTab(QWidget):
             row.toggled.connect(lambda _v, k=key: self._on_section_toggled(k))
             self._section_rows[key] = row
             alay.addWidget(row)
+
+        # Per-plot selection (contextual: single-sample vs comparison plots)
+        self._plots_header = self._uc_header_with_icon(
+            "fa6s.images", "PLOTS TO INCLUDE", top_margin=12
+        )
+        alay.addWidget(self._plots_header)
+        for scope, specs in (
+            ("single", self.SINGLE_PLOT_KEYS),
+            ("collection", self.COLLECTION_PLOT_KEYS),
+        ):
+            for key, fa, label, default_on in specs:
+                row = _SectionRow(fa, label)
+                row.set_checked(default_on)
+                self._plot_rows[scope][key] = row
+                alay.addWidget(row)
+        self._sync_plot_rows_visibility()
 
         # Appendices
         alay.addWidget(self._uc_header_with_icon("fa6s.paperclip", "APPENDICES", top_margin=12))
@@ -1361,6 +1392,18 @@ class ReportingTab(QWidget):
         self._selected_type = card_id
         for card in getattr(self, "_type_cards", []):
             card.set_on(card._id == card_id)
+        self._sync_plot_rows_visibility()
+
+    def _sync_plot_rows_visibility(self) -> None:
+        """Show single-sample plot rows for an Individual report, comparison
+        plot rows for the multi-sample report types."""
+        if not getattr(self, "_plot_rows", None):
+            return
+        single = self._selected_type == self.TYPE_INDIVIDUAL
+        for row in self._plot_rows.get("single", {}).values():
+            row.setVisible(single)
+        for row in self._plot_rows.get("collection", {}).values():
+            row.setVisible(not single)
 
     def _apply_type_preset(self, type_id: int) -> None:
         """Apply the canonical section/appendix state + selection mode for a type."""
@@ -1976,6 +2019,8 @@ class ReportingTab(QWidget):
             dataset, metadata=metadata, sections=sections, brand=brand,
             appendix_label_config=appendix_cfg,
             plot_context=plot_context,
+            k_results=list(tab.get_results() or []),
+            selected_plots=self._collect_selected_plots("single"),
         )
 
     def _gen_comparison(self, brand, metadata, sections) -> str:
@@ -1999,6 +2044,7 @@ class ReportingTab(QWidget):
             [item["dataset"] for item in sample_details],
             metadata=metadata, sections=sections, brand=brand,
             sample_details=sample_details,
+            selected_plots=self._collect_selected_plots("collection"),
         )
 
     def _gen_full(self, brand, metadata, sections) -> str:
@@ -2019,7 +2065,23 @@ class ReportingTab(QWidget):
             [item["dataset"] for item in sample_details],
             metadata=metadata, sections=sections, brand=brand,
             sample_details=sample_details,
+            selected_plots=self._collect_selected_plots("collection"),
         )
+
+    def _collect_selected_plots(self, scope: str) -> set:
+        """Return the chosen plot-type keys for the given report scope.
+
+        Reads the per-plot checkboxes when present; otherwise falls back to the
+        defaults (distribution + K/comparison plots ON, heatmap/matrix OFF).
+        """
+        defaults = {
+            "single": {"grain_size_curve", "k_value_bar"},
+            "collection": {"distribution_overlay", "k_value_comparison", "statistical_boxplots"},
+        }.get(scope, set())
+        rows = getattr(self, "_plot_rows", {}).get(scope)
+        if not rows:
+            return set(defaults)
+        return {key for key, row in rows.items() if row.is_checked()}
 
     # ══════════════════════════════════════════════════════════
     # Preview-topbar actions

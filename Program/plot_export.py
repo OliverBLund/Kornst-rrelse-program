@@ -32,6 +32,7 @@ _renderers = _il.import_module("gui.plot_renderers")
 _styles    = _il.import_module("gui.plot_styles")
 _theme     = _il.import_module("gui.theme")
 _plot_ctx  = _il.import_module("gui.plot_context")
+_cmp_spec  = _il.import_module("gui.comparison_plot_spec")
 
 render_grain_size_distribution = _renderers.render_grain_size_distribution
 render_k_bar_chart             = _renderers.render_k_bar_chart
@@ -42,6 +43,7 @@ render_k_scope_boxplot         = _renderers.render_k_scope_boxplot
 render_applicability_heatmap   = _renderers.render_applicability_heatmap
 render_reliability_matrix      = _renderers.render_reliability_matrix
 apply_legend_aware_layout      = _renderers.apply_legend_aware_layout
+render_comparison              = _cmp_spec.render_comparison
 apply_axis_limits_from_context = _plot_ctx.apply_axis_limits_from_context
 grain_size_renderer_kwargs_from_context = _plot_ctx.grain_size_renderer_kwargs_from_context
 
@@ -198,6 +200,28 @@ def export_distribution_overlay(
     )
 
     apply_legend_aware_layout(fig, style)
+    return _fig_to_base64(fig, dpi=dpi)
+
+
+# ── Comparison plot via the shared render spec ───────────────
+
+def export_comparison_spec(
+    spec,
+    *,
+    figsize: tuple[float, float] = (12, 7),
+    dpi: int = 150,
+) -> str:
+    """Return a base64-encoded PNG of a comparison plot rendered from *spec*.
+
+    Uses the same ``render_comparison`` pipeline as the Comparison tab, so the
+    report/export plot matches the GUI (group breakdown, group colours,
+    line styles, display unit, log-K). *spec* is a ``ComparisonPlotSpec``.
+    """
+    apply_matplotlib_style()
+    fig = plt.figure(figsize=figsize)
+    fig.patch.set_facecolor(getattr(spec.style, "figure_facecolor", "white"))
+    render_comparison(fig, spec)
+    apply_legend_aware_layout(fig, spec.style)
     return _fig_to_base64(fig, dpi=dpi)
 
 

@@ -102,6 +102,18 @@ class TestComparisonPlotWidget(unittest.TestCase):
     def tearDown(self):
         self.widget.deleteLater()
 
+    @staticmethod
+    def _legend_handle_for(ax, name):
+        """Return the legend handle whose label matches *name* (ignoring the
+        indentation added by the group-structured legend)."""
+        legend = ax.get_legend()
+        handles = getattr(legend, 'legend_handles', getattr(legend, 'legendHandles', []))
+        labels = [t.get_text() for t in legend.get_texts()]
+        for handle, label in zip(handles, labels):
+            if label.strip() == name:
+                return handle
+        raise AssertionError(f"No legend entry for {name!r} in {labels}")
+
     def test_plot_type_change_normalizes_layout_mode(self):
         # Combined is grid-only; switching to it forces grid layout and disables
         # the Overlay option.
@@ -385,10 +397,9 @@ class TestComparisonPlotWidget(unittest.TestCase):
             self.widget.refresh_plot()
 
             ax = self.widget.figure.axes[0]
-            legend = ax.get_legend()
-            handles = getattr(legend, 'legend_handles', getattr(legend, 'legendHandles', []))
+            handle = self._legend_handle_for(ax, 'Layer A-2')
             self.assertEqual(ax.lines[1].get_linestyle(), ':')
-            self.assertEqual(handles[1].get_linestyle(), ':')
+            self.assertEqual(handle.get_linestyle(), ':')
         finally:
             clear_dataset_line_style('Layer A-2')
 
@@ -411,12 +422,11 @@ class TestComparisonPlotWidget(unittest.TestCase):
             self.widget.refresh_plot()
 
             ax = self.widget.figure.axes[0]
-            legend = ax.get_legend()
-            handles = getattr(legend, 'legend_handles', getattr(legend, 'legendHandles', []))
+            handle = self._legend_handle_for(ax, 'Layer A-2')
             self.assertEqual(ax.lines[1].get_linestyle(), '--')
             self.assertEqual(ax.lines[1].get_marker(), 's')
-            self.assertEqual(handles[1].get_linestyle(), '--')
-            self.assertEqual(handles[1].get_marker(), 's')
+            self.assertEqual(handle.get_linestyle(), '--')
+            self.assertEqual(handle.get_marker(), 's')
         finally:
             clear_dataset_line_style('Layer A-2')
 
@@ -645,6 +655,57 @@ class TestComparisonPlotWidget(unittest.TestCase):
 
         self.assertEqual(self.widget.current_style.legend_ncol, 0)
         self.assertEqual(getattr(legend, '_ncols', None), 2)
+
+    def test_distribution_overlay_legend_is_group_structured(self):
+        self.widget.set_datasets([
+            DummyDatasetTab('A-1', 1.0, group='Layer A'),
+            DummyDatasetTab('A-2', 1.5, group='Layer A'),
+            DummyDatasetTab('B-1', 3.0, group='Layer B'),
+        ])
+        self.widget.on_plot_type_changed('Distribution')
+        self.widget.set_display_mode('overlay')
+        self.widget.breakdown = 'dataset'  # members drawn individually
+        self.widget.refresh_plot()
+
+        legend = self.widget.figure.axes[0].get_legend()
+        labels = [t.get_text() for t in legend.get_texts()]
+        # Bold group headers with their (left-aligned, un-indented) members.
+        self.assertIn('Layer A', labels)
+        self.assertIn('Layer B', labels)
+        self.assertIn('A-1', labels)
+        self.assertIn('B-1', labels)
+        header_weights = [
+            t.get_fontweight() for t in legend.get_texts()
+            if t.get_text() in ('Layer A', 'Layer B')
+        ]
+        self.assertTrue(all(weight == 'bold' for weight in header_weights))
+
+    def test_grid_mode_grows_canvas_height_for_scrolling(self):
+        self.widget.set_datasets([
+            DummyDatasetTab(f'S{i}', 1.0 + i) for i in range(5)
+        ])
+        self.widget.on_plot_type_changed('Distribution')
+        self.widget.set_display_mode('grid')
+        self.widget.refresh_plot()
+
+        rows = self.widget._facet_dims(5)[0]
+        self.assertEqual(
+            self.widget.canvas.minimumHeight(), rows * self.widget.GRID_ROW_HEIGHT
+        )
+
+        # Overlay fills the viewport again (no forced scroll height).
+        self.widget.set_display_mode('overlay')
+        self.widget.refresh_plot()
+        self.assertEqual(self.widget.canvas.minimumHeight(), 220)
+
+    def test_tick_size_applies_to_distribution_overlay(self):
+        self.widget.on_plot_type_changed('Distribution')
+        self.widget.set_display_mode('overlay')
+        self.widget._update_style_field('tick_fontsize', 18)
+
+        ax = self.widget.figure.axes[0]
+        sizes = [t.get_fontsize() for t in ax.get_xticklabels()]
+        self.assertTrue(any(abs(size - 18) < 0.5 for size in sizes))
 
     def test_sidebar_can_toggle_open_and_closed(self):
         self.widget.resize(1000, 600)
