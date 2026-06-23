@@ -102,17 +102,135 @@ class TestComparisonPlotWidget(unittest.TestCase):
     def tearDown(self):
         self.widget.deleteLater()
 
-    def test_plot_type_change_normalizes_grouped_mode(self):
+    def test_plot_type_change_normalizes_layout_mode(self):
+        # Combined is grid-only; switching to it forces grid layout and disables
+        # the Overlay option.
+        self.widget.on_plot_type_changed('Combined')
+        self.assertEqual(self.widget.display_mode, 'grid')
+        self.assertTrue(self.widget.grid_radio.isChecked())
+        self.assertFalse(self.widget.overlay_radio.isEnabled())
+
+        # K-Values supports both layouts; Overlay becomes available and active.
         self.widget.on_plot_type_changed('K-Values')
-        self.widget.set_display_mode('grouped')
-        self.assertEqual(self.widget.display_mode, 'grouped')
-        self.assertFalse(self.widget.grouped_radio.isHidden())
-
-        self.widget.on_plot_type_changed('Distribution')
-
+        self.widget.set_display_mode('overlay')
         self.assertEqual(self.widget.display_mode, 'overlay')
-        self.assertTrue(self.widget.grouped_radio.isHidden())
+        self.assertTrue(self.widget.overlay_radio.isEnabled())
         self.assertTrue(self.widget.overlay_radio.isChecked())
+
+        # K Distribution is overlay-only; Grid is disabled.
+        self.widget.on_plot_type_changed('K Distribution')
+        self.assertEqual(self.widget.display_mode, 'overlay')
+        self.assertFalse(self.widget.grid_radio.isEnabled())
+
+    def test_breakdown_defaults_to_group_when_groups_exist(self):
+        self.widget.set_datasets([
+            DummyDatasetTab('Layer A-1', 1.0, group='Layer A'),
+            DummyDatasetTab('Layer A-2', 1.5, group='Layer A'),
+            DummyDatasetTab('Layer B-1', 3.0, group='Layer B'),
+        ])
+        self.assertEqual(self.widget.breakdown, 'group')
+        self.assertTrue(self.widget._use_group_breakdown())
+        self.assertFalse(self.widget._breakdown_frame.isHidden())
+
+        # Ungrouped scope falls back to per-dataset and hides the control.
+        self.widget.set_datasets([
+            DummyDatasetTab('Sample A', 1.0),
+            DummyDatasetTab('Sample B', 2.0),
+        ])
+        self.assertEqual(self.widget.breakdown, 'dataset')
+        self.assertFalse(self.widget._use_group_breakdown())
+
+    def test_k_values_overlay_aggregates_one_bar_per_group(self):
+        self.widget.set_datasets([
+            DummyDatasetTab('Layer A-1', 1.0, group='Layer A'),
+            DummyDatasetTab('Layer A-2', 1.5, group='Layer A'),
+            DummyDatasetTab('Layer B-1', 3.0, group='Layer B'),
+        ])
+        self.widget.on_plot_type_changed('K-Values')
+        self.widget.set_display_mode('overlay')
+        self.widget.refresh_plot()
+
+        results_m_s, colors, flagged = self.widget._group_overlay_inputs()
+        # Two named groups -> two aggregated bar series, no ungrouped expansion.
+        self.assertEqual(set(results_m_s.keys()), {'Layer A', 'Layer B'})
+        self.assertEqual(len(colors), 2)
+        self.assertTrue(all(not flag for flag in flagged.values()))
+
+    def test_histogram_facets_by_group_when_grouped(self):
+        self.widget.set_datasets([
+            DummyDatasetTab('Layer A-1', 1.0, group='Layer A'),
+            DummyDatasetTab('Layer A-2', 1.5, group='Layer A'),
+            DummyDatasetTab('Layer B-1', 3.0, group='Layer B'),
+        ])
+        self.widget.on_plot_type_changed('Histogram')
+        self.widget.refresh_plot()
+
+        units = self.widget._histogram_units()
+        self.assertEqual([u['label'] for u in units], ['Layer A', 'Layer B'])
+        # One panel per group, and the aggregate stays a valid mass distribution.
+        self.assertEqual(len(self.widget.figure.axes), 2)
+        heights = [patch.get_height() for patch in self.widget.figure.axes[0].patches]
+        self.assertTrue(all(height >= 0 for height in heights))
+
+    def test_combined_facets_use_group_geomean_when_grouped(self):
+        self.widget.set_datasets([
+            DummyDatasetTab('Layer A-1', 1.0, group='Layer A'),
+            DummyDatasetTab('Layer A-2', 1.5, group='Layer A'),
+            DummyDatasetTab('Layer B-1', 3.0, group='Layer B'),
+        ])
+        self.widget.on_plot_type_changed('Combined')
+        self.widget.refresh_plot()
+
+        facets = self.widget._combined_facets()
+        self.assertEqual([f['label'] for f in facets], ['Layer A', 'Layer B'])
+        self.assertTrue(all(f['k'] for f in facets))
+
+    def test_k_distribution_controls_visible_only_for_that_type(self):
+        self.widget.on_plot_type_changed('K Distribution')
+        self.assertTrue(self.widget._sect_kdist.isVisibleTo(self.widget))
+        self.widget.on_plot_type_changed('Distribution')
+        self.assertFalse(self.widget._sect_kdist.isVisibleTo(self.widget))
+
+    def test_k_distribution_histogram_lnk_view_annotates_sigma(self):
+        self.widget.on_plot_type_changed('K Distribution')
+        self.widget._on_kdist_view_changed('histogram')
+        self.widget._on_kdist_axis_changed('lnk')
+
+        ax = self.widget.figure.axes[0]
+        self.assertIn('ln K', ax.get_xlabel())
+        self.assertTrue(self.widget._row_kdist_axis.isVisibleTo(self.widget._sect_kdist))
+        texts = [t.get_text() for t in ax.texts]
+        self.assertTrue(any('lnK' in text for text in texts))
+
+    def test_k_distribution_histogram_grouped_auto_draws_bars(self):
+        self.widget.set_datasets([
+            DummyDatasetTab('Layer A-1', 1.0, group='Layer A'),
+            DummyDatasetTab('Layer A-2', 1.5, group='Layer A'),
+            DummyDatasetTab('Layer B-1', 3.0, group='Layer B'),
+            DummyDatasetTab('Layer B-2', 5.0, group='Layer B'),
+        ])
+        self.widget.on_plot_type_changed('K Distribution')
+        self.widget._on_kdist_view_changed('histogram')
+        # Auto now draws (dodged) bars for groups too.
+        self.assertEqual(self.widget.k_hist_bins, 'auto')
+        ax = self.widget.figure.axes[0]
+        self.assertGreater(len(ax.patches), 0)
+
+        # 'Off' shows fitted curves only — no bars.
+        idx = self.widget._kdist_bin_options.index('Off')
+        self.widget._kdist_bins_combo.setCurrentIndex(idx)
+        self.assertEqual(self.widget.k_hist_bins, 'off')
+        ax = self.widget.figure.axes[0]
+        self.assertEqual(len(ax.patches), 0)
+
+    def test_k_distribution_histogram_k_axis_uses_conductivity_label(self):
+        self.widget.on_plot_type_changed('K Distribution')
+        self.widget.k_dist_view = 'histogram'
+        self.widget.k_hist_axis = 'k'
+        self.widget.refresh_plot()
+
+        ax = self.widget.figure.axes[0]
+        self.assertIn('Hydraulic Conductivity', ax.get_xlabel())
 
     def test_histogram_uses_non_negative_retained_frequencies(self):
         self.widget.on_plot_type_changed('Histogram')
@@ -126,6 +244,44 @@ class TestComparisonPlotWidget(unittest.TestCase):
         self.assertEqual(first_ax.get_ylabel(), 'Weight (%)')
         self.assertEqual(self.widget.display_mode, 'grid')
         self.assertTrue(self.widget.grid_radio.isChecked())
+
+    def test_group_colors_stable_across_hide_and_show(self):
+        tabs = [
+            DummyDatasetTab('A', 1.0, group='G1'),
+            DummyDatasetTab('B', 1.5, group='G1'),
+            DummyDatasetTab('C', 2.0, group='G2'),
+        ]
+        self.widget.set_datasets(tabs)
+        g1, g2 = self.widget._group_color_map['G1'], self.widget._group_color_map['G2']
+
+        # Hide G1 (only C/G2 remains) — G2 keeps its colour.
+        self.widget.set_datasets([tabs[2]])
+        self.assertEqual(self.widget._group_color_map['G2'], g2)
+
+        # Re-show everything — both groups keep their original colours.
+        self.widget.set_datasets(tabs)
+        self.assertEqual(self.widget._group_color_map['G1'], g1)
+        self.assertEqual(self.widget._group_color_map['G2'], g2)
+
+    def test_breakdown_choice_survives_visibility_toggle(self):
+        tabs = [
+            DummyDatasetTab('A', 1.0, group='G1'),
+            DummyDatasetTab('B', 1.5, group='G2'),
+        ]
+        self.widget.set_datasets(tabs)
+        self.assertEqual(self.widget.breakdown, 'group')  # default with groups
+
+        self.widget._on_breakdown_toggled(True, 'dataset')  # user picks per-dataset
+        self.assertEqual(self.widget.breakdown, 'dataset')
+
+        # A visibility toggle re-enters set_datasets with a subset — keep choice.
+        self.widget.set_datasets([tabs[0]])
+        self.assertEqual(self.widget.breakdown, 'dataset')
+
+        # A genuine scope change resets to the group default.
+        self.widget.reset_presentation_state()
+        self.widget.set_datasets(tabs)
+        self.assertEqual(self.widget.breakdown, 'group')
 
     def test_k_value_overlay_hatches_flagged_methods_and_shows_grid(self):
         self.widget.on_plot_type_changed('K-Values')
@@ -225,6 +381,7 @@ class TestComparisonPlotWidget(unittest.TestCase):
             self.assertIn('Layer A-2', self.widget._dataset_line_style_rows)
             self.widget.on_plot_type_changed('Distribution')
             self.widget.set_display_mode('overlay')
+            self.widget.breakdown = 'dataset'
             self.widget.refresh_plot()
 
             ax = self.widget.figure.axes[0]
@@ -250,6 +407,7 @@ class TestComparisonPlotWidget(unittest.TestCase):
 
             self.widget.on_plot_type_changed('Distribution')
             self.widget.set_display_mode('overlay')
+            self.widget.breakdown = 'dataset'
             self.widget.refresh_plot()
 
             ax = self.widget.figure.axes[0]
@@ -548,6 +706,9 @@ class TestComparisonPlotWidget(unittest.TestCase):
         ])
         self.widget.on_plot_type_changed('Distribution')
         self.widget.set_display_mode('overlay')
+        # Per-dataset breakdown keeps group color + distinct member line styles
+        # (the per-group breakdown instead aggregates to one curve per group).
+        self.widget.breakdown = 'dataset'
         self.widget.refresh_plot()
 
         ax = self.widget.figure.axes[0]

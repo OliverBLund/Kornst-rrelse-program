@@ -97,10 +97,10 @@ PROFESSIONAL_STYLE = PlotStyle(
     d_line_width=1.2,
     d_line_alpha=0.70,
 
-    # Grid - warm, matches --border (#d4c4a8)
+    # Grid - standard black with restrained opacity for report/export clarity
     grid_show=True,
-    grid_color="#d4c4a8",
-    grid_alpha=0.6,
+    grid_color="#000000",
+    grid_alpha=0.18,
     grid_linestyle="-",
     grid_linewidth=0.5,
 
@@ -112,13 +112,13 @@ PROFESSIONAL_STYLE = PlotStyle(
     legend_fontsize=9,
     font_family="Source Sans 3",
 
-    # Legend - upper left, warm frame
+    # Legend - upper left, standard black frame
     legend_loc="upper left",
     legend_framealpha=0.92,
-    legend_edgecolor="#d4c4a8",
+    legend_edgecolor="#000000",
 
-    # Figure colors - match C.BG / white axes
-    figure_facecolor="#f5f5f0",
+    # Figure colors - always white for report/export consistency
+    figure_facecolor="#ffffff",
     axes_facecolor="#ffffff",
 
     # K-value bar chart
@@ -156,8 +156,8 @@ PRESENTATION_STYLE = PlotStyle(
 
     # Grid - Bold and clear
     grid_show=True,
-    grid_color="#999999",
-    grid_alpha=0.5,
+    grid_color="#000000",
+    grid_alpha=0.25,
     grid_linestyle="-",
     grid_linewidth=1.0,
 
@@ -172,10 +172,10 @@ PRESENTATION_STYLE = PlotStyle(
     # Legend - Prominent
     legend_loc="upper left",
     legend_framealpha=1.0,
-    legend_edgecolor="#666666",
+    legend_edgecolor="#000000",
 
     # Figure colors - High contrast
-    figure_facecolor="#f5f5f5",
+    figure_facecolor="#ffffff",
     axes_facecolor="white",
 
     # K-value bar chart - use colorful method-specific colors for presentations
@@ -213,8 +213,8 @@ MINIMALIST_STYLE = PlotStyle(
 
     # Grid - Very subtle
     grid_show=True,
-    grid_color="#e0e0e0",
-    grid_alpha=0.3,
+    grid_color="#000000",
+    grid_alpha=0.12,
     grid_linestyle="-",
     grid_linewidth=0.5,
 
@@ -229,7 +229,7 @@ MINIMALIST_STYLE = PlotStyle(
     # Legend - Minimal frame
     legend_loc="upper left",
     legend_framealpha=0.7,
-    legend_edgecolor="#dddddd",
+    legend_edgecolor="#000000",
 
     # Figure colors - Clean white
     figure_facecolor="white",
@@ -270,8 +270,8 @@ CLASSIC_STYLE = PlotStyle(
 
     # Grid - Traditional look
     grid_show=True,
-    grid_color="#d3d3d3",
-    grid_alpha=0.35,
+    grid_color="#000000",
+    grid_alpha=0.18,
     grid_linestyle="--",
     grid_linewidth=0.8,
 
@@ -286,7 +286,7 @@ CLASSIC_STYLE = PlotStyle(
     # Legend - Traditional placement
     legend_loc="best",
     legend_framealpha=0.8,
-    legend_edgecolor="#999999",
+    legend_edgecolor="#000000",
 
     # Figure colors - classic white export surface
     figure_facecolor="white",

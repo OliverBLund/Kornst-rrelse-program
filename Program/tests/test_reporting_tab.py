@@ -38,6 +38,14 @@ class TestReportingTabValidation(unittest.TestCase):
 
         self.assertIsNone(ReportingTab._generation_validation_error(state))
 
+    def test_preview_css_does_not_inject_page_number_bars(self):
+        html = "<html><head></head><body><h1>Report</h1></body></html>"
+
+        injected = ReportingTab._inject_preview_css(html)
+
+        self.assertNotIn("preview-page-sep", injected)
+        self.assertNotIn("Page ' +", injected)
+
 
 if __name__ == "__main__":
     unittest.main(verbosity=2)

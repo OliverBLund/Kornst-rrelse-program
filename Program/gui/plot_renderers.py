@@ -284,11 +284,103 @@ def render_distribution_overlay(
                   fontsize=style.label_fontsize, fontfamily=style.font_family)
     ax.set_title(title, fontsize=style.title_fontsize,
                  fontweight=style.title_fontweight, fontfamily=style.font_family)
-    ax.set_xlim(0.001, 100)
-    ax.set_ylim(0, 100)
+    x_min, x_max, y_min, y_max = _overlay_distribution_limits(datasets)
+    ax.set_xlim(x_min, x_max)
+    ax.set_ylim(y_min, y_max)
 
     _apply_grid(ax, style, show_grid, which="both")
 
+    if show_legend:
+        _apply_styled_legend(ax, style)
+
+
+def _interp_passing_on_grid(sizes, pcts, grid) -> Optional[np.ndarray]:
+    """Interpolate one curve's % passing onto a shared log-spaced size grid.
+
+    Values outside the curve's own size range clamp to its end values (the curve
+    is monotonic), so members with different sieve sets still align for
+    averaging. Returns ``None`` when there are too few usable points.
+    """
+    pairs = sorted(
+        (float(s), float(p))
+        for s, p in zip(sizes, pcts)
+        if s is not None and float(s) > 0 and p is not None
+    )
+    if len(pairs) < 2:
+        return None
+    xs = np.log10([s for s, _ in pairs])
+    ys = np.array([p for _, p in pairs], dtype=float)
+    return np.interp(np.log10(grid), xs, ys)
+
+
+def render_distribution_groups(
+    ax: Axes,
+    groups: Sequence[Mapping],
+    *,
+    style: PlotStyle = PROFESSIONAL_STYLE,
+    show_grid: bool = True,
+    show_legend: bool = True,
+    show_members: bool = True,
+    title: str = "Grain Size Distribution by Group",
+    grid_points: int = 60,
+) -> None:
+    """Draw one aggregate curve + min–max spread band + faint members per group.
+
+    *groups*: sequence of mappings with ``label``, ``color`` and ``members``
+    (an iterable of ``(particle_sizes, percent_passing)`` pairs). Used for both
+    the overlay (all groups on one axes) and the grid·group cell (one group).
+    """
+    all_sizes: list[float] = []
+    all_pcts: list[float] = []
+    for group in groups:
+        for sizes, pcts in group.get("members", ()):
+            for size, pct in zip(sizes, pcts):
+                if size is not None and float(size) > 0 and pct is not None:
+                    all_sizes.append(float(size))
+                    all_pcts.append(float(pct))
+    if all_sizes:
+        x_min, x_max, y_min, y_max = _distribution_limits(all_sizes, all_pcts)
+    else:
+        x_min, x_max, y_min, y_max = 0.001, 100.0, 0.0, _DIST_Y_MAX
+
+    grid = np.logspace(math.log10(x_min), math.log10(x_max), grid_points)
+
+    for group in groups:
+        color = group.get("color") or "#2b5797"
+        label = group.get("label", "Group")
+        curves = [
+            curve
+            for sizes, pcts in group.get("members", ())
+            if (curve := _interp_passing_on_grid(sizes, pcts, grid)) is not None
+        ]
+        if not curves:
+            continue
+        stacked = np.vstack(curves)
+        aggregate = np.nanmean(stacked, axis=0)
+        member_count = stacked.shape[0]
+
+        if member_count > 1:
+            ax.fill_between(grid, np.nanmin(stacked, axis=0),
+                            np.nanmax(stacked, axis=0),
+                            color=color, alpha=0.12, zorder=1)
+            if show_members:
+                for curve in curves:
+                    ax.semilogx(grid, curve, color=color, alpha=0.28,
+                                linewidth=max(0.6, style.curve_linewidth * 0.5),
+                                zorder=2)
+        ax.semilogx(grid, aggregate, color=color,
+                    linewidth=style.curve_linewidth + 0.4,
+                    label=f"{label} (n={member_count})", zorder=3)
+
+    ax.set_xlabel("Grain Size (mm)",
+                  fontsize=style.label_fontsize, fontfamily=style.font_family)
+    ax.set_ylabel("Percent Passing (%)",
+                  fontsize=style.label_fontsize, fontfamily=style.font_family)
+    ax.set_title(title, fontsize=style.title_fontsize,
+                 fontweight=style.title_fontweight, fontfamily=style.font_family)
+    ax.set_xlim(x_min, x_max)
+    ax.set_ylim(y_min, y_max)
+    _apply_grid(ax, style, show_grid, which="both")
     if show_legend:
         _apply_styled_legend(ax, style)
 
@@ -490,6 +582,162 @@ def render_k_distribution_function(
     _apply_grid(ax, style, show_grid, which="both")
 
     if show_legend:
+        _apply_styled_legend(ax, style)
+
+
+def heterogeneity_label(sigma: Optional[float]) -> str:
+    """Aquifer heterogeneity class from σ_lnK (Bohling et al. 2012 banding)."""
+    if sigma is None:
+        return ""
+    if sigma < 1.0:
+        return "moderately heterogeneous"
+    if sigma < 2.0:
+        return "heterogeneous"
+    return "highly heterogeneous"
+
+
+def render_k_histogram(
+    ax: Axes,
+    scopes: Sequence[dict],
+    *,
+    axis: str = "lnk",
+    unit_symbol: str = "m/s",
+    bins: "str | int" = "auto",
+    style: PlotStyle = PROFESSIONAL_STYLE,
+    show_grid: bool = True,
+    show_legend: bool = True,
+    title: str = "K Distribution (lognormal)",
+) -> None:
+    """Draw the lognormal K histogram (Poul's distribution function for K).
+
+    K is lognormal, so on the ``lnk`` axis the data forms a bell with a fitted
+    normal curve; on the ``k`` axis it is right-skewed with a fitted lognormal
+    curve. Each scope shows histogram bars + a fitted PDF + a Kgeo line, plus a
+    K_geo / σ_lnK annotation for a single scope. Group bars are drawn dodged
+    (side-by-side, black-outlined). ``bins`` controls the bars: ``"auto"`` draws
+    data-sized bars (dodged for groups), ``"off"`` shows fitted curves only, and
+    an integer forces that many bins. Values must be positive, in display units.
+    """
+    use_lnk = axis != "k"
+
+    prepared: list[dict] = []
+    for scope in scopes:
+        values = sorted(
+            float(v) for v in scope.get("values", ())
+            if v is not None and float(v) > 0
+        )
+        if not values:
+            continue
+        logs = [math.log(v) for v in values]
+        mu = sum(logs) / len(logs)
+        sigma = float(np.std(logs))  # population std == σ_lnK
+        prepared.append({
+            "label": scope.get("label", "Scope"),
+            "color": scope.get("color") or "#2b5797",
+            "values": values, "logs": logs, "mu": mu, "sigma": sigma, "n": len(values),
+        })
+    if not prepared:
+        return
+
+    single = len(prepared) == 1
+
+    # Shared evaluation range + bin edges across every scope so fitted curves
+    # are not asymmetrically clipped to each scope's own min/max and so grouped
+    # histograms stay directly comparable.
+    all_x = [
+        value
+        for p in prepared
+        for value in (p["logs"] if use_lnk else p["values"])
+    ]
+    if use_lnk:
+        g_min, g_max = min(all_x), max(all_x)
+        span = (g_max - g_min) or (abs(g_max) or 1.0)
+        pad = span * 0.12
+        x_lo, x_hi = g_min - pad, g_max + pad
+    else:
+        # Linear-K is dominated by the long right tail when σ_lnK is large;
+        # clip the upper limit to a high percentile so the bulk stays readable
+        # while the lognormal skew is still visible.
+        g_max = float(np.percentile(all_x, 95))
+        x_lo = 0.0
+        x_hi = (g_max * 1.05) or 1.0
+    n_max = max(p["n"] for p in prepared)
+    bins_arg = str(bins).strip().lower()
+    if bins_arg == "off":
+        draw_bars, n_bins = False, 10
+    elif bins_arg.isdigit():
+        # Explicit bin count forces bars for every scope.
+        draw_bars, n_bins = True, max(2, int(bins_arg))
+    else:  # "auto": always draw bars (dodged for groups), sized to the data.
+        draw_bars, n_bins = True, max(6, min(24, n_max // 2))
+    bin_edges = np.linspace(x_lo, x_hi, n_bins + 1)
+    xs = np.linspace(x_lo, x_hi, 320)
+
+    # Draw all scopes' bars in one call so matplotlib dodges them side-by-side
+    # (with black outlines) instead of muddily overlapping translucent bars.
+    bar_scopes = [p for p in prepared if draw_bars and p["n"] >= 3]
+    if bar_scopes:
+        bar_data = [(p["logs"] if use_lnk else p["values"]) for p in bar_scopes]
+        bar_colors = [p["color"] for p in bar_scopes]
+        ax.hist(
+            bar_data, bins=bin_edges, density=True, color=bar_colors,
+            histtype="bar", edgecolor="black", linewidth=0.5,
+            alpha=0.85 if len(bar_data) > 1 else 0.45, zorder=1,
+        )
+
+    for p in prepared:
+        color = p["color"]
+        label = p["label"]
+        if not single:
+            label = f'{p["label"]} (Kgeo={math.exp(p["mu"]):.1e}, σ={p["sigma"]:.2f})'
+
+        if p["sigma"] > 0:
+            if use_lnk:
+                pdf = (1.0 / (p["sigma"] * math.sqrt(2 * math.pi))) * np.exp(
+                    -((xs - p["mu"]) ** 2) / (2 * p["sigma"] ** 2)
+                )
+            else:
+                safe_xs = np.where(xs > 0, xs, np.nan)
+                pdf = (1.0 / (safe_xs * p["sigma"] * math.sqrt(2 * math.pi))) * np.exp(
+                    -((np.log(safe_xs) - p["mu"]) ** 2) / (2 * p["sigma"] ** 2)
+                )
+            ax.plot(xs, pdf, color=color, linewidth=style.curve_linewidth + 0.3,
+                    label=label, zorder=3)
+        else:
+            ax.axvline(p["mu"] if use_lnk else p["values"][0], color=color, label=label)
+
+        center = p["mu"] if use_lnk else math.exp(p["mu"])
+        ax.axvline(center, color=color, linestyle=":", linewidth=1.1, alpha=0.7, zorder=2)
+
+    ax.set_xlim(x_lo, x_hi)
+
+    if use_lnk:
+        ax.set_xlabel(f"ln K   (K in {unit_symbol})",
+                      fontsize=style.label_fontsize, fontfamily=style.font_family)
+    else:
+        ax.set_xlabel(f"Hydraulic Conductivity K ({unit_symbol})",
+                      fontsize=style.label_fontsize, fontfamily=style.font_family)
+    ax.set_ylabel("Probability density",
+                  fontsize=style.label_fontsize, fontfamily=style.font_family)
+    ax.set_title(title, fontsize=style.title_fontsize,
+                 fontweight=style.title_fontweight, fontfamily=style.font_family)
+    ax.set_ylim(bottom=0)
+
+    _apply_grid(ax, style, show_grid)
+
+    if single:
+        p = prepared[0]
+        het = heterogeneity_label(p["sigma"])
+        lines = [
+            f"$K_{{geo}}$ = {math.exp(p['mu']):.2e} {unit_symbol}",
+            f"$\\sigma_{{lnK}}$ = {p['sigma']:.2f}" + (f"  ({het})" if het else ""),
+            f"n = {p['n']}",
+        ]
+        ax.text(0.97, 0.97, "\n".join(lines), transform=ax.transAxes,
+                ha="right", va="top", fontsize=8, color="#3a2e1c",
+                bbox=dict(boxstyle="round", facecolor="white",
+                          edgecolor=style.legend_edgecolor, alpha=0.85))
+    elif show_legend:
         _apply_styled_legend(ax, style)
 
 
@@ -760,6 +1008,27 @@ def _distribution_limits(
             x_max = max(x_max, last_x * 3.5)
 
     return x_min, x_max, 0.0, _DIST_Y_MAX
+
+
+def _overlay_distribution_limits(datasets, scheme=None) -> tuple[float, float, float, float]:
+    """Compute padded limits spanning every dataset in a comparison overlay.
+
+    Falls back to the historical fixed window when no usable points exist so an
+    empty overlay still renders a sensible axes box.
+    """
+    all_sizes: list[float] = []
+    all_pcts: list[float] = []
+    for dataset in datasets:
+        sizes = list(getattr(dataset, "particle_sizes", []) or [])
+        pcts = list(getattr(dataset, "percent_passing", []) or [])
+        for size, pct in zip(sizes, pcts):
+            if size is None or size <= 0 or pct is None:
+                continue
+            all_sizes.append(float(size))
+            all_pcts.append(float(pct))
+    if not all_sizes:
+        return 0.001, 100.0, 0.0, _DIST_Y_MAX
+    return _distribution_limits(all_sizes, all_pcts, scheme)
 
 
 def _draw_characteristic_lines(

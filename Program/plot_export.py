@@ -14,11 +14,13 @@ from __future__ import annotations
 
 import base64
 import io
-from typing import Dict, List, Optional, Set
+import math
+from typing import Dict, List, Optional, Sequence, Set
 
 import matplotlib
 matplotlib.use("Agg")
 import matplotlib.pyplot as plt          # noqa: E402
+from matplotlib.colors import to_rgba    # noqa: E402
 from matplotlib.figure import Figure     # noqa: E402
 
 import importlib as _il  # noqa: E402
@@ -46,6 +48,8 @@ grain_size_renderer_kwargs_from_context = _plot_ctx.grain_size_renderer_kwargs_f
 PlotStyle          = _styles.PlotStyle
 PROFESSIONAL_STYLE = _styles.PROFESSIONAL_STYLE
 apply_matplotlib_style = _theme.apply_matplotlib_style
+C = _theme.C
+F = _theme.F
 
 
 # ── Helper ────────────────────────────────────────────────────
@@ -272,18 +276,128 @@ def export_k_scope_boxplot(
     """Return a base64-encoded PNG of grouped/dataset K-value boxplots."""
     apply_matplotlib_style()
     fig, ax = plt.subplots(figsize=figsize)
-
-    render_k_scope_boxplot(
+    _render_statistics_scope_boxplot(
         ax,
         scope_values,
         colors=colors,
-        style=style,
         show_grid=show_grid,
-        title=title,
+        title=title.replace("Hydraulic Conductivity", "K-value"),
     )
 
     fig.tight_layout()
     return _fig_to_base64(fig, dpi=dpi)
+
+
+def _render_statistics_scope_boxplot(
+    ax,
+    scope_values,
+    *,
+    colors: Optional[Sequence[str]] = None,
+    show_grid: bool = True,
+    title: str = "K-value Distribution by Scope",
+) -> None:
+    """Render report K boxplots to match Comparison > Statistics defaults."""
+    foreground = "#000000"
+    raw_items = list(scope_values.items()) if isinstance(scope_values, dict) else list(scope_values)
+    color_list = list(colors or [])
+    plot_data: list[list[float]] = []
+    plot_labels: list[str] = []
+    plot_colors: list[str] = []
+
+    for index, (label, values) in enumerate(raw_items):
+        clean_values = []
+        for value in values or []:
+            try:
+                numeric = float(value)
+            except (TypeError, ValueError):
+                continue
+            if math.isfinite(numeric) and numeric > 0:
+                clean_values.append(numeric)
+        if not clean_values:
+            continue
+        plot_data.append(clean_values)
+        plot_labels.append(_short_scope_label(str(label)))
+        plot_colors.append(color_list[index] if index < len(color_list) else C.TEXT_MID)
+
+    ax.set_facecolor("#ffffff")
+    if not plot_data:
+        ax.text(
+            0.5,
+            0.5,
+            "No K data available",
+            ha="center",
+            va="center",
+            transform=ax.transAxes,
+            color=foreground,
+            fontsize=11,
+        )
+        return
+
+    bp = ax.boxplot(
+        plot_data,
+        tick_labels=plot_labels,
+        patch_artist=True,
+        medianprops={"color": foreground, "linewidth": 1.5},
+        whiskerprops={"color": foreground, "linewidth": 1.0},
+        capprops={"color": foreground, "linewidth": 1.0},
+        flierprops={"marker": "o", "markersize": 4, "alpha": 0.6},
+    )
+    for patch, color in zip(bp["boxes"], plot_colors):
+        patch.set_facecolor(to_rgba(color, 0.24))
+        patch.set_edgecolor(color)
+        patch.set_linewidth(1.2)
+
+    marker_values = [
+        float(math.exp(sum(math.log(value) for value in values) / len(values)))
+        for values in plot_data
+    ]
+    ax.scatter(
+        range(1, len(plot_data) + 1),
+        marker_values,
+        marker="D",
+        s=34,
+        color=foreground,
+        edgecolors="white",
+        linewidths=0.8,
+        zorder=4,
+    )
+
+    ax.set_yscale("log")
+    ax.set_ylabel("K (m/s)", color=foreground, fontsize=10)
+    ax.set_title(title, color=foreground, fontsize=11, fontweight="600")
+    many_scopes = len(plot_labels) > 6
+    ax.tick_params(
+        axis="x",
+        labelrotation=18 if many_scopes else 0,
+        labelsize=7 if many_scopes else 8,
+        colors=foreground,
+    )
+    ax.tick_params(axis="y", labelsize=8, colors=foreground)
+    for idx, tick_label in enumerate(ax.get_xticklabels()):
+        tick_label.set_color(foreground)
+        tick_label.set_ha("right" if many_scopes else "center")
+    if show_grid:
+        ax.grid(True, which="both", linestyle="--", alpha=0.18, color=foreground)
+    ax.spines["top"].set_visible(False)
+    ax.spines["right"].set_visible(False)
+    ax.spines["left"].set_color(foreground)
+    ax.spines["bottom"].set_color(foreground)
+    ax.text(
+        0.99,
+        0.98,
+        "Marker: Geo. mean",
+        transform=ax.transAxes,
+        ha="right",
+        va="top",
+        fontsize=8,
+        color=foreground,
+        family=F.MONO,
+    )
+
+
+def _short_scope_label(label: str, max_chars: int = 26) -> str:
+    text = str(label or "")
+    return text if len(text) <= max_chars else f"{text[:max_chars - 1]}..."
 
 
 def export_applicability_heatmap(

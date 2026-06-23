@@ -17,8 +17,13 @@ from analysis.comparison_snapshot import (
     DatasetAnalysisInput,
     build_comparison_snapshot,
 )
-from k_aggregation import KAggregationOptions, build_k_result_summary, k_scope_value_series
-from grain_classification import ISO14688
+from k_aggregation import (
+    KAggregationOptions,
+    UNGROUPED_LABEL,
+    build_k_result_summary,
+    k_scope_value_series,
+)
+from grain_classification import ISO14688, permeability_class
 from method_registry import DEFAULT_METHOD_ORDER, METHOD_CATEGORY_MAP, ordered_methods
 from .plot_renderers import (
     apply_legend_aware_layout,
@@ -485,6 +490,129 @@ class ExportManager:
 
         return rows
 
+    def _collection_statistics_enabled(self, datasets: List[tuple], config: Dict) -> bool:
+        return bool(
+            config.get('statistics', True)
+            and config.get('include_collection_aggregates', True)
+            and len(datasets) > 1
+        )
+
+    def _format_optional_float(self, value: Optional[float], fmt: str = '.4g') -> str:
+        try:
+            if value is None:
+                return ''
+            return format(float(value), fmt)
+        except (TypeError, ValueError):
+            return ''
+
+    def _format_scope_range(self, min_value: Optional[float], max_value: Optional[float]) -> str:
+        if min_value is None or max_value is None:
+            return ''
+        return f"{min_value:.3e} - {max_value:.3e}"
+
+    def build_aggregate_statistics_table(
+        self,
+        datasets: List[tuple],
+        config: Dict,
+        max_data_rows: Optional[int] = None,
+    ) -> List[List[Any]]:
+        """Build Overall/Group/Dataset aggregate rows from the shared snapshot."""
+        header = [
+            'Scope_Type',
+            'Scope',
+            'Dataset_Count',
+            'Datasets',
+            'K_Included_Cells',
+            'K_Total_Cells',
+            'K_Warning_Cells',
+            'K_Error_Cells',
+            'K_Geometric_Mean_m_s',
+            'K_Arithmetic_Mean_m_s',
+            'K_Median_m_s',
+            'K_Range_m_s',
+            'lnK_StdDev',
+            'Permeability_Class',
+            'D10_Median_mm',
+            'D50_Median_mm',
+            'D60_Median_mm',
+            'Mean_Grain_Size_Median_mm',
+            'Cu_Median',
+            'Fines_Median_pct',
+            'Dominant_Soil_Class',
+        ]
+        rows: List[List[Any]] = [header]
+        if not datasets:
+            return rows
+
+        snapshot = self._build_comparison_snapshot_for_export(datasets, config)
+
+        def grain_metric(scope_name: str, metric_name: str) -> Optional[float]:
+            grain_stats = None
+            if scope_name == 'Overall':
+                grain_stats = snapshot.grain.overall
+            elif scope_name in snapshot.grain.by_group:
+                grain_stats = snapshot.grain.by_group.get(scope_name)
+            elif scope_name in snapshot.grain.by_dataset:
+                grain_stats = snapshot.grain.by_dataset.get(scope_name)
+            if grain_stats is None:
+                return None
+            metric = grain_stats.metrics.get(metric_name)
+            return metric.median if metric is not None else None
+
+        def dominant_class(scope_name: str) -> str:
+            if scope_name == 'Overall':
+                return snapshot.grain.overall.dominant_class
+            if scope_name in snapshot.grain.by_group:
+                return snapshot.grain.by_group[scope_name].dominant_class
+            if scope_name in snapshot.grain.by_dataset:
+                return snapshot.grain.by_dataset[scope_name].dominant_class
+            return ''
+
+        scope_rows = [('Overall', 'Overall', snapshot.k.overall)]
+        scope_rows.extend(
+            ('Group', group_name, snapshot.k.by_group.get(group_name))
+            for group_name in snapshot.k.group_names
+            if group_name != UNGROUPED_LABEL or len(snapshot.k.group_names) > 1
+        )
+        scope_rows.extend(
+            ('Dataset', dataset_name, snapshot.k.by_dataset.get(dataset_name))
+            for dataset_name in snapshot.k.dataset_names
+        )
+
+        written = 0
+        for scope_type, scope_name, k_stats in scope_rows:
+            if max_data_rows is not None and written >= max_data_rows:
+                break
+            if k_stats is None:
+                continue
+            geo_mean = k_stats.geometric_mean_m_s
+            rows.append([
+                scope_type,
+                scope_name,
+                k_stats.dataset_count,
+                '; '.join(k_stats.dataset_names),
+                k_stats.included_count,
+                k_stats.total_cells,
+                k_stats.warning_count,
+                k_stats.error_count,
+                self._format_optional_float(geo_mean, '.3e'),
+                self._format_optional_float(k_stats.arithmetic_mean_m_s, '.3e'),
+                self._format_optional_float(k_stats.median_m_s, '.3e'),
+                self._format_scope_range(k_stats.min_m_s, k_stats.max_m_s),
+                self._format_optional_float(k_stats.ln_std_dev, '.3f'),
+                permeability_class(geo_mean) if geo_mean is not None else '',
+                self._format_optional_float(grain_metric(scope_name, 'D10'), '.4f'),
+                self._format_optional_float(grain_metric(scope_name, 'D50'), '.4f'),
+                self._format_optional_float(grain_metric(scope_name, 'D60'), '.4f'),
+                self._format_optional_float(grain_metric(scope_name, 'Dmean'), '.4f'),
+                self._format_optional_float(grain_metric(scope_name, 'Cu'), '.3f'),
+                self._format_optional_float(grain_metric(scope_name, 'Fines%'), '.2f'),
+                dominant_class(scope_name),
+            ])
+            written += 1
+
+        return rows
+
     def export(self, datasets: List[tuple], config: Dict, progress: Optional[QProgressDialog] = None) -> List[str]:
         """
         Export datasets according to configuration
@@ -518,6 +646,10 @@ class ExportManager:
                     self._export_csv_wide_format_filtered(datasets, config)
                     if progress:
                         progress.setValue(len(self.exported_files))
+                if self._collection_statistics_enabled(datasets, config):
+                    self._export_aggregate_statistics_csv(datasets, config)
+                    if progress:
+                        progress.setValue(len(self.exported_files))
             else:
                 if config.get('csv_long', True):
                     self._export_csv_combined_filtered(datasets, config)
@@ -525,6 +657,10 @@ class ExportManager:
                         progress.setValue(len(self.exported_files))
                 if config.get('csv_wide', False):
                     self._export_csv_wide_format_filtered(datasets, config)
+                    if progress:
+                        progress.setValue(len(self.exported_files))
+                if self._collection_statistics_enabled(datasets, config):
+                    self._export_aggregate_statistics_csv(datasets, config)
                     if progress:
                         progress.setValue(len(self.exported_files))
 
@@ -545,6 +681,11 @@ class ExportManager:
 
             elif excel_mode == 'method_organized':
                 self._export_excel_method_organized(datasets, config)
+                if progress:
+                    progress.setValue(len(self.exported_files))
+
+            if self._collection_statistics_enabled(datasets, config):
+                self._export_aggregate_statistics_excel(datasets, config)
                 if progress:
                     progress.setValue(len(self.exported_files))
 
@@ -915,12 +1056,16 @@ class ExportManager:
                     steps += 1
                 if config.get('csv_wide', False):
                     steps += 1
+            if self._collection_statistics_enabled(datasets, config):
+                steps += 1
 
         if config.get('excel', False):
             excel_mode = config.get('excel_mode', 'per_dataset')
             if excel_mode == 'per_dataset':
                 steps += len(datasets)
             else:
+                steps += 1
+            if self._collection_statistics_enabled(datasets, config):
                 steps += 1
 
         if config.get('json', False):
@@ -1393,6 +1538,19 @@ class ExportManager:
 
         self.exported_files.append(filepath)
 
+    def _export_aggregate_statistics_csv(self, datasets: List[tuple], config: Dict):
+        """Export collection-level Overall/Group/Dataset aggregate statistics."""
+        output_dir = self._category_output_dir(config, 'tables', 'csv')
+        template = config['filename_template']
+        filename = self._format_filename(template, 'aggregate_statistics', '.csv')
+        filepath = os.path.join(output_dir, filename)
+
+        with open(filepath, 'w', newline='', encoding='utf-8') as f:
+            writer = csv.writer(f)
+            writer.writerows(self.build_aggregate_statistics_table(datasets, config))
+
+        self.exported_files.append(filepath)
+
     def _write_k_values_csv_filtered(self, filepath: str, name: str, dataset: GrainSizeData,
                                      results: List[KCalculationResult], config: Dict):
         """Write filtered K-values to CSV honoring method and unit selection."""
@@ -1625,6 +1783,41 @@ class ExportManager:
 
         wb.save(filepath)
         self.exported_files.append(filepath)
+
+    def _export_aggregate_statistics_excel(self, datasets: List[tuple], config: Dict):
+        """Export collection-level aggregate statistics as a dedicated workbook."""
+        try:
+            from openpyxl import Workbook
+        except ImportError:
+            raise ImportError("openpyxl is required for Excel export. Install with: pip install openpyxl")
+
+        output_dir = self._category_output_dir(config, 'workbooks')
+        template = config['filename_template']
+        filename = self._format_filename(template, 'aggregate_statistics', '.xlsx')
+        filepath = os.path.join(output_dir, filename)
+
+        wb = Workbook()
+        ws = wb.active
+        ws.title = 'Aggregate_Statistics'
+        self._write_excel_aggregate_statistics(ws, datasets, config)
+        wb.save(filepath)
+        self.exported_files.append(filepath)
+
+    def _write_excel_aggregate_statistics(self, ws, datasets: List[tuple], config: Dict):
+        """Write the shared aggregate statistics table to an Excel worksheet."""
+        from openpyxl.styles import Font
+
+        rows = self.build_aggregate_statistics_table(datasets, config)
+        for row_index, values in enumerate(rows, start=1):
+            for col_index, value in enumerate(values, start=1):
+                cell = ws.cell(row=row_index, column=col_index)
+                cell.value = value
+                if row_index == 1:
+                    cell.font = Font(bold=True)
+
+        for col_index, header in enumerate(rows[0], start=1):
+            width = min(max(len(str(header)) + 2, 12), 34)
+            ws.column_dimensions[chr(64 + col_index) if col_index <= 26 else ws.cell(row=1, column=col_index).column_letter].width = width
 
     def _write_excel_summary(self, ws, name: str, dataset: GrainSizeData,
                             results: List[KCalculationResult], config: Dict):

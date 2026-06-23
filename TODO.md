@@ -132,8 +132,12 @@ Goal: get the program stable enough for the next tester round and then produce a
   - Confirm report sample selection is clear.
   - Confirm report plot outputs match app plot defaults or documented report defaults.
   - Confirm wide comparison tables fit A4/PDF output.
+  - Comparison/K-focus reports include a K-value aggregate summary from the shared comparison snapshot.
+  - Comparison report K boxplots now use the same grouped/dataset scope data as Comparison > Statistics.
 - [ ] Export tab:
   - Include full detail dump plus aggregate/group aggregate tables.
+    - CSV/Excel exports now create `aggregate_statistics` outputs for multi-dataset exports when Statistics is enabled.
+    - Aggregate preview tab shows Overall, Group, and Dataset rows before export.
   - Ensure export names clearly distinguish raw data, processed curve data, plot drawer data, and aggregate statistics.
   - Confirm selected dataset scope and group scope are respected.
   - Confirm PNG/SVG/PDF plot export works for single and comparison plots.

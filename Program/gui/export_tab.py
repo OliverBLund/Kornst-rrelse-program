@@ -228,6 +228,7 @@ class ExportTab(QWidget):
                             'valid_count': True,
                         }
                     },
+                    'collection_aggregates': True,
                     'grain_size_stats': True,  # Summary of percentiles/gradation
                 }
             },
@@ -431,7 +432,7 @@ class ExportTab(QWidget):
             'applicability_heatmap': 'Applicability heatmap',
             'distribution_overlay': 'Distribution overlay',
             'k_value_comparison': 'K-value comparison',
-            'statistical_boxplots': 'K-value boxplot',
+            'statistical_boxplots': 'Overall/group K boxplot',
             'reliability_matrix': 'Reliability matrix',
         }
         return labels.get(plot_type, plot_type.replace('_', ' ').title())
@@ -443,7 +444,7 @@ class ExportTab(QWidget):
             'applicability_heatmap': 'Method status table',
             'distribution_overlay': 'Curve data from all selected datasets',
             'k_value_comparison': 'K table from all selected datasets',
-            'statistical_boxplots': 'K-value distributions by dataset',
+            'statistical_boxplots': 'Included K values grouped by overall/group scope',
             'reliability_matrix': 'Method status matrix',
         }
         return labels.get(plot_type, 'Plot source data')
@@ -468,6 +469,11 @@ class ExportTab(QWidget):
             and self._selected_plot_types()
             and self._selected_plot_formats()
         )
+
+    def _collection_aggregates_enabled(self) -> bool:
+        stats = self.content_selection.get('statistics', {})
+        items = stats.get('items', {})
+        return bool(stats.get('enabled', True) and items.get('collection_aggregates', True))
 
     def update_file_tree(self):
         """Update the file tree showing exact files that will be created"""
@@ -501,6 +507,11 @@ class ExportTab(QWidget):
                 self._set_tree_icon(wide_item, "fa6s.file-lines")
                 csv_folder.addChild(wide_item)
 
+            if len(datasets_to_export) > 1 and self._collection_aggregates_enabled():
+                aggregate_item = QTreeWidgetItem(["aggregate_statistics.csv", "overall + groups"])
+                self._set_tree_icon(aggregate_item, "fa6s.chart-simple")
+                csv_folder.addChild(aggregate_item)
+
             self.file_tree.addTopLevelItem(csv_folder)
             csv_folder.setExpanded(True)
 
@@ -514,6 +525,11 @@ class ExportTab(QWidget):
                 excel_item = QTreeWidgetItem([f"{name}.xlsx", "workbook"])
                 self._set_tree_icon(excel_item, "fa6s.file-excel")
                 excel_folder.addChild(excel_item)
+
+            if len(datasets_to_export) > 1 and self._collection_aggregates_enabled():
+                aggregate_item = QTreeWidgetItem(["aggregate_statistics.xlsx", "overall + groups"])
+                self._set_tree_icon(aggregate_item, "fa6s.chart-simple")
+                excel_folder.addChild(aggregate_item)
 
             self.file_tree.addTopLevelItem(excel_folder)
             excel_folder.setExpanded(True)
@@ -590,8 +606,16 @@ class ExportTab(QWidget):
             file_count += 1
         if self.selected_formats.get('csv_wide'):
             file_count += 1
+        if (
+            dataset_count > 1
+            and self._collection_aggregates_enabled()
+            and (self.selected_formats.get('csv_long') or self.selected_formats.get('csv_wide'))
+        ):
+            file_count += 1
         if self.selected_formats.get('excel'):
             file_count += dataset_count
+            if dataset_count > 1 and self._collection_aggregates_enabled():
+                file_count += 1
 
         plot_formats = len(self._selected_plot_formats()) if self._plot_exports_enabled() else 0
         single_plot_types = len(self._selected_single_plot_types()) if self._plot_exports_enabled() else 0
@@ -724,10 +748,11 @@ class ExportTab(QWidget):
 
         # === STATISTICS ===
         stats_group = self._create_content_category(
-            "Statistical Summaries",
+            "Statistics & Aggregates",
             [
-                ("k_value_stats", "K-value statistics (mean, median, std, etc.)"),
-                ("grain_size_stats", "Grain size summary")
+                ("k_value_stats", "Per-dataset K statistics"),
+                ("collection_aggregates", "Overall/group aggregate table"),
+                ("grain_size_stats", "Per-dataset grain summary")
             ],
             'statistics'
         )
@@ -754,7 +779,7 @@ class ExportTab(QWidget):
                 ("applicability_heatmap", "Method applicability heatmap"),
                 ("distribution_overlay", "Distribution comparison overlay"),
                 ("k_value_comparison", "K-value comparison chart"),
-                ("statistical_boxplots", "K-value statistical boxplots"),
+                ("statistical_boxplots", "Overall/group K distribution boxplot"),
                 ("reliability_matrix", "Method reliability matrix"),
                 ("include_legend", "Include legend"),
                 ("include_grid", "Include grid lines")
@@ -1952,6 +1977,17 @@ class ExportTab(QWidget):
         if self.selected_formats.get('csv_wide'):
             self._add_csv_wide_preview_tab(datasets_to_export)
 
+        if (
+            len(datasets_to_export) > 1
+            and self._collection_aggregates_enabled()
+            and (
+                self.selected_formats.get('csv_long')
+                or self.selected_formats.get('csv_wide')
+                or self.selected_formats.get('excel')
+            )
+        ):
+            self._add_aggregate_statistics_preview_tab(datasets_to_export)
+
         if self.selected_formats.get('excel'):
             self._add_excel_preview_tab(datasets_to_export)
 
@@ -2240,6 +2276,35 @@ class ExportTab(QWidget):
         label = f"CSV Wide ({max_preview_rows} datasets)" if len(datasets_to_export) > max_preview_rows else "CSV Wide"
         self.preview_tabs.addTab(preview, icon("fa6s.chart-simple", C.TEXT_MUTED, 12), label)
 
+    def _add_aggregate_statistics_preview_tab(self, datasets_to_export):
+        """Preview collection-level Overall/Group/Dataset aggregate statistics."""
+        preview = QTableWidget()
+        preview.setAlternatingRowColors(True)
+        preview.setEditTriggers(QTableWidget.EditTrigger.NoEditTriggers)
+
+        manager = ExportManager()
+        manager.set_scheme(self._scheme)
+        rows = manager.build_aggregate_statistics_table(
+            datasets_to_export,
+            self._build_export_config(),
+            max_data_rows=50,
+        )
+        headers = rows[0] if rows else []
+        data_rows = rows[1:]
+
+        preview.setColumnCount(len(headers))
+        preview.setHorizontalHeaderLabels([str(header) for header in headers])
+        preview.setRowCount(len(data_rows))
+        for row, values in enumerate(data_rows):
+            for column, value in enumerate(values):
+                preview.setItem(row, column, QTableWidgetItem("" if value is None else str(value)))
+
+        preview.horizontalHeader().setSectionResizeMode(QHeaderView.ResizeMode.ResizeToContents)
+        preview.horizontalHeader().setStretchLastSection(False)
+
+        label = "Aggregates (50 rows)" if len(data_rows) == 50 else "Aggregates"
+        self.preview_tabs.addTab(preview, icon("fa6s.layer-group", C.TEXT_MUTED, 12), label)
+
     def _add_excel_preview_tab(self, datasets_to_export):
         """Add Excel format preview tab"""
         preview = QTextEdit()
@@ -2257,8 +2322,14 @@ class ExportTab(QWidget):
             text.append("  - Percentiles - D10, D20, D30, D50, D60, etc.")
             text.append("  - K_Values - All calculation methods and results")
             text.append("  - Statistics - Summary statistics")
+            if len(datasets_to_export) > 1 and self._collection_aggregates_enabled():
+                text.append("")
+                text.append("Collection workbook:")
+                text.append("  - aggregate_statistics.xlsx - Overall, group, and dataset aggregate rows")
             text.append("")
             text.append(f"Total workbooks to create: {len(datasets_to_export)}")
+            if len(datasets_to_export) > 1 and self._collection_aggregates_enabled():
+                text.append("  + 1 aggregate statistics workbook")
 
         preview.setPlainText("\n".join(text))
         self.preview_tabs.addTab(preview, icon("fa6s.file-excel", C.TEXT_MUTED, 12), "Excel")
@@ -3289,6 +3360,7 @@ class ExportTab(QWidget):
                 stat for stat, enabled in k_value_stats_config['items'].items()
                 if enabled
             ] if k_value_stats_enabled else [],
+            'include_collection_aggregates': self._collection_aggregates_enabled(),
             'include_grain_size_stats': grain_size_enabled and statistics_enabled and statistics_items['grain_size_stats'],
             'include_metadata': {
                 'sample_info': metadata_enabled and metadata_items['sample_info'],

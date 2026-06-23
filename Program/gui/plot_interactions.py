@@ -150,8 +150,8 @@ class AxesInteractionController:
             for spine in ax.spines.values():
                 spine.set_visible(True)
                 spine.set_linewidth(1.15 if is_active else 0.8)
-                spine.set_edgecolor(C.BORDER_DK if is_active else "#cfc5b4")
-            ax.title.set_color(C.TEXT if is_active else C.TEXT_MID)
+                spine.set_edgecolor("#000000")
+            ax.title.set_color("#000000")
 
     def reset_axes_view(self, ax) -> None:
         defaults = self._default_limits.get(ax)

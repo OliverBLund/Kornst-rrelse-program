@@ -3754,6 +3754,10 @@ class ComparisonTab(QWidget):
                         pass
             selected_tabs = dialog.get_selected_tabs()
             self._set_selected_datasets(selected_tabs)
+            # A real scope/group edit should start color + breakdown fresh; only
+            # plot-visibility toggles keep the accumulated presentation state.
+            if hasattr(self._plot_widget, "reset_presentation_state"):
+                self._plot_widget.reset_presentation_state()
             self.dataset_selection_requested.emit(self._dataset_paths(selected_tabs))
             self.update_comparison()
 
@@ -5089,9 +5093,10 @@ class ComparisonTab(QWidget):
 
     def _draw_boxplot(self) -> None:
         """K-value box plots — one box per dataset, log y-axis."""
+        foreground = "#000000"
         self._box_fig.clear()
         ax = self._box_fig.add_subplot(111)
-        ax.set_facecolor("#fbf8f2")
+        ax.set_facecolor("#ffffff")
 
         tabs = self.selected_datasets
         aggregation = self._build_k_aggregation()
@@ -5152,7 +5157,7 @@ class ComparisonTab(QWidget):
                 ha="center",
                 va="center",
                 transform=ax.transAxes,
-                color=C.TEXT_MUTED,
+                color=foreground,
                 fontsize=11,
             )
             self._box_canvas.draw()
@@ -5170,9 +5175,9 @@ class ComparisonTab(QWidget):
             p_data,
             tick_labels=p_labels,
             patch_artist=True,
-            medianprops={"color": C.TEXT, "linewidth": 1.5},
-            whiskerprops={"color": C.BORDER_DK, "linewidth": 1.0},
-            capprops={"color": C.BORDER_DK, "linewidth": 1.0},
+            medianprops={"color": foreground, "linewidth": 1.5},
+            whiskerprops={"color": foreground, "linewidth": 1.0},
+            capprops={"color": foreground, "linewidth": 1.0},
             flierprops={"marker": "o", "markersize": 4, "alpha": 0.6},
         )
         for patch, color in zip(bp["boxes"], p_colors):
@@ -5197,19 +5202,19 @@ class ComparisonTab(QWidget):
             marker_values,
             marker="D",
             s=34,
-            color="#433528",
+            color=foreground,
             edgecolors="white",
             linewidths=0.8,
             zorder=4,
         )
 
         ax.set_yscale("log")
-        ax.set_ylabel(f"K ({self._stats_unit_symbol()})", color=C.TEXT_MID, fontsize=10)
+        ax.set_ylabel(f"K ({self._stats_unit_symbol()})", color=foreground, fontsize=10)
         ax.set_title(
             "K-value Distribution by Group"
             if self._stats_uses_group_scope()
             else "K-value Distribution by Dataset",
-            color=C.TEXT_MID,
+            color=foreground,
             fontsize=11,
             fontweight="600",
         )
@@ -5218,14 +5223,17 @@ class ComparisonTab(QWidget):
             axis="x",
             labelrotation=18 if many_scopes else 0,
             labelsize=7 if many_scopes else 8,
+            colors=foreground,
         )
-        ax.tick_params(axis="y", labelsize=8)
+        ax.tick_params(axis="y", labelsize=8, colors=foreground)
         for idx, tick_lbl in enumerate(ax.get_xticklabels()):
-            tick_lbl.set_color(p_colors[idx % len(p_colors)])
+            tick_lbl.set_color(foreground)
             tick_lbl.set_ha("right" if many_scopes else "center")
-        ax.grid(True, which="both", linestyle="--", alpha=0.38, color=C.BORDER)
+        ax.grid(True, which="both", linestyle="--", alpha=0.18, color=foreground)
         ax.spines["top"].set_visible(False)
         ax.spines["right"].set_visible(False)
+        ax.spines["left"].set_color(foreground)
+        ax.spines["bottom"].set_color(foreground)
         ax.text(
             0.99,
             0.98,
@@ -5234,7 +5242,7 @@ class ComparisonTab(QWidget):
             ha="right",
             va="top",
             fontsize=8,
-            color=C.TEXT_MUTED,
+            color=foreground,
             family=F.MONO,
         )
 
@@ -5248,9 +5256,10 @@ class ComparisonTab(QWidget):
           WARNING (1) — amber        — K result outside applicability range
           N/A     (0) — pale beige   — method not applicable / failed
         """
+        foreground = "#000000"
         self._heat_fig.clear()
         ax = self._heat_fig.add_subplot(111)
-        ax.set_facecolor("#fbf8f2")
+        ax.set_facecolor("#ffffff")
 
         tabs = self.selected_datasets
         aggregation = self._build_k_aggregation()
@@ -5258,13 +5267,8 @@ class ComparisonTab(QWidget):
         use_group_scope = self._stats_uses_group_scope()
         if use_group_scope:
             groups = list(aggregation.group_names)
-            group_colors = self._group_color_map(groups)
             members_by_group = self._stats_group_members()
             scope_names = ["Overall", *groups]
-            scope_colors = [
-                C.EARTH,
-                *[group_colors.get(group, C.TEXT_MID) for group in groups],
-            ]
             scope_dataset_counts = [
                 len(tabs),
                 *[len(members_by_group.get(group, [])) for group in groups],
@@ -5274,7 +5278,6 @@ class ComparisonTab(QWidget):
                 self._short_dataset_name(tab.get_dataset_name(), max_width=84)
                 for tab in tabs
             ]
-            scope_colors = self._dataset_colors_for_tabs(tabs)
             scope_dataset_counts = [1 for _tab in tabs]
 
         if not method_names or not scope_names:
@@ -5285,7 +5288,7 @@ class ComparisonTab(QWidget):
                 ha="center",
                 va="center",
                 transform=ax.transAxes,
-                color=C.TEXT_MUTED,
+                color=foreground,
             )
             self._heat_canvas.draw()
             return
@@ -5369,16 +5372,16 @@ class ComparisonTab(QWidget):
             "Method Coverage by Group"
             if use_group_scope
             else "Method Agreement & Applicability",
-            color=C.TEXT_MID,
+            color=foreground,
             fontsize=11,
             fontweight="600",
             pad=28,
         )
         legend = ax.legend(
             handles=[
-                Patch(facecolor="#dbe8c0", edgecolor=C.BORDER, label="Included"),
-                Patch(facecolor="#d99a3a", edgecolor=C.BORDER, label="Warning"),
-                Patch(facecolor="#ece5da", edgecolor=C.BORDER, label="Unavailable"),
+                Patch(facecolor="#dbe8c0", edgecolor=foreground, label="Included"),
+                Patch(facecolor="#d99a3a", edgecolor=foreground, label="Warning"),
+                Patch(facecolor="#ece5da", edgecolor=foreground, label="Unavailable"),
             ],
             loc="upper center",
             bbox_to_anchor=(0.5, 1.10),
@@ -5390,12 +5393,12 @@ class ComparisonTab(QWidget):
             borderaxespad=0,
         )
         for text in legend.get_texts():
-            text.set_color(C.TEXT_MID)
+            text.set_color(foreground)
 
         # Add crisp cell separators so the matrix reads as a table, not a color slab.
         ax.set_xticks(np.arange(-0.5, len(scope_names), 1), minor=True)
         ax.set_yticks(np.arange(-0.5, len(method_names), 1), minor=True)
-        ax.grid(which="minor", color="#fbf8f2", linestyle="-", linewidth=1.2)
+        ax.grid(which="minor", color=foreground, alpha=0.12, linestyle="-", linewidth=1.0)
         ax.tick_params(which="minor", bottom=False, left=False)
 
         # Overlay compact coverage counts for grouped scopes; per-dataset cells stay icon-like.
@@ -5411,11 +5414,7 @@ class ComparisonTab(QWidget):
                         va="center",
                         fontsize=7,
                         fontweight="700",
-                        color=C.TEXT_MID
-                        if v >= 2.0
-                        else "white"
-                        if v >= 1.0
-                        else "#8e816f",
+                        color=foreground,
                     )
                     continue
                 if v >= 2.0:
@@ -5429,7 +5428,7 @@ class ComparisonTab(QWidget):
                         va="center",
                         fontsize=9,
                         fontweight="700",
-                        color="white",
+                        color=foreground,
                     )
                 else:
                     ax.text(
@@ -5439,15 +5438,16 @@ class ComparisonTab(QWidget):
                         ha="center",
                         va="center",
                         fontsize=9,
-                        color="#8e816f",
+                        color=foreground,
                     )
 
-        # Color x-tick labels per dataset or group color.
-        for ci, tick_lbl in enumerate(ax.get_xticklabels()):
-            tick_lbl.set_color(scope_colors[ci % len(scope_colors)])
+        for tick_lbl in ax.get_xticklabels():
+            tick_lbl.set_color(foreground)
+        for tick_lbl in ax.get_yticklabels():
+            tick_lbl.set_color(foreground)
 
         ax.spines[:].set_visible(False)
-        ax.tick_params(length=0)
+        ax.tick_params(length=0, colors=foreground)
         ax.tick_params(axis="x", pad=6)
         ax.tick_params(axis="y", pad=4)
 

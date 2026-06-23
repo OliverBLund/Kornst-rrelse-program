@@ -424,10 +424,10 @@ class ReportingTab(QWidget):
     SECTION_KEYS = [
         ("cover",        "fa6s.file-lines",   "Cover Page",          True),
         ("executive",    "fa6s.align-left",   "Executive Summary",   False),
-        ("results",      "fa6s.table",        "Grain Size Data",     False),
-        ("plots",        "fa6s.chart-line",   "Distribution Plot",   False),
-        ("k_stats",      "fa6s.bolt",         "K-Values Table",      False),
-        ("gradation",    "fa6s.chart-column", "Statistics",          False),
+        ("results",      "fa6s.table",        "Sample & Grain Tables", False),
+        ("plots",        "fa6s.chart-line",   "Report Plots",        False),
+        ("k_stats",      "fa6s.bolt",         "K + Aggregate Tables", False),
+        ("gradation",    "fa6s.chart-column", "Grain Statistics",    False),
         ("methodology",  "fa6s.book",         "Method References",   False),
     ]
     APPENDIX_KEYS = [
@@ -462,7 +462,7 @@ class ReportingTab(QWidget):
         },
         TYPE_COMPARISON: {
             "selection_mode": "multi",
-            "hint": "Pick two or more samples to compare.",
+            "hint": "Pick two or more samples. Group/overall aggregates are included when K tables are enabled.",
             "sections": {
                 "cover": False, "executive": True, "results": True, "plots": True,
                 "k_stats": True, "gradation": True, "methodology": True,
@@ -471,7 +471,7 @@ class ReportingTab(QWidget):
         },
         TYPE_FULL: {
             "selection_mode": "all",
-            "hint": "All loaded samples are included.",
+            "hint": "All loaded samples are included with overall/group aggregate summaries.",
             "sections": {
                 "cover": True, "executive": True, "results": True, "plots": True,
                 "k_stats": True, "gradation": True, "methodology": True,
@@ -480,7 +480,7 @@ class ReportingTab(QWidget):
         },
         TYPE_KFOCUS: {
             "selection_mode": "multi",
-            "hint": "Pick one or more samples for the K-value comparison.",
+            "hint": "Pick samples for K tables, overall/group aggregates, and K distribution plots.",
             "sections": {
                 "cover": False, "executive": True, "results": False, "plots": False,
                 "k_stats": True, "gradation": True, "methodology": True,
@@ -633,11 +633,11 @@ class ReportingTab(QWidget):
             (self.TYPE_INDIVIDUAL, "fa6s.chart-area", "Individual Sample",
              "Full report for one sample \u2014 grain data, plot, K-values, statistics."),
             (self.TYPE_COMPARISON, "fa6s.code-compare", "Cross-Sample Comparison",
-             "Side-by-side parameters and K-values for selected samples."),
+             "Side-by-side samples plus overall/group aggregate summaries."),
             (self.TYPE_FULL, "fa6s.book", "Full Project Summary",
-             "All samples, all methods \u2014 complete project documentation."),
+             "All samples with aggregate tables, plots, and appendices."),
             (self.TYPE_KFOCUS, "fa6s.bolt", "K-Value Focus",
-             "Compact report centred on hydraulic conductivity results."),
+             "Hydraulic conductivity method tables and group aggregates."),
         ]
         self._type_cards: list[_TypeCard] = []
         for i, (cid, fa, label, desc) in enumerate(cards):
@@ -2125,7 +2125,7 @@ class ReportingTab(QWidget):
 
     @staticmethod
     def _inject_preview_css(html: str) -> str:
-        """Inject screen-only CSS + JS that simulates an A4 paper sheet."""
+        """Inject screen-only CSS that previews the report on a clean A4 sheet."""
         screen_block = """<style>
 @media screen {
     html { background: #c8c4be !important; min-height: 100%; padding: 32px 0 48px 0; }
@@ -2142,86 +2142,8 @@ class ReportingTab(QWidget):
     .report-top-bar {
         margin: 0 -20mm 40px -20mm !important;
     }
-    .preview-page-sep {
-        display: flex;
-        align-items: center;
-        justify-content: center;
-        height: 40px;
-        margin: 0 -20mm;
-        background: #c8c4be;
-        border-top:    1px solid #b0aba5;
-        border-bottom: 1px solid #b0aba5;
-        box-shadow: inset 0 4px 8px rgba(0,0,0,0.07),
-                    inset 0 -4px 8px rgba(0,0,0,0.07);
-        font-family: sans-serif;
-        font-size: 9px;
-        color: #9a9590;
-        letter-spacing: 2px;
-        text-transform: uppercase;
-    }
 }
-</style>
-<script>
-(function () {
-    var PAGE_PX = 252 * 96 / 25.4;
-
-    function isBreakCandidate(el) {
-        if (!el || el.classList.contains('preview-page-sep')) return false;
-        if (el.closest('table, thead, tbody, tr, td, th, ul, ol, li')) return false;
-        var style = window.getComputedStyle(el);
-        if (style.display === 'none' || style.position === 'fixed') return false;
-        if (el.offsetHeight < 12) return false;
-        return /^(H1|H2|H3|H4|P|DIV|HR|IMG|FIGURE|TABLE)$/.test(el.tagName);
-    }
-
-    function collectBreakCandidates() {
-        var bodyTop = document.body.getBoundingClientRect().top;
-        var walker = document.createTreeWalker(document.body, NodeFilter.SHOW_ELEMENT);
-        var candidates = [];
-
-        while (walker.nextNode()) {
-            var el = walker.currentNode;
-            if (!isBreakCandidate(el)) continue;
-            candidates.push({
-                el: el,
-                top: el.getBoundingClientRect().top - bodyTop
-            });
-        }
-
-        candidates.sort(function (a, b) { return a.top - b.top; });
-        return candidates;
-    }
-
-    function injectPageBreaks() {
-        if (document.querySelector('.preview-page-sep')) return;
-
-        var candidates = collectBreakCandidates();
-        var bodyH = document.body.scrollHeight;
-        var page = 1;
-        var usedTargets = new Set();
-
-        for (var boundary = PAGE_PX; boundary < bodyH; boundary += PAGE_PX) {
-            var target = null;
-            for (var i = 0; i < candidates.length; i++) {
-                if (candidates[i].top >= boundary && !usedTargets.has(candidates[i].el)) {
-                    target = candidates[i].el;
-                    break;
-                }
-            }
-            if (!target) continue;
-
-            usedTargets.add(target);
-            var sep = document.createElement('div');
-            sep.className = 'preview-page-sep';
-            sep.textContent = 'Page ' + (++page);
-            target.insertAdjacentElement('beforebegin', sep);
-        }
-    }
-
-    if (document.readyState === 'complete') { injectPageBreaks(); }
-    else { window.addEventListener('load', injectPageBreaks); }
-})();
-</script>"""
+</style>"""
         if "</head>" in html:
             return html.replace("</head>", screen_block + "\n</head>", 1)
         return screen_block + html

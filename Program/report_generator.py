@@ -32,7 +32,7 @@ from grain_classification import (
     permeability_class as _gc_perm_class,
     cc_label as _gc_cc_label,
 )
-from gui.plot_constants import classify_k_status
+from gui.plot_constants import DATASET_COLORS, classify_k_status
 
 
 def _get_plot_export():
@@ -1237,9 +1237,12 @@ class ReportGenerator:
         group_colors: Dict[str, str] = {}
         try:
             from gui.group_styles import group_color_map
-            group_colors = group_color_map(comparison_snapshot.k.group_names)
+            group_colors = group_color_map(
+                comparison_snapshot.k.group_names,
+                palette=DATASET_COLORS,
+            )
         except Exception:
-            fallback = ("#3a7ea0", "#6b8e23", "#b46428", "#2a9d8f", "#8b4580", "#a03a30")
+            fallback = tuple(DATASET_COLORS) or ("#3a7ea0", "#6b8e23", "#b46428")
             group_colors = {
                 group: fallback[index % len(fallback)]
                 for index, group in enumerate(comparison_snapshot.k.group_names)

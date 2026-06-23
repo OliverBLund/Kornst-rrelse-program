@@ -426,6 +426,95 @@ class TestExportManagerExports(unittest.TestCase):
         self.assertAlmostEqual(stats['mean_k'], 2.5e-4)
         self.assertEqual(stats['valid_count'], 2)
 
+    def test_aggregate_statistics_table_includes_overall_groups_and_datasets(self):
+        dataset_b = build_dataset('Sample B')
+        self.dataset.group_name = 'Layer A'
+        dataset_b.group_name = 'Layer B'
+        datasets = [
+            (self.dataset.sample_name, self.dataset, self.results),
+            (dataset_b.sample_name, dataset_b, self.results),
+        ]
+        config = self.make_config(tempfile.gettempdir(), selected_statistics=['geometric_mean', 'mean', 'valid_count'])
+
+        rows = ExportManager().build_aggregate_statistics_table(datasets, config)
+
+        headers = rows[0]
+        self.assertIn('Scope_Type', headers)
+        self.assertIn('K_Geometric_Mean_m_s', headers)
+        self.assertIn('D50_Median_mm', headers)
+        scope_pairs = {(row[0], row[1]) for row in rows[1:]}
+        self.assertIn(('Overall', 'Overall'), scope_pairs)
+        self.assertIn(('Group', 'Layer A'), scope_pairs)
+        self.assertIn(('Group', 'Layer B'), scope_pairs)
+        self.assertIn(('Dataset', 'Sample A'), scope_pairs)
+        self.assertIn(('Dataset', 'Sample B'), scope_pairs)
+
+    def test_csv_export_writes_collection_aggregate_statistics(self):
+        dataset_b = build_dataset('Sample B')
+        self.dataset.group_name = 'Layer A'
+        dataset_b.group_name = 'Layer B'
+        datasets = [
+            (self.dataset.sample_name, self.dataset, self.results),
+            (dataset_b.sample_name, dataset_b, self.results),
+        ]
+        with tempfile.TemporaryDirectory() as temp_dir:
+            config = self.make_config(temp_dir, csv_long=True, csv_wide=False, excel=False, statistics=True)
+
+            exported = ExportManager().export(datasets, config)
+
+            aggregate_path = next(path for path in exported if 'aggregate_statistics' in os.path.basename(path))
+            rows = read_csv_rows(aggregate_path)
+            scope_pairs = {(row[0], row[1]) for row in rows[1:]}
+            self.assertIn(('Overall', 'Overall'), scope_pairs)
+            self.assertIn(('Group', 'Layer A'), scope_pairs)
+            self.assertIn(('Group', 'Layer B'), scope_pairs)
+
+    def test_collection_aggregate_export_can_be_disabled(self):
+        dataset_b = build_dataset('Sample B')
+        datasets = [
+            (self.dataset.sample_name, self.dataset, self.results),
+            (dataset_b.sample_name, dataset_b, self.results),
+        ]
+        with tempfile.TemporaryDirectory() as temp_dir:
+            config = self.make_config(
+                temp_dir,
+                csv_long=True,
+                csv_wide=False,
+                excel=False,
+                statistics=True,
+                include_collection_aggregates=False,
+            )
+
+            exported = ExportManager().export(datasets, config)
+
+            self.assertFalse(any('aggregate_statistics' in os.path.basename(path) for path in exported))
+
+    def test_excel_export_writes_collection_aggregate_statistics_workbook(self):
+        try:
+            from openpyxl import load_workbook
+        except ImportError:
+            self.skipTest('openpyxl not installed')
+
+        dataset_b = build_dataset('Sample B')
+        self.dataset.group_name = 'Layer A'
+        dataset_b.group_name = 'Layer B'
+        datasets = [
+            (self.dataset.sample_name, self.dataset, self.results),
+            (dataset_b.sample_name, dataset_b, self.results),
+        ]
+        with tempfile.TemporaryDirectory() as temp_dir:
+            config = self.make_config(temp_dir, csv=False, excel=True, statistics=True)
+
+            exported = ExportManager().export(datasets, config)
+
+            aggregate_path = next(path for path in exported if 'aggregate_statistics' in os.path.basename(path))
+            workbook = load_workbook(aggregate_path, data_only=True)
+            rows = list(workbook['Aggregate_Statistics'].iter_rows(values_only=True))
+            scope_pairs = {(row[0], row[1]) for row in rows[1:]}
+            self.assertIn(('Overall', 'Overall'), scope_pairs)
+            self.assertIn(('Group', 'Layer A'), scope_pairs)
+            self.assertIn(('Dataset', 'Sample B'), scope_pairs)
+
     def test_excel_export_honors_metadata_and_stat_selection(self):
         try:
             from openpyxl import load_workbook

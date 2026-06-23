@@ -32,7 +32,7 @@ from .sidebar_controls import (
     make_axis_row, make_color_row, make_combo_row, make_dspin_row,
     make_spin_row, make_toggle_row,
 )
-from .plot_renderers import apply_legend_aware_layout, build_legend_kwargs
+from .plot_renderers import apply_legend_aware_layout
 from .plot_text_options import (
     GlobalPlotStylingPlaceholderDialog,
     PlotTextOptionsDialog,
@@ -262,7 +262,7 @@ class PlotWorkspace(QWidget):
         # ── More plot types dropdown ──
         self._more_plots = QComboBox()
         self._more_plots.setObjectName("pw-more-plots-sel")
-        self._more_plots.addItems(["More Plots…", "Combined", "Cumulative", "Histogram"])
+        self._more_plots.addItems(["More Plots…", "Combined", "Histogram"])
         self._more_plots.setMaxVisibleItems(6)
         self._more_plots.setToolTip("Additional plot types")
         self._more_plots.currentIndexChanged.connect(self._on_more_plot_changed)
@@ -871,7 +871,7 @@ class PlotWorkspace(QWidget):
     def _on_more_plot_changed(self, index: int):
         if index == 0:
             return  # "More Plots…" header
-        plot_map = {1: "combined", 2: "cumulative", 3: "histogram"}
+        plot_map = {1: "combined", 2: "histogram"}
         self.current_plot_type = plot_map.get(index, "distribution")
         # Deselect segment buttons visually
         self._seg_group.setExclusive(False)
@@ -1095,13 +1095,13 @@ class PlotWorkspace(QWidget):
     def _update_contextual_controls(self):
         """Show only the controls that make sense for the active plot type."""
         plot_type = self.current_plot_type
-        is_distribution_like = plot_type in {"distribution", "combined", "cumulative"}
+        is_distribution_like = plot_type in {"distribution", "combined"}
         is_k_plot = plot_type == "k-values"
         supports_k_units = plot_type in {"k-values", "combined"}
-        supports_zones = plot_type in {"distribution", "combined", "cumulative"}
+        supports_zones = plot_type in {"distribution", "combined"}
         supports_dlines = plot_type in {"distribution", "combined"}
         supports_fill = plot_type in {"distribution", "combined"}
-        supports_markers = plot_type in {"distribution", "combined", "cumulative"}
+        supports_markers = plot_type in {"distribution", "combined"}
 
         # Toolbar checks
         self._chk_zones.setHidden(not supports_zones)
@@ -1220,76 +1220,10 @@ class PlotWorkspace(QWidget):
             )
             self.plot_widget.flagged_methods = set(self.flagged_methods)
             self.plot_widget.plot_combined_view(self.k_results)
-        elif self.current_plot_type == "cumulative":
-            self._plot_cumulative_distribution()
         elif self.current_plot_type == "histogram":
             self._plot_histogram()
         self._sync_axis_inputs_from_ax(getattr(self.plot_widget, 'current_ax', None))
         self._refresh_drawer()
-
-    def _plot_cumulative_distribution(self):
-        if not self.plot_widget:
-            return
-        self.plot_widget.figure.clear()
-        ax = self.plot_widget.figure.add_subplot(111)
-        if self.show_zones and self.plot_widget:
-            self.plot_widget.draw_classification_zones(ax)
-
-        cumulative = np.array(self.dataset.percent_passing)
-        sizes = np.array(self.dataset.particle_sizes)
-        style = self.plot_widget.current_style if self.plot_widget else None
-
-        if style:
-            ax.plot(sizes, cumulative, color=style.curve_color,
-                    linewidth=style.curve_linewidth,
-                    label=self.dataset.sample_name,
-                    marker=self.plot_widget._get_curve_marker(style),
-                    markersize=style.curve_markersize,
-                    markeredgecolor=style.curve_markeredgecolor,
-                    markeredgewidth=style.curve_markeredgewidth)
-            ax.set_xlabel('Grain Size (mm)', fontsize=style.label_fontsize,
-                          fontfamily=style.font_family)
-            ax.set_ylabel('Cumulative Percent Passing (%)',
-                          fontsize=style.label_fontsize,
-                          fontfamily=style.font_family)
-            ax.set_title(f'Cumulative Distribution - {self.dataset.sample_name}',
-                         fontsize=style.title_fontsize,
-                         fontweight=style.title_fontweight,
-                         fontfamily=style.font_family)
-            if self.log_x_scale:
-                ax.set_xscale('log')
-            ax.set_facecolor(style.axes_facecolor)
-            ax.tick_params(labelsize=style.tick_fontsize)
-            if self.show_grid and style.grid_show:
-                ax.grid(True, which='major', alpha=style.grid_alpha,
-                        linestyle=style.grid_linestyle,
-                        color=style.grid_color, linewidth=style.grid_linewidth)
-            if self.show_legend:
-                handles, labels = ax.get_legend_handles_labels()
-                ax.legend(handles, labels, **build_legend_kwargs(style, len(labels)))
-        else:
-            ax.plot(sizes, cumulative, 'g-', linewidth=2,
-                    label=self.dataset.sample_name)
-            ax.set_xlabel('Grain Size (mm)')
-            ax.set_ylabel('Cumulative Percent Passing (%)')
-            ax.set_title(
-                f'Cumulative Distribution - {self.dataset.sample_name}')
-            if self.log_x_scale:
-                ax.set_xscale('log')
-            ax.grid(self.show_grid, which='both', alpha=0.3)
-            if self.show_legend:
-                ax.legend()
-
-        self.plot_widget.current_ax = ax
-        self.plot_widget.grain_size_ax = ax
-        self.plot_widget.k_value_ax = None
-        self.plot_widget.active_axes = [ax]
-        if style:
-            apply_legend_aware_layout(self.plot_widget.figure, style)
-        else:
-            self.plot_widget.figure.tight_layout()
-        self.plot_widget.canvas.draw()
-        self._sync_axis_inputs_from_ax(ax)
 
     def _histogram_rows(self) -> list[dict[str, float | str]]:
         scheme = getattr(self.plot_widget, "_scheme", None) if self.plot_widget else None
@@ -1415,8 +1349,6 @@ class PlotWorkspace(QWidget):
             return self._k_values_table()
         if self.current_plot_type == "combined":
             return self._combined_table()
-        if self.current_plot_type == "cumulative":
-            return self._distribution_table("Cumulative curve data")
         return self._distribution_table("Distribution curve data")
 
     def _distribution_table(self, title: str) -> tuple[str, list[str], list[tuple]]:

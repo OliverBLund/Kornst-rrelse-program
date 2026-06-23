@@ -93,7 +93,7 @@ class PlotWidget(QWidget):
 
         # Create matplotlib figure
         self.figure = Figure(figsize=(12, 8), tight_layout=True)
-        self.figure.patch.set_facecolor(C.BG)
+        self.figure.patch.set_facecolor("#ffffff")
 
         # Create canvas
         self.canvas = FigureCanvas(self.figure)
@@ -143,13 +143,13 @@ class PlotWidget(QWidget):
         ax.set_ylim(0, self._DIST_Y_MAX)
         ax.set_facecolor('#ffffff')
         ax.grid(True, which='major', linestyle='-',
-                color='#d4c4a8', linewidth=0.5, alpha=0.6)
+                color='#000000', linewidth=0.5, alpha=0.18)
 
         ax.text(
             0.5, 0.5, 'Load grain size data to view distribution curve',
             transform=ax.transAxes,
             ha='center', va='center', fontsize=11,
-            color=C.TEXT_MUTED, fontstyle='italic',
+            color='#000000', fontstyle='italic',
         )
 
         self.interactions.prime_current_ax()

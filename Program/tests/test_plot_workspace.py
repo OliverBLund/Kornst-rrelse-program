@@ -445,19 +445,6 @@ class TestPlotWorkspaceWiring(unittest.TestCase):
         self.assertEqual(rows[0], ['Method', 'K (m/d)', 'Status'])
         self.assertIn(['Beyer', '12.96', 'Warning'], rows)
 
-    def test_cumulative_plot_respects_marker_toggle(self):
-        self.workspace.current_plot_type = 'cumulative'
-        self.workspace.show_markers = False
-
-        self.workspace.refresh_plot()
-        ax = self.workspace.plot_widget.current_ax
-        self.assertEqual(ax.lines[0].get_marker(), 'None')
-
-        self.workspace.show_markers = True
-        self.workspace.refresh_plot()
-        ax = self.workspace.plot_widget.current_ax
-        self.assertNotEqual(ax.lines[0].get_marker(), 'None')
-
     def test_combined_plot_shows_k_side_legend(self):
         self.workspace.add_k_results({'Hazen': 1.0e-4, 'Beyer': 1.5e-4})
         self.workspace.current_plot_type = 'combined'
