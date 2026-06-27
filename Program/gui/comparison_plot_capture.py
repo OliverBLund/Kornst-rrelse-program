@@ -28,7 +28,7 @@ from .group_styles import (
     dataset_series_key,
     group_color_map,
 )
-from .plot_constants import DATASET_COLORS
+from .plot_constants import DATASET_COLORS, palette_colors
 from .plot_styles import PROFESSIONAL_STYLE, PlotStyle
 from unit_conversions import HydraulicConductivityUnit, get_default_plot_unit
 
@@ -77,10 +77,15 @@ def build_comparison_spec(
     log_k_y_scale: bool = False,
     display_unit: Optional[HydraulicConductivityUnit] = None,
     palette: Optional[Sequence[str]] = None,
+    palette_name: Optional[str] = None,
+    group_palette_authoritative: bool = False,
     grid_cols: int = 2,
-    k_dist_view: str = "cdf",
+    k_dist_view: str = "histogram",
     k_hist_axis: str = "lnk",
     k_hist_bins: str = "auto",
+    k_hist_y_mode: str = "frequency",
+    k_hist_show_n: bool = True,
+    k_hist_drop_empty: bool = True,
 ) -> ComparisonPlotSpec:
     """Resolve a :class:`ComparisonPlotSpec` for a fresh dataset selection.
 
@@ -123,8 +128,21 @@ def build_comparison_spec(
         if group_name != UNGROUPED_LABEL and group_name not in known_group_order:
             known_group_order.append(group_name)
 
+    # Sample the colormap to the number of GROUPS so the groups spread across the
+    # full palette. Sampling to the (larger) dataset count would cram every group
+    # into the first slice of the map — e.g. 7 groups among 20 datasets all landing
+    # in viridis's dark-purple/blue end. Categorical/legacy keep the flat list.
+    if palette_name and known_group_order:
+        group_palette = palette_colors(palette_name, len(known_group_order))
+    else:
+        group_palette = palette_list
+
+    # A non-Categorical report/export palette is authoritative: it re-colours
+    # every group from the palette, bypassing persisted Comparison-tab group
+    # colour overrides. Categorical (the default) keeps those overrides.
     resolved_group_colors = group_color_map(
-        known_group_order, palette=palette_list, include_ungrouped=False
+        known_group_order, palette=group_palette, include_ungrouped=False,
+        ignore_overrides=group_palette_authoritative,
     )
 
     # ── Per-dataset line styles (group members cycle the style table) ──
@@ -190,4 +208,7 @@ def build_comparison_spec(
         k_dist_view=k_dist_view,
         k_hist_axis=k_hist_axis,
         k_hist_bins=k_hist_bins,
+        k_hist_y_mode=k_hist_y_mode,
+        k_hist_show_n=k_hist_show_n,
+        k_hist_drop_empty=k_hist_drop_empty,
     )

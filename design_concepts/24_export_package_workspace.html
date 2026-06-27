@@ -1,0 +1,1382 @@
+﻿<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Export Package Workspace</title>
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.2/css/all.min.css">
+  <style>
+    :root {
+      --bg: #f5f5f0;
+      --raised: #eee8dc;
+      --low: #e8e0d0;
+      --panel: #faf9f5;
+      --paper: #ffffff;
+      --border: #d4c4a8;
+      --border-dark: #c0ae90;
+      --text: #2f2f2f;
+      --text-mid: #5d4e37;
+      --muted: #8d816f;
+      --olive: #6b8e23;
+      --olive-dark: #4f6a1a;
+      --olive-soft: #eef3df;
+      --earth: #8b7355;
+      --blue: #315b80;
+      --warn: #a66c18;
+      --danger: #a4493f;
+      --mono: "Cascadia Mono", "JetBrains Mono", Consolas, monospace;
+      --ui: "Segoe UI", Arial, sans-serif;
+      --radius: 5px;
+    }
+
+    * { box-sizing: border-box; }
+
+    html, body {
+      width: 100%;
+      height: 100%;
+      margin: 0;
+      overflow: hidden;
+    }
+
+    body {
+      background: var(--bg);
+      color: var(--text);
+      font-family: var(--ui);
+      font-size: 13px;
+      letter-spacing: 0;
+    }
+
+    button, input, select { font: inherit; }
+    button { cursor: pointer; }
+
+    .app {
+      height: 100vh;
+      min-height: 720px;
+      display: grid;
+      grid-template-rows: 42px minmax(0, 1fr) 24px;
+      background: var(--bg);
+    }
+
+    .topbar {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      padding: 0 12px;
+      border-bottom: 1px solid var(--border-dark);
+      background: var(--raised);
+    }
+
+    .topbar-title {
+      display: flex;
+      align-items: center;
+      gap: 9px;
+      min-width: 0;
+      font-weight: 700;
+    }
+
+    .topbar-title i { color: var(--olive-dark); }
+    .topbar-title small {
+      color: var(--muted);
+      font-weight: 400;
+    }
+
+    .topbar-spacer { flex: 1; }
+
+    .status-chip {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      min-height: 24px;
+      padding: 0 8px;
+      border: 1px solid rgba(107, 142, 35, .34);
+      border-radius: 12px;
+      color: var(--olive-dark);
+      background: var(--olive-soft);
+      font-size: 11px;
+      font-weight: 600;
+      white-space: nowrap;
+    }
+
+    .workspace {
+      min-height: 0;
+      display: grid;
+      grid-template-columns: minmax(350px, 390px) minmax(620px, 1fr);
+    }
+
+    .inspector {
+      min-width: 0;
+      min-height: 0;
+      display: grid;
+      grid-template-rows: auto 38px minmax(0, 1fr) auto;
+      border-right: 1px solid var(--border-dark);
+      background: var(--panel);
+    }
+
+    .scope {
+      padding: 11px 12px 10px;
+      border-bottom: 1px solid var(--border);
+      background: var(--raised);
+    }
+
+    .section-label {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 8px;
+      margin-bottom: 7px;
+      color: var(--muted);
+      font-size: 10px;
+      font-weight: 700;
+      text-transform: uppercase;
+    }
+
+    .scope-line {
+      display: grid;
+      grid-template-columns: minmax(0, 1fr) auto;
+      align-items: center;
+      gap: 8px;
+    }
+
+    .segmented {
+      min-width: 0;
+      display: grid;
+      grid-template-columns: repeat(3, 1fr);
+      padding: 2px;
+      border: 1px solid var(--border-dark);
+      border-radius: var(--radius);
+      background: rgba(255, 255, 255, .42);
+    }
+
+    .segment {
+      height: 26px;
+      border: 0;
+      border-radius: 3px;
+      color: var(--muted);
+      background: transparent;
+      font-size: 11px;
+    }
+
+    .segment.active {
+      color: var(--text);
+      background: white;
+      box-shadow: 0 1px 4px rgba(60, 40, 20, .12);
+      font-weight: 600;
+    }
+
+    .icon-button,
+    .ghost-button {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      gap: 6px;
+      height: 28px;
+      border: 1px solid var(--border-dark);
+      border-radius: var(--radius);
+      color: var(--text-mid);
+      background: rgba(255, 255, 255, .55);
+    }
+
+    .icon-button { width: 30px; }
+    .ghost-button { padding: 0 9px; }
+
+    .icon-button:hover,
+    .ghost-button:hover {
+      border-color: var(--earth);
+      color: var(--text);
+      background: white;
+    }
+
+    .scope-meta {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 8px;
+      margin-top: 7px;
+      color: var(--muted);
+      font-size: 11px;
+    }
+
+    .scope-meta strong {
+      color: var(--text-mid);
+      font-family: var(--mono);
+      font-size: 10px;
+    }
+
+    .inspector-tabs {
+      display: grid;
+      grid-template-columns: repeat(3, 1fr);
+      border-bottom: 1px solid var(--border);
+      background: var(--low);
+    }
+
+    .inspector-tab {
+      position: relative;
+      border: 0;
+      color: var(--muted);
+      background: transparent;
+      font-size: 11px;
+      font-weight: 600;
+    }
+
+    .inspector-tab i { margin-right: 6px; }
+
+    .inspector-tab.active {
+      color: var(--text);
+      background: rgba(255, 255, 255, .44);
+    }
+
+    .inspector-tab.active::after {
+      content: "";
+      position: absolute;
+      left: 12px;
+      right: 12px;
+      bottom: 0;
+      height: 2px;
+      background: var(--olive);
+    }
+
+    .tab-body {
+      min-height: 0;
+      overflow: auto;
+      scrollbar-width: thin;
+      scrollbar-color: var(--border-dark) transparent;
+    }
+
+    .tab-panel { display: none; }
+    .tab-panel.active { display: block; }
+
+    .control-section {
+      padding: 11px 12px;
+      border-bottom: 1px solid var(--border);
+    }
+
+    .control-section:last-child { border-bottom: 0; }
+
+    .control-title {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 8px;
+      margin-bottom: 8px;
+      color: var(--text-mid);
+      font-size: 11px;
+      font-weight: 700;
+      text-transform: uppercase;
+    }
+
+    .control-title small {
+      color: var(--muted);
+      font-family: var(--mono);
+      font-size: 9px;
+      font-weight: 400;
+      text-transform: none;
+    }
+
+    .preset-list {
+      display: grid;
+      gap: 5px;
+    }
+
+    .preset {
+      display: grid;
+      grid-template-columns: 18px minmax(0, 1fr) auto;
+      align-items: center;
+      gap: 8px;
+      min-height: 42px;
+      padding: 6px 8px;
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      background: rgba(255, 255, 255, .43);
+    }
+
+    .preset.active {
+      border-color: rgba(107, 142, 35, .55);
+      background: var(--olive-soft);
+    }
+
+    .radio {
+      width: 12px;
+      height: 12px;
+      border: 1px solid var(--border-dark);
+      border-radius: 50%;
+      background: white;
+    }
+
+    .preset.active .radio {
+      border: 3px solid white;
+      background: var(--olive);
+      box-shadow: 0 0 0 1px var(--olive);
+    }
+
+    .preset strong {
+      display: block;
+      font-size: 11px;
+    }
+
+    .preset span {
+      display: block;
+      margin-top: 2px;
+      color: var(--muted);
+      font-size: 10px;
+    }
+
+    .preset code {
+      color: var(--olive-dark);
+      font-family: var(--mono);
+      font-size: 9px;
+    }
+
+    .format-list,
+    .table-list,
+    .plot-list {
+      display: grid;
+      gap: 1px;
+    }
+
+    .toggle-row,
+    .table-row,
+    .plot-row {
+      display: grid;
+      grid-template-columns: 18px minmax(0, 1fr) auto;
+      align-items: center;
+      gap: 8px;
+      min-height: 34px;
+      padding: 4px 5px;
+      border-radius: 4px;
+    }
+
+    .table-row,
+    .plot-row { cursor: pointer; }
+
+    .table-row:hover,
+    .plot-row:hover,
+    .table-row.selected {
+      background: rgba(255, 255, 255, .72);
+    }
+
+    .table-row.selected {
+      box-shadow: inset 3px 0 0 var(--olive);
+    }
+
+    .checkbox {
+      width: 13px;
+      height: 13px;
+      display: grid;
+      place-items: center;
+      border: 1px solid var(--border-dark);
+      border-radius: 3px;
+      color: white;
+      background: white;
+      font-size: 8px;
+    }
+
+    .checkbox.on {
+      border-color: var(--olive-dark);
+      background: var(--olive);
+    }
+
+    .row-copy {
+      min-width: 0;
+    }
+
+    .row-copy strong {
+      display: block;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+      color: var(--text-mid);
+      font-size: 11px;
+      font-weight: 600;
+    }
+
+    .row-copy span {
+      display: block;
+      margin-top: 1px;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+      color: var(--muted);
+      font-size: 9px;
+    }
+
+    .row-meta {
+      color: var(--muted);
+      font-family: var(--mono);
+      font-size: 9px;
+      white-space: nowrap;
+    }
+
+    .inline-select {
+      height: 26px;
+      min-width: 120px;
+      padding: 0 7px;
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      color: var(--text-mid);
+      background: rgba(255, 255, 255, .62);
+      font-size: 11px;
+    }
+
+    .form-row {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 10px;
+      min-height: 32px;
+    }
+
+    .form-row label {
+      color: var(--text-mid);
+      font-size: 11px;
+    }
+
+    .palette-swatches {
+      display: flex;
+      align-items: center;
+      gap: 3px;
+    }
+
+    .swatch {
+      width: 14px;
+      height: 14px;
+      border: 1px solid rgba(0, 0, 0, .16);
+      border-radius: 3px;
+    }
+
+    .file-tree {
+      padding: 7px 0 10px;
+      font-family: var(--mono);
+      font-size: 10px;
+    }
+
+    .tree-group { margin-bottom: 7px; }
+
+    .tree-parent,
+    .tree-item {
+      display: grid;
+      grid-template-columns: 16px minmax(0, 1fr) auto;
+      align-items: center;
+      gap: 5px;
+      min-height: 26px;
+      padding: 2px 10px;
+    }
+
+    .tree-parent {
+      color: var(--text-mid);
+      font-weight: 700;
+    }
+
+    .tree-item {
+      padding-left: 29px;
+      color: var(--muted);
+    }
+
+    .tree-item span:nth-child(2) {
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+
+    .tree-count {
+      color: var(--muted);
+      font-size: 9px;
+      font-weight: 400;
+    }
+
+    .export-footer {
+      display: grid;
+      gap: 8px;
+      padding: 10px 12px 11px;
+      border-top: 1px solid var(--border-dark);
+      background: var(--low);
+    }
+
+    .destination {
+      display: grid;
+      grid-template-columns: minmax(0, 1fr) auto;
+      gap: 6px;
+    }
+
+    .path {
+      min-width: 0;
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      height: 28px;
+      padding: 0 8px;
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      color: var(--muted);
+      background: rgba(255, 255, 255, .58);
+      font-family: var(--mono);
+      font-size: 9px;
+    }
+
+    .path span {
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+
+    .export-summary {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 8px;
+      color: var(--muted);
+      font-size: 10px;
+    }
+
+    .export-summary strong {
+      color: var(--text-mid);
+      font-family: var(--mono);
+    }
+
+    .primary-button {
+      height: 34px;
+      border: 1px solid var(--olive-dark);
+      border-radius: var(--radius);
+      color: white;
+      background: var(--olive);
+      font-weight: 700;
+    }
+
+    .primary-button:hover { background: #7b9d31; }
+
+    .preview {
+      min-width: 0;
+      min-height: 0;
+      display: grid;
+      grid-template-rows: 42px minmax(0, 1fr);
+      background: var(--bg);
+    }
+
+    .preview-toolbar {
+      display: grid;
+      grid-template-columns: minmax(0, 1fr) auto;
+      align-items: center;
+      gap: 10px;
+      padding: 0 12px;
+      border-bottom: 1px solid var(--border);
+      background: rgba(255, 255, 255, .44);
+    }
+
+    .preview-heading {
+      min-width: 0;
+      display: flex;
+      align-items: baseline;
+      gap: 9px;
+    }
+
+    .preview-heading strong {
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+      font-size: 13px;
+    }
+
+    .preview-heading span {
+      color: var(--muted);
+      font-family: var(--mono);
+      font-size: 9px;
+      white-space: nowrap;
+    }
+
+    .preview-actions {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+    }
+
+    .preview-content {
+      min-height: 0;
+      overflow: hidden;
+      position: relative;
+    }
+
+    .preview-view {
+      display: none;
+      width: 100%;
+      height: 100%;
+    }
+
+    .preview-view.active { display: grid; }
+
+    .data-view {
+      grid-template-rows: 43px minmax(0, 1fr) 30px;
+      padding: 12px;
+    }
+
+    .dataset-tabs {
+      display: flex;
+      align-items: end;
+      gap: 2px;
+      overflow-x: auto;
+      border-bottom: 1px solid var(--border-dark);
+    }
+
+    .dataset-tab {
+      height: 31px;
+      padding: 0 10px;
+      border: 1px solid transparent;
+      border-bottom: 0;
+      border-radius: 4px 4px 0 0;
+      color: var(--muted);
+      background: transparent;
+      font-size: 10px;
+      white-space: nowrap;
+    }
+
+    .dataset-tab.active {
+      border-color: var(--border-dark);
+      color: var(--text);
+      background: var(--paper);
+      font-weight: 600;
+    }
+
+    .table-frame {
+      min-height: 0;
+      overflow: auto;
+      border: 1px solid var(--border-dark);
+      border-top: 0;
+      background: var(--paper);
+    }
+
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      table-layout: auto;
+      font-size: 11px;
+    }
+
+    th {
+      position: sticky;
+      top: 0;
+      z-index: 2;
+      height: 31px;
+      padding: 0 9px;
+      border-bottom: 1px solid var(--border-dark);
+      color: var(--text-mid);
+      background: #f1ece2;
+      font-size: 10px;
+      font-weight: 700;
+      text-align: left;
+      white-space: nowrap;
+    }
+
+    td {
+      height: 29px;
+      padding: 0 9px;
+      border-bottom: 1px solid #eee9df;
+      color: var(--text-mid);
+      white-space: nowrap;
+    }
+
+    tbody tr:hover { background: #faf8f2; }
+
+    td.num {
+      color: var(--blue);
+      font-family: var(--mono);
+      font-size: 10px;
+      text-align: right;
+    }
+
+    td.code {
+      font-family: var(--mono);
+      font-size: 10px;
+    }
+
+    .ok { color: var(--olive-dark); }
+    .warning { color: var(--warn); }
+
+    .schema-bar {
+      display: flex;
+      align-items: center;
+      gap: 14px;
+      min-width: 0;
+      padding: 0 9px;
+      border: 1px solid var(--border-dark);
+      border-top: 0;
+      color: var(--muted);
+      background: var(--raised);
+      font-family: var(--mono);
+      font-size: 9px;
+    }
+
+    .schema-bar span {
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+
+    .schema-bar span:last-child { margin-left: auto; }
+
+    .plot-view {
+      grid-template-rows: auto minmax(0, 1fr);
+      padding: 12px;
+    }
+
+    .plot-title {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 10px;
+      min-height: 36px;
+      color: var(--text-mid);
+      font-size: 12px;
+      font-weight: 700;
+    }
+
+    .plot-title span {
+      color: var(--muted);
+      font-family: var(--mono);
+      font-size: 9px;
+      font-weight: 400;
+    }
+
+    .plot-paper {
+      min-height: 0;
+      display: grid;
+      place-items: center;
+      position: relative;
+      border: 1px solid var(--border-dark);
+      background: white;
+    }
+
+    .plot-area {
+      width: min(82%, 860px);
+      height: min(72%, 520px);
+      position: relative;
+      border-left: 1px solid #8b8172;
+      border-bottom: 1px solid #8b8172;
+      background:
+        linear-gradient(to right, rgba(190,176,151,.24) 1px, transparent 1px) 0 0 / 20% 100%,
+        linear-gradient(to bottom, rgba(190,176,151,.24) 1px, transparent 1px) 0 0 / 100% 20%;
+    }
+
+    .curve {
+      position: absolute;
+      inset: 8% 5% 8% 7%;
+      clip-path: polygon(0 96%, 12% 95%, 24% 89%, 34% 77%, 42% 55%, 49% 25%, 56% 8%, 68% 3%, 82% 1%, 100% 0, 100% 3%, 82% 4%, 68% 6%, 57% 11%, 51% 28%, 44% 59%, 36% 81%, 25% 93%, 12% 98%, 0 100%);
+      background: #315b80;
+    }
+
+    .plot-legend {
+      position: absolute;
+      top: 12%;
+      left: 17%;
+      display: flex;
+      align-items: center;
+      gap: 7px;
+      padding: 6px 8px;
+      border: 1px solid var(--border);
+      background: rgba(255,255,255,.94);
+      font-size: 10px;
+    }
+
+    .legend-line {
+      width: 24px;
+      height: 2px;
+      background: #315b80;
+    }
+
+    .axis-x,
+    .axis-y {
+      position: absolute;
+      color: var(--muted);
+      font-size: 10px;
+    }
+
+    .axis-x { bottom: 15px; left: 50%; transform: translateX(-50%); }
+    .axis-y { left: 10px; top: 50%; transform: translateY(-50%) rotate(-90deg); }
+
+    .files-view {
+      grid-template-columns: minmax(0, 1.1fr) minmax(300px, .7fr);
+      gap: 12px;
+      padding: 12px;
+    }
+
+    .package-tree,
+    .manifest {
+      min-height: 0;
+      overflow: auto;
+      border: 1px solid var(--border-dark);
+      background: white;
+    }
+
+    .view-head {
+      position: sticky;
+      top: 0;
+      z-index: 2;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 8px;
+      height: 34px;
+      padding: 0 10px;
+      border-bottom: 1px solid var(--border);
+      color: var(--text-mid);
+      background: #f1ece2;
+      font-size: 10px;
+      font-weight: 700;
+      text-transform: uppercase;
+    }
+
+    .manifest-body { padding: 9px 11px; }
+
+    .manifest-row {
+      display: grid;
+      grid-template-columns: 120px minmax(0, 1fr);
+      gap: 8px;
+      min-height: 27px;
+      align-items: center;
+      border-bottom: 1px solid #eee9df;
+      font-size: 10px;
+    }
+
+    .manifest-row span:first-child { color: var(--muted); }
+    .manifest-row span:last-child {
+      color: var(--text-mid);
+      font-family: var(--mono);
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+
+    .statusbar {
+      display: flex;
+      align-items: center;
+      gap: 14px;
+      padding: 0 10px;
+      color: #efe7d7;
+      background: var(--earth);
+      font-size: 10px;
+    }
+
+    .statusbar span:last-child { margin-left: auto; }
+
+    @media (max-width: 1100px) {
+      .workspace { grid-template-columns: 350px minmax(560px, 1fr); }
+      .topbar-title small { display: none; }
+    }
+  </style>
+</head>
+<body>
+  <div class="app">
+    <header class="topbar">
+      <div class="topbar-title">
+        <i class="fa-solid fa-box-archive"></i>
+        <span>Export workspace</span>
+        <small>analysis-ready data and publication plots</small>
+      </div>
+      <div class="topbar-spacer"></div>
+      <span class="status-chip"><i class="fa-solid fa-circle-check"></i>Package valid</span>
+      <button class="ghost-button"><i class="fa-solid fa-rotate-left"></i>Reset</button>
+    </header>
+
+    <main class="workspace">
+      <aside class="inspector">
+        <section class="scope">
+          <div class="section-label">
+            <span>Dataset scope</span>
+            <span>8 of 18</span>
+          </div>
+          <div class="scope-line">
+            <div class="segmented">
+              <button class="segment">All</button>
+              <button class="segment">Current</button>
+              <button class="segment active">Selected</button>
+            </div>
+            <button class="icon-button" title="Manage selected datasets">
+              <i class="fa-solid fa-list-check"></i>
+            </button>
+          </div>
+          <div class="scope-meta">
+            <span>Comparison selection Â· 3 groups</span>
+            <strong>8 datasets</strong>
+          </div>
+        </section>
+
+        <nav class="inspector-tabs" aria-label="Export settings">
+          <button class="inspector-tab active" data-tab="data"><i class="fa-solid fa-table"></i>Data</button>
+          <button class="inspector-tab" data-tab="plots"><i class="fa-solid fa-chart-line"></i>Plots</button>
+          <button class="inspector-tab" data-tab="files"><i class="fa-solid fa-folder-tree"></i>Files</button>
+        </nav>
+
+        <div class="tab-body">
+          <section class="tab-panel active" data-panel="data">
+            <div class="control-section">
+              <div class="control-title"><span>Package</span><small>schema 1.0</small></div>
+              <div class="preset-list">
+                <div class="preset active">
+                  <span class="radio"></span>
+                  <div><strong>Analysis package</strong><span>Normalized tables and full precision</span></div>
+                  <code>recommended</code>
+                </div>
+                <div class="preset">
+                  <span class="radio"></span>
+                  <div><strong>Excel workbook</strong><span>Single workbook for review and analysis</span></div>
+                  <code>.xlsx</code>
+                </div>
+                <div class="preset">
+                  <span class="radio"></span>
+                  <div><strong>Custom</strong><span>Choose adapters and tables manually</span></div>
+                  <code>advanced</code>
+                </div>
+              </div>
+            </div>
+
+            <div class="control-section">
+              <div class="control-title"><span>Output adapters</span><small>9 files</small></div>
+              <div class="format-list">
+                <div class="toggle-row">
+                  <span class="checkbox on"><i class="fa-solid fa-check"></i></span>
+                  <div class="row-copy"><strong>Excel workbook</strong><span>One workbook Â· typed data sheets</span></div>
+                  <span class="row-meta">1 file</span>
+                </div>
+                <div class="toggle-row">
+                  <span class="checkbox on"><i class="fa-solid fa-check"></i></span>
+                  <div class="row-copy"><strong>CSV tables</strong><span>One normalized file per table</span></div>
+                  <span class="row-meta">7 files</span>
+                </div>
+                <div class="toggle-row">
+                  <span class="checkbox on"><i class="fa-solid fa-check"></i></span>
+                  <div class="row-copy"><strong>JSON package</strong><span>Nested data with units and provenance</span></div>
+                  <span class="row-meta">1 file</span>
+                </div>
+              </div>
+            </div>
+
+            <div class="control-section">
+              <div class="control-title"><span>Tables</span><small>7 selected</small></div>
+              <div class="table-list">
+                <div class="table-row selected" data-table="samples">
+                  <span class="checkbox on"><i class="fa-solid fa-check"></i></span>
+                  <div class="row-copy"><strong>Samples</strong><span>Identity, groups, temperature, porosity</span></div>
+                  <span class="row-meta">8 rows</span>
+                </div>
+                <div class="table-row" data-table="grain">
+                  <span class="checkbox on"><i class="fa-solid fa-check"></i></span>
+                  <div class="row-copy"><strong>Grain distribution</strong><span>Measured particle size and percent passing</span></div>
+                  <span class="row-meta">364 rows</span>
+                </div>
+                <div class="table-row" data-table="percentiles">
+                  <span class="checkbox on"><i class="fa-solid fa-check"></i></span>
+                  <div class="row-copy"><strong>Percentiles</strong><span>D-values in long, analysis-ready form</span></div>
+                  <span class="row-meta">80 rows</span>
+                </div>
+                <div class="table-row" data-table="kresults">
+                  <span class="checkbox on"><i class="fa-solid fa-check"></i></span>
+                  <div class="row-copy"><strong>K results</strong><span>One method result per row</span></div>
+                  <span class="row-meta">121 rows</span>
+                </div>
+                <div class="table-row">
+                  <span class="checkbox on"><i class="fa-solid fa-check"></i></span>
+                  <div class="row-copy"><strong>Sample statistics</strong><span>Selected K and grain summaries</span></div>
+                  <span class="row-meta">8 rows</span>
+                </div>
+                <div class="table-row">
+                  <span class="checkbox on"><i class="fa-solid fa-check"></i></span>
+                  <div class="row-copy"><strong>Aggregate statistics</strong><span>Overall, group and dataset scopes</span></div>
+                  <span class="row-meta">12 rows</span>
+                </div>
+                <div class="table-row">
+                  <span class="checkbox on"><i class="fa-solid fa-check"></i></span>
+                  <div class="row-copy"><strong>Manifest</strong><span>Schema, units, methods and provenance</span></div>
+                  <span class="row-meta">1 record</span>
+                </div>
+              </div>
+            </div>
+
+            <div class="control-section">
+              <div class="control-title"><span>Numeric policy</span></div>
+              <div class="form-row"><label>Canonical K unit</label><select class="inline-select"><option>m/s</option></select></div>
+              <div class="form-row"><label>Derived columns</label><select class="inline-select"><option>cm/s and m/d</option><option>None</option></select></div>
+              <div class="form-row"><label>Precision</label><select class="inline-select"><option>Full numeric precision</option></select></div>
+            </div>
+          </section>
+
+          <section class="tab-panel" data-panel="plots">
+            <div class="control-section">
+              <div class="control-title"><span>Plot files</span><small>8 selected</small></div>
+              <div class="format-list">
+                <div class="toggle-row">
+                  <span class="checkbox on"><i class="fa-solid fa-check"></i></span>
+                  <div class="row-copy"><strong>PNG</strong><span>300 dpi Â· white background</span></div>
+                  <span class="row-meta">8 files</span>
+                </div>
+                <div class="toggle-row">
+                  <span class="checkbox on"><i class="fa-solid fa-check"></i></span>
+                  <div class="row-copy"><strong>SVG</strong><span>Editable vector graphics</span></div>
+                  <span class="row-meta">8 files</span>
+                </div>
+                <div class="toggle-row">
+                  <span class="checkbox"><i class="fa-solid fa-check"></i></span>
+                  <div class="row-copy"><strong>PDF</strong><span>Publication vector output</span></div>
+                  <span class="row-meta">off</span>
+                </div>
+              </div>
+            </div>
+
+            <div class="control-section">
+              <div class="control-title"><span>Per sample</span><small>2 types</small></div>
+              <div class="plot-list">
+                <div class="plot-row selected">
+                  <span class="checkbox on"><i class="fa-solid fa-check"></i></span>
+                  <div class="row-copy"><strong>Grain size curve</strong><span>One figure per selected dataset</span></div>
+                  <span class="row-meta">8 Ã— 2</span>
+                </div>
+                <div class="plot-row">
+                  <span class="checkbox on"><i class="fa-solid fa-check"></i></span>
+                  <div class="row-copy"><strong>K-value bars</strong><span>Method values and status markers</span></div>
+                  <span class="row-meta">8 Ã— 2</span>
+                </div>
+              </div>
+            </div>
+
+            <div class="control-section">
+              <div class="control-title"><span>Across samples</span><small>3 types</small></div>
+              <div class="plot-list">
+                <div class="plot-row">
+                  <span class="checkbox on"><i class="fa-solid fa-check"></i></span>
+                  <div class="row-copy"><strong>Distribution overlay</strong><span>Grouped comparison</span></div>
+                  <span class="row-meta">2 files</span>
+                </div>
+                <div class="plot-row">
+                  <span class="checkbox on"><i class="fa-solid fa-check"></i></span>
+                  <div class="row-copy"><strong>K-value comparison</strong><span>Grouped method comparison</span></div>
+                  <span class="row-meta">2 files</span>
+                </div>
+                <div class="plot-row">
+                  <span class="checkbox on"><i class="fa-solid fa-check"></i></span>
+                  <div class="row-copy"><strong>K distribution</strong><span>Lognormal histogram</span></div>
+                  <span class="row-meta">2 files</span>
+                </div>
+              </div>
+            </div>
+
+            <div class="control-section">
+              <div class="control-title"><span>Global plot style</span></div>
+              <div class="form-row"><label>Preset</label><select class="inline-select"><option>Professional</option><option>Presentation</option></select></div>
+              <div class="form-row">
+                <label>Palette</label>
+                <div class="palette-swatches" title="Viridis">
+                  <span class="swatch" style="background:#440154"></span>
+                  <span class="swatch" style="background:#31688e"></span>
+                  <span class="swatch" style="background:#35b779"></span>
+                  <span class="swatch" style="background:#fde725"></span>
+                </div>
+              </div>
+              <div class="form-row"><label>Overrides</label><button class="ghost-button"><i class="fa-solid fa-sliders"></i>Customize</button></div>
+            </div>
+          </section>
+
+          <section class="tab-panel" data-panel="files">
+            <div class="control-section">
+              <div class="control-title"><span>Package tree</span><small>26 files</small></div>
+              <div class="file-tree">
+                <div class="tree-group">
+                  <div class="tree-parent"><i class="fa-solid fa-chevron-down"></i><span>analysis_package</span><span class="tree-count">26</span></div>
+                  <div class="tree-item"><i class="fa-solid fa-file-excel"></i><span>grain_analysis.xlsx</span><span>1</span></div>
+                  <div class="tree-item"><i class="fa-solid fa-brackets-curly"></i><span>grain_analysis.json</span><span>1</span></div>
+                </div>
+                <div class="tree-group">
+                  <div class="tree-parent"><i class="fa-solid fa-chevron-down"></i><span>tables</span><span class="tree-count">7</span></div>
+                  <div class="tree-item"><i class="fa-solid fa-file-csv"></i><span>samples.csv</span><span>8</span></div>
+                  <div class="tree-item"><i class="fa-solid fa-file-csv"></i><span>grain_distribution.csv</span><span>364</span></div>
+                  <div class="tree-item"><i class="fa-solid fa-file-csv"></i><span>percentiles.csv</span><span>80</span></div>
+                  <div class="tree-item"><i class="fa-solid fa-file-csv"></i><span>k_results.csv</span><span>121</span></div>
+                  <div class="tree-item"><i class="fa-solid fa-ellipsis"></i><span>3 more tables</span><span></span></div>
+                </div>
+                <div class="tree-group">
+                  <div class="tree-parent"><i class="fa-solid fa-chevron-down"></i><span>plots</span><span class="tree-count">16</span></div>
+                  <div class="tree-item"><i class="fa-solid fa-folder"></i><span>sample_plots</span><span>12</span></div>
+                  <div class="tree-item"><i class="fa-solid fa-folder"></i><span>comparison_plots</span><span>4</span></div>
+                </div>
+                <div class="tree-group">
+                  <div class="tree-parent"><i class="fa-solid fa-file-code"></i><span>manifest.json</span><span class="tree-count">1</span></div>
+                </div>
+              </div>
+            </div>
+
+            <div class="control-section">
+              <div class="control-title"><span>Naming</span></div>
+              <div class="form-row"><label>Package name</label><select class="inline-select"><option>grain_analysis_20260625</option></select></div>
+              <div class="form-row"><label>Existing files</label><select class="inline-select"><option>Confirm replacement</option></select></div>
+            </div>
+          </section>
+        </div>
+
+        <footer class="export-footer">
+          <div class="destination">
+            <div class="path"><i class="fa-solid fa-folder"></i><span>C:\Projects\Grain Analysis\Exports</span></div>
+            <button class="icon-button" title="Choose output folder"><i class="fa-solid fa-ellipsis"></i></button>
+          </div>
+          <div class="export-summary">
+            <span>8 datasets Â· 7 tables Â· 16 plots</span>
+            <strong>26 files</strong>
+          </div>
+          <button class="primary-button"><i class="fa-solid fa-box-archive"></i>&nbsp; Export Analysis Package</button>
+        </footer>
+      </aside>
+
+      <section class="preview">
+        <header class="preview-toolbar">
+          <div class="preview-heading">
+            <strong id="preview-title">Samples</strong>
+            <span id="preview-meta">8 rows Â· 8 columns Â· typed numeric data</span>
+          </div>
+          <div class="preview-actions">
+            <button class="ghost-button"><i class="fa-solid fa-magnifying-glass-minus"></i></button>
+            <button class="ghost-button"><i class="fa-solid fa-magnifying-glass-plus"></i></button>
+            <button class="ghost-button"><i class="fa-solid fa-arrow-up-right-from-square"></i>Open dataset</button>
+          </div>
+        </header>
+
+        <div class="preview-content">
+          <section class="preview-view data-view active" data-view="data">
+            <nav class="dataset-tabs">
+              <button class="dataset-tab active" data-table="samples">Samples</button>
+              <button class="dataset-tab" data-table="grain">Grain Distribution</button>
+              <button class="dataset-tab" data-table="percentiles">Percentiles</button>
+              <button class="dataset-tab" data-table="kresults">K Results</button>
+              <button class="dataset-tab">Sample Statistics</button>
+              <button class="dataset-tab">Aggregate Statistics</button>
+            </nav>
+            <div class="table-frame" id="table-frame"></div>
+            <div class="schema-bar">
+              <span id="schema-key">Primary key: sample_id</span>
+              <span id="schema-units">Units: temperature_c, porosity_fraction</span>
+              <span>schema_version: 1.0</span>
+            </div>
+          </section>
+
+          <section class="preview-view plot-view" data-view="plots">
+            <div class="plot-title">
+              <strong>Borehole_DK-07 Â· Grain size curve</strong>
+              <span>Professional Â· Viridis Â· PNG/SVG</span>
+            </div>
+            <div class="plot-paper">
+              <div class="plot-area">
+                <div class="curve"></div>
+                <div class="plot-legend"><span class="legend-line"></span><span>Borehole_DK-07</span></div>
+              </div>
+              <div class="axis-y">Percent passing (%)</div>
+              <div class="axis-x">Particle size (mm)</div>
+            </div>
+          </section>
+
+          <section class="preview-view files-view" data-view="files">
+            <div class="package-tree">
+              <div class="view-head"><span>Output package</span><span>26 files</span></div>
+              <div class="file-tree">
+                <div class="tree-group">
+                  <div class="tree-parent"><i class="fa-solid fa-folder-open"></i><span>grain_analysis_20260625</span><span class="tree-count">root</span></div>
+                  <div class="tree-item"><i class="fa-solid fa-file-excel"></i><span>grain_analysis.xlsx</span><span>284 KB</span></div>
+                  <div class="tree-item"><i class="fa-solid fa-brackets-curly"></i><span>grain_analysis.json</span><span>166 KB</span></div>
+                  <div class="tree-item"><i class="fa-solid fa-file-code"></i><span>manifest.json</span><span>3 KB</span></div>
+                </div>
+                <div class="tree-group">
+                  <div class="tree-parent"><i class="fa-solid fa-folder-open"></i><span>tables</span><span class="tree-count">7 CSV</span></div>
+                  <div class="tree-item"><i class="fa-solid fa-file-csv"></i><span>samples.csv</span><span>8 rows</span></div>
+                  <div class="tree-item"><i class="fa-solid fa-file-csv"></i><span>grain_distribution.csv</span><span>364 rows</span></div>
+                  <div class="tree-item"><i class="fa-solid fa-file-csv"></i><span>percentiles.csv</span><span>80 rows</span></div>
+                  <div class="tree-item"><i class="fa-solid fa-file-csv"></i><span>k_results.csv</span><span>121 rows</span></div>
+                  <div class="tree-item"><i class="fa-solid fa-file-csv"></i><span>sample_statistics.csv</span><span>8 rows</span></div>
+                  <div class="tree-item"><i class="fa-solid fa-file-csv"></i><span>aggregate_statistics.csv</span><span>12 rows</span></div>
+                  <div class="tree-item"><i class="fa-solid fa-file-csv"></i><span>manifest.csv</span><span>24 rows</span></div>
+                </div>
+                <div class="tree-group">
+                  <div class="tree-parent"><i class="fa-solid fa-folder-open"></i><span>plots</span><span class="tree-count">16</span></div>
+                  <div class="tree-item"><i class="fa-solid fa-folder"></i><span>sample_plots</span><span>12 files</span></div>
+                  <div class="tree-item"><i class="fa-solid fa-folder"></i><span>comparison_plots</span><span>4 files</span></div>
+                </div>
+              </div>
+            </div>
+
+            <div class="manifest">
+              <div class="view-head"><span>Manifest</span><span>valid</span></div>
+              <div class="manifest-body">
+                <div class="manifest-row"><span>schema_version</span><span>1.0</span></div>
+                <div class="manifest-row"><span>created_at</span><span>2026-06-25T10:42:18+02:00</span></div>
+                <div class="manifest-row"><span>application</span><span>Grain Size Analysis</span></div>
+                <div class="manifest-row"><span>dataset_count</span><span>8</span></div>
+                <div class="manifest-row"><span>group_count</span><span>3</span></div>
+                <div class="manifest-row"><span>canonical_k_unit</span><span>m/s</span></div>
+                <div class="manifest-row"><span>grain_size_unit</span><span>mm</span></div>
+                <div class="manifest-row"><span>classification</span><span>ISO 14688</span></div>
+                <div class="manifest-row"><span>k_method_count</span><span>16</span></div>
+                <div class="manifest-row"><span>warning_policy</span><span>excluded_from_statistics</span></div>
+                <div class="manifest-row"><span>plot_style</span><span>Professional</span></div>
+                <div class="manifest-row"><span>plot_palette</span><span>Viridis</span></div>
+              </div>
+            </div>
+          </section>
+        </div>
+      </section>
+    </main>
+
+    <footer class="statusbar">
+      <span><i class="fa-solid fa-circle"></i> 18 datasets loaded</span>
+      <span>8 selected</span>
+      <span>Export package schema 1.0</span>
+      <span>Ready</span>
+    </footer>
+  </div>
+
+  <script>
+    const tableModels = {
+      samples: {
+        title: "Samples",
+        meta: "8 rows Â· 8 columns Â· typed numeric data",
+        key: "Primary key: sample_id",
+        units: "Units: temperature_c, porosity_fraction",
+        headers: ["sample_id", "sample_name", "group_name", "temperature_c", "porosity", "porosity_source", "soil_class", "source_file"],
+        rows: [
+          ["S001", "Borehole_DK-07", "Upper sand", "20.0", "0.3500", "Manual override", "medium SAND", "DK-07.xlsx"],
+          ["S002", "Sample_GW-2024-A", "Upper sand", "20.0", "0.3374", "Calculated", "fine SAND", "GW-2024-A.csv"],
+          ["S003", "Core_LC-11", "Lower sand", "18.5", "0.4012", "Calculated", "coarse SAND", "LC-11.xlsx"],
+          ["S004", "Trench_TR-12", "Silty unit", "21.0", "0.4620", "Manual override", "silty SAND", "TR-12.csv"],
+          ["S005", "WellScreen_WS-22", "Lower sand", "19.5", "0.3231", "Calculated", "medium SAND", "WS-22.xlsx"],
+          ["S006", "GravelPit_GP-09", "Gravel", "20.0", "0.2875", "Calculated", "sandy GRAVEL", "GP-09.csv"],
+          ["S007", "CPTU-08_Sample", "Silty unit", "17.0", "0.4980", "Manual override", "sandy SILT", "CPTU-08.xlsx"],
+          ["S008", "Drillhole_DH-14", "Gravel", "20.0", "0.3018", "Calculated", "gravelly SAND", "DH-14.csv"]
+        ],
+        numeric: [3,4]
+      },
+      grain: {
+        title: "Grain Distribution",
+        meta: "364 rows Â· normalized measured data Â· full precision",
+        key: "Composite key: sample_id + sequence",
+        units: "Units: particle_size_mm, percent_passing",
+        headers: ["sample_id", "sequence", "particle_size_mm", "percent_passing", "measurement_source"],
+        rows: [
+          ["S001", "1", "4.750000", "100.000000", "sieve"],
+          ["S001", "2", "2.000000", "95.000000", "sieve"],
+          ["S001", "3", "1.000000", "82.000000", "sieve"],
+          ["S001", "4", "0.500000", "61.000000", "sieve"],
+          ["S001", "5", "0.250000", "38.000000", "sieve"],
+          ["S001", "6", "0.125000", "14.000000", "sieve"],
+          ["S001", "7", "0.063000", "4.000000", "sieve"],
+          ["S002", "1", "4.750000", "100.000000", "sieve"],
+          ["S002", "2", "2.000000", "98.400000", "sieve"],
+          ["S002", "3", "1.000000", "91.200000", "sieve"]
+        ],
+        numeric: [1,2,3]
+      },
+      percentiles: {
+        title: "Percentiles",
+        meta: "80 rows Â· long format Â· one percentile per row",
+        key: "Composite key: sample_id + percentile",
+        units: "Units: size_mm",
+        headers: ["sample_id", "percentile", "percent_passing", "size_mm", "interpolation"],
+        rows: [
+          ["S001", "D10", "10", "0.103208", "log-linear"],
+          ["S001", "D20", "20", "0.154612", "log-linear"],
+          ["S001", "D30", "30", "0.207091", "log-linear"],
+          ["S001", "D50", "50", "0.374311", "log-linear"],
+          ["S001", "D60", "60", "0.486293", "log-linear"],
+          ["S002", "D10", "10", "0.074216", "log-linear"],
+          ["S002", "D20", "20", "0.112983", "log-linear"],
+          ["S002", "D30", "30", "0.151277", "log-linear"],
+          ["S002", "D50", "50", "0.263159", "log-linear"]
+        ],
+        numeric: [2,3]
+      },
+      kresults: {
+        title: "K Results",
+        meta: "121 rows Â· one calculation method per row",
+        key: "Composite key: sample_id + method_id",
+        units: "Canonical: k_m_s Â· derived: k_cm_s, k_m_d",
+        headers: ["sample_id", "method_id", "k_m_s", "k_cm_s", "k_m_d", "status", "conditions_met", "grain_size_used"],
+        rows: [
+          ["S001", "Hazen", "1.023400e-04", "1.023400e-02", "8.842176", "OK", "true", "D10"],
+          ["S001", "Beyer", "1.384100e-04", "1.384100e-02", "11.958624", "OK", "true", "D10"],
+          ["S001", "USBR", "2.111900e-04", "2.111900e-02", "18.247216", "OK", "true", "D20"],
+          ["S001", "Kozeny-Carman", "8.774000e-05", "8.774000e-03", "7.580736", "OK", "true", "D50"],
+          ["S002", "Hazen", "4.672000e-05", "4.672000e-03", "4.036608", "WARNING", "false", "D10"],
+          ["S002", "Beyer", "5.931000e-05", "5.931000e-03", "5.124384", "OK", "true", "D10"],
+          ["S002", "USBR", "9.812000e-05", "9.812000e-03", "8.477568", "OK", "true", "D20"],
+          ["S003", "Hazen", "4.602000e-04", "4.602000e-02", "39.761280", "OK", "true", "D10"]
+        ],
+        numeric: [2,3,4]
+      }
+    };
+
+    function renderTable(key) {
+      const model = tableModels[key] || tableModels.samples;
+      document.getElementById("preview-title").textContent = model.title;
+      document.getElementById("preview-meta").textContent = model.meta;
+      document.getElementById("schema-key").textContent = model.key;
+      document.getElementById("schema-units").textContent = model.units;
+
+      const head = `<thead><tr>${model.headers.map(header => `<th>${header}</th>`).join("")}</tr></thead>`;
+      const body = `<tbody>${model.rows.map(row => `<tr>${row.map((value, index) => {
+        const classes = [];
+        if (model.numeric.includes(index)) classes.push("num");
+        if (index === 0 || model.headers[index].includes("id")) classes.push("code");
+        if (String(value) === "OK") classes.push("ok");
+        if (String(value) === "WARNING") classes.push("warning");
+        return `<td class="${classes.join(" ")}">${value}</td>`;
+      }).join("")}</tr>`).join("")}</tbody>`;
+      document.getElementById("table-frame").innerHTML = `<table>${head}${body}</table>`;
+
+      document.querySelectorAll("[data-table]").forEach(element => {
+        element.classList.toggle("selected", element.matches(".table-row") && element.dataset.table === key);
+        element.classList.toggle("active", element.matches(".dataset-tab") && element.dataset.table === key);
+      });
+    }
+
+    function activateInspector(tabName) {
+      document.querySelectorAll(".inspector-tab").forEach(tab => {
+        tab.classList.toggle("active", tab.dataset.tab === tabName);
+      });
+      document.querySelectorAll(".tab-panel").forEach(panel => {
+        panel.classList.toggle("active", panel.dataset.panel === tabName);
+      });
+      document.querySelectorAll(".preview-view").forEach(view => {
+        view.classList.toggle("active", view.dataset.view === tabName);
+      });
+
+      if (tabName === "data") {
+        const active = document.querySelector(".dataset-tab.active");
+        renderTable(active?.dataset.table || "samples");
+      } else if (tabName === "plots") {
+        document.getElementById("preview-title").textContent = "Plot preview";
+        document.getElementById("preview-meta").textContent = "shared report/export renderer";
+      } else {
+        document.getElementById("preview-title").textContent = "Package contents";
+        document.getElementById("preview-meta").textContent = "26 files Â· manifest validated";
+      }
+    }
+
+    document.querySelectorAll(".inspector-tab").forEach(tab => {
+      tab.addEventListener("click", () => activateInspector(tab.dataset.tab));
+    });
+
+    document.querySelectorAll(".table-row[data-table], .dataset-tab[data-table]").forEach(row => {
+      row.addEventListener("click", () => {
+        activateInspector("data");
+        renderTable(row.dataset.table);
+      });
+    });
+
+    document.querySelectorAll(".checkbox").forEach(box => {
+      box.addEventListener("click", event => {
+        event.stopPropagation();
+        box.classList.toggle("on");
+      });
+    });
+
+    document.querySelectorAll(".segment").forEach(segment => {
+      segment.addEventListener("click", () => {
+        document.querySelectorAll(".segment").forEach(item => item.classList.remove("active"));
+        segment.classList.add("active");
+      });
+    });
+
+    renderTable("samples");
+  </script>
+</body>
+</html>
+

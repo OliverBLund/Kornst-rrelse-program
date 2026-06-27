@@ -67,6 +67,81 @@ class TestReportPlotStyle(unittest.TestCase):
         rps._reset_cache_for_tests()
         self.assertEqual(rps.resolve_report_style().title_fontsize, base)
 
+    def test_palette_defaults_to_categorical(self):
+        self.assertEqual(rps.get_report_palette(), "Categorical")
+
+    def test_palette_persists_and_resolves_colors(self):
+        from gui.plot_constants import DATASET_COLORS
+
+        rps.set_report_palette("Viridis")
+        rps._reset_cache_for_tests()
+        self.assertEqual(rps.get_report_palette(), "Viridis")
+        colors = rps.resolve_report_palette_colors(3)
+        self.assertEqual(len(colors), 3)
+        # A real colormap differs from the categorical default palette.
+        self.assertNotEqual(colors, DATASET_COLORS[:3])
+
+    def test_categorical_palette_matches_dataset_colors(self):
+        from gui.plot_constants import DATASET_COLORS
+
+        rps.set_report_palette("Categorical")
+        self.assertEqual(rps.resolve_report_palette_colors(4), DATASET_COLORS[:4])
+
+    def test_invalid_palette_falls_back_to_categorical(self):
+        rps.set_report_palette("Rainbow Unicorn")
+        self.assertEqual(rps.get_report_palette(), "Categorical")
+
+
+class TestPaletteColors(unittest.TestCase):
+    def test_categorical_cycles_dataset_colors(self):
+        from gui.plot_constants import DATASET_COLORS, palette_colors
+
+        n = len(DATASET_COLORS) + 2
+        colors = palette_colors("Categorical", n)
+        self.assertEqual(len(colors), n)
+        self.assertEqual(colors[0], DATASET_COLORS[0])
+        self.assertEqual(colors[len(DATASET_COLORS)], DATASET_COLORS[0])  # wraps
+
+    def test_colormap_samples_distinct_hex_colors(self):
+        from gui.plot_constants import palette_colors
+
+        colors = palette_colors("Plasma", 5)
+        self.assertEqual(len(colors), 5)
+        self.assertEqual(len(set(colors)), 5)
+        self.assertTrue(all(c.startswith("#") for c in colors))
+
+    def test_zero_and_negative_counts_are_empty(self):
+        from gui.plot_constants import palette_colors
+
+        self.assertEqual(palette_colors("Viridis", 0), [])
+        self.assertEqual(palette_colors("Viridis", -3), [])
+
+    def test_grayscale_is_offered_and_distinct(self):
+        from gui.plot_constants import PALETTE_NAMES, palette_colors
+
+        self.assertIn("Grayscale", PALETTE_NAMES)
+        grays = palette_colors("Grayscale", 7)
+        self.assertEqual(len(grays), 7)
+        self.assertEqual(len(set(grays)), 7)  # all distinct shades
+        # Every shade is a true gray (R==G==B) and none is near-white.
+        for hex_color in grays:
+            r, g, b = (int(hex_color[i:i + 2], 16) for i in (1, 3, 5))
+            self.assertEqual((r, g), (g, b))
+            self.assertLess(r, 200)
+
+    def test_colormap_samples_span_full_range_for_many_colors(self):
+        # Regression: seven colours must spread across the whole colormap, not
+        # cluster at one end (the bug behind '7 groups all look blue/purple').
+        from gui.plot_constants import palette_colors
+
+        first, last = palette_colors("Viridis", 7)[0], palette_colors("Viridis", 7)[-1]
+        self.assertNotEqual(first, last)
+        # Viridis runs dark-purple → yellow; the endpoints must be far apart.
+        fr = int(first[1:3], 16)
+        lr, lg = int(last[1:3], 16), int(last[3:5], 16)
+        self.assertLess(fr, 100)         # dark purple start (low red)
+        self.assertGreater(lr + lg, 300)  # yellow end (high red+green)
+
 
 if __name__ == "__main__":
     unittest.main(verbosity=2)

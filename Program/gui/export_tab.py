@@ -3,7 +3,7 @@ Export Tab - Unified export interface for grain size analysis results
 """
 
 from PyQt6.QtWidgets import (
-    QWidget, QApplication, QVBoxLayout, QHBoxLayout, QGroupBox, QRadioButton,
+    QWidget, QVBoxLayout, QHBoxLayout, QGroupBox, QRadioButton,
     QCheckBox, QComboBox, QLabel, QPushButton, QFileDialog,
     QLineEdit, QSpinBox, QMessageBox, QScrollArea, QButtonGroup,
     QProgressDialog, QTabWidget, QTableWidget, QTableWidgetItem,
@@ -21,42 +21,20 @@ from k_calculations_v2 import KCalculationResult
 from grain_classification import ISO14688
 from .matplotlib_canvas import FigureCanvas
 from .accordion_section import AccordionSection
+from .report_style_controls import ReportStyleControls
 from .export_manager import ExportManager
+from .report_export_plot_registry import (
+    PLOT_TYPE_SPECS,
+    export_plot_items,
+    plot_file_suffix,
+    plot_keys_for_scope,
+    plot_label,
+    plot_source_label,
+    selected_export_plot_keys,
+)
 from .loading_dialog import LoadingDialog
 from .stack_fade import TabFadeInController
 from .theme import C, icon
-
-
-class ExportProgressAdapter:
-    """Adapter exposing the old progress API through the styled loading dialog."""
-
-    def __init__(self, dialog: LoadingDialog):
-        self.dialog = dialog
-        self.total = 1
-
-    def setMaximum(self, total: int) -> None:
-        self.total = max(1, total)
-        self.dialog.update_progress(
-            0,
-            self.total,
-            "Preparing export",
-            "Building the export package.",
-            count_label=f"0 of {self.total} files",
-            activity_label="Preparing folders and export settings.",
-        )
-        QApplication.processEvents()
-
-    def setValue(self, current: int) -> None:
-        current = max(0, min(current, self.total))
-        self.dialog.update_progress(
-            current,
-            self.total,
-            "Exporting files",
-            "Writing selected tables, workbooks, and plot files.",
-            count_label=f"{current} of {self.total} files",
-            activity_label=f"Written {current} of {self.total} files.",
-        )
-        QApplication.processEvents()
 
 
 class ExportTab(QWidget):
@@ -81,6 +59,9 @@ class ExportTab(QWidget):
         self._plot_preview_table = None
         self._plot_preview_records: List[Dict[str, Any]] = []
         self._selected_plot_preview_row = 0
+        # Active background export (None when idle) — see export_now / _run_export.
+        self._export_worker = None
+        self._export_dialog = None
 
         # Selected formats (for card-based selection)
         self.selected_formats = {
@@ -143,6 +124,11 @@ class ExportTab(QWidget):
 
     def _init_content_selection(self):
         """Initialize granular content selection structure with smart defaults"""
+        plot_items = export_plot_items()
+        plot_items.update({
+            'include_legend': True,
+            'include_grid': True,
+        })
         self.content_selection = {
             # === GRAIN SIZE DATA ===
             'grain_size': {
@@ -248,17 +234,7 @@ class ExportTab(QWidget):
             # === PLOTS/FIGURES ===
             'plots': {
                 'enabled': True,
-                'items': {
-                    'grain_size_curve': True,
-                    'k_value_bar': False,
-                    'applicability_heatmap': False,
-                    'distribution_overlay': False,
-                    'k_value_comparison': False,
-                    'statistical_boxplots': False,
-                    'reliability_matrix': False,
-                    'include_legend': True,
-                    'include_grid': True,
-                }
+                'items': plot_items,
             }
         }
 
@@ -400,66 +376,22 @@ class ExportTab(QWidget):
     def _selected_plot_types(self) -> List[str]:
         """Return selected plot types in display/export order."""
         plots = self.content_selection.get('plots', {})
-        items = plots.get('items', {})
-        ordered = (
-            'grain_size_curve',
-            'k_value_bar',
-            'applicability_heatmap',
-            'distribution_overlay',
-            'k_value_comparison',
-            'statistical_boxplots',
-            'reliability_matrix',
-        )
-        return [plot_type for plot_type in ordered if items.get(plot_type, False)]
+        return selected_export_plot_keys(plots.get('items', {}))
 
     def _selected_single_plot_types(self) -> List[str]:
-        single_types = {'grain_size_curve', 'k_value_bar', 'applicability_heatmap'}
-        return [plot_type for plot_type in self._selected_plot_types() if plot_type in single_types]
+        return plot_keys_for_scope(self._selected_plot_types(), 'single')
 
     def _selected_collection_plot_types(self) -> List[str]:
-        collection_types = {
-            'distribution_overlay',
-            'k_value_comparison',
-            'statistical_boxplots',
-            'reliability_matrix',
-        }
-        return [plot_type for plot_type in self._selected_plot_types() if plot_type in collection_types]
+        return plot_keys_for_scope(self._selected_plot_types(), 'collection')
 
     def _plot_type_label(self, plot_type: str) -> str:
-        labels = {
-            'grain_size_curve': 'Grain size curve',
-            'k_value_bar': 'K-value bar chart',
-            'applicability_heatmap': 'Applicability heatmap',
-            'distribution_overlay': 'Distribution overlay',
-            'k_value_comparison': 'K-value comparison',
-            'statistical_boxplots': 'Overall/group K boxplot',
-            'reliability_matrix': 'Reliability matrix',
-        }
-        return labels.get(plot_type, plot_type.replace('_', ' ').title())
+        return plot_label(plot_type, for_export=True)
 
     def _plot_data_source_label(self, plot_type: str) -> str:
-        labels = {
-            'grain_size_curve': 'Curve data: particle size + percent passing',
-            'k_value_bar': 'K table: method, K value, warning status',
-            'applicability_heatmap': 'Method status table',
-            'distribution_overlay': 'Curve data from all selected datasets',
-            'k_value_comparison': 'K table from all selected datasets',
-            'statistical_boxplots': 'Included K values grouped by overall/group scope',
-            'reliability_matrix': 'Method status matrix',
-        }
-        return labels.get(plot_type, 'Plot source data')
+        return plot_source_label(plot_type)
 
     def _plot_file_suffix(self, plot_type: str) -> str:
-        suffixes = {
-            'grain_size_curve': 'plot',
-            'k_value_bar': 'k_values',
-            'applicability_heatmap': 'applicability',
-            'distribution_overlay': 'distribution_overlay',
-            'k_value_comparison': 'k_value_comparison',
-            'statistical_boxplots': 'k_value_boxplot',
-            'reliability_matrix': 'reliability_matrix',
-        }
-        return suffixes.get(plot_type, plot_type)
+        return plot_file_suffix(plot_type)
 
     def _plot_exports_enabled(self) -> bool:
         """Return whether plot files will actually be exported."""
@@ -771,22 +703,23 @@ class ExportTab(QWidget):
         content_area_layout.addWidget(metadata_group)
 
         # === PLOTS ===
+        plot_items = [
+            (spec.key, spec.export_label)
+            for spec in PLOT_TYPE_SPECS
+            if spec.exportable
+        ] + [
+            ("include_legend", "Include legend"),
+            ("include_grid", "Include grid lines"),
+        ]
         plots_group = self._create_content_category(
             "Plots/Figures",
-            [
-                ("grain_size_curve", "Grain size distribution curve"),
-                ("k_value_bar", "K-value bar chart"),
-                ("applicability_heatmap", "Method applicability heatmap"),
-                ("distribution_overlay", "Distribution comparison overlay"),
-                ("k_value_comparison", "K-value comparison chart"),
-                ("statistical_boxplots", "Overall/group K distribution boxplot"),
-                ("reliability_matrix", "Method reliability matrix"),
-                ("include_legend", "Include legend"),
-                ("include_grid", "Include grid lines")
-            ],
+            plot_items,
             'plots'
         )
         content_area_layout.addWidget(plots_group)
+
+        # === PLOT STYLE === (same global "restyle once" controls as the Report tab)
+        content_area_layout.addWidget(self._create_plot_style_section())
 
         content_scroll = QScrollArea()
         content_scroll.setWidgetResizable(True)
@@ -1122,6 +1055,49 @@ class ExportTab(QWidget):
                         cb = self.content_checkboxes.get(f'percentile_{p}')
                         if cb:
                             cb.setChecked(True)
+
+    def _create_plot_style_section(self) -> QWidget:
+        """Accordion section hosting the shared global plot-style controls.
+
+        Mirrors the Report tab's "PLOT STYLE" group (preset + palette + Customize)
+        over the same persisted store, so a single control themes every export
+        plot. Collection figures already default to ``resolve_report_style()`` /
+        the chosen palette; this just exposes those controls in the Export tab.
+        """
+        section = AccordionSection("fa6s.palette", "Plot Style")
+        section.set_meta("global")
+        section.set_open(True)
+
+        group = QFrame()
+        group.setStyleSheet(
+            f"QFrame {{ background-color: {C.BG_RAISED}; border: none; }}"
+        )
+        layout = QVBoxLayout(group)
+        layout.setContentsMargins(6, 4, 6, 6)
+        layout.setSpacing(3)
+
+        hint = QLabel("Preset, palette and tweaks applied to every exported plot.")
+        hint.setFont(QFont("Segoe UI", 8))
+        hint.setStyleSheet(f"color: {C.TEXT_MUTED}; background: transparent;")
+        hint.setWordWrap(True)
+        layout.addWidget(hint)
+
+        self._style_controls = ReportStyleControls()
+        # A palette/preset change invalidates the cached file preview counts/labels.
+        self._style_controls.changed.connect(self._on_plot_style_changed)
+        layout.addWidget(self._style_controls)
+
+        section.body_layout().addWidget(group)
+        return section
+
+    def _on_plot_style_changed(self) -> None:
+        """Re-render the plot preview after a global style/palette edit, if shown."""
+        if self._plot_preview_canvas is None:
+            return
+        try:
+            self._render_selected_plot_preview()
+        except Exception:
+            pass
 
     def _create_content_category(self, title: str, items: list, category_key: str) -> QWidget:
         """Create a content category group with checkboxes"""
@@ -3189,6 +3165,9 @@ class ExportTab(QWidget):
                 )
                 return
 
+        if getattr(self, "_export_worker", None) is not None:
+            return  # an export is already running
+
         # Build export configuration
         config = self._build_export_config()
 
@@ -3196,56 +3175,94 @@ class ExportTab(QWidget):
         manager = ExportManager()
         manager.set_scheme(self._scheme)
 
-        progress_dialog = LoadingDialog(
+        self._run_export(manager, datasets_to_export, config, output_dir)
+
+    def _run_export(self, manager, datasets, config, output_dir) -> None:
+        """Run the export on a worker thread behind a cancellable LoadingDialog.
+
+        The export writes files and renders plots (now pyplot-free, hence
+        thread-safe); doing it on a worker keeps the UI responsive and lets the
+        dialog report per-file progress and cancel between files.
+        """
+        from gui.export_worker import ExportWorker
+
+        dialog = LoadingDialog(
             "Exporting results",
             "Writing selected grain-size outputs to a structured export folder.",
             self,
-            cancellable=False,
+            cancellable=True,
         )
-        progress_dialog.set_activity("Creating tables, workbooks, and report-ready plot files.")
-        progress = ExportProgressAdapter(progress_dialog)
-        progress_dialog.show()
-        QApplication.processEvents()
+        dialog.set_activity("Creating tables, workbooks, and report-ready plot files.")
+        dialog.update_progress(
+            0, 1, "Preparing export", "Building the export package.",
+            count_label="0 files", activity_label="Preparing folders and export settings.",
+        )
 
-        try:
-            self.export_started.emit()
+        worker = ExportWorker(manager, datasets, config, parent=self)
+        self._export_worker = worker
+        self._export_dialog = dialog
+        self._export_output_dir = output_dir
 
-            # Perform export
-            exported_files = manager.export(datasets_to_export, config, progress)
+        worker.progress.connect(
+            lambda cur, total: dialog.update_progress(
+                cur, total, "Exporting files",
+                "Writing selected tables, workbooks, and plot files.",
+                count_label=f"{cur} of {total} files",
+                activity_label=f"Written {cur} of {total} files.",
+            )
+        )
+        worker.finished_files.connect(self._on_export_finished)
+        worker.failed.connect(self._on_export_failed)
+        worker.cancelled.connect(self._on_export_cancelled)
+        dialog.cancellation_requested.connect(worker.cancel)
+        worker.finished.connect(worker.deleteLater)
 
-            progress_dialog.mark_finished(
+        self.export_started.emit()
+        worker.start()
+        dialog.exec()
+
+    def _cleanup_export_worker(self) -> None:
+        self._export_worker = None
+        self._export_dialog = None
+
+    def _on_export_finished(self, exported_files: list) -> None:
+        dialog = getattr(self, "_export_dialog", None)
+        output_dir = getattr(self, "_export_output_dir", "")
+        if dialog is not None:
+            dialog.mark_finished(
                 "Export complete",
                 f"{len(exported_files)} files written to the selected export folder.",
                 ok=True,
             )
-            QApplication.processEvents()
-            progress_dialog.close()
+            dialog.accept()
 
-            # Show success message
-            file_list = "\n".join([
-                f"  - {os.path.relpath(f, output_dir)}"
-                for f in exported_files[:10]
-            ])
-            if len(exported_files) > 10:
-                file_list += f"\n  ... and {len(exported_files) - 10} more"
+        file_list = "\n".join(
+            f"  - {os.path.relpath(f, output_dir)}" for f in exported_files[:10]
+        )
+        if len(exported_files) > 10:
+            file_list += f"\n  ... and {len(exported_files) - 10} more"
+        QMessageBox.information(
+            self, "Export Successful",
+            f"Successfully exported {len(exported_files)} file(s) to:\n{output_dir}\n\nFiles:\n{file_list}",
+        )
+        self.export_completed.emit(output_dir)
+        self._cleanup_export_worker()
 
-            QMessageBox.information(
-                self,
-                "Export Successful",
-                f"Successfully exported {len(exported_files)} file(s) to:\n{output_dir}\n\nFiles:\n{file_list}"
-            )
+    def _on_export_failed(self, message: str) -> None:
+        dialog = getattr(self, "_export_dialog", None)
+        if dialog is not None:
+            dialog.mark_finished("Export failed", message, ok=False)
+            dialog.reject()
+        QMessageBox.critical(
+            self, "Export Error", f"An error occurred during export:\n{message}"
+        )
+        self._cleanup_export_worker()
 
-            self.export_completed.emit(output_dir)
-
-        except Exception as e:
-            progress_dialog.mark_finished("Export failed", str(e), ok=False)
-            QApplication.processEvents()
-            progress_dialog.close()
-            QMessageBox.critical(
-                self,
-                "Export Error",
-                f"An error occurred during export:\n{str(e)}"
-            )
+    def _on_export_cancelled(self) -> None:
+        dialog = getattr(self, "_export_dialog", None)
+        if dialog is not None:
+            dialog.reject()
+        self._cleanup_export_worker()
 
     def save_export_config(self):
         """Save current export configuration"""

@@ -28,25 +28,30 @@ from method_registry import DEFAULT_METHOD_ORDER, METHOD_CATEGORY_MAP, ordered_m
 from .plot_renderers import (
     apply_legend_aware_layout,
     render_applicability_heatmap,
-    render_distribution_overlay,
     render_grain_size_distribution,
     render_k_bar_chart,
-    render_k_overlay,
     render_k_scope_boxplot,
     render_reliability_matrix,
 )
 from .plot_context import (
+    REPORT_EXPORT_PLOT_K_UNIT,
     apply_axis_limits_from_context,
+    context_with_style,
     convert_k_to_display,
     grain_size_renderer_kwargs_from_context,
     k_axis_label_for_unit,
-    k_display_unit_from_context,
     plot_context_value,
-    plot_style_from_context,
 )
 from .comparison_plot_capture import build_comparison_spec
 from .comparison_plot_spec import render_comparison
-from .report_plot_style import resolve_report_style
+from .plot_constants import CATEGORICAL_PALETTE
+from .report_plot_style import (
+    get_report_palette,
+    resolve_report_palette_colors,
+    resolve_report_style,
+)
+from .report_export_plot_colors import k_scope_plot_colors
+from .report_export_plot_registry import export_plot_keys, plot_file_suffix
 from .theme import apply_matplotlib_style
 
 
@@ -69,25 +74,11 @@ class ExportManager:
         ('max', 'Max', 'K_Max', 'max_k'),
         ('valid_count', 'Valid Count', 'Valid_Methods_Count', 'valid_count'),
     ]
-    SINGLE_PLOT_TYPES = {
-        'grain_size_curve',
-        'k_value_bar',
-        'applicability_heatmap',
-    }
-    COLLECTION_PLOT_TYPES = {
-        'distribution_overlay',
-        'k_value_comparison',
-        'statistical_boxplots',
-        'reliability_matrix',
-    }
+    SINGLE_PLOT_TYPES = set(export_plot_keys("single"))
+    COLLECTION_PLOT_TYPES = set(export_plot_keys("collection"))
     PLOT_FILE_SUFFIXES = {
-        'grain_size_curve': 'plot',
-        'k_value_bar': 'k_values',
-        'applicability_heatmap': 'applicability',
-        'distribution_overlay': 'distribution_overlay',
-        'k_value_comparison': 'k_value_comparison',
-        'statistical_boxplots': 'k_value_boxplot',
-        'reliability_matrix': 'reliability_matrix',
+        key: plot_file_suffix(key)
+        for key in export_plot_keys()
     }
     PERCENTILE_SPECS = [
         ('d5', 'D5', 5),
@@ -236,22 +227,7 @@ class ExportManager:
         )
 
     def _k_scope_plot_colors(self, snapshot, series) -> List[str]:
-        uses_group_scope = any(group != 'Ungrouped' for group in snapshot.k.group_names)
-        if not uses_group_scope:
-            return []
-        try:
-            from .group_styles import group_color_map
-            group_colors = group_color_map(snapshot.k.group_names)
-        except Exception:
-            fallback = ("#3a7ea0", "#6b8e23", "#b46428", "#2a9d8f", "#8b4580", "#a03a30")
-            group_colors = {
-                group: fallback[index % len(fallback)]
-                for index, group in enumerate(snapshot.k.group_names)
-            }
-        return [
-            "#8c6f45" if label == "Overall" else group_colors.get(label, "#777777")
-            for label, _values in series
-        ]
+        return k_scope_plot_colors(snapshot.k.group_names, series)
 
     def _collect_method_names(self, datasets: List[tuple], config: Dict) -> List[str]:
         """Collect method names visible in the current export selection."""
@@ -743,6 +719,17 @@ class ExportManager:
                 selected.append(plot_type)
         return selected
 
+    def _single_curve_palette_color(self) -> Optional[str]:
+        """First palette colour for a single-curve export, or None to keep the preset.
+
+        Mirrors ``ReportGenerator._palette_curve_color``: a chosen colormap palette
+        colours the curve; Categorical keeps the preset colour.
+        """
+        if get_report_palette() == CATEGORICAL_PALETTE:
+            return None
+        palette = resolve_report_palette_colors(1)
+        return palette[0] if palette else None
+
     def _build_grain_size_plot_figure(
         self,
         name: str,
@@ -752,7 +739,22 @@ class ExportManager:
     ) -> Figure:
         """Create a fresh plot figure through the shared renderer."""
         apply_matplotlib_style()
-        style = plot_style_from_context(context)
+        # Prefer the captured live-tab style; otherwise fall back to the global
+        # report/export style so single-sample exports honor the "restyle once"
+        # preset just like the collection figures do (not a bare default).
+        # Global report/export style wins over any captured live-tab style, so
+        # the Customize panel themes every export plot uniformly. Other captured
+        # context (unit, axis limits, text options, grid/legend) is preserved.
+        context = context_with_style(context, resolve_report_style())
+        style = context["style"]
+        # Same one rule as the report/comparison plots: a chosen colormap palette
+        # colours the curve (Categorical keeps the preset colour). Keeps the
+        # single-sample export consistent with the report's individual plots.
+        curve_color = self._single_curve_palette_color()
+        if curve_color:
+            import dataclasses
+            style = dataclasses.replace(style, curve_color=curve_color)
+            context = context_with_style(context, style)
         figure = Figure(figsize=config.get('plot_figsize', (10, 6)))
         figure.patch.set_facecolor(style.figure_facecolor)
         ax = figure.add_subplot(1, 1, 1)
@@ -783,13 +785,20 @@ class ExportManager:
         context: Optional[Dict] = None,
     ) -> Figure:
         apply_matplotlib_style()
-        style = plot_style_from_context(context)
+        # Prefer the captured live-tab style; otherwise fall back to the global
+        # report/export style so single-sample exports honor the "restyle once"
+        # preset just like the collection figures do (not a bare default).
+        # Global report/export style wins over any captured live-tab style, so
+        # the Customize panel themes every export plot uniformly. Other captured
+        # context (unit, axis limits, text options, grid/legend) is preserved.
+        context = context_with_style(context, resolve_report_style())
+        style = context["style"]
         figure = Figure(figsize=config.get('plot_figsize', (10, 6)))
         figure.patch.set_facecolor(style.figure_facecolor)
         ax = figure.add_subplot(1, 1, 1)
 
         filtered_results = self._filter_results(results, config)
-        unit = k_display_unit_from_context(context)
+        unit = REPORT_EXPORT_PLOT_K_UNIT
         methods = [result.method_name for result in filtered_results]
         k_values = [convert_k_to_display(result.k_value, unit) for result in filtered_results]
         flagged_methods = {
@@ -818,9 +827,23 @@ class ExportManager:
             log_y_scale=bool(plot_context_value(context, 'log_k_y_scale', False)),
             y_label=k_axis_label_for_unit(unit),
             sample_name=name,
+            colors=self._k_bar_method_colors(methods),
         )
         apply_legend_aware_layout(figure, style)
         return figure
+
+    def _k_bar_method_colors(self, methods) -> List[str]:
+        """Per-method bar colours from the active palette (preset never decides).
+
+        Mirrors ``ReportGenerator._k_bar_method_colors`` so report and export
+        K-bars colour identically: colormap palettes sample one colour per method;
+        Categorical keeps the fixed semantic method colours.
+        """
+        from .plot_constants import METHOD_COLORS, palette_colors
+        palette = get_report_palette()
+        if palette == CATEGORICAL_PALETTE:
+            return [METHOD_COLORS.get(m, "#888888") for m in methods]
+        return palette_colors(palette, len(methods))
 
     def _build_applicability_heatmap_figure(
         self,
@@ -830,7 +853,14 @@ class ExportManager:
         context: Optional[Dict] = None,
     ) -> Figure:
         apply_matplotlib_style()
-        style = plot_style_from_context(context)
+        # Prefer the captured live-tab style; otherwise fall back to the global
+        # report/export style so single-sample exports honor the "restyle once"
+        # preset just like the collection figures do (not a bare default).
+        # Global report/export style wins over any captured live-tab style, so
+        # the Customize panel themes every export plot uniformly. Other captured
+        # context (unit, axis limits, text options, grid/legend) is preserved.
+        context = context_with_style(context, resolve_report_style())
+        style = context["style"]
         filtered_results = self._filter_results(results, config)
         figure = Figure(figsize=config.get('plot_figsize', (10, max(4, len(filtered_results) * 0.4))))
         figure.patch.set_facecolor(style.figure_facecolor)
@@ -882,7 +912,12 @@ class ExportManager:
             show_grid=config.get('plot_include_grid', True),
             show_legend=config.get('plot_include_legend', True),
             log_k_y_scale=bool(plot_context_value(context, 'log_k_y_scale', False)),
-            display_unit=k_display_unit_from_context(context),
+            display_unit=REPORT_EXPORT_PLOT_K_UNIT,
+            # Match the report side: comparison colours follow the global palette,
+            # re-sampled per series-count so many groups spread across the colormap.
+            palette=resolve_report_palette_colors(max(len(ds_objects), 1)),
+            palette_name=get_report_palette(),
+            group_palette_authoritative=get_report_palette() != CATEGORICAL_PALETTE,
         )
 
     def _build_collection_plot_figure(
@@ -895,14 +930,23 @@ class ExportManager:
         apply_matplotlib_style()
         # Default to the global report/export style when the live tab context
         # carries none, so exports honor the "restyle once" report setting.
-        style = plot_style_from_context(context, resolve_report_style())
+        # Global report/export style wins over any captured live-tab style, so
+        # the Customize panel themes every export plot uniformly. Other captured
+        # context (unit, axis limits, text options, grid/legend) is preserved.
+        context = context_with_style(context, resolve_report_style())
+        style = context["style"]
 
-        if plot_type == 'distribution_overlay':
+        if plot_type in ('distribution_overlay', 'k_value_comparison', 'k_distribution'):
             # Render through the shared comparison spec so exports get the same
             # group-aware breakdown, palette and styling as the Comparison tab
-            # and the report (instead of a flat overlay).
+            # and the report.
+            spec_plot_type = {
+                'distribution_overlay': 'distribution',
+                'k_value_comparison': 'k-values',
+                'k_distribution': 'k-distribution',
+            }[plot_type]
             spec = self._build_export_comparison_spec(
-                datasets, config, context, plot_type='distribution', style=style,
+                datasets, config, context, plot_type=spec_plot_type, style=style,
             )
             figure = Figure(figsize=config.get('plot_figsize', (12, 7)))
             figure.patch.set_facecolor(style.figure_facecolor)
@@ -913,35 +957,6 @@ class ExportManager:
         figure = Figure(figsize=config.get('plot_figsize', (12, 7)))
         figure.patch.set_facecolor(style.figure_facecolor)
         ax = figure.add_subplot(1, 1, 1)
-
-        if plot_type == 'k_value_comparison':
-            k_results_dict = {}
-            flagged_methods_dict = {}
-            for name, _, results in datasets:
-                filtered_results = self._filter_results(results, config)
-                k_results_dict[name] = {
-                    result.method_name: result.k_value
-                    for result in filtered_results
-                    if result.k_value is not None
-                }
-                flagged_methods_dict[name] = {
-                    result.method_name
-                    for result in filtered_results
-                    if not getattr(result, 'conditions_met', True)
-                    or getattr(getattr(result, 'status', None), 'name', 'OK') != 'OK'
-                }
-            render_k_overlay(
-                ax,
-                k_results_dict,
-                flagged_methods_dict=flagged_methods_dict,
-                style=style,
-                show_grid=config.get('plot_include_grid', True),
-                show_legend=config.get('plot_include_legend', True),
-                log_y_scale=bool(plot_context_value(context, 'log_k_y_scale', False)),
-            )
-            apply_legend_aware_layout(figure, style)
-            return figure
-
         if plot_type == 'statistical_boxplots':
             snapshot = self._build_comparison_snapshot_for_export(datasets, config)
             series = k_scope_value_series(snapshot.k)
@@ -1871,125 +1886,6 @@ class ExportManager:
             width = min(max(len(str(header)) + 2, 12), 34)
             ws.column_dimensions[chr(64 + col_index) if col_index <= 26 else ws.cell(row=1, column=col_index).column_letter].width = width
 
-    def _write_excel_summary(self, ws, name: str, dataset: GrainSizeData,
-                            results: List[KCalculationResult], config: Dict):
-        """Write summary sheet to Excel"""
-        from openpyxl.styles import Font, Alignment, PatternFill
-
-        # Title
-        ws['A1'] = 'Grain Size Analysis Summary'
-        ws['A1'].font = Font(size=14, bold=True)
-
-        row = 3
-
-        # Sample Information
-        ws[f'A{row}'] = 'Sample Name:'
-        ws[f'B{row}'] = name
-        ws[f'A{row}'].font = Font(bold=True)
-        row += 1
-
-        ws[f'A{row}'] = 'Temperature:'
-        ws[f'B{row}'] = f"{dataset.temperature}°C"
-        ws[f'A{row}'].font = Font(bold=True)
-        row += 1
-
-        ws[f'A{row}'] = 'Porosity:'
-        ws[f'B{row}'] = self._effective_porosity(dataset)
-        ws[f'A{row}'].font = Font(bold=True)
-        row += 1
-
-        ws[f'A{row}'] = 'Porosity Source:'
-        ws[f'B{row}'] = self._porosity_source_label(dataset)
-        ws[f'A{row}'].font = Font(bold=True)
-        row += 2
-
-        # Key grain sizes
-        ws[f'A{row}'] = 'Key Grain Sizes'
-        ws[f'A{row}'].font = Font(bold=True, size=12)
-        row += 1
-
-        percentiles = {
-            'D10': dataset.get_d10() if hasattr(dataset, 'get_d10') else None,
-            'D50': dataset.get_d50() if hasattr(dataset, 'get_d50') else None,
-            'D60': dataset.get_d60() if hasattr(dataset, 'get_d60') else None,
-        }
-
-        for pname, value in percentiles.items():
-            if value is not None:
-                ws[f'A{row}'] = f"{pname}:"
-                ws[f'B{row}'] = f"{value:.4f} mm"
-                ws[f'A{row}'].font = Font(bold=True)
-                row += 1
-
-        row += 1
-
-        # Gradation
-        cu = dataset.get_uniformity_coefficient() if hasattr(dataset, 'get_uniformity_coefficient') else None
-        cc = dataset.get_coefficient_of_curvature() if hasattr(dataset, 'get_coefficient_of_curvature') else None
-
-        if cu is not None:
-            ws[f'A{row}'] = 'Uniformity Coefficient (Cu):'
-            ws[f'B{row}'] = f"{cu:.2f}"
-            ws[f'A{row}'].font = Font(bold=True)
-            row += 1
-
-        if cc is not None:
-            ws[f'A{row}'] = 'Coefficient of Curvature (Cc):'
-            ws[f'B{row}'] = f"{cc:.2f}"
-            ws[f'A{row}'].font = Font(bold=True)
-            row += 1
-
-        # Classification
-        if config.get('classification', True):
-            row += 1
-            _cls = dataset.classify(scheme=self._scheme)
-            ws[f'A{row}'] = 'Soil Classification:'
-            ws[f'B{row}'] = _cls.label
-            ws[f'A{row}'].font = Font(bold=True)
-            row += 1
-            ws[f'A{row}'] = 'Standard:'
-            ws[f'B{row}'] = _cls.scheme.name
-            row += 1
-            ws[f'A{row}'] = 'Clay %:'
-            ws[f'B{row}'] = _cls.fractions.clay_pct
-            row += 1
-            ws[f'A{row}'] = 'Silt %:'
-            ws[f'B{row}'] = _cls.fractions.silt_pct
-            row += 1
-            ws[f'A{row}'] = 'Sand %:'
-            ws[f'B{row}'] = _cls.fractions.sand_pct
-            row += 1
-            ws[f'A{row}'] = 'Gravel %:'
-            ws[f'B{row}'] = _cls.fractions.gravel_pct
-
-        # K-value statistics
-        if results:
-            valid_k_values = [r.k_value for r in results if r.k_value is not None and r.k_value > 0]
-
-            if valid_k_values:
-                import statistics
-
-                row += 2
-                ws[f'A{row}'] = 'K-Value Statistics'
-                ws[f'A{row}'].font = Font(bold=True, size=12)
-                row += 1
-
-                mean_k = statistics.mean(valid_k_values)
-                median_k = statistics.median(valid_k_values)
-
-                ws[f'A{row}'] = 'Mean K:'
-                ws[f'B{row}'] = f"{mean_k:.3e} m/s"
-                ws[f'A{row}'].font = Font(bold=True)
-                row += 1
-
-                ws[f'A{row}'] = 'Median K:'
-                ws[f'B{row}'] = f"{median_k:.3e} m/s"
-                ws[f'A{row}'].font = Font(bold=True)
-                row += 1
-
-        # Auto-size columns
-        ws.column_dimensions['A'].width = 30
-        ws.column_dimensions['B'].width = 20
 
     def _write_excel_grain_size(self, ws, dataset: GrainSizeData):
         """Write grain size data sheet"""
@@ -2071,104 +1967,7 @@ class ExportManager:
         for col in range(1, len(headers) + 1):
             ws.column_dimensions[chr(64 + col)].width = 18
 
-    def _write_excel_statistics(self, ws, results: List[KCalculationResult]):
-        """Write statistics sheet"""
-        from openpyxl.styles import Font
-        import statistics
 
-        valid_k_values = [r.k_value for r in results if r.k_value is not None and r.k_value > 0]
-
-        if not valid_k_values:
-            return
-
-        # Header
-        ws['A1'] = 'Statistic'
-        ws['B1'] = 'Value (m/s)'
-        ws['C1'] = 'Value (cm/s)'
-        ws['D1'] = 'Value (m/d)'
-
-        for col in ['A', 'B', 'C', 'D']:
-            ws[f'{col}1'].font = Font(bold=True)
-
-        # Calculate statistics
-        mean_k = statistics.mean(valid_k_values)
-        median_k = statistics.median(valid_k_values)
-        min_k = min(valid_k_values)
-        max_k = max(valid_k_values)
-        stdev_k = statistics.stdev(valid_k_values) if len(valid_k_values) > 1 else 0
-
-        stats_data = [
-            ('Mean', mean_k),
-            ('Median', median_k),
-            ('Std Dev', stdev_k),
-            ('Min', min_k),
-            ('Max', max_k),
-        ]
-
-        for row, (name, value) in enumerate(stats_data, start=2):
-            ws[f'A{row}'] = name
-            ws[f'A{row}'].font = Font(bold=True)
-            ws[f'B{row}'] = value
-            ws[f'C{row}'] = value * 100
-            ws[f'D{row}'] = value * 86400
-
-        # Auto-size
-        for col in ['A', 'B', 'C', 'D']:
-            ws.column_dimensions[col].width = 15
-
-    def _write_excel_combined_summary(self, ws, datasets: List[tuple], config: Dict):
-        """Write combined summary comparing all datasets"""
-        from openpyxl.styles import Font
-
-        # Header
-        ws['A1'] = 'Sample'
-        headers = ['Sample']
-        col = 2
-
-        # Get all method names
-        all_methods = set()
-        for _, _, results in datasets:
-            if results:
-                for result in results:
-                    all_methods.add(result.method_name)
-
-        for method in sorted(all_methods):
-            ws.cell(row=1, column=col).value = method
-            ws.cell(row=1, column=col).font = Font(bold=True)
-            col += 1
-
-        # Add statistical columns
-        ws.cell(row=1, column=col).value = 'Mean'
-        ws.cell(row=1, column=col).font = Font(bold=True)
-        col += 1
-        ws.cell(row=1, column=col).value = 'Median'
-        ws.cell(row=1, column=col).font = Font(bold=True)
-
-        # Data rows
-        for row, (name, dataset, results) in enumerate(datasets, start=2):
-            ws.cell(row=row, column=1).value = name
-
-            # Create method -> k_value mapping
-            method_values = {}
-            if results:
-                for result in results:
-                    if result.k_value is not None:
-                        method_values[result.method_name] = result.k_value
-
-            # Fill in K-values
-            col = 2
-            for method in sorted(all_methods):
-                if method in method_values:
-                    ws.cell(row=row, column=col).value = method_values[method]
-                col += 1
-
-            # Calculate and fill statistics
-            if method_values:
-                import statistics
-                values = list(method_values.values())
-                ws.cell(row=row, column=col).value = statistics.mean(values)
-                col += 1
-                ws.cell(row=row, column=col).value = statistics.median(values)
 
     def _write_excel_dataset_combined(self, ws, name: str, dataset: GrainSizeData,
                                      results: List[KCalculationResult], config: Dict):
@@ -2250,107 +2049,6 @@ class ExportManager:
         # Auto-size
         for col in ['A', 'B', 'C', 'D', 'E']:
             ws.column_dimensions[col].width = 18
-
-    # ==================== JSON EXPORT ====================
-
-    def _export_json(self, name: str, dataset: GrainSizeData,
-                    results: List[KCalculationResult], config: Dict):
-        """Export dataset to JSON format"""
-        output_dir = self._category_output_dir(config, 'data', 'json')
-        template = config['filename_template']
-
-        filename = self._format_filename(template, name, '.json')
-        filepath = os.path.join(output_dir, filename)
-
-        # Build JSON structure
-        data = {
-            'sample_name': name,
-            'metadata': {
-                'temperature': dataset.temperature,
-                'porosity': self._effective_porosity(dataset),
-                'porosity_source': self._porosity_source_label(dataset),
-                'file_path': dataset.file_path if hasattr(dataset, 'file_path') else None,
-            }
-        }
-
-        # Grain size distribution
-        if config.get('grain_distribution', True):
-            data['grain_size_distribution'] = {
-                'particle_sizes_mm': dataset.particle_sizes,
-                'percent_passing': dataset.percent_passing,
-            }
-
-        # Percentiles
-        if config.get('percentiles', True):
-            data['percentiles'] = {
-                'D10': dataset.get_d10() if hasattr(dataset, 'get_d10') else None,
-                'D20': dataset.get_d20() if hasattr(dataset, 'get_d20') else None,
-                'D30': dataset.get_d30() if hasattr(dataset, 'get_d30') else None,
-                'D50': dataset.get_d50() if hasattr(dataset, 'get_d50') else None,
-                'D60': dataset.get_d60() if hasattr(dataset, 'get_d60') else None,
-            }
-
-        # Gradation
-        if config.get('gradation', True):
-            data['gradation'] = {
-                'uniformity_coefficient': dataset.get_uniformity_coefficient() if hasattr(dataset, 'get_uniformity_coefficient') else None,
-                'coefficient_of_curvature': dataset.get_coefficient_of_curvature() if hasattr(dataset, 'get_coefficient_of_curvature') else None,
-            }
-
-        # Classification
-        if config.get('classification', True):
-            _cls = dataset.classify(scheme=self._scheme)
-            data['classification'] = {
-                'label':       _cls.label,
-                'scheme_name': _cls.scheme.name,
-                'clay_pct':    _cls.fractions.clay_pct,
-                'silt_pct':    _cls.fractions.silt_pct,
-                'sand_pct':    _cls.fractions.sand_pct,
-                'gravel_pct':  _cls.fractions.gravel_pct,
-                'cobble_pct':  _cls.fractions.cobble_pct,
-            }
-
-        # K-values
-        if config.get('k_values', True) and results:
-            data['k_values'] = []
-            for result in results:
-                if result.k_value is not None:
-                    k_data = {
-                        'method': result.method_name,
-                        'k_m_s': result.k_value,
-                        'k_cm_s': result.k_value * 100,
-                        'k_m_d': result.k_value * 86400,
-                        'status': result.status.value if hasattr(result.status, 'value') else str(result.status),
-                        'status_message': result.status_message,
-                        'grain_size_used': result.grain_size_used,
-                    }
-
-                    if config.get('formulas', False):
-                        k_data['formula'] = result.formula_used
-
-                    data['k_values'].append(k_data)
-
-        # Statistics
-        if config.get('statistics', True) and results:
-            valid_k_values = [r.k_value for r in results if r.k_value is not None and r.k_value > 0]
-
-            if valid_k_values:
-                import statistics
-
-                data['statistics'] = {
-                    'mean_k_m_s': statistics.mean(valid_k_values),
-                    'median_k_m_s': statistics.median(valid_k_values),
-                    'min_k_m_s': min(valid_k_values),
-                    'max_k_m_s': max(valid_k_values),
-                    'stdev_k_m_s': statistics.stdev(valid_k_values) if len(valid_k_values) > 1 else 0,
-                    'count': len(valid_k_values),
-                }
-
-        # Write JSON file
-        with open(filepath, 'w', encoding='utf-8') as f:
-            json.dump(data, f, indent=2, default=str)
-
-        self.exported_files.append(filepath)
 
     def _write_excel_summary(self, ws, name: str, dataset: GrainSizeData,
                             results: List[KCalculationResult], config: Dict):

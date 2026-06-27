@@ -523,6 +523,13 @@ class LoadingDialog(FramelessDialogBase):
         self.mark_cancel_pending()
         self.cancellation_requested.emit()
 
+    def keyPressEvent(self, event):
+        if event.key() == Qt.Key.Key_Escape and not self._finished:
+            self._request_cancel()
+            event.accept()
+            return
+        super().keyPressEvent(event)
+
     def _update_elapsed_chip(self):
         elapsed_seconds = max(0, int(time.monotonic() - self._started_at))
         minutes, seconds = divmod(elapsed_seconds, 60)

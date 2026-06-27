@@ -269,11 +269,22 @@ def group_color_map(
     *,
     palette: Sequence[str] = DEFAULT_GROUP_COLORS,
     include_ungrouped: bool = True,
+    ignore_overrides: bool = False,
 ) -> dict[str, str]:
+    """Map each group to a colour from *palette* (in first-seen order).
+
+    By default a user's persisted per-group colour override wins over the
+    palette. Pass ``ignore_overrides=True`` to make the palette authoritative
+    (used by reports/exports when a non-Categorical palette is chosen, so the
+    palette re-colours every group regardless of Comparison-tab tweaks).
+    """
     ordered = [normalize_group_name(group_name) for group_name in group_names]
     colors: dict[str, str] = {}
     for group_name in dict.fromkeys(ordered):
         if group_name == UNGROUPED_LABEL and not include_ungrouped:
             continue
-        colors[group_name] = group_color(group_name, ordered, palette=palette)
+        if ignore_overrides:
+            colors[group_name] = default_group_color(group_name, ordered, palette=palette)
+        else:
+            colors[group_name] = group_color(group_name, ordered, palette=palette)
     return colors

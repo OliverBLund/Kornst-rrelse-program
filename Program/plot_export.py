@@ -19,7 +19,7 @@ from typing import Dict, List, Optional, Sequence, Set
 
 import matplotlib
 matplotlib.use("Agg")
-import matplotlib.pyplot as plt          # noqa: E402
+from matplotlib.backends.backend_agg import FigureCanvasAgg  # noqa: E402
 from matplotlib.colors import to_rgba    # noqa: E402
 from matplotlib.figure import Figure     # noqa: E402
 
@@ -56,14 +56,36 @@ F = _theme.F
 
 # ── Helper ────────────────────────────────────────────────────
 
+def _new_fig(figsize) -> Figure:
+    """Create a standalone Agg figure (no pyplot global state → thread-safe).
+
+    Report generation runs on a worker thread; using pyplot's global figure
+    registry off the main thread is unsafe, so every report figure is built as a
+    bare ``Figure`` with its own ``FigureCanvasAgg``.
+    """
+    fig = Figure(figsize=figsize)
+    FigureCanvasAgg(fig)
+    return fig
+
+
+def _new_fig_ax(figsize):
+    """Return ``(figure, axes)`` for a fresh single-axes Agg figure."""
+    fig = _new_fig(figsize)
+    ax = fig.add_subplot(1, 1, 1)
+    return fig, ax
+
+
 def _fig_to_base64(fig: Figure, *, dpi: int = 150) -> str:
-    """Render *fig* to a base64-encoded PNG data-URL and close it."""
+    """Render *fig* to a base64-encoded PNG data-URL.
+
+    No ``plt.close`` is needed — the figure carries its own canvas and holds no
+    pyplot registry reference, so it is freed when it goes out of scope.
+    """
     buf = io.BytesIO()
     fig.savefig(buf, format="png", dpi=dpi, bbox_inches="tight",
                 facecolor="white")
     buf.seek(0)
     encoded = base64.b64encode(buf.read()).decode("utf-8")
-    plt.close(fig)
     return f"data:image/png;base64,{encoded}"
 
 
@@ -94,7 +116,7 @@ def export_grain_size_plot(
 ) -> str:
     """Return a base64-encoded PNG of a grain-size distribution plot."""
     apply_matplotlib_style()
-    fig, ax = plt.subplots(figsize=figsize)
+    fig, ax = _new_fig_ax(figsize)
     renderer_kwargs = grain_size_renderer_kwargs_from_context(
         dataset.sample_name,
         dataset,
@@ -151,10 +173,15 @@ def export_k_bar_chart(
     title: Optional[str] = None,
     y_label: str = "Hydraulic Conductivity K (m/s)",
     sample_name: str = "Sample",
+    colors: Optional[Sequence[str]] = None,
 ) -> str:
-    """Return a base64-encoded PNG of a K-value bar chart."""
+    """Return a base64-encoded PNG of a K-value bar chart.
+
+    *colors* (one per method) overrides the bar colours so reports/exports can
+    drive them from the global palette instead of the preset.
+    """
     apply_matplotlib_style()
-    fig, ax = plt.subplots(figsize=figsize)
+    fig, ax = _new_fig_ax(figsize)
 
     render_k_bar_chart(
         ax, methods, k_values,
@@ -169,6 +196,7 @@ def export_k_bar_chart(
         title=title,
         y_label=y_label,
         sample_name=sample_name,
+        colors=colors,
     )
 
     apply_legend_aware_layout(fig, style)
@@ -191,7 +219,7 @@ def export_distribution_overlay(
 ) -> str:
     """Return a base64-encoded PNG of overlaid grain-size curves."""
     apply_matplotlib_style()
-    fig, ax = plt.subplots(figsize=figsize)
+    fig, ax = _new_fig_ax(figsize)
 
     render_distribution_overlay(
         ax, datasets,
@@ -218,7 +246,7 @@ def export_comparison_spec(
     line styles, display unit, log-K). *spec* is a ``ComparisonPlotSpec``.
     """
     apply_matplotlib_style()
-    fig = plt.figure(figsize=figsize)
+    fig = _new_fig(figsize)
     fig.patch.set_facecolor(getattr(spec.style, "figure_facecolor", "white"))
     render_comparison(fig, spec)
     apply_legend_aware_layout(fig, spec.style)
@@ -242,7 +270,7 @@ def export_k_overlay(
 ) -> str:
     """Return a base64-encoded PNG of grouped K-value bars."""
     apply_matplotlib_style()
-    fig, ax = plt.subplots(figsize=figsize)
+    fig, ax = _new_fig_ax(figsize)
 
     render_k_overlay(
         ax, k_results_dict,
@@ -272,7 +300,7 @@ def export_k_boxplot(
 ) -> str:
     """Return a base64-encoded PNG of K-value boxplots."""
     apply_matplotlib_style()
-    fig, ax = plt.subplots(figsize=figsize)
+    fig, ax = _new_fig_ax(figsize)
 
     render_k_boxplot(
         ax, k_results_dict,
@@ -299,13 +327,14 @@ def export_k_scope_boxplot(
 ) -> str:
     """Return a base64-encoded PNG of grouped/dataset K-value boxplots."""
     apply_matplotlib_style()
-    fig, ax = plt.subplots(figsize=figsize)
+    fig, ax = _new_fig_ax(figsize)
     _render_statistics_scope_boxplot(
         ax,
         scope_values,
         colors=colors,
         show_grid=show_grid,
         title=title.replace("Hydraulic Conductivity", "K-value"),
+        style=style,
     )
 
     fig.tight_layout()
@@ -319,8 +348,13 @@ def _render_statistics_scope_boxplot(
     colors: Optional[Sequence[str]] = None,
     show_grid: bool = True,
     title: str = "K-value Distribution by Scope",
+    style: PlotStyle = PROFESSIONAL_STYLE,
 ) -> None:
-    """Render report K boxplots to match Comparison > Statistics defaults."""
+    """Render report K boxplots to match Comparison > Statistics defaults.
+
+    Typography (title/axis/tick sizes) follows *style* so the global report
+    Customize panel themes this plot like the others.
+    """
     foreground = "#000000"
     raw_items = list(scope_values.items()) if isinstance(scope_values, dict) else list(scope_values)
     color_list = list(colors or [])
@@ -387,16 +421,17 @@ def _render_statistics_scope_boxplot(
     )
 
     ax.set_yscale("log")
-    ax.set_ylabel("K (m/s)", color=foreground, fontsize=10)
-    ax.set_title(title, color=foreground, fontsize=11, fontweight="600")
+    ax.set_ylabel("K (m/s)", color=foreground, fontsize=style.label_fontsize)
+    ax.set_title(title, color=foreground,
+                 fontsize=style.title_fontsize, fontweight=style.title_fontweight)
     many_scopes = len(plot_labels) > 6
     ax.tick_params(
         axis="x",
         labelrotation=18 if many_scopes else 0,
-        labelsize=7 if many_scopes else 8,
+        labelsize=max(6, style.tick_fontsize - 1) if many_scopes else style.tick_fontsize,
         colors=foreground,
     )
-    ax.tick_params(axis="y", labelsize=8, colors=foreground)
+    ax.tick_params(axis="y", labelsize=style.tick_fontsize, colors=foreground)
     for idx, tick_label in enumerate(ax.get_xticklabels()):
         tick_label.set_color(foreground)
         tick_label.set_ha("right" if many_scopes else "center")
@@ -435,7 +470,7 @@ def export_applicability_heatmap(
     """Return a base64-encoded PNG of a method applicability heatmap."""
     apply_matplotlib_style()
     _figsize = figsize or (10, max(4, len(k_results) * 0.4))
-    fig, ax = plt.subplots(figsize=_figsize)
+    fig, ax = _new_fig_ax(_figsize)
 
     render_applicability_heatmap(ax, k_results, style=style, title=title)
 
@@ -463,7 +498,7 @@ def export_reliability_matrix(
     n_methods = len(all_methods)
     n_samples = len(k_results_dict)
     _figsize = figsize or (max(10, n_samples * 0.8), max(6, n_methods * 0.5))
-    fig, ax = plt.subplots(figsize=_figsize)
+    fig, ax = _new_fig_ax(_figsize)
 
     render_reliability_matrix(ax, k_results_dict, style=style, title=title)
 

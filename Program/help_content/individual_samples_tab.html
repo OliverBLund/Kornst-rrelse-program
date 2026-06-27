@@ -1,0 +1,74 @@
+<div class="page">
+  <p class="eyebrow">Tab Guide</p>
+  <h1>Individual Samples Tab</h1>
+  <p class="lead">The <strong>Individual Samples</strong> tab works one dataset at a time. Each loaded dataset has its own tab, and inside it three subtabs — <strong>Plot</strong>, <strong>Results</strong>, and <strong>Statistics</strong>. Use the sidebar to switch which dataset is active.</p>
+
+  <h2>Plot Subtab</h2>
+  <p>Shows graphics for the active dataset. Pick what to draw with the buttons and the <strong>More Plots…</strong> menu.</p>
+  <table>
+    <tr>
+      <th>Plot</th>
+      <th>Shows</th>
+    </tr>
+    <tr>
+      <td>Dist. Curve</td>
+      <td>The grain-size distribution (percent passing vs. grain diameter). The default view.</td>
+    </tr>
+    <tr>
+      <td>K-Values</td>
+      <td>A bar chart of the hydraulic-conductivity estimate from each method.</td>
+    </tr>
+    <tr>
+      <td>Combined (More Plots…)</td>
+      <td>The distribution and the K-values side by side.</td>
+    </tr>
+    <tr>
+      <td>Histogram (More Plots…)</td>
+      <td>The grain-size histogram (weight retained per size class).</td>
+    </tr>
+  </table>
+  <ul>
+    <li>The <strong>D-lines</strong> toggle shows the D10/D50/D60 reference lines on the curve.</li>
+    <li>The <strong>Controls</strong> button opens a sidebar for axes, units, labels, reference lines, and K-value display options.</li>
+    <li>A per-tab style preset, <strong>Curve Color</strong>, and <strong>Legend &amp; Typography</strong> control how this on-screen plot looks. (The single global <strong>Plot Style</strong> in the Reports and Export tabs controls report and export plots instead.)</li>
+  </ul>
+
+  <h2>Results Subtab</h2>
+  <p>A table of every method's hydraulic-conductivity estimate, with a detail panel for the selected row.</p>
+  <table>
+    <tr>
+      <th>Column</th>
+      <th>Meaning</th>
+    </tr>
+    <tr><td>Method</td><td>The empirical K-method name.</td></tr>
+    <tr><td>Category</td><td>The method family.</td></tr>
+    <tr><td>K (cm/s), K (m/s), K (m/d)</td><td>The estimate in each unit.</td></tr>
+    <tr><td>Status</td><td>OK, or a warning/error when the sample is outside the method's recommended range.</td></tr>
+  </table>
+  <ul>
+    <li>Select a row to see the method's formula, the grain size it used, and why it was flagged.</li>
+    <li>Which methods appear is set globally by <strong>Analysis &gt; Choose K Methods…</strong></li>
+  </ul>
+
+  <h2>Statistics Subtab</h2>
+  <p>Per-sample numbers grouped into sections:</p>
+  <ul>
+    <li><strong>Grain Size Percentiles</strong> and <strong>Percentile Usage by Methods</strong> — D-values and which methods rely on each.</li>
+    <li><strong>Gradation Parameters</strong> — uniformity (Cu) and curvature (Cc).</li>
+    <li><strong>Classification Criteria</strong> — the soil classification result for the active scheme.</li>
+    <li><strong>Special Method Diameters</strong> — diameters specific methods require.</li>
+    <li><strong>Environmental Parameters</strong> — temperature and porosity used for this dataset.</li>
+    <li><strong>K-statistics</strong> — summary statistics across the included methods.</li>
+  </ul>
+
+  <div class="callout note">
+    <div class="callout-title">Global settings drive these views</div>
+    <p>Temperature, porosity mode, the classification scheme, and the active K-method set come from the <strong>Analysis</strong> menu and the sidebar, so every dataset tab stays consistent. See <a href="analysis_parameters.html">Analysis Parameters</a>.</p>
+  </div>
+
+  <p class="link-list">
+    <a href="comparison_tab.html">Comparison Tab</a>
+    <a href="analysis_parameters.html">Analysis Parameters</a>
+    <a href="common_issues.html">Common Issues</a>
+  </p>
+</div>

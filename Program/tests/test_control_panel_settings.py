@@ -140,6 +140,9 @@ class TestControlPanelSettings(unittest.TestCase):
             "sidebar-credit-logo",
         )
         self.assertFalse(self.panel._sidebar_credit_logo.pixmap().isNull())
+        logo_style = self.panel._sidebar_credit_logo.styleSheet()
+        self.assertIn("background: transparent", logo_style)
+        self.assertNotIn("background: #000", logo_style)
 
         credit_text = self.panel._sidebar_credit_text.text()
         self.assertIn("Developed by Oliver Lund", credit_text)

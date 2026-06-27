@@ -18,7 +18,11 @@ from .collapsible_section import CollapsibleSection
 from .matplotlib_canvas import FigureCanvas
 from .plot_interactions import AxesInteractionController
 from .plot_constants import METHOD_COLORS, DATASET_COLORS, DEFAULT_METHOD_ORDER, ordered_methods
-from .plot_renderers import apply_legend_aware_layout
+from .plot_renderers import (
+    _distribution_limits,
+    _interp_passing_on_grid,
+    apply_legend_aware_layout,
+)
 from .plot_styles import PlotStyle, PROFESSIONAL_STYLE, get_style, get_available_style_names
 from . import comparison_plot_spec as cps
 from .sidebar_controls import (
@@ -121,18 +125,24 @@ class ComparisonPlotWidget(QWidget):
         # the loaded datasets carry named groups (set in set_datasets). Group
         # membership itself is owned by the Scope & Groups dialog, not here.
         self.breakdown = "dataset"
-        # K Distribution sub-view: "cdf" (empirical CDF + lognormal fit) or
-        # "histogram" (Poul's lognormal PDF). Histogram x-axis: "k" or "lnk".
+        # K Distribution sub-view: "histogram" (Poul's lognormal PDF, default) or
+        # "cdf" (empirical CDF + lognormal fit). Histogram x-axis: "k" or "lnk".
         # Histogram bins: "auto" / "off" / a digit string ("5".."30").
-        self.k_dist_view = "cdf"
+        # y-mode: "frequency" (per-bin counts, default) or "density".
+        # show_n: count labels atop bars; drop_empty: collapse all-empty bins.
+        self.k_dist_view = "histogram"
         self.k_hist_axis = "lnk"
         self.k_hist_bins = "auto"
+        self.k_hist_y_mode = "frequency"
+        self.k_hist_show_n = True
+        self.k_hist_drop_empty = True
         self.grid_layout = (2, 2)  # Default grid size
         self.show_grid = True
         self.show_legend = True
         self.sidebar_visible = False
         self.display_unit: HydraulicConductivityUnit = get_default_plot_unit()
         self.log_k_y_scale = False
+        self.k_group_aggregation = "geometric"
 
         # Active style — swapped by set_style(). Starts at the Professional preset
         # so the comparison view now honors the preset selector (previously it was
@@ -690,15 +700,25 @@ class ComparisonPlotWidget(QWidget):
             CollapsibleSection.OLIVE, expanded=True,
         )
         self._row_kdist_view, self._kdist_view_combo = make_combo_row(
-            "Chart", ["Empirical CDF", "Lognormal histogram"])
+            "Chart", ["Lognormal histogram", "Empirical CDF"])
         self._kdist_view_combo.currentIndexChanged.connect(
-            lambda idx: self._on_kdist_view_changed("histogram" if idx == 1 else "cdf"))
+            lambda idx: self._on_kdist_view_changed("cdf" if idx == 1 else "histogram"))
         self._row_kdist_view.setToolTip(
             "K is pooled across the comparison scope.\n"
             "Per dataset = one pooled (Overall) distribution; "
             "Per group = one distribution per group."
         )
         self._sect_kdist.add_widget(self._row_kdist_view)
+
+        self._row_kdist_yaxis, self._kdist_yaxis_combo = make_combo_row(
+            "Histogram y-axis", ["Frequency (count)", "Probability density"])
+        self._kdist_yaxis_combo.currentIndexChanged.connect(
+            lambda idx: self._on_kdist_ymode_changed("density" if idx == 1 else "frequency"))
+        self._row_kdist_yaxis.setToolTip(
+            "Frequency counts how many K-values fall in each bin (default); "
+            "Probability density normalises so the fitted lognormal integrates to 1."
+        )
+        self._sect_kdist.add_widget(self._row_kdist_yaxis)
 
         self._row_kdist_axis, self._kdist_axis_combo = make_combo_row(
             "Histogram x-axis", ["ln K", "K"])
@@ -715,10 +735,43 @@ class ComparisonPlotWidget(QWidget):
             "Off shows fitted curves only; a number sets a fixed bin count."
         )
         self._sect_kdist.add_widget(self._row_kdist_bins)
+
+        self._row_kdist_dropempty, self._sw_kdist_dropempty = make_toggle_row(
+            "Drop empty bins", self.k_hist_drop_empty)
+        self._sw_kdist_dropempty.toggled.connect(self._on_kdist_drop_empty_toggled)
+        self._row_kdist_dropempty.setToolTip(
+            "Collapse all-empty interior bins so populated bars sit adjacent "
+            "(no gaps). Turn off to keep the true K axis with the fitted curve."
+        )
+        self._sect_kdist.add_widget(self._row_kdist_dropempty)
+
+        self._row_kdist_shown, self._sw_kdist_shown = make_toggle_row(
+            "Show N labels", self.k_hist_show_n)
+        self._sw_kdist_shown.toggled.connect(self._on_kdist_show_n_toggled)
+        self._row_kdist_shown.setToolTip("Print the sample count above each bar.")
+        self._sect_kdist.add_widget(self._row_kdist_shown)
+
         self._sect_kdist.setVisible(False)
         lay.addWidget(self._sect_kdist)
 
-        # ── Series Appearance ──
+        # K-Value Aggregation
+        self._sect_k_group_agg = CollapsibleSection(
+            "K-Value Aggregation", "fa6s.calculator",
+            CollapsibleSection.EARTH, expanded=True,
+        )
+        self._row_k_group_agg, self._k_group_agg_combo = make_combo_row(
+            "Group method bars", ["Geo. mean", "Arith. mean"])
+        self._k_group_agg_combo.currentIndexChanged.connect(
+            self._on_k_group_aggregation_changed)
+        self._row_k_group_agg.setToolTip(
+            "Controls how grouped K-value method bars summarize datasets "
+            "inside each group."
+        )
+        self._sect_k_group_agg.add_widget(self._row_k_group_agg)
+        self._sect_k_group_agg.setVisible(False)
+        lay.addWidget(self._sect_k_group_agg)
+
+        # Series Appearance
         self._sect_dataset_colors = CollapsibleSection(
             "Series Appearance", "fa6s.palette",
             CollapsibleSection.PURPLE, expanded=False,
@@ -851,6 +904,13 @@ class ComparisonPlotWidget(QWidget):
 
     def _on_sidebar_log_k_toggled(self, on: bool) -> None:
         self.log_k_y_scale = bool(on)
+        self.refresh_plot()
+
+    def _on_k_group_aggregation_changed(self, index: int) -> None:
+        mode = "arithmetic" if index == 1 else "geometric"
+        if self.k_group_aggregation == mode:
+            return
+        self.k_group_aggregation = mode
         self.refresh_plot()
 
     def _update_style_field(self, field: str, value) -> None:
@@ -1175,7 +1235,7 @@ class ComparisonPlotWidget(QWidget):
     def _group_overlay_inputs(
         self,
     ) -> tuple[Dict[str, Dict[str, float]], List[str], Dict[str, set]]:
-        """Per-group K aggregates for the K-Values overlay (in m/s)."""
+        """Per-group method-mean K aggregates for the K-Values overlay (in m/s)."""
         return cps.group_overlay_inputs(self._build_spec())
 
     def _histogram_units(self) -> list[dict]:
@@ -1202,6 +1262,7 @@ class ComparisonPlotWidget(QWidget):
             return
         self.breakdown = mode
         self._breakdown_explicit = True
+        self._sync_contextual_sidebar_sections()
         self.refresh_plot()
 
     def _on_kdist_view_changed(self, view: str) -> None:
@@ -1225,18 +1286,40 @@ class ComparisonPlotWidget(QWidget):
         self.k_hist_bins = value
         self.refresh_plot()
 
+    def _on_kdist_ymode_changed(self, mode: str) -> None:
+        if self.k_hist_y_mode == mode:
+            return
+        self.k_hist_y_mode = mode
+        self.refresh_plot()
+
+    def _on_kdist_show_n_toggled(self, checked: bool) -> None:
+        if self.k_hist_show_n == checked:
+            return
+        self.k_hist_show_n = checked
+        self.refresh_plot()
+
+    def _on_kdist_drop_empty_toggled(self, checked: bool) -> None:
+        if self.k_hist_drop_empty == checked:
+            return
+        self.k_hist_drop_empty = checked
+        self.refresh_plot()
+
     def _sync_kdist_controls(self) -> None:
         """Show K-distribution chart/axis sidebar rows only for that plot type."""
         if not hasattr(self, "_sect_kdist"):
             return
         is_kdist = self.current_plot_type == "k-distribution"
         self._sect_kdist.setVisible(is_kdist)
-        # The axis + bins rows are only meaningful for the histogram view.
+        # The histogram-only rows (y-axis, x-axis, bins, drop-empty, N labels)
+        # are meaningless for the empirical-CDF view.
         histogram = is_kdist and self.k_dist_view == "histogram"
-        if hasattr(self, "_row_kdist_axis"):
-            self._row_kdist_axis.setVisible(histogram)
-        if hasattr(self, "_row_kdist_bins"):
-            self._row_kdist_bins.setVisible(histogram)
+        for attr in (
+            "_row_kdist_yaxis", "_row_kdist_axis", "_row_kdist_bins",
+            "_row_kdist_dropempty", "_row_kdist_shown",
+        ):
+            row = getattr(self, attr, None)
+            if row is not None:
+                row.setVisible(histogram)
 
     def _sync_breakdown_controls(self) -> None:
         """Show the Breakdown control only when named groups exist; sync buttons."""
@@ -1396,6 +1479,14 @@ class ComparisonPlotWidget(QWidget):
         show_log_axis = self.current_plot_type in {"k-values", "combined"}
         if hasattr(self, "_row_k_log"):
             self._row_k_log.setVisible(show_log_axis)
+        show_group_agg = (
+            self.current_plot_type in {"k-values", "combined"}
+            and self._use_group_breakdown()
+        )
+        if hasattr(self, "_sect_k_group_agg"):
+            self._sect_k_group_agg.setVisible(show_group_agg)
+        if hasattr(self, "_row_k_group_agg"):
+            self._row_k_group_agg.setVisible(show_group_agg)
 
     def _sync_mode_radios(self):
         """Reflect the active layout mode in the radio buttons without re-entering."""
@@ -1575,6 +1666,7 @@ class ComparisonPlotWidget(QWidget):
         if not self._breakdown_explicit:
             self.breakdown = "group" if self._has_named_groups() else "dataset"
         self._sync_breakdown_controls()
+        self._sync_contextual_sidebar_sections()
         self._rebuild_dataset_color_rows()
 
     def _build_spec(self) -> cps.ComparisonPlotSpec:
@@ -1615,9 +1707,13 @@ class ComparisonPlotWidget(QWidget):
             show_legend=self.show_legend,
             log_k_y_scale=self.log_k_y_scale,
             display_unit=self.display_unit,
+            k_group_aggregation=self.k_group_aggregation,
             k_dist_view=self.k_dist_view,
             k_hist_axis=self.k_hist_axis,
             k_hist_bins=self.k_hist_bins,
+            k_hist_y_mode=self.k_hist_y_mode,
+            k_hist_show_n=self.k_hist_show_n,
+            k_hist_drop_empty=self.k_hist_drop_empty,
         )
 
     def refresh_plot(self):
@@ -1725,21 +1821,21 @@ class ComparisonPlotWidget(QWidget):
             self._set_drawer_rows("Plot data", ["Status"], [("No datasets to compare",)])
             return
 
+        spec = self._build_spec()
         if self.current_plot_type == "k-distribution":
-            headers, rows = self._k_scope_drawer_rows()
-            self._set_drawer_rows("K distribution summary - OK only", headers, rows)
+            title, headers, rows = self._k_distribution_drawer_rows(spec)
         elif self.current_plot_type == "k-values":
-            headers, rows = self._k_method_drawer_rows()
-            self._set_drawer_rows("K method summary - OK only", headers, rows)
+            title, headers, rows = self._k_values_drawer_rows(spec)
         elif self.current_plot_type == "distribution":
-            headers, rows = self._distribution_drawer_rows()
-            self._set_drawer_rows("Distribution curve data", headers, rows)
+            title, headers, rows = self._distribution_drawer_rows(spec)
         elif self.current_plot_type == "histogram":
-            headers, rows = self._histogram_drawer_rows()
-            self._set_drawer_rows("Histogram size-class data", headers, rows)
+            title, headers, rows = self._histogram_drawer_rows(spec)
+        elif self.current_plot_type == "combined":
+            title, headers, rows = self._combined_drawer_rows(spec)
         else:
             headers, rows = self._grain_drawer_rows()
-            self._set_drawer_rows("Grain summary", headers, rows)
+            title = "Grain summary"
+        self._set_drawer_rows(title, headers, rows)
 
     def _set_drawer_rows(self, title: str, headers: list[str], rows: list[tuple]) -> None:
         self._drawer_title_text = title
@@ -1824,7 +1920,17 @@ class ComparisonPlotWidget(QWidget):
                 add_row(dataset_name, grain.by_dataset[dataset_name])
         return headers, rows
 
-    def _distribution_drawer_rows(self) -> tuple[list[str], list[tuple]]:
+    def _distribution_drawer_rows(self, spec: cps.ComparisonPlotSpec) -> tuple[str, list[str], list[tuple]]:
+        if spec.display_mode == "overlay" and not spec.use_group_breakdown:
+            headers, rows = self._raw_distribution_drawer_rows()
+            return "Distribution curve data", headers, rows
+
+        units = self._shown_plot_units(spec, self._named_distribution_units(spec))
+        axis_indices = list(range(len(units))) if spec.display_mode == "grid" else [0] * len(units)
+        headers, rows = self._distribution_curve_rows(units, axis_indices)
+        return "Distribution plotted curve data", headers, rows
+
+    def _raw_distribution_drawer_rows(self) -> tuple[list[str], list[tuple]]:
         headers = ["Dataset", "Particle size (mm)", "Percent passing (%)"]
         rows: list[tuple] = []
         for dataset in self.datasets:
@@ -1836,70 +1942,320 @@ class ComparisonPlotWidget(QWidget):
                 ))
         return headers, rows
 
-    def _histogram_drawer_rows(self) -> tuple[list[str], list[tuple]]:
-        headers = ["Dataset", "Size class", "Particle size (mm)", "Weight (%)"]
+    def _histogram_drawer_rows(self, spec: cps.ComparisonPlotSpec) -> tuple[str, list[str], list[tuple]]:
+        headers = ["Scope", "Size class", "Particle size (mm)", "Weight (%)"]
         rows: list[tuple] = []
-        for dataset in self.datasets:
-            sizes, weights = self._calculate_histogram_frequencies(
-                dataset.particle_sizes,
-                dataset.percent_passing,
-            )
+        for unit in self._shown_plot_units(spec, cps.histogram_units(spec)):
+            sizes = unit.get("sizes", [])
+            weights = unit.get("freq", [])
             for index, (size, weight) in enumerate(zip(sizes, weights), start=1):
                 rows.append((
-                    dataset.sample_name,
+                    unit.get("label", "Scope"),
                     str(index),
                     self._fmt_number(size, decimals=6),
                     self._fmt_number(weight, decimals=4),
                 ))
-        return headers, rows
+        return "Histogram plotted size-class data", headers, rows
 
-    def _k_scope_drawer_rows(self) -> tuple[list[str], list[tuple]]:
-        k_report = self._comparison_snapshot.k
+    def _k_distribution_drawer_rows(
+        self, spec: cps.ComparisonPlotSpec
+    ) -> tuple[str, list[str], list[tuple]]:
         unit = self._unit_symbol()
+        is_histogram = self.k_dist_view == "histogram"
+        headers = ["Scope", "Dataset", "Group", "Method", f"K ({unit})", "ln K"]
+        if not is_histogram:
+            headers.append("CDF probability (%)")
+
+        scope_labels = self._k_distribution_scope_labels(spec)
+        rows: list[tuple] = []
+        for scope_label in scope_labels:
+            records = self._k_distribution_records_for_scope(scope_label)
+            n = len(records)
+            for index, record in enumerate(records):
+                converted = self._convert_k_value(record.positive_value)
+                if converted is None or converted <= 0:
+                    continue
+                base = (
+                    scope_label,
+                    record.dataset_name,
+                    record.group_name,
+                    record.method_name,
+                    self._fmt_k(record.positive_value),
+                    self._fmt_number(np.log(converted), decimals=6),
+                )
+                if is_histogram:
+                    rows.append(base)
+                else:
+                    probability = ((index + 1 - 0.5) / n) * 100.0 if n else None
+                    rows.append(base + (self._fmt_number(probability, decimals=4),))
+
+        title = (
+            "K distribution histogram observations - OK only"
+            if is_histogram
+            else "K distribution CDF points - OK only"
+        )
+        return title, headers, rows
+
+    def _k_values_drawer_rows(
+        self, spec: cps.ComparisonPlotSpec
+    ) -> tuple[str, list[str], list[tuple]]:
         headers = [
-            "Scope", "Datasets", f"Kgeo ({unit})", f"Arithmetic ({unit})", f"Median ({unit})",
-            "sigma lnK", "Var lnK", "Included", "Warnings",
+            "Scope", "Method", f"K ({self._unit_symbol()})", "Status", "Value type",
         ]
         rows: list[tuple] = []
+        k_results_m_s, flagged_by_scope, value_type_by_scope = self._plotted_k_scope_values(spec)
 
-        def add_row(label: str, stats) -> None:
-            rows.append((
-                label,
-                str(stats.dataset_count),
-                self._fmt_k(stats.geometric_mean_m_s),
-                self._fmt_k(stats.arithmetic_mean_m_s),
-                self._fmt_k(stats.median_m_s),
-                self._fmt_number(stats.ln_std_dev, decimals=2),
-                self._fmt_number(stats.ln_variance, decimals=2),
-                f"{stats.included_count} / {stats.total_cells}",
-                str(stats.warning_count),
-            ))
+        for scope_name, k_dict in k_results_m_s.items():
+            flagged = flagged_by_scope.get(scope_name, set())
+            value_type = value_type_by_scope.get(scope_name, "Dataset value")
+            for method_name in self._ordered_methods(k_dict.keys()):
+                status = "Warning" if method_name in flagged else "OK"
+                rows.append((
+                    scope_name,
+                    method_name,
+                    self._fmt_k(k_dict[method_name]),
+                    status,
+                    value_type,
+                ))
+        return "K-value plotted bars", headers, rows
 
-        add_row("Overall", k_report.overall)
-        for group_name in k_report.group_names:
-            if group_name in k_report.by_group and group_name != UNGROUPED_LABEL:
-                add_row(group_name, k_report.by_group[group_name])
-        return headers, rows
-
-    def _k_method_drawer_rows(self) -> tuple[list[str], list[tuple]]:
-        k_report = self._comparison_snapshot.k
-        unit = self._unit_symbol()
+    def _combined_drawer_rows(
+        self, spec: cps.ComparisonPlotSpec
+    ) -> tuple[str, list[str], list[tuple]]:
         headers = [
-            "Method", "Included", "OK", "Warnings", f"Kgeo ({unit})", f"Median ({unit})", f"Range ({unit})",
+            "Scope", "Panel", "Curve or method", "Particle size (mm)",
+            "Percent passing (%)", f"K ({self._unit_symbol()})", "Status",
         ]
         rows: list[tuple] = []
-        for method_name in self._ordered_methods(k_report.by_method.keys()):
-            stats = k_report.by_method[method_name]
-            rows.append((
-                method_name,
-                f"{stats.included_count} / {stats.total_cells}",
-                str(stats.ok_count),
-                str(stats.warning_count),
-                self._fmt_k(stats.geometric_mean_m_s),
-                self._fmt_k(stats.median_m_s),
-                self._fmt_range(stats.min_m_s, stats.max_m_s),
-            ))
+        facets = self._shown_plot_units(spec, cps.combined_facets(spec))
+
+        for facet_index, facet in enumerate(facets):
+            _headers, dist_rows = self._distribution_curve_rows(
+                [{
+                    "label": facet["label"],
+                    "members": self._named_members_for_facet(spec, facet["label"]),
+                }],
+                [facet_index * 2],
+            )
+            for scope, curve, size, passing in dist_rows:
+                rows.append((scope, "Distribution", curve, size, passing, "", ""))
+
+            k_dict = facet.get("k", {})
+            flagged = facet.get("flagged", set())
+            for method_name in self._ordered_methods(k_dict.keys())[:5]:
+                rows.append((
+                    facet["label"],
+                    "K values",
+                    method_name,
+                    "",
+                    "",
+                    self._fmt_k(k_dict[method_name]),
+                    "Warning" if method_name in flagged else "OK",
+                ))
+
+        return "Combined plotted data", headers, rows
+
+    def _shown_plot_units(self, spec: cps.ComparisonPlotSpec, units: list[dict]) -> list[dict]:
+        if spec.display_mode != "grid":
+            return list(units)
+        _rows, _cols, shown, _hidden = cps.facet_dims(spec, len(units))
+        return list(units[:shown])
+
+    def _named_distribution_units(self, spec: cps.ComparisonPlotSpec) -> list[dict]:
+        def make_member(dataset) -> dict:
+            return {
+                "name": dataset.sample_name,
+                "sizes": list(getattr(dataset, "particle_sizes", []) or []),
+                "passing": list(getattr(dataset, "percent_passing", []) or []),
+            }
+
+        if not spec.use_group_breakdown:
+            return [
+                {"label": dataset.sample_name, "members": [make_member(dataset)]}
+                for dataset in self.datasets
+            ]
+
+        units: list[dict] = []
+        for group_name in cps.group_order(spec):
+            members = [
+                dataset for dataset in self.datasets
+                if spec.dataset_groups.get(dataset.sample_name, UNGROUPED_LABEL) == group_name
+            ]
+            if group_name == UNGROUPED_LABEL:
+                units.extend(
+                    {"label": dataset.sample_name, "members": [make_member(dataset)]}
+                    for dataset in members
+                )
+                continue
+            units.append({
+                "label": group_name,
+                "members": [make_member(dataset) for dataset in members],
+            })
+        return units
+
+    def _named_members_for_facet(
+        self, spec: cps.ComparisonPlotSpec, label: str
+    ) -> list[dict]:
+        for unit in self._named_distribution_units(spec):
+            if unit["label"] == label:
+                return unit["members"]
+        return []
+
+    def _distribution_curve_rows(
+        self, units: list[dict], axis_indices: list[int]
+    ) -> tuple[list[str], list[tuple]]:
+        headers = ["Scope", "Curve", "Particle size (mm)", "Percent passing (%)"]
+        rows: list[tuple] = []
+
+        for unit_index, unit in enumerate(units):
+            members = unit.get("members", [])
+            xlim = self._distribution_xlim_for_members(
+                members,
+                axis_indices[unit_index] if unit_index < len(axis_indices) else None,
+            )
+            if xlim is None:
+                continue
+            grid = np.logspace(np.log10(xlim[0]), np.log10(xlim[1]), 60)
+            curves: list[tuple[str, np.ndarray]] = []
+            for member in members:
+                curve = _interp_passing_on_grid(
+                    member.get("sizes", []),
+                    member.get("passing", []),
+                    grid,
+                )
+                if curve is not None:
+                    curves.append((member.get("name", "Member"), curve))
+            if not curves:
+                continue
+
+            stacked = np.vstack([curve for _name, curve in curves])
+            self._append_distribution_curve_rows(
+                rows,
+                unit.get("label", "Scope"),
+                "Aggregate" if len(curves) > 1 else "Curve",
+                grid,
+                np.nanmean(stacked, axis=0),
+            )
+            if len(curves) > 1:
+                self._append_distribution_curve_rows(
+                    rows,
+                    unit.get("label", "Scope"),
+                    "Band min",
+                    grid,
+                    np.nanmin(stacked, axis=0),
+                )
+                self._append_distribution_curve_rows(
+                    rows,
+                    unit.get("label", "Scope"),
+                    "Band max",
+                    grid,
+                    np.nanmax(stacked, axis=0),
+                )
+                for member_name, curve in curves:
+                    self._append_distribution_curve_rows(
+                        rows,
+                        unit.get("label", "Scope"),
+                        f"Member: {member_name}",
+                        grid,
+                        curve,
+                    )
+
         return headers, rows
+
+    def _distribution_xlim_for_members(
+        self, members: list[dict], axis_index: Optional[int]
+    ) -> Optional[tuple[float, float]]:
+        axes = list(getattr(self.figure, "axes", []) or [])
+        if axis_index is not None and 0 <= axis_index < len(axes):
+            lo, hi = axes[axis_index].get_xlim()
+            if lo > 0 and hi > lo:
+                return float(lo), float(hi)
+
+        sizes: list[float] = []
+        passing: list[float] = []
+        for member in members:
+            for size, pct in zip(member.get("sizes", []), member.get("passing", [])):
+                if size is None or pct is None:
+                    continue
+                try:
+                    size_f = float(size)
+                    pct_f = float(pct)
+                except (TypeError, ValueError):
+                    continue
+                if size_f > 0:
+                    sizes.append(size_f)
+                    passing.append(pct_f)
+        if not sizes:
+            return None
+        lo, hi, _ymin, _ymax = _distribution_limits(sizes, passing)
+        return float(lo), float(hi)
+
+    def _append_distribution_curve_rows(
+        self,
+        rows: list[tuple],
+        scope: str,
+        curve_label: str,
+        grid: np.ndarray,
+        values: np.ndarray,
+    ) -> None:
+        for size, passing in zip(grid, values):
+            rows.append((
+                scope,
+                curve_label,
+                self._fmt_number(size, decimals=6),
+                self._fmt_number(passing, decimals=4),
+            ))
+
+    def _k_distribution_scope_labels(self, spec: cps.ComparisonPlotSpec) -> list[str]:
+        scopes = cps.k_distribution_scopes(spec)
+        if self.k_dist_view == "histogram":
+            if spec.use_group_breakdown:
+                scopes = [scope for scope in scopes if not scope.get("is_overall")] or scopes
+            else:
+                scopes = [scope for scope in scopes if scope.get("is_overall")] or scopes
+        return [scope.get("label", "Scope") for scope in scopes]
+
+    def _k_distribution_records_for_scope(self, scope_label: str) -> list:
+        records = [
+            record for record in self._comparison_snapshot.k.included_records
+            if record.positive_value is not None
+            and (
+                scope_label == "Overall"
+                or record.group_name == scope_label
+                or record.dataset_name == scope_label
+            )
+        ]
+        return sorted(
+            records,
+            key=lambda record: self._convert_k_value(record.positive_value) or 0.0,
+        )
+
+    def _plotted_k_scope_values(
+        self, spec: cps.ComparisonPlotSpec
+    ) -> tuple[Dict[str, Dict[str, float]], Dict[str, set], Dict[str, str]]:
+        if spec.use_group_breakdown:
+            k_results_m_s, _colors, flagged = cps.group_overlay_inputs(spec)
+            named_groups = {
+                group for group in spec.dataset_groups.values()
+                if group and group != UNGROUPED_LABEL
+            }
+            mean_name = (
+                "arithmetic"
+                if spec.k_group_aggregation == "arithmetic"
+                else "geometric"
+            )
+            value_types = {
+                scope: (
+                    f"Group method {mean_name} mean (OK only)"
+                    if scope in named_groups
+                    else "Dataset value"
+                )
+                for scope in k_results_m_s
+            }
+            return k_results_m_s, flagged, value_types
+
+        value_types = {scope: "Dataset value" for scope in spec.k_results_dict}
+        return spec.k_results_dict, spec.flagged_methods_dict, value_types
 
     @staticmethod
     def _grain_metric(stats, metric_name: str, attr_name: str) -> Optional[float]:

@@ -55,6 +55,69 @@ DATASET_COLORS: List[str] = [
 ]
 
 
+# ── Palettes ──────────────────────────────────────────────────
+# The dataset/group colours for comparison plots can be drawn from a chosen
+# palette so reports/exports re-colour every multi-series plot at once. The
+# "Categorical" default reuses DATASET_COLORS (so behaviour is unchanged unless
+# a palette is picked); the others sample a perceptually-uniform matplotlib
+# colormap to N evenly-spaced colours.
+
+CATEGORICAL_PALETTE = "Categorical"
+# Display name → matplotlib colormap key. Turbo/viridis-family are perceptually
+# uniform; "Grayscale" (the 'gray' map) is for black-and-white printing.
+_PALETTE_CMAPS: Dict[str, str] = {
+    "Viridis": "viridis",
+    "Plasma": "plasma",
+    "Inferno": "inferno",
+    "Cividis": "cividis",
+    "Turbo": "turbo",
+    "Grayscale": "gray",
+}
+PALETTE_NAMES: List[str] = [CATEGORICAL_PALETTE] + list(_PALETTE_CMAPS)
+
+# Per-palette sampling window (fraction of the colormap to use). Trimming the
+# endpoints keeps the extreme-dark/-light ends legible against a white plot;
+# grayscale stops well short of white so every shade stays visible.
+_DEFAULT_PALETTE_RANGE = (0.06, 0.94)
+_PALETTE_RANGES: Dict[str, tuple] = {
+    "Grayscale": (0.0, 0.62),
+}
+
+
+def palette_colors(name: str, n: int) -> List[str]:
+    """Return *n* distinct hex colours for a palette *name*.
+
+    "Categorical" cycles the canonical DATASET_COLORS (matching the GUI by
+    construction); any colormap palette samples that matplotlib colormap at *n*
+    evenly-spaced points across the palette's sampling window, so the colours are
+    spread over the FULL map (sampling to the actual series count is the caller's
+    job — under-sampling clusters everything at one end). Unknown names fall back
+    to Categorical. ``n <= 0`` yields an empty list.
+    """
+    count = max(0, int(n))
+    if count == 0:
+        return []
+    key = str(name or "").strip()
+    cmap_name = next(
+        (cmap for disp, cmap in _PALETTE_CMAPS.items() if disp.lower() == key.lower()),
+        None,
+    )
+    if cmap_name is not None:
+        try:
+            import numpy as np
+            from matplotlib import colormaps
+            from matplotlib.colors import to_hex
+
+            cmap = colormaps[cmap_name]
+            display = next(d for d in _PALETTE_CMAPS if d.lower() == key.lower())
+            lo, hi = _PALETTE_RANGES.get(display, _DEFAULT_PALETTE_RANGE)
+            stops = [(lo + hi) / 2] if count == 1 else list(np.linspace(lo, hi, count))
+            return [to_hex(cmap(stop)) for stop in stops]
+        except (KeyError, ValueError, ImportError, StopIteration):
+            pass  # Unknown/unavailable colormap → categorical fallback.
+    return [DATASET_COLORS[i % len(DATASET_COLORS)] for i in range(count)]
+
+
 # ── Status classification ─────────────────────────────────────
 
 def classify_k_status(result) -> str:

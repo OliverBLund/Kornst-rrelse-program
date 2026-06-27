@@ -18,6 +18,7 @@ from typing import Any, Dict
 from PyQt6.QtCore import QSettings
 
 from .plot_styles import PlotStyle, get_available_style_names, get_style
+from .plot_constants import CATEGORICAL_PALETTE, PALETTE_NAMES, palette_colors
 
 
 # Override fields the customize panel may set, with light type coercion so a
@@ -36,8 +37,10 @@ ALLOWED_OVERRIDE_FIELDS = (
 
 _PRESET_KEY = "report_plot_style_preset"
 _OVERRIDES_KEY = "report_plot_style_overrides"
+_PALETTE_KEY = "report_plot_palette"
 _PRESET_CACHE: str | None = None
 _OVERRIDES_CACHE: Dict[str, Any] | None = None
+_PALETTE_CACHE: str | None = None
 
 
 def _settings() -> QSettings:
@@ -138,6 +141,39 @@ def clear_report_style_overrides() -> None:
     set_report_style_overrides({})
 
 
+def get_report_palette() -> str:
+    """Return the persisted palette name (defaults to Categorical)."""
+    global _PALETTE_CACHE
+    if _PALETTE_CACHE is not None:
+        return _PALETTE_CACHE
+    raw = str(_settings().value(_PALETTE_KEY, "") or "").strip()
+    name = next(
+        (p for p in PALETTE_NAMES if p.lower() == raw.lower()),
+        CATEGORICAL_PALETTE,
+    )
+    _PALETTE_CACHE = name
+    return name
+
+
+def set_report_palette(name: str) -> str:
+    """Persist the chosen palette name (validated against PALETTE_NAMES)."""
+    global _PALETTE_CACHE
+    valid = next(
+        (p for p in PALETTE_NAMES if p.lower() == str(name or "").strip().lower()),
+        CATEGORICAL_PALETTE,
+    )
+    _PALETTE_CACHE = valid
+    settings = _settings()
+    settings.setValue(_PALETTE_KEY, valid)
+    settings.sync()
+    return valid
+
+
+def resolve_report_palette_colors(n: int) -> list[str]:
+    """Return *n* colours for the persisted palette (Categorical → DATASET_COLORS)."""
+    return palette_colors(get_report_palette(), n)
+
+
 def resolve_report_style() -> PlotStyle:
     """Return the persisted preset with any custom field overrides applied."""
     style = get_style(get_report_style_preset())
@@ -149,6 +185,7 @@ def resolve_report_style() -> PlotStyle:
 
 
 def _reset_cache_for_tests() -> None:  # pragma: no cover - test helper
-    global _PRESET_CACHE, _OVERRIDES_CACHE
+    global _PRESET_CACHE, _OVERRIDES_CACHE, _PALETTE_CACHE
     _PRESET_CACHE = None
     _OVERRIDES_CACHE = None
+    _PALETTE_CACHE = None

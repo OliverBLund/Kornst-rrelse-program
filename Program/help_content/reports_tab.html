@@ -1,0 +1,74 @@
+<div class="page">
+  <p class="eyebrow">Tab Guide</p>
+  <h1>Reports Tab</h1>
+  <p class="lead">The <strong>Reports</strong> tab turns one or more datasets into a formatted document. Pick a <strong>report type</strong>, optionally adjust the content, choose an output format, and generate.</p>
+
+  <h2>Report Types</h2>
+  <table>
+    <tr>
+      <th>Report type</th>
+      <th>Samples</th>
+      <th>What it includes</th>
+    </tr>
+    <tr>
+      <td>Individual Sample</td>
+      <td>Exactly one</td>
+      <td>That sample's grain-size curve, K-value bar chart, method applicability heatmap, and tables.</td>
+    </tr>
+    <tr>
+      <td>Cross-Sample Comparison</td>
+      <td>Two or more</td>
+      <td>Side-by-side plots (grain-size overlay, K-value bars, K box plots) plus overall/group aggregate summaries.</td>
+    </tr>
+    <tr>
+      <td>Full Project Summary</td>
+      <td>All loaded</td>
+      <td>The comparison plots and tables for every dataset, with appendices.</td>
+    </tr>
+    <tr>
+      <td>K-Value Focus</td>
+      <td>One or more</td>
+      <td>Hydraulic-conductivity tables, group aggregates, K box plots, and the lognormal K-distribution plot.</td>
+    </tr>
+  </table>
+
+  <div class="callout note">
+    <div class="callout-title">Types are templates, not locks</div>
+    <p>Choosing a report type pre-sets the section, plot, and sample-selection toggles. Everything stays editable, so you can start from a template and tick exactly the sections, tables, and plots you want.</p>
+  </div>
+
+  <h2>Steps</h2>
+  <ol>
+    <li>Pick a report type.</li>
+    <li>Select the samples (the type sets the rule: one, two-or-more, or all).</li>
+    <li>Adjust <strong>Main Sections</strong>, <strong>Plots to Include</strong>, and <strong>Appendices</strong>.</li>
+    <li>Choose the output format: <strong>HTML</strong>, <strong>PDF</strong>, or <strong>Word (.docx)</strong>.</li>
+    <li>Generate, then preview, print, or save.</li>
+  </ol>
+
+  <h2>Plots To Include</h2>
+  <ul>
+    <li><strong>Per sample</strong>: each selected sample's own grain-size curve and K-value bar. Opt-in for multi-sample reports, so a large project does not render dozens of figures unless you ask.</li>
+    <li><strong>Across samples</strong>: the comparison plots — grain-size comparison, K-value comparison bars, K distribution box plots, the lognormal K-distribution, and the method reliability matrix. These need two or more samples.</li>
+  </ul>
+
+  <h2>Plot Style</h2>
+  <p>The <strong>Plot Style</strong> control sets how report plots look, with one rule: <strong>the preset sizes the text, the palette colours the data.</strong></p>
+  <ul>
+    <li><strong>Preset</strong> (Professional, Presentation, …) — typography only. Use Presentation for large text.</li>
+    <li><strong>Palette</strong> (Categorical, Viridis, Grayscale, …) — the colours of the data series. Categorical keeps the standard colours; a colour map recolours every plot; Grayscale is for black-and-white printing.</li>
+    <li><strong>Customize…</strong> fine-tunes legend and font sizes on top of the preset.</li>
+  </ul>
+  <p class="muted">The Reports and Export tabs share these settings, so you theme your output once.</p>
+
+  <div class="callout note">
+    <div class="callout-title">Large reports run in the background</div>
+    <p>Generating a big report runs in a background task with a progress dialog you can cancel, so the app stays responsive. The preview and the exported PDF show the whole report even when it embeds many figures.</p>
+  </div>
+
+  <p class="link-list">
+    <a href="export_tab.html">Export Tab</a>
+    <a href="comparison_tab.html">Comparison Tab</a>
+    <a href="common_issues.html">Common Issues</a>
+  </p>
+</div>

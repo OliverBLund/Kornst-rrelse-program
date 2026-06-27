@@ -32,9 +32,17 @@ HELP_TOPIC_SECTIONS = [
         "Use The App",
         [
             ("Workspace Tour", "workspace_tour.html", "fa6s.compass"),
-            ("Results, Comparison & Export", "workflow_results.html", "fa6s.chart-area"),
             ("Analysis Parameters", "analysis_parameters.html", "fa6s.sliders"),
             ("Common Issues", "common_issues.html", "fa6s.screwdriver-wrench"),
+        ],
+    ),
+    (
+        "Tabs & Subtabs",
+        [
+            ("Individual Samples Tab", "individual_samples_tab.html", "fa6s.chart-area"),
+            ("Comparison Tab", "comparison_tab.html", "fa6s.code-compare"),
+            ("Reports Tab", "reports_tab.html", "fa6s.file-lines"),
+            ("Export Tab", "export_tab.html", "fa6s.file-export"),
         ],
     ),
     (

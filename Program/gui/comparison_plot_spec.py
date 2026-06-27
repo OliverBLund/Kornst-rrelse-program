@@ -92,11 +92,18 @@ class ComparisonPlotSpec:
     show_legend: bool = True
     log_k_y_scale: bool = False
     display_unit: HydraulicConductivityUnit = field(default_factory=get_default_plot_unit)
+    k_group_aggregation: str = "geometric"  # geometric | arithmetic
 
     # ── K Distribution sub-view ─────────────────────────────────────
-    k_dist_view: str = "cdf"     # cdf | histogram
-    k_hist_axis: str = "lnk"     # lnk | k
-    k_hist_bins: str = "auto"    # auto | off | digit string
+    # The lognormal histogram is the default view (the empirical CDF is the
+    # opt-in alternative); see render_k_histogram for the frequency/N/collapse
+    # semantics carried by the three options below.
+    k_dist_view: str = "histogram"   # histogram | cdf
+    k_hist_axis: str = "lnk"         # lnk | k
+    k_hist_bins: str = "auto"        # auto | off | digit string
+    k_hist_y_mode: str = "frequency"  # frequency (counts) | density
+    k_hist_show_n: bool = True        # annotate each bar with its count
+    k_hist_drop_empty: bool = True    # collapse all-empty interior bins
 
 
 # ═══════════════════════════════════════════════════════════════════
@@ -218,7 +225,7 @@ def group_overlay_inputs(
 ) -> tuple[Dict[str, Dict[str, float]], List[str], Dict[str, set]]:
     """Per-group K aggregates for the K-Values overlay (in m/s).
 
-    Named groups collapse to one geometric-mean series each (OK-only, from the
+    Named groups collapse to one method-mean series each (OK-only, from the
     comparison snapshot); ungrouped datasets stay individual so no scope is
     dropped. Returns parallel ``(results_m_s, colors, flagged_by_scope)``.
     """
@@ -238,10 +245,18 @@ def group_overlay_inputs(
 
     group_names = list(snapshot.k.group_names) if snapshot is not None else []
     palette_fallback = spec.palette[0] if spec.palette else "#1f77b4"
+    aggregation_mode = (
+        "arithmetic" if spec.k_group_aggregation == "arithmetic" else "geometric"
+    )
+
+    def aggregate(values: list[float]) -> float:
+        if aggregation_mode == "arithmetic":
+            return float(sum(values) / len(values))
+        return math.exp(sum(map(math.log, values)) / len(values))
 
     def emit_group(group_name: str) -> None:
         method_means = {
-            method: math.exp(sum(map(math.log, values)) / len(values))
+            method: aggregate(values)
             for method, values in buckets.get(group_name, {}).items()
             if values
         }
@@ -323,7 +338,7 @@ def _k_grid_units(
     """Return ``(display_results, flagged_by_scope)`` for K grid facets.
 
     Honours the breakdown: per-dataset cells use raw per-dataset results;
-    per-group cells use the group geometric-mean aggregates.
+    per-group cells use the selected group method-mean aggregates.
     """
     if spec.use_group_breakdown:
         results_m_s, _colors, flagged = group_overlay_inputs(spec)
@@ -427,8 +442,8 @@ def histogram_units(spec: ComparisonPlotSpec) -> list[dict]:
 def combined_facets(spec: ComparisonPlotSpec) -> list[dict]:
     """Faceting units for the combined view: distribution + K per unit.
 
-    Joins each distribution unit to its K values by label — group geo-mean
-    aggregates per group, or raw per-dataset results otherwise.
+    Joins each distribution unit to its K values by label: selected group
+    method-mean aggregates per group, or raw per-dataset results otherwise.
     """
     if spec.use_group_breakdown:
         k_results_m_s, _colors, flagged_by_scope = group_overlay_inputs(spec)
@@ -461,19 +476,30 @@ def k_distribution_scopes(spec: ComparisonPlotSpec) -> list[dict]:
     if not records:
         return []
 
-    scopes: list[dict] = [{
-        "label": "Overall",
-        "values": [convert_k_value(spec, record.positive_value) for record in records],
-        "color": "#3d4a1f",
-        "linestyle": "-",
-        "is_overall": True,
-    }]
-
     named_groups = [
         group for group in snapshot.k.group_names
         if group and group != UNGROUPED_LABEL
     ]
     palette = spec.palette or ["#1f77b4"]
+    reserved_group_colors = {
+        color for color in (
+            spec.group_color_map.get(group_name) for group_name in named_groups
+        )
+        if color
+    }
+    overall_color = next(
+        (color for color in palette if color not in reserved_group_colors),
+        palette[0],
+    )
+    scopes: list[dict] = [{
+        "label": "Overall",
+        "values": [convert_k_value(spec, record.positive_value) for record in records],
+        "color": overall_color,
+        "linestyle": "-",
+        "is_overall": True,
+    }]
+
+    group_palette_offset = 1 if len(palette) > 1 and bool(named_groups) else 0
     for index, group_name in enumerate(named_groups):
         values = [
             convert_k_value(spec, record.positive_value)
@@ -487,7 +513,7 @@ def k_distribution_scopes(spec: ComparisonPlotSpec) -> list[dict]:
             "values": values,
             "color": spec.group_color_map.get(
                 group_name,
-                palette[index % len(palette)],
+                palette[(index + group_palette_offset) % len(palette)],
             ),
             "linestyle": "-",
             "is_overall": False,
@@ -699,7 +725,7 @@ def _plot_k_values_overlay(figure, spec: ComparisonPlotSpec) -> None:
     """Plot K-values as grouped bars via shared renderer.
 
     When dataset groups exist, each named group collapses to a single
-    geometric-mean bar series (one bar per group per method) so same-group
+    method-mean bar series (one bar per group per method) so same-group
     members no longer render as indistinguishable same-colour bars.
     """
     ax = figure.add_subplot(1, 1, 1)
@@ -720,7 +746,7 @@ def _plot_k_values_overlay(figure, spec: ComparisonPlotSpec) -> None:
             show_value_labels=True,
             log_y_scale=spec.log_k_y_scale,
             y_label=f"K ({unit_symbol(spec)})",
-            title="Hydraulic Conductivity by Group (geometric mean)",
+            title="Hydraulic Conductivity by Group",
         )
         return
 
@@ -808,6 +834,9 @@ def _plot_k_distribution(figure, spec: ComparisonPlotSpec) -> int:
             hist_scopes,
             axis=spec.k_hist_axis,
             bins=spec.k_hist_bins,
+            y_mode=spec.k_hist_y_mode,
+            show_n=spec.k_hist_show_n,
+            drop_empty_bins=spec.k_hist_drop_empty,
             unit_symbol=unit_symbol(spec),
             style=spec.style,
             show_grid=spec.show_grid,

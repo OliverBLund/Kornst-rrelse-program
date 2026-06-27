@@ -32,20 +32,22 @@ from grain_classification import (
     permeability_class as _gc_perm_class,
     cc_label as _gc_cc_label,
 )
-from gui.plot_constants import DATASET_COLORS, classify_k_status
+from gui.plot_constants import classify_k_status
 from gui.plot_context import (
+    REPORT_EXPORT_PLOT_K_UNIT,
+    context_with_style,
     convert_k_to_display,
     k_axis_label_for_unit,
-    k_display_unit_from_context,
     plot_context_value,
-    plot_style_from_context,
 )
+from gui.report_export_plot_colors import k_scope_plot_colors
 
 
 def _get_plot_export():
     """Lazy import to avoid circular dependency (plot_export -> gui -> report_generator)."""
     import plot_export as _pe
     return _pe
+from report_tables import analyze_report_tables, generate_excel_appendix
 from report_model import (
     AppendixLabelConfig,
     HeadingBlock,
@@ -60,6 +62,10 @@ from report_model import (
 
 
 DOCX_AVAILABLE = importlib.util.find_spec("docx") is not None
+
+
+class ReportCancelled(Exception):
+    """Raised inside a generator when the caller's cancel_check returns True."""
 
 
 @dataclass
@@ -130,7 +136,10 @@ class ReportGenerator:
                 .page-break { page-break-before: always; }
                 .no-break   { page-break-inside: avoid; }
                 h1, h2, h3  { page-break-after: avoid; }
-                table       { page-break-inside: avoid; }
+                table       { page-break-inside: auto; break-inside: auto; }
+                thead       { display: table-header-group; }
+                tfoot       { display: table-footer-group; }
+                tr          { page-break-inside: avoid; break-inside: avoid; }
                 .page-header { display: flex !important; }
                 .report-top-bar { display: none; }
             }
@@ -269,54 +278,71 @@ class ReportGenerator:
             table {
                 border-collapse: collapse;
                 width: 100%;
-                margin: 14px 0;
-                font-size: 9.5pt;
+                margin: 14px 0 18px 0;
+                font-size: 9.25pt;
+                line-height: 1.35;
                 background: var(--bg);
+                border-top: 2px solid var(--brand);
+                border-bottom: 2px solid var(--brand);
+                font-variant-numeric: tabular-nums;
             }
 
-            thead { background: var(--brand); }
+            thead { background: transparent; }
 
             th {
-                color: white;
-                padding: 8px 10px;
+                color: var(--text);
+                background: var(--brand-light);
+                padding: 7px 9px;
                 text-align: left;
-                font-weight: 600;
-                font-size: 9pt;
-                letter-spacing: 0.3px;
+                vertical-align: bottom;
+                font-weight: 700;
+                font-size: 8.75pt;
+                border-bottom: 1.5px solid var(--brand);
             }
 
             td {
-                padding: 6px 10px;
+                padding: 6px 9px;
                 border-bottom: 1px solid var(--border);
                 vertical-align: top;
                 color: var(--text);
             }
 
-            tr:nth-child(even) td { background: var(--bg-alt); }
-            tbody tr:last-child td { border-bottom: 2px solid var(--brand); }
+            tbody tr:last-child td { border-bottom: none; }
+            tbody tr.table-group-start td { border-top: 1.5px solid var(--brand); }
+            td.num, th.num, td.text-right, th.text-right { text-align: right; }
+            td.center, th.center, td.text-center, th.text-center { text-align: center; }
+            td.note { color: var(--text-mid); font-size: 8.5pt; }
+            .table-empty { text-align: center; color: var(--text-muted); font-style: italic; }
 
-            .table-compact th { padding: 5px 8px; font-size: 8.5pt; }
-            .table-compact td { padding: 4px 8px; }
+            .table-compact th { padding: 5px 7px; font-size: 8.25pt; }
+            .table-compact td { padding: 4px 7px; }
             .table-wide {
                 table-layout: fixed;
-                font-size: 8pt;
+                font-size: 7.75pt;
             }
             .table-wide th,
             .table-wide td {
                 padding: 4px 5px;
                 overflow-wrap: anywhere;
-                word-break: break-word;
+                word-break: normal;
             }
             .table-wide th:first-child,
-            .table-wide td:first-child {
-                width: 16%;
-            }
+            .table-wide td:first-child { width: 16%; }
             .table-wide th:last-child,
-            .table-wide td:last-child {
-                width: 16%;
+            .table-wide td:last-child { width: 16%; }
+            .table-pair {
+                display: grid;
+                grid-template-columns: 1fr;
+                gap: 12px;
+                margin: 10px 0 18px 0;
+            }
+            .table-pair table { margin: 0; }
+            .table-caption {
+                color: var(--text-muted);
+                font-size: 8.25pt;
+                margin: -10px 0 16px 0;
             }
 
-            /* ── Metadata box ─────────────────────────────────── */
             .metadata {
                 background: var(--bg-alt);
                 border: 1px solid var(--border);
@@ -623,6 +649,22 @@ class ReportGenerator:
         return DOCX_AVAILABLE
 
     @staticmethod
+    def analyze_tables(html_text: str):
+        return analyze_report_tables(html_text)
+
+    @staticmethod
+    def generate_excel_appendix(
+        html_text: str,
+        title: str = "Report data appendix",
+        accent_color: str = "#2c3e50",
+    ) -> bytes:
+        return generate_excel_appendix(
+            html_text,
+            title=title,
+            accent_color=accent_color,
+        )
+
+    @staticmethod
     def _node_classes(node: _HtmlNode) -> set[str]:
         return {name for name in node.attrs.get("class", "").split() if name}
 
@@ -766,35 +808,101 @@ class ReportGenerator:
         shading = ctx["parse_xml"](f'<w:shd {ctx["nsdecls"]("w")} w:fill="{fill_hex}"/>')
         cell._tc.get_or_add_tcPr().append(shading)
 
+    @staticmethod
+    def _html_span(node: _HtmlNode, name: str) -> int:
+        try:
+            return max(1, int(node.attrs.get(name, "1") or 1))
+        except (TypeError, ValueError):
+            return 1
+
+    def _apply_docx_table_rules(self, table, fill_hex: str, ctx: dict[str, Any]) -> None:
+        borders = ctx["parse_xml"](
+            f'<w:tblBorders {ctx["nsdecls"]("w")}>'
+            f'<w:top w:val="single" w:sz="14" w:space="0" w:color="{fill_hex}"/>'
+            f'<w:left w:val="nil"/>'
+            f'<w:bottom w:val="single" w:sz="14" w:space="0" w:color="{fill_hex}"/>'
+            f'<w:right w:val="nil"/>'
+            f'<w:insideH w:val="single" w:sz="4" w:space="0" w:color="D0D0D0"/>'
+            f'<w:insideV w:val="nil"/>'
+            f'</w:tblBorders>'
+        )
+        table._tbl.tblPr.append(borders)
+
+    def _apply_docx_cell_bottom_rule(self, cell, fill_hex: str, ctx: dict[str, Any]) -> None:
+        borders = ctx["parse_xml"](
+            f'<w:tcBorders {ctx["nsdecls"]("w")}>'
+            f'<w:bottom w:val="single" w:sz="10" w:space="0" w:color="{fill_hex}"/>'
+            f'</w:tcBorders>'
+        )
+        cell._tc.get_or_add_tcPr().append(borders)
+
     def _render_docx_table(self, container, node: _HtmlNode,
                            ctx: dict[str, Any], brand_rgb: tuple[int, int, int]) -> None:
         rows = self._iter_table_rows(node)
         if not rows:
             return
 
-        col_count = max(
-            sum(1 for child in self._child_nodes(row) if child.tag.lower() in {"th", "td"})
-            for row in rows
-        )
-        table = container.add_table(rows=len(rows), cols=col_count)
-        table.style = "Table Grid"
-        table.alignment = ctx["WD_TABLE_ALIGNMENT"].CENTER
-        fill_hex = "".join(f"{value:02X}" for value in brand_rgb)
-
+        placements = []
+        occupied: set[tuple[int, int]] = set()
+        col_count = 0
         for row_index, row_node in enumerate(rows):
-            cells = [child for child in self._child_nodes(row_node) if child.tag.lower() in {"th", "td"}]
-            for col_index, cell_node in enumerate(cells):
-                cell = table.cell(row_index, col_index)
-                paragraph = cell.paragraphs[0]
-                text = self._node_text(cell_node)
-                if text:
-                    run = paragraph.add_run(text)
-                    if cell_node.tag.lower() == "th":
-                        run.bold = True
-                if row_index == 0 and any(child.tag.lower() == "th" for child in cells):
-                    self._apply_docx_header_shading(cell, fill_hex, ctx)
-                    for run in paragraph.runs:
-                        run.font.color.rgb = ctx["RGBColor"](255, 255, 255)
+            column_index = 0
+            cells = [
+                child for child in self._child_nodes(row_node)
+                if child.tag.lower() in {"th", "td"}
+            ]
+            for cell_node in cells:
+                while (row_index, column_index) in occupied:
+                    column_index += 1
+                colspan = self._html_span(cell_node, "colspan")
+                rowspan = self._html_span(cell_node, "rowspan")
+                placements.append((row_index, column_index, colspan, rowspan, cell_node))
+                for occupied_row in range(row_index, row_index + rowspan):
+                    for occupied_col in range(column_index, column_index + colspan):
+                        occupied.add((occupied_row, occupied_col))
+                column_index += colspan
+                col_count = max(col_count, column_index)
+
+        table = container.add_table(rows=len(rows), cols=max(col_count, 1))
+        table.alignment = ctx["WD_TABLE_ALIGNMENT"].CENTER
+        table.autofit = True
+        fill_hex = "".join(f"{value:02X}" for value in brand_rgb)
+        self._apply_docx_table_rules(table, fill_hex, ctx)
+        font_size = ctx["Pt"](7.5 if col_count >= 7 else 9)
+
+        header_rows: set[int] = set()
+        for row_index, column_index, colspan, rowspan, cell_node in placements:
+            cell = table.cell(row_index, column_index)
+            if colspan > 1 or rowspan > 1:
+                cell = cell.merge(
+                    table.cell(row_index + rowspan - 1, column_index + colspan - 1)
+                )
+            paragraph = cell.paragraphs[0]
+            classes = self._node_classes(cell_node)
+            style_text = cell_node.attrs.get("style", "").lower()
+            if "text-align: right" in style_text or "num" in classes or "text-right" in classes:
+                paragraph.alignment = ctx["WD_ALIGN_PARAGRAPH"].RIGHT
+            elif "text-align: center" in style_text or "center" in classes or "text-center" in classes:
+                paragraph.alignment = ctx["WD_ALIGN_PARAGRAPH"].CENTER
+
+            text = self._node_text(cell_node)
+            if text:
+                run = paragraph.add_run(text)
+                run.font.size = font_size
+                if cell_node.tag.lower() == "th":
+                    run.bold = True
+                    run.font.color.rgb = ctx["RGBColor"](*brand_rgb)
+
+            if cell_node.tag.lower() == "th":
+                header_rows.add(row_index)
+                self._apply_docx_header_shading(cell, "EAF0F3", ctx)
+                self._apply_docx_cell_bottom_rule(cell, fill_hex, ctx)
+
+        for row_index in sorted(header_rows):
+            header = ctx["parse_xml"](
+                f'<w:tblHeader {ctx["nsdecls"]("w")} w:val="true"/>'
+            )
+            table.rows[row_index]._tr.get_or_add_trPr().append(header)
 
     def _render_docx_image(self, container, node: _HtmlNode, ctx: dict[str, Any]) -> None:
         src = node.attrs.get("src", "")
@@ -1093,7 +1201,7 @@ class ReportGenerator:
                 blocks=[HtmlBlock(self._create_data_quality_table(dataset))],
             ))
         if sections.get('raw_data', False):
-            raw_data_table = '<table class="table-compact"><thead><tr><th>Grain Size (mm)</th><th>Percent Passing (%)</th><th>Percent Retained (%)</th></tr></thead><tbody>'
+            raw_data_table = '<table class="table-compact" data-report-table="raw-measurements"><thead><tr><th>Grain Size (mm)</th><th>Percent Passing (%)</th><th>Percent Retained (%)</th></tr></thead><tbody>'
             for size, passing in zip(dataset.particle_sizes, dataset.percent_passing):
                 retained = 100 - passing
                 raw_data_table += f'<tr><td>{size:.4f}</td><td>{passing:.2f}</td><td>{retained:.2f}</td></tr>'
@@ -1178,16 +1286,53 @@ class ReportGenerator:
 
         return html
 
+    def _global_report_style(self):
+        """The global report/export PlotStyle (preset + saved Customize overrides)."""
+        from gui.report_plot_style import resolve_report_style
+        return resolve_report_style()
+
+    def _palette_curve_color(self) -> Optional[str]:
+        """First palette colour for a single-curve plot, or None to keep the preset.
+
+        One rule, shared with the comparison plots: a chosen colormap palette
+        (Viridis/…) colours the curve; the Categorical default leaves the curve at
+        the preset's colour (unchanged behaviour). The preset always governs
+        typography either way.
+        """
+        from gui.plot_constants import CATEGORICAL_PALETTE
+        from gui.report_plot_style import get_report_palette, resolve_report_palette_colors
+        if get_report_palette() == CATEGORICAL_PALETTE:
+            return None
+        palette = resolve_report_palette_colors(1)
+        return palette[0] if palette else None
+
     def _create_grain_size_plot(
         self,
         dataset: GrainSizeData,
         plot_context: Optional[Dict[str, Any]] = None,
+        curve_color: Optional[str] = None,
     ) -> str:
-        """Create grain size distribution curve and return as base64."""
+        """Create grain size distribution curve and return as base64.
+
+        The global report style is forced onto the captured context so the
+        Customize panel themes this plot too (other context — unit, limits,
+        text, grid/legend — is preserved). *curve_color* overrides the curve
+        colour so a per-sample plot can match that sample's palette colour in the
+        comparison overlay; when omitted the single-curve palette colour applies,
+        so a standalone Individual report follows the palette too. Typography
+        always comes from the global preset.
+        """
         pe = _get_plot_export()
+        style = self._global_report_style()
+        if curve_color is None:
+            curve_color = self._palette_curve_color()
+        if curve_color:
+            import dataclasses
+            style = dataclasses.replace(style, curve_color=curve_color)
         return pe.export_grain_size_plot(
             dataset,
-            plot_context=plot_context,
+            style=style,
+            plot_context=context_with_style(plot_context, style),
             show_d_lines=False,
             show_markers=False,
             classification_scheme=self._scheme,
@@ -1198,16 +1343,16 @@ class ReportGenerator:
         k_results: List[KCalculationResult],
         plot_context: Optional[Dict[str, Any]] = None,
     ) -> str:
-        """Create K-value comparison bar chart, honouring the live plot state.
+        """Create a report K-value bar chart in the canonical plot unit.
 
-        Style, log-K axis, grid/legend and the chosen display unit are taken
-        from the captured plot context so the report matches the GUI.
+        Style, log-K axis, grid and legend state come from captured context;
+        report/export figures intentionally use m/s for cross-path parity.
         """
         valid_results = [r for r in k_results if r.k_value is not None and r.k_value > 0]
         if not valid_results:
             return ""
 
-        unit = k_display_unit_from_context(plot_context)
+        unit = REPORT_EXPORT_PLOT_K_UNIT
         methods = [r.method_name for r in valid_results]
         k_values = [convert_k_to_display(r.k_value, unit) for r in valid_results]
         flagged = {r.method_name for r in valid_results if classify_k_status(r) != "OK"}
@@ -1222,24 +1367,41 @@ class ReportGenerator:
             methods, k_values,
             flagged_methods=flagged,
             reference_values=reference_values,
-            style=plot_style_from_context(plot_context),
+            style=self._global_report_style(),
             show_grid=bool(plot_context_value(plot_context, "show_grid", True)),
             show_legend=bool(plot_context_value(plot_context, "show_legend", True)),
             log_y_scale=bool(plot_context_value(plot_context, "log_k_y_scale", False)),
             y_label=k_axis_label_for_unit(unit),
             title="Hydraulic Conductivity Estimates by Method",
+            colors=self._k_bar_method_colors(methods),
         )
+
+    def _k_bar_method_colors(self, methods) -> List[str]:
+        """Per-method bar colours from the active palette (preset never decides).
+
+        Colormap palettes (Viridis/…) sample one colour per method; the
+        Categorical default keeps the fixed semantic method colours (Hazen=red…)
+        so meaning is preserved. Either way the preset only governs typography.
+        """
+        from gui.plot_constants import (
+            CATEGORICAL_PALETTE, METHOD_COLORS, palette_colors,
+        )
+        from gui.report_plot_style import get_report_palette
+        palette = get_report_palette()
+        if palette == CATEGORICAL_PALETTE:
+            return [METHOD_COLORS.get(m, "#888888") for m in methods]
+        return palette_colors(palette, len(methods))
 
     def _create_method_applicability_heatmap(
         self,
         k_results: List[KCalculationResult],
         plot_context: Optional[Dict[str, Any]] = None,
     ) -> str:
-        """Create method applicability status heatmap (styled from context)."""
+        """Create method applicability status heatmap (styled from the global style)."""
         if not k_results:
             return ""
         return _get_plot_export().export_applicability_heatmap(
-            k_results, style=plot_style_from_context(plot_context)
+            k_results, style=self._global_report_style()
         )
 
     def _build_comparison_spec(self, sample_details, comparison_snapshot, *,
@@ -1256,8 +1418,8 @@ class ReportGenerator:
         """
         from gui.comparison_plot_capture import build_comparison_spec
         from gui.plot_styles import PROFESSIONAL_STYLE
-        from unit_conversions import HydraulicConductivityUnit
-
+        from gui.plot_constants import CATEGORICAL_PALETTE
+        from gui.report_plot_style import get_report_palette, resolve_report_palette_colors
         datasets = [item["dataset"] for item in sample_details]
         results_by_name = {
             item["dataset"].sample_name: list(item.get("k_results") or [])
@@ -1280,7 +1442,14 @@ class ReportGenerator:
             display_mode=display_mode,
             breakdown=breakdown,
             style=plot_style or PROFESSIONAL_STYLE,
-            display_unit=HydraulicConductivityUnit.M_PER_S,
+            display_unit=REPORT_EXPORT_PLOT_K_UNIT,
+            # Dataset/group colours follow the global report palette so every
+            # comparison plot re-colours at once (Categorical → GUI defaults).
+            # palette_name lets the spec re-sample per series-count so groups
+            # spread across the whole colormap (not just its dark end).
+            palette=resolve_report_palette_colors(max(len(datasets), 1)),
+            palette_name=get_report_palette(),
+            group_palette_authoritative=get_report_palette() != CATEGORICAL_PALETTE,
         )
 
     def _create_comparison_grain_size_plot(self, sample_details, comparison_snapshot,
@@ -1305,6 +1474,85 @@ class ReportGenerator:
             return ""
         return _get_plot_export().export_comparison_spec(spec)
 
+    def _create_per_sample_plots_section(self, sample_details, *,
+                                         include_grain: bool, include_kbar: bool,
+                                         advance=None, colors_by_name=None) -> str:
+        """Render each sample's own grain curve and/or K-value bar as one section.
+
+        Lets a multi-sample (Comparison/Full) report carry per-sample detail in
+        addition to the cross-sample plots. Each sample becomes a sub-block; plots
+        reuse the single-sample helpers (so they honour the global report style).
+        *advance* (optional ``callable(label)``) is called once per sample to drive
+        a progress bar and honour cancellation (it may raise ``ReportCancelled``).
+        *colors_by_name* maps a dataset's ``sample_name`` to the colour it has in
+        the comparison overlay (from the active palette), so each per-sample grain
+        curve matches its overlay colour while keeping the global typography.
+        """
+        if not (include_grain or include_kbar):
+            return ""
+        colors_by_name = colors_by_name or {}
+
+        blocks = ""
+        for item in sample_details:
+            dataset = item.get("dataset")
+            if dataset is None:
+                continue
+            label = item.get("label") or dataset.sample_name
+            if advance is not None:
+                advance(f"Rendering plots for {label}")
+            plot_context = item.get("plot_context")
+            curve_color = colors_by_name.get(dataset.sample_name)
+            grain = (
+                self._create_grain_size_plot(dataset, plot_context, curve_color=curve_color)
+                if include_grain else ""
+            )
+            kbar = (
+                self._create_k_value_bar_chart(list(item.get("k_results") or []), plot_context)
+                if include_kbar else ""
+            )
+            if not (grain or kbar):
+                continue
+            images = ""
+            if grain:
+                images += (
+                    '<div class="plot-container">'
+                    f'<img src="{grain}" alt="{label} grain size distribution" '
+                    'style="max-width: 100%; height: auto;"></div>'
+                )
+            if kbar:
+                images += (
+                    '<div class="plot-container">'
+                    f'<img src="{kbar}" alt="{label} K-value bar chart" '
+                    'style="max-width: 100%; height: auto;"></div>'
+                )
+            blocks += f'<div style="page-break-before: auto;"><h3>{label}</h3>{images}</div>'
+
+        if not blocks:
+            return ""
+        return (
+            '<div style="page-break-before: auto;">'
+            '<h2>Individual Sample Plots</h2>'
+            f'{blocks}</div>'
+        )
+
+    def _create_comparison_k_distribution(self, sample_details, comparison_snapshot,
+                                          breakdown: Optional[str] = None,
+                                          plot_style=None) -> str:
+        """Lognormal K-distribution comparison (histogram), matching the Comparison tab.
+
+        Pools the report's K-values across the comparison scope and renders the
+        same lognormal histogram view the Comparison tab shows (frequency axis,
+        N labels, collapsed empty bins by default). Returns "" when no K-values
+        are available.
+        """
+        if comparison_snapshot is None or not comparison_snapshot.k.included_records:
+            return ""
+        spec = self._build_comparison_spec(
+            sample_details, comparison_snapshot,
+            plot_type="k-distribution", breakdown=breakdown, plot_style=plot_style,
+        )
+        return _get_plot_export().export_comparison_spec(spec)
+
     def _create_k_value_boxplot(self, k_results_dict: Dict[str, List[KCalculationResult]]) -> str:
         """Create box plots for K-value comparison across samples."""
         if not k_results_dict:
@@ -1315,32 +1563,9 @@ class ReportGenerator:
         return any(group != UNGROUPED_LABEL for group in comparison_snapshot.k.group_names)
 
     def _k_scope_plot_colors(self, comparison_snapshot, series) -> List[str]:
-        if not self._comparison_uses_grouped_k_scope(comparison_snapshot):
-            return []
+        return k_scope_plot_colors(comparison_snapshot.k.group_names, series)
 
-        group_colors: Dict[str, str] = {}
-        try:
-            from gui.group_styles import group_color_map
-            group_colors = group_color_map(
-                comparison_snapshot.k.group_names,
-                palette=DATASET_COLORS,
-            )
-        except Exception:
-            fallback = tuple(DATASET_COLORS) or ("#3a7ea0", "#6b8e23", "#b46428")
-            group_colors = {
-                group: fallback[index % len(fallback)]
-                for index, group in enumerate(comparison_snapshot.k.group_names)
-            }
-
-        colors = []
-        for label, _values in series:
-            if label == "Overall":
-                colors.append("#8c6f45")
-            else:
-                colors.append(group_colors.get(label, "#777777"))
-        return colors
-
-    def _create_comparison_k_scope_boxplot(self, comparison_snapshot) -> str:
+    def _create_comparison_k_scope_boxplot(self, comparison_snapshot, plot_style=None) -> str:
         """Create the report K boxplot from the shared comparison aggregation."""
         series = k_scope_value_series(comparison_snapshot.k)
         if not any(values for _label, values in series):
@@ -1352,10 +1577,12 @@ class ReportGenerator:
             if grouped
             else "Hydraulic Conductivity Distribution by Dataset"
         )
+        kwargs = {"style": plot_style} if plot_style is not None else {}
         return _get_plot_export().export_k_scope_boxplot(
             series,
             colors=self._k_scope_plot_colors(comparison_snapshot, series),
             title=title,
+            **kwargs,
         )
 
     def _create_method_reliability_matrix(self, k_results_dict: Dict[str, List[KCalculationResult]],
@@ -1622,7 +1849,7 @@ class ReportGenerator:
 </div>
 
 <h3>Soil Classification Parameters</h3>
-<table>
+<table data-report-table="soil-classification">
     <thead>
         <tr>
             <th>Parameter</th>
@@ -1937,25 +2164,24 @@ class ReportGenerator:
             </div>
 
             <h3>K-Value Calculations by Method</h3>
-            <table>
+            <table class="table-compact" data-report-table="k-method-results">
                 <tr>
                     <th>Method</th>
-                    <th>K-Value (m/s)</th>
+                    <th class="num">K-Value (m/s)</th>
                     <th>Formula</th>
                     <th>Status</th>
                 </tr>
             """
 
             for result in k_results:
-                status_class = "success" if classify_k_status(result) == "OK" else "warning"
                 k_display = f"{result.k_value:.2e}" if result.k_value else "N/A"
 
                 html += f"""
                 <tr>
                     <td>{result.method_name}</td>
-                    <td>{k_display}</td>
-                    <td style="font-size: 11px;">{result.formula_used}</td>
-                    <td><span class="{status_class}">{result.status_message or result.status}</span></td>
+                    <td class="num">{k_display}</td>
+                    <td class="note">{self._esc(result.formula_used)}</td>
+                    <td>{self._esc(result.status_message or result.status)}</td>
                 </tr>
                 """
 
@@ -1968,10 +2194,6 @@ class ReportGenerator:
                 <p><strong>Typical Application:</strong> {}</p>
             </div>
             """.format(self._classify_permeability(mean_k), self._get_permeability_application(mean_k))
-
-            # Add detailed K-value statistics
-            if sections.get('k_statistics', True):
-                html += f"<h3>Detailed K-Value Statistics</h3>{self._create_k_statistics_table(k_results)}"
 
             html += "</div>"
 
@@ -2126,7 +2348,9 @@ class ReportGenerator:
                                   sample_details: Optional[List[Dict[str, Any]]] = None,
                                   selected_plots: Optional[set] = None,
                                   plot_breakdowns: Optional[Dict[str, str]] = None,
-                                  plot_style=None) -> str:
+                                  plot_style=None,
+                                  progress=None,
+                                  cancel_check=None) -> str:
         """Generate a comparison report for multiple samples.
 
         *plot_breakdowns* optionally maps a comparison plot key
@@ -2134,6 +2358,11 @@ class ReportGenerator:
         ``"dataset"``; omitted keys fall back to auto (group when groups exist).
         *plot_style* is the global report/export ``PlotStyle`` themed once on the
         report tab; ``None`` keeps the default preset.
+
+        *progress* (optional ``callable(current, total, label)``) and
+        *cancel_check* (optional ``callable() -> bool``) let a worker thread show
+        progress and abort: the per-sample plot loop reports per sample and raises
+        :class:`ReportCancelled` when cancellation is requested.
         """
         if metadata is None:
             metadata = {}
@@ -2295,57 +2524,11 @@ class ReportGenerator:
             html += """
             <div style="page-break-before: auto;">
             <h2>Results & Analysis</h2>
-
-            <h3>Sample Overview</h3>
-            <table>
-                <thead>
-                    <tr>
-                        <th>Sample</th>
-                        <th>Temp (°C)</th>
-                        <th>Porosity</th>
-                        <th>D10 (mm)</th>
-                        <th>D50 (mm)</th>
-                        <th>D60 (mm)</th>
-                        <th>Cu</th>
-                        <th>Soil Type</th>
-                        <th>K geometric mean (m/s)</th>
-                    </tr>
-                </thead>
-                <tbody>
             """
-
-            for item in sample_details:
-                label = str(item["label"])
-                dataset = item["dataset"]
-                d10 = dataset.get_d10()
-                d50 = dataset.get_d50()
-                d60 = dataset.get_d60()
-                cu = (d60 / d10) if (d10 and d60) else None
-
-                mean_k = "N/A"
-                if label in mean_k_by_sample:
-                    mean_k = f"{mean_k_by_sample[label]:.2e}"
-
-                temp_value = item.get("temperature")
-                porosity_value = item.get("porosity")
-                temp_display = "N/A" if temp_value is None else f"{float(temp_value):.2f}"
-                porosity_display = "N/A" if porosity_value is None else f"{float(porosity_value):.3f}".rstrip("0").rstrip(".")
-
-                html += f"""
-                <tr>
-                    <td>{self._esc(label)}</td>
-                    <td>{temp_display}</td>
-                    <td>{porosity_display}</td>
-                    <td>{f'{d10:.3f}' if d10 else 'N/A'}</td>
-                    <td>{f'{d50:.3f}' if d50 else 'N/A'}</td>
-                    <td>{f'{d60:.3f}' if d60 else 'N/A'}</td>
-                    <td>{f'{cu:.2f}' if cu else 'N/A'}</td>
-                    <td>{self._esc(dataset.classify(scheme=self._scheme).label)}</td>
-                    <td>{mean_k}</td>
-                </tr>
-                """
-
-            html += "</tbody></table>"
+            html += (
+                f"<h3>Sample Overview</h3>"
+                f"{self._create_sample_overview_tables(sample_details, mean_k_by_sample)}"
+            )
 
             if sections.get('grain_comparison', True):
                 html += f"<h3>Grain Parameters Comparison</h3>{self._create_grain_parameters_comparison_table(datasets, sample_labels)}"
@@ -2371,79 +2554,128 @@ class ReportGenerator:
             """
 
         if sections.get('plots', True):
-            # Each comparison plot is individually selectable; default omits the
-            # reliability matrix (rarely wanted) but keeps the overlay, K-value
-            # bars and K boxplot.
+            # Each comparison plot is individually selectable; the default keeps
+            # the overlay, K-value bars and K boxplot and leaves the lognormal
+            # K-distribution and reliability matrix opt-in.
             selected = (
                 selected_plots if selected_plots is not None
                 else {'distribution_overlay', 'k_value_comparison',
                       'statistical_boxplots', 'reliability_matrix'}
             )
             breakdowns = plot_breakdowns or {}
-            comparison_plot = (
-                self._create_comparison_grain_size_plot(
+
+            # Progress / cancellation: the cross-sample plots are one coarse step;
+            # the per-sample loop reports per sample (the part that scales with
+            # dataset count).
+            per_sample_on = bool({'per_sample_grain', 'per_sample_kbar'} & selected)
+            total_steps = 1 + (len(sample_details) if per_sample_on else 0) + 1
+            step_state = {'n': 0}
+
+            def _advance(label: str) -> None:
+                if cancel_check is not None and cancel_check():
+                    raise ReportCancelled()
+                step_state['n'] += 1
+                if progress is not None:
+                    progress(min(step_state['n'], total_steps), total_steps, label)
+
+            _advance("Rendering comparison plots")
+
+            def _plot_variants(create_fn, key):
+                """Render a breakdown-capable plot, expanding "both" to two images.
+
+                Returns a list of ``(caption_suffix, data_uri)``. A "both"
+                breakdown emits the per-group and per-dataset variants as two
+                entries; any other value yields a single entry.
+                """
+                if key not in selected:
+                    return []
+                chosen = breakdowns.get(key)
+                if chosen == 'both':
+                    wanted = [(' — per group', 'group'),
+                              (' — per dataset', 'dataset')]
+                else:
+                    wanted = [('', chosen)]
+                variants = []
+                for suffix, bd in wanted:
+                    uri = create_fn(bd)
+                    if uri:
+                        variants.append((suffix, uri))
+                return variants
+
+            def _plot_block(title, alt, variants, page_break='auto'):
+                block = ""
+                for suffix, uri in variants:
+                    block += f"""
+                <div style="page-break-before: {page_break};">
+                <h2>{title}{suffix}</h2>
+                <div class="plot-container">
+                    <img src="{uri}" alt="{alt}" style="max-width: 100%; height: auto;">
+                </div>
+                </div>
+                """
+                return block
+
+            html += _plot_block(
+                "Grain Size Distribution Comparison", "Grain Size Comparison",
+                _plot_variants(
+                    lambda bd: self._create_comparison_grain_size_plot(
+                        sample_details, comparison_snapshot,
+                        breakdown=bd, plot_style=plot_style),
+                    'distribution_overlay'),
+            )
+            html += _plot_block(
+                "Hydraulic Conductivity by Method", "K-Value Comparison",
+                _plot_variants(
+                    lambda bd: self._create_comparison_k_value_bar(
+                        sample_details, comparison_snapshot,
+                        breakdown=bd, plot_style=plot_style),
+                    'k_value_comparison'),
+            )
+            html += _plot_block(
+                "Hydraulic Conductivity Distribution (Lognormal)", "K Distribution",
+                _plot_variants(
+                    lambda bd: self._create_comparison_k_distribution(
+                        sample_details, comparison_snapshot,
+                        breakdown=bd, plot_style=plot_style),
+                    'k_distribution'),
+            )
+
+            if 'statistical_boxplots' in selected:
+                k_boxplot = self._create_comparison_k_scope_boxplot(
+                    comparison_snapshot, plot_style=plot_style)
+                if k_boxplot:
+                    html += _plot_block(
+                        "Hydraulic Conductivity Distribution", "K-Value Boxplot",
+                        [('', k_boxplot)])
+
+            if 'reliability_matrix' in selected:
+                reliability_matrix = self._create_method_reliability_matrix(
+                    plot_results_dict, plot_style=plot_style)
+                if reliability_matrix:
+                    html += _plot_block(
+                        "Appendix: Method Reliability Matrix", "Method Reliability Matrix",
+                        [('', reliability_matrix)], page_break='always')
+
+            # Per-sample (individual) plots — each sample's own grain curve and/or
+            # K-value bar, so a multi-sample report can carry per-sample detail
+            # alongside the cross-sample plots.
+            # Resolve each sample's overlay colour (from the active palette) so its
+            # per-sample grain curve matches the comparison overlay.
+            per_sample_colors = {}
+            if per_sample_on and 'per_sample_grain' in selected:
+                color_spec = self._build_comparison_spec(
                     sample_details, comparison_snapshot,
-                    breakdown=breakdowns.get('distribution_overlay'),
-                    plot_style=plot_style,
+                    plot_type="distribution", plot_style=plot_style,
                 )
-                if 'distribution_overlay' in selected else ""
+                per_sample_colors = dict(color_spec.color_by_name)
+            html += self._create_per_sample_plots_section(
+                sample_details,
+                include_grain='per_sample_grain' in selected,
+                include_kbar='per_sample_kbar' in selected,
+                advance=_advance if per_sample_on else None,
+                colors_by_name=per_sample_colors,
             )
-            k_value_bar = (
-                self._create_comparison_k_value_bar(
-                    sample_details, comparison_snapshot,
-                    breakdown=breakdowns.get('k_value_comparison'),
-                    plot_style=plot_style,
-                )
-                if 'k_value_comparison' in selected else ""
-            )
-            k_boxplot = (
-                self._create_comparison_k_scope_boxplot(comparison_snapshot)
-                if 'statistical_boxplots' in selected else ""
-            )
-            reliability_matrix = (
-                self._create_method_reliability_matrix(plot_results_dict, plot_style=plot_style)
-                if 'reliability_matrix' in selected else ""
-            )
-
-            if comparison_plot:
-                html += f"""
-                <div style="page-break-before: auto;">
-                <h2>Grain Size Distribution Comparison</h2>
-                <div class="plot-container">
-                    <img src="{comparison_plot}" alt="Grain Size Comparison" style="max-width: 100%; height: auto;">
-                </div>
-                </div>
-                """
-
-            if k_value_bar:
-                html += f"""
-                <div style="page-break-before: auto;">
-                <h2>Hydraulic Conductivity by Method</h2>
-                <div class="plot-container">
-                    <img src="{k_value_bar}" alt="K-Value Comparison" style="max-width: 100%; height: auto;">
-                </div>
-                </div>
-                """
-
-            if k_boxplot:
-                html += f"""
-                <div style="page-break-before: auto;">
-                <h2>Hydraulic Conductivity Distribution</h2>
-                <div class="plot-container">
-                    <img src="{k_boxplot}" alt="K-Value Boxplot" style="max-width: 100%; height: auto;">
-                </div>
-                </div>
-                """
-
-            if reliability_matrix:
-                html += f"""
-                <div style="page-break-before: always;">
-                <h2>Appendix: Method Reliability Matrix</h2>
-                <div class="plot-container">
-                    <img src="{reliability_matrix}" alt="Method Reliability Matrix" style="max-width: 100%; height: auto;">
-                </div>
-                </div>
-                """
+            _advance("Finalizing report")
 
         if sections.get('interpretation', True):
             html += """
@@ -2528,7 +2760,7 @@ class ReportGenerator:
         max_val = max((value for value in percentiles_dict.values() if value is not None), default=0)
 
         html = """
-        <table>
+        <table data-report-table="percentiles">
             <thead>
                 <tr>
                     <th>Percentile</th>
@@ -2576,7 +2808,7 @@ class ReportGenerator:
         sand_bnd = s.sand_max
 
         html = f"""
-        <table>
+        <table data-report-table="gradation">
             <thead>
                 <tr>
                     <th>Fraction</th>
@@ -2608,7 +2840,7 @@ class ReportGenerator:
     def _create_k_statistics_table(self, k_results: List[KCalculationResult]) -> str:
         """Generate HTML table with K-value statistics: Method, K-value, Status, Applicability Range"""
         html = """
-        <table>
+        <table class="table-compact" data-report-table="k-method-details">
             <tr>
                 <th>Method</th>
                 <th>K-Value (m/s)</th>
@@ -2635,7 +2867,7 @@ class ReportGenerator:
         return html
 
     def _create_comparison_k_scope_summary_table(self, comparison_snapshot) -> str:
-        """Generate grouped/dataset K summaries from the shared aggregation snapshot."""
+        """Render aggregate K statistics as two portrait-friendly tables."""
         k_report = comparison_snapshot.k
         grouped = self._comparison_uses_grouped_k_scope(comparison_snapshot)
         rows = [("Overall", k_report.overall)]
@@ -2656,22 +2888,23 @@ class ReportGenerator:
         def fmt_float(value, precision=2):
             return "N/A" if value is None else f"{value:.{precision}f}"
 
-        html = """
-        <table>
-            <thead>
-                <tr>
-                    <th>Scope</th>
-                    <th>Datasets</th>
-                    <th>K geometric mean (m/s)</th>
-                    <th>K arithmetic mean (m/s)</th>
-                    <th>K median (m/s)</th>
-                    <th>ln(K) std dev</th>
-                    <th>Included K cells</th>
-                    <th>Warning cells</th>
-                    <th>Permeability class</th>
-                </tr>
-            </thead>
-            <tbody>
+        statistics = """
+        <div class="table-pair">
+        <table class="table-compact" data-report-table="k-aggregate-statistics">
+            <thead><tr>
+                <th>Scope</th><th class="num">Datasets</th>
+                <th class="num">Geometric mean (m/s)</th>
+                <th class="num">Arithmetic mean (m/s)</th>
+                <th class="num">Median (m/s)</th>
+                <th class="num">ln(K) std dev</th>
+            </tr></thead><tbody>
+        """
+        coverage = """
+        <table data-report-table="k-aggregate-coverage">
+            <thead><tr>
+                <th>Scope</th><th class="center">Included K cells</th>
+                <th class="center">Warning cells</th><th>Permeability class</th>
+            </tr></thead><tbody>
         """
 
         written = 0
@@ -2683,91 +2916,82 @@ class ReportGenerator:
                 if stats.geometric_mean_m_s is not None
                 else "N/A"
             )
-            html += f"""
+            escaped_scope = self._esc(scope_name)
+            statistics += f"""
                 <tr>
-                    <td><strong>{self._esc(scope_name)}</strong></td>
-                    <td style="text-align: right;">{stats.dataset_count}</td>
-                    <td style="text-align: right;">{fmt_k(stats.geometric_mean_m_s)}</td>
-                    <td style="text-align: right;">{fmt_k(stats.arithmetic_mean_m_s)}</td>
-                    <td style="text-align: right;">{fmt_k(stats.median_m_s)}</td>
-                    <td style="text-align: right;">{fmt_float(stats.ln_std_dev, 3)}</td>
-                    <td style="text-align: center;">{stats.included_count} / {stats.total_cells}</td>
-                    <td style="text-align: center;">{stats.warning_count}</td>
+                    <td><strong>{escaped_scope}</strong></td>
+                    <td class="num">{stats.dataset_count}</td>
+                    <td class="num">{fmt_k(stats.geometric_mean_m_s)}</td>
+                    <td class="num">{fmt_k(stats.arithmetic_mean_m_s)}</td>
+                    <td class="num">{fmt_k(stats.median_m_s)}</td>
+                    <td class="num">{fmt_float(stats.ln_std_dev, 3)}</td>
+                </tr>
+            """
+            coverage += f"""
+                <tr>
+                    <td><strong>{escaped_scope}</strong></td>
+                    <td class="center">{stats.included_count} / {stats.total_cells}</td>
+                    <td class="center">{stats.warning_count}</td>
                     <td>{self._esc(permeability)}</td>
                 </tr>
             """
             written += 1
 
         if written == 0:
-            html += """
-                <tr>
-                    <td colspan="9" style="text-align: center;">No included K-value results available</td>
-                </tr>
-            """
+            statistics += '<tr><td colspan="6" class="table-empty">No included K-value results available</td></tr>'
+            coverage += '<tr><td colspan="4" class="table-empty">No included K-value results available</td></tr>'
 
-        html += "</tbody></table>"
-        return html
+        return (
+            statistics + "</tbody></table>"
+            + coverage + "</tbody></table></div>"
+        )
 
     def _create_comparison_k_statistics_table(self, k_results_dict: Dict[str, List[KCalculationResult]]) -> str:
-        """Generate a multi-sample table with one row per K method result."""
+        """Generate one compact row per sample/method result in canonical m/s."""
         html = """
-        <table>
-            <thead>
-                <tr>
-                    <th>Sample</th>
-                    <th>Method</th>
-                    <th>K (m/s)</th>
-                    <th>K (m/d)</th>
-                    <th>Status</th>
-                    <th>Included in Mean</th>
-                    <th>Notes</th>
-                </tr>
-            </thead>
-            <tbody>
+        <table class="table-compact" data-report-table="k-method-results-comparison">
+            <thead><tr>
+                <th>Sample</th><th>Method</th><th class="num">K (m/s)</th>
+                <th class="center">Status</th><th class="center">Included</th><th>Notes</th>
+            </tr></thead><tbody>
         """
 
         row_count = 0
         for sample_name, results in k_results_dict.items():
             if not results:
                 html += f"""
-                <tr>
+                <tr class="table-group-start">
                     <td><strong>{self._esc(sample_name)}</strong></td>
-                    <td colspan="6" style="text-align: center;">No K-value results available</td>
+                    <td colspan="5" class="table-empty">No K-value results available</td>
                 </tr>
                 """
                 continue
 
-            for result in results:
+            for result_index, result in enumerate(results):
                 status_text = classify_k_status(result)
                 k_value = getattr(result, "k_value", None)
                 has_value = k_value is not None and np.isfinite(k_value) and k_value > 0
                 k_ms = f"{k_value:.2e}" if has_value else "N/A"
-                k_md = f"{k_value * 86400.0:.2f}" if has_value else "N/A"
                 included = has_value and status_text == "OK"
                 notes = getattr(result, "status_message", "") or status_text
+                row_class = ' class="table-group-start"' if result_index == 0 else ""
 
                 html += f"""
-                <tr>
+                <tr{row_class}>
                     <td><strong>{self._esc(sample_name)}</strong></td>
                     <td>{self._esc(getattr(result, "method_name", ""))}</td>
-                    <td style="text-align: right;">{k_ms}</td>
-                    <td style="text-align: right;">{k_md}</td>
-                    <td style="text-align: center;">{self._esc(status_text)}</td>
-                    <td style="text-align: center;">{"Yes" if included else "No"}</td>
-                    <td>{self._esc(notes)}</td>
+                    <td class="num">{k_ms}</td>
+                    <td class="center">{self._esc(status_text)}</td>
+                    <td class="center">{"Yes" if included else "No"}</td>
+                    <td class="note">{self._esc(notes)}</td>
                 </tr>
                 """
                 row_count += 1
 
         if row_count == 0:
-            html += """
-            <tr>
-                <td colspan="7" style="text-align: center;">No K-value results available</td>
-            </tr>
-            """
+            html += '<tr><td colspan="6" class="table-empty">No K-value results available</td></tr>'
 
-        html += "</tbody></table>"
-        return html
+        return html + "</tbody></table>"
 
     def _create_data_quality_table(self, dataset: GrainSizeData) -> str:
         """Generate HTML table showing data quality metrics"""
@@ -2795,7 +3019,7 @@ class ReportGenerator:
         confidence_score = "High" if (n_points > 15 and size_range > 50) else "Moderate" if n_points > 8 else "Low"
 
         html = """
-        <table>
+        <table data-report-table="data-quality">
             <tr>
                 <th>Quality Metric</th>
                 <th>Value</th>
@@ -2831,9 +3055,72 @@ class ReportGenerator:
         html += "</table>"
         return html
 
+    def _create_sample_overview_tables(
+        self,
+        sample_details: List[Dict[str, Any]],
+        mean_k_by_sample: Dict[str, float],
+    ) -> str:
+        """Render sample properties separately from classification/K results."""
+        properties = """
+        <div class="table-pair">
+        <table class="table-compact" data-report-table="sample-properties">
+            <thead><tr>
+                <th>Sample</th><th class="num">Temp (?C)</th><th class="num">Porosity</th>
+                <th class="num">D10 (mm)</th><th class="num">D50 (mm)</th>
+                <th class="num">D60 (mm)</th><th class="num">Cu</th>
+            </tr></thead><tbody>
+        """
+        classification = """
+        <table data-report-table="sample-classification">
+            <thead><tr>
+                <th>Sample</th><th>Soil type</th><th class="num">K geometric mean (m/s)</th>
+            </tr></thead><tbody>
+        """
+
+        for item in sample_details:
+            label = str(item["label"])
+            dataset = item["dataset"]
+            d10 = dataset.get_d10()
+            d50 = dataset.get_d50()
+            d60 = dataset.get_d60()
+            cu = (d60 / d10) if (d10 and d60) else None
+            temp_value = item.get("temperature")
+            porosity_value = item.get("porosity")
+            temp_display = "N/A" if temp_value is None else f"{float(temp_value):.2f}"
+            porosity_display = (
+                "N/A" if porosity_value is None
+                else f"{float(porosity_value):.3f}".rstrip("0").rstrip(".")
+            )
+            mean_k = mean_k_by_sample.get(label)
+            mean_display = "N/A" if mean_k is None else f"{mean_k:.2e}"
+
+            properties += f"""
+                <tr>
+                    <td>{self._esc(label)}</td>
+                    <td class="num">{temp_display}</td>
+                    <td class="num">{porosity_display}</td>
+                    <td class="num">{f'{d10:.3f}' if d10 else 'N/A'}</td>
+                    <td class="num">{f'{d50:.3f}' if d50 else 'N/A'}</td>
+                    <td class="num">{f'{d60:.3f}' if d60 else 'N/A'}</td>
+                    <td class="num">{f'{cu:.2f}' if cu else 'N/A'}</td>
+                </tr>
+            """
+            classification += f"""
+                <tr>
+                    <td>{self._esc(label)}</td>
+                    <td>{self._esc(dataset.classify(scheme=self._scheme).label)}</td>
+                    <td class="num">{mean_display}</td>
+                </tr>
+            """
+
+        return (
+            properties + "</tbody></table>"
+            + classification + "</tbody></table></div>"
+        )
+
     def _create_grain_parameters_comparison_table(self, datasets: List[GrainSizeData],
                                                   sample_labels: Optional[List[str]] = None) -> str:
-        """Generate HTML comparison table with color-coded cells showing D10, D50, D60, Cu, Cc for all samples"""
+        """Compare key grain parameters without creating an unprintable wide table."""
         labels = sample_labels or [dataset.sample_name for dataset in datasets]
         param_specs = [
             ("D10 (mm)", lambda ds: ds.get_d10(), ".3f"),
@@ -2854,7 +3141,7 @@ class ReportGenerator:
                     values.append(getter(dataset))
                 except Exception:
                     values.append(None)
-            valid_values = [v for v in values if v is not None]
+            valid_values = [value for value in values if value is not None]
             if valid_values:
                 mean = float(np.mean(valid_values))
                 std = float(np.std(valid_values))
@@ -2865,136 +3152,49 @@ class ReportGenerator:
 
         if len(datasets) > 6:
             html = """
-            <table class="table-compact">
-                <thead>
-                    <tr>
-                        <th>Parameter</th>
-                        <th>Sample</th>
-                        <th>Value</th>
-                    </tr>
-                </thead>
+            <table class="table-compact" data-report-table="grain-parameters">
+                <thead><tr><th>Parameter</th><th>Sample</th><th>Value</th></tr></thead>
                 <tbody>
             """
             for param, fmt, values, summary in values_by_param:
-                for label, value in zip(labels, values):
+                for row_index, (label, value) in enumerate(zip(labels, values)):
+                    row_class = ' class="table-group-start"' if row_index == 0 else ""
                     html += f"""
-                    <tr>
+                    <tr{row_class}>
                         <td><strong>{self._esc(param)}</strong></td>
                         <td>{self._esc(label)}</td>
-                        <td style="text-align: right;">{self._esc(fmt_value(value, fmt))}</td>
+                        <td class="num">{self._esc(fmt_value(value, fmt))}</td>
                     </tr>
                     """
                 html += f"""
                 <tr>
                     <td><strong>{self._esc(param)} summary</strong></td>
                     <td>Included samples</td>
-                    <td style="text-align: right;">{summary}</td>
+                    <td class="num">{summary}</td>
                 </tr>
                 """
-            html += "</tbody></table>"
-            return html
+            return html + "</tbody></table>"
 
         html = """
-        <table class="table-compact table-wide">
-            <thead>
-                <tr>
-                    <th>Parameter</th>
+        <table class="table-compact table-wide" data-report-table="grain-parameters">
+            <thead><tr><th>Parameter</th>
         """
         for label in labels:
-            html += f"<th>{self._esc(label)}</th>"
-        html += "<th>Statistics</th></tr></thead><tbody>"
+            html += f"<th class='num'>{self._esc(label)}</th>"
+        html += "<th class='num'>Statistics</th></tr></thead><tbody>"
 
         for param, fmt, values, summary in values_by_param:
-            html += f"<tr><td style='font-weight: bold;'>{self._esc(param)}</td>"
+            html += f"<tr><td><strong>{self._esc(param)}</strong></td>"
             for value in values:
-                html += f"<td style='text-align: center;'>{self._esc(fmt_value(value, fmt))}</td>"
-            html += f"<td style='text-align: center; font-size: 9pt;'>{summary}</td></tr>"
+                html += f"<td class='num'>{self._esc(fmt_value(value, fmt))}</td>"
+            html += f"<td class='num'>{summary}</td></tr>"
 
-        html += "</tbody></table>"
-        return html
-
-        html = """
-        <table class="table-compact table-wide">
-            <thead>
-            <tr>
-                    <th>Parameter</th>
-        """
-
-        # Add column headers for each dataset
-        labels = sample_labels or [dataset.sample_name for dataset in datasets]
-        for label in labels:
-            html += f"<th>{self._esc(label)}</th>"
-
-        # Add statistics column
-        html += "<th>Statistics</th>"
-        html += """
-                </tr>
-            </thead>
-            <tbody>
-        """
-
-        # Parameters to compare
-        params = ["D₁₀ (mm)", "D₅₀ (mm)", "D₆₀ (mm)", "Cu", "Cc"]
-
-        for param in params:
-            html += f"<tr><td style='font-weight: bold;'>{param}</td>"
-
-            # Collect values for this parameter using dataset accessors
-            values = []
-            for dataset in datasets:
-                if param == "D₁₀ (mm)":
-                    val = dataset.get_d10()
-                elif param == "D₅₀ (mm)":
-                    val = dataset.get_d50()
-                elif param == "D₆₀ (mm)":
-                    val = dataset.get_d60()
-                elif param == "Cu":
-                    val = dataset.get_uniformity_coefficient()
-                elif param == "Cc":
-                    val = dataset.get_coefficient_of_curvature()
-                else:
-                    val = None
-
-                values.append(val)
-
-            # Filter valid values for statistics and color-coding
-            valid_values = [v for v in values if v is not None]
-
-            # Calculate color scale
-            if len(valid_values) > 1:
-                min_val = min(valid_values)
-                max_val = max(valid_values)
-                val_range = max_val - min_val
-            else:
-                min_val = max_val = val_range = 0
-
-            # Add cells without color-coding (clean and simple)
-            for val in values:
-                if val is None:
-                    html += "<td style='text-align: center;'>—</td>"
-                else:
-                    display_val = f"{val:.3f}" if param.endswith("(mm)") else f"{val:.2f}"
-                    html += f"<td style='text-align: center;'>{display_val}</td>"
-
-            # Add statistics column
-            if valid_values:
-                mean = np.mean(valid_values)
-                std = np.std(valid_values)
-
-                stats_text = f"Mean: {mean:.2f}<br>Std: {std:.2f}"
-                html += f"<td style='text-align: center; font-size: 9pt;'>{stats_text}</td>"
-            else:
-                html += "<td style='text-align: center;'>—</td>"
-
-            html += "</tr>"
-
-        html += "</tbody></table>"
-        return html
+        return html + "</tbody></table>"
 
     def _create_permeability_classification_table(self, k_results_dict: Dict[str, List[KCalculationResult]]) -> str:
         """Generate HTML table with sample name, K geometric mean, and classification."""
         html = """
-        <table>
+        <table data-report-table="permeability-summary">
             <thead>
                 <tr>
                     <th>Sample Name</th>

@@ -3,16 +3,17 @@ from __future__ import annotations
 
 from html import escape
 import os
+import tempfile
 from typing import List, Optional
 
-from PyQt6.QtCore import Qt, QSettings, QSize, QRect, QPoint, pyqtSignal
+from PyQt6.QtCore import Qt, QSettings, QSize, QRect, QPoint, QUrl, pyqtSignal
 from PyQt6.QtGui import (
     QColor, QPainter, QPen, QBrush, QPageLayout, QPageSize, QCursor, QPixmap,
 )
 from PyQt6.QtWidgets import (
     QAbstractItemView, QButtonGroup, QCheckBox, QComboBox, QDialog, QDialogButtonBox,
-    QFileDialog, QFrame, QGridLayout, QHBoxLayout, QHeaderView, QLabel, QLineEdit,
-    QMessageBox, QPushButton, QScrollArea, QSizePolicy, QSplitter, QTableWidget,
+    QColorDialog, QFileDialog, QFrame, QGridLayout, QHBoxLayout, QHeaderView, QLabel,
+    QLineEdit, QMessageBox, QPushButton, QScrollArea, QSizePolicy, QSplitter, QTableWidget,
     QTableWidgetItem, QTextEdit, QVBoxLayout, QWidget,
 )
 from PyQt6.QtCore import QMarginsF
@@ -25,15 +26,19 @@ except ImportError as exc:
     HAS_WEBENGINE = False
     WEBENGINE_IMPORT_ERROR = str(exc)
 
-from .theme import C, F, icon as theme_icon
+from .theme import C, F, combo_popup_qss, icon as theme_icon
 from .report_brand import ReportBrand
-from .plot_context import build_plot_context_from_tab
-from .plot_styles import get_available_style_names
-from .report_plot_style import (
-    get_report_style_preset,
-    resolve_report_style,
-    set_report_style_preset,
+from .loading_dialog import LoadingDialog
+from .report_export_worker import (
+    ReportExportCancelled,
+    ReportExportWorker,
+    atomic_write_bytes,
+    atomic_write_text,
 )
+from .plot_context import build_plot_context_from_tab
+from .report_plot_style import resolve_report_style
+from .report_style_controls import ReportStyleControls
+from .report_export_plot_registry import report_plot_rows
 from report_generator import ReportGenerator
 from grain_classification import ISO14688
 
@@ -258,8 +263,9 @@ class _TypeCard(QFrame):
         self._fa_name = fa_name
         self.setCursor(Qt.CursorShape.PointingHandCursor)
         self.setToolTip(f"{label} — {desc}")
-        self.setFixedHeight(46)
-        self.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
+        self.setMinimumHeight(54)
+        self.setMinimumWidth(0)
+        self.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Minimum)
 
         lay = QHBoxLayout(self)
         lay.setContentsMargins(8, 6, 8, 6)
@@ -271,13 +277,23 @@ class _TypeCard(QFrame):
         self._icon.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self._icon.setPixmap(_icon_pixmap(fa_name, C.TEXT_MUTED, 15))
 
+        # Short label + compact scope note; long descriptions live in the type hint.
+        text_col = QVBoxLayout()
+        text_col.setContentsMargins(0, 0, 0, 0)
+        text_col.setSpacing(1)
         self._lbl = QLabel(label)
         self._lbl.setObjectName("tcLbl")
         self._lbl.setWordWrap(True)
-        self._lbl.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Preferred)
+        self._lbl.setSizePolicy(QSizePolicy.Policy.Ignored, QSizePolicy.Policy.Preferred)
+        self._desc = QLabel(desc)
+        self._desc.setObjectName("tcDesc")
+        self._desc.setWordWrap(True)
+        self._desc.setSizePolicy(QSizePolicy.Policy.Ignored, QSizePolicy.Policy.Preferred)
+        text_col.addWidget(self._lbl)
+        text_col.addWidget(self._desc)
 
-        lay.addWidget(self._icon, 0, Qt.AlignmentFlag.AlignVCenter)
-        lay.addWidget(self._lbl, 1, Qt.AlignmentFlag.AlignVCenter)
+        lay.addWidget(self._icon, 0, Qt.AlignmentFlag.AlignTop)
+        lay.addLayout(text_col, 1)
 
         self._apply_style()
 
@@ -330,6 +346,12 @@ class _TypeCard(QFrame):
                 font-weight: 700;
                 background: transparent;
             }}
+            QLabel#tcDesc {{
+                color: {C.TEXT_MID if self._on else C.TEXT_MUTED};
+                font-family: "{F.UI}";
+                font-size: {F.SZ_XS}pt;
+                background: transparent;
+            }}
         """)
 
 
@@ -370,18 +392,22 @@ class _SectionRow(QFrame):
             self._breakdown_combo = QComboBox()
             self._breakdown_combo.addItem("Per group", "group")
             self._breakdown_combo.addItem("Per dataset", "dataset")
+            self._breakdown_combo.addItem("Both", "both")
             self._breakdown_combo.setCursor(Qt.CursorShape.PointingHandCursor)
             self._breakdown_combo.setFixedHeight(20)
             self._breakdown_combo.setToolTip(
                 "Per group: one aggregate curve/bar series per named group "
                 "(per dataset when ungrouped).\nPer dataset: every dataset drawn "
-                "individually."
+                "individually.\nBoth: include the per-group and per-dataset "
+                "versions as two figures."
             )
             self._breakdown_combo.setStyleSheet(
                 f'QComboBox {{ color: {C.TEXT_MID}; background: {C.BG_LOW}; '
                 f'border: 1px solid {C.BORDER}; border-radius: 4px; padding: 0 6px; '
                 f'font-family: "{F.UI}"; font-size: {F.SZ_XS}pt; }}'
                 f'QComboBox:focus {{ border-color: {C.OLIVE}; }}'
+                # Keep this dropdown's popup opaque despite the transparent row.
+                + combo_popup_qss()
             )
 
         self._toggle = _TogglePill(True)
@@ -478,21 +504,9 @@ class ReportingTab(QWidget):
         ("interp",  "fa6s.chart-area", "B \u2014 Full-Size Plots"),
         ("quality", "fa6s.scroll",     "C \u2014 Method Details"),
     ]
-    # Per-plot selection (key, icon, label, default-on, breakdown-capable). Keys
-    # match the export plot-type vocabulary so reports and exports share one set
-    # of plot names. "breakdown" adds a per-dataset/per-group selector to the row
-    # (comparison plots rendered through the shared ComparisonPlotSpec).
-    SINGLE_PLOT_KEYS = [
-        ("grain_size_curve",      "fa6s.chart-line",   "Grain size distribution",      True,  False),
-        ("k_value_bar",           "fa6s.bolt",         "K-value bar chart",            True,  False),
-        ("applicability_heatmap", "fa6s.table-cells",  "Method applicability heatmap", False, False),
-    ]
-    COLLECTION_PLOT_KEYS = [
-        ("distribution_overlay",  "fa6s.chart-area",   "Grain size comparison",        True,  True),
-        ("k_value_comparison",    "fa6s.bolt",         "K-value comparison (bars)",    True,  True),
-        ("statistical_boxplots",  "fa6s.chart-column", "K distribution (by scope)",    True,  False),
-        ("reliability_matrix",    "fa6s.table-cells",  "Method reliability matrix",    False, False),
-    ]
+    # Per-plot selection rows come from the shared report/export plot registry.
+    SINGLE_PLOT_KEYS = report_plot_rows("single")
+    COLLECTION_PLOT_KEYS = report_plot_rows("collection")
     # Outline page hints (must match order: main sections then appendices)
     OUTLINE_PAGES = [1, 2, 3, 5, 7, 9, 11, 13, 15, 17]
 
@@ -504,6 +518,12 @@ class ReportingTab(QWidget):
 
     # Output format options
     FORMATS = ["PDF", "HTML", "Word (.docx)"]
+    REPORT_COLOR_PRESETS = (
+        ("DTU Red", "#990000"),
+        ("Professional Blue", "#1f4e79"),
+        ("Forest Green", "#356859"),
+        ("Neutral Charcoal", "#3f454b"),
+    )
 
     # Canonical presets per report type — defines the default section/appendix
     # state and the sample-table selection mode for each of the four built-in
@@ -526,6 +546,9 @@ class ReportingTab(QWidget):
                 "k_stats": True, "gradation": True, "methodology": True,
             },
             "appendices": {"raw": False, "interp": False, "quality": False},
+            "collection_plots": {
+                "distribution_overlay", "k_value_comparison", "statistical_boxplots",
+            },
         },
         TYPE_FULL: {
             "selection_mode": "all",
@@ -535,15 +558,28 @@ class ReportingTab(QWidget):
                 "k_stats": True, "gradation": True, "methodology": True,
             },
             "appendices": {"raw": True, "interp": True, "quality": True},
+            # Cross-sample plots on by default. Per-sample plots stay OPT-IN even
+            # here: rendering a grain curve + K-bar for every sample is the main
+            # cause of a large (e.g. 20-dataset) report freezing the UI, so the
+            # user enables them deliberately (see the per_sample_* rows).
+            "collection_plots": {
+                "distribution_overlay", "k_value_comparison", "statistical_boxplots",
+            },
         },
         TYPE_KFOCUS: {
             "selection_mode": "multi",
             "hint": "Pick samples for K tables, overall/group aggregates, and K distribution plots.",
             "sections": {
-                "cover": False, "executive": True, "results": False, "plots": False,
+                # Plots ON so the K-distribution/K-value charts the hint promises
+                # actually render (the generator gates every plot on this flag).
+                "cover": False, "executive": True, "results": False, "plots": True,
                 "k_stats": True, "gradation": True, "methodology": True,
             },
             "appendices": {"raw": False, "interp": False, "quality": False},
+            # K-focused: drop the grain-size comparison; lead with the K plots.
+            "collection_plots": {
+                "k_value_comparison", "statistical_boxplots", "k_distribution",
+            },
         },
     }
 
@@ -551,6 +587,17 @@ class ReportingTab(QWidget):
         super().__init__(parent)
         self.report_generator = ReportGenerator()
         self._scheme = ISO14688
+        # Active background report generation (None when idle) — see _on_generate.
+        self._report_worker = None
+        self._report_dialog = None
+        self._report_export_worker = None
+        self._report_export_dialog = None
+        self._pdf_export_path = None
+        self._pdf_appendix_inputs = None
+        # Temp file backing the web-engine preview (avoids setHtml's 2 MB limit).
+        self._preview_tmp_path = None
+        self._preview_loading_path = None
+        self._preview_load_ready = not HAS_WEBENGINE
         self.dataset_tabs: List = []
         self._sample_contexts: list[dict] = []
         self._sample_selected: list[bool] = []
@@ -597,7 +644,7 @@ class ReportingTab(QWidget):
 
         # Left composer panel
         left = self._build_composer_panel()
-        left.setMinimumWidth(340)
+        left.setMinimumWidth(440)
         left.setMaximumWidth(560)
 
         # Right preview panel
@@ -690,14 +737,10 @@ class ReportingTab(QWidget):
         grid.setVerticalSpacing(6)
 
         cards = [
-            (self.TYPE_INDIVIDUAL, "fa6s.chart-area", "Individual Sample",
-             "Full report for one sample \u2014 grain data, plot, K-values, statistics."),
-            (self.TYPE_COMPARISON, "fa6s.code-compare", "Cross-Sample Comparison",
-             "Side-by-side samples plus overall/group aggregate summaries."),
-            (self.TYPE_FULL, "fa6s.book", "Full Project Summary",
-             "All samples with aggregate tables, plots, and appendices."),
-            (self.TYPE_KFOCUS, "fa6s.bolt", "K-Value Focus",
-             "Hydraulic conductivity method tables and group aggregates."),
+            (self.TYPE_INDIVIDUAL, "fa6s.chart-area", "Individual", "1 sample"),
+            (self.TYPE_COMPARISON, "fa6s.code-compare", "Comparison", "2+ samples"),
+            (self.TYPE_FULL, "fa6s.book", "Full summary", "All samples"),
+            (self.TYPE_KFOCUS, "fa6s.bolt", "K focus", "K outputs"),
         ]
         self._type_cards: list[_TypeCard] = []
         for i, (cid, fa, label, desc) in enumerate(cards):
@@ -705,6 +748,8 @@ class ReportingTab(QWidget):
             card.clicked.connect(self._on_type_clicked)
             self._type_cards.append(card)
             grid.addWidget(card, i // 2, i % 2)
+        grid.setColumnMinimumWidth(0, 0)
+        grid.setColumnMinimumWidth(1, 0)
         grid.setColumnStretch(0, 1)
         grid.setColumnStretch(1, 1)
 
@@ -733,6 +778,33 @@ class ReportingTab(QWidget):
         self._language_combo = self._make_form_combo()
         self._language_combo.addItems(["English", "Danish"])
         flay.addLayout(self._form_row("Language", self._language_combo))
+
+        self._excel_appendix_panel = QFrame()
+        self._excel_appendix_panel.setStyleSheet(f"""
+            QFrame {{
+                background: {C.BG_LOW};
+                border: 1px solid {C.BORDER};
+                border-left: 3px solid {C.AMBER};
+                border-radius: 4px;
+            }}
+            QLabel, QCheckBox {{ background: transparent; border: none; }}
+        """)
+        excel_lay = QVBoxLayout(self._excel_appendix_panel)
+        excel_lay.setContentsMargins(9, 7, 9, 7)
+        excel_lay.setSpacing(3)
+        self._excel_appendix_status = QLabel("Large tables detected")
+        self._excel_appendix_status.setWordWrap(True)
+        self._excel_appendix_status.setStyleSheet(
+            f'color: {C.TEXT_MID}; font-size: {F.SZ_XS}pt; font-weight: 600;'
+        )
+        self._excel_appendix_check = QCheckBox("Save companion Excel appendix")
+        self._excel_appendix_check.setStyleSheet(
+            f'color: {C.TEXT}; font-size: {F.SZ_SM}pt;'
+        )
+        excel_lay.addWidget(self._excel_appendix_status)
+        excel_lay.addWidget(self._excel_appendix_check)
+        self._excel_appendix_panel.setVisible(False)
+        flay.addWidget(self._excel_appendix_panel)
 
         lay.addWidget(area)
         lay.addWidget(sep)
@@ -961,6 +1033,7 @@ class ReportingTab(QWidget):
         self._plots_header = self._uc_header_with_icon(
             "fa6s.images", "PLOTS TO INCLUDE", top_margin=12
         )
+        self._plots_header_lbl = getattr(self._plots_header, "label", None)
         alay.addWidget(self._plots_header)
         for scope, specs in (
             ("single", self.SINGLE_PLOT_KEYS),
@@ -1134,6 +1207,43 @@ class ReportingTab(QWidget):
 
         ilay.addLayout(grid)
 
+        # Report accent
+        accent_wrap = QWidget()
+        accent_lay = QVBoxLayout(accent_wrap)
+        accent_lay.setContentsMargins(0, 0, 0, 0)
+        accent_lay.setSpacing(7)
+
+        accent_hdr = QLabel("REPORT ACCENT")
+        accent_hdr.setStyleSheet(self._uc_header_css(border_bottom=True))
+        accent_hdr.setContentsMargins(0, 0, 0, 4)
+        accent_lay.addWidget(accent_hdr)
+
+        accent_row = QHBoxLayout()
+        accent_row.setContentsMargins(0, 0, 0, 0)
+        accent_row.setSpacing(7)
+
+        self._report_color_combo = self._make_form_combo()
+        for label, color in self.REPORT_COLOR_PRESETS:
+            self._report_color_combo.addItem(label, color)
+        self._report_color_combo.addItem("Custom", None)
+        self._report_color_combo.setToolTip(
+            "Accent used for report headings, cover elements, and table rules."
+        )
+        accent_row.addWidget(self._report_color_combo, 1)
+
+        self._report_color_button = QPushButton()
+        self._report_color_button.setFixedSize(82, 26)
+        self._report_color_button.setCursor(Qt.CursorShape.PointingHandCursor)
+        self._report_color_button.setToolTip("Choose a custom report accent")
+        self._report_color_button.clicked.connect(self._pick_report_color)
+        accent_row.addWidget(self._report_color_button)
+        accent_lay.addLayout(accent_row)
+
+        self._sync_report_color_controls()
+        self._report_color_combo.currentIndexChanged.connect(
+            self._on_report_color_preset_changed
+        )
+
         # Logo
         logo_wrap = QWidget()
         llay = QVBoxLayout(logo_wrap)
@@ -1200,6 +1310,7 @@ class ReportingTab(QWidget):
         nlay.addWidget(self.notes_edit)
 
         alay.addWidget(info)
+        alay.addWidget(accent_wrap)
         alay.addWidget(logo_wrap)
         alay.addWidget(notes_wrap)
         lay.addWidget(area)
@@ -1349,6 +1460,7 @@ class ReportingTab(QWidget):
             self.web_view = QWebEngineView()
             self.web_view.setStyleSheet("background: white; border: none;")
             self.web_view.setHtml(self._empty_preview_html())
+            self.web_view.loadFinished.connect(self._on_preview_load_finished)
             self.web_view.page().pdfPrintingFinished.connect(self._on_pdf_done)
             lay.addWidget(self.web_view)
         else:
@@ -1393,6 +1505,7 @@ class ReportingTab(QWidget):
         )
         h.addWidget(lbl)
         h.addStretch()
+        box.label = lbl  # exposed so callers can retitle the header later
         return box
 
     @staticmethod
@@ -1447,15 +1560,14 @@ class ReportingTab(QWidget):
         self._sync_plot_rows_visibility()
 
     def _sync_plot_rows_visibility(self) -> None:
-        """Show single-sample plot rows for an Individual report, comparison
-        plot rows for the multi-sample report types."""
+        """Keep plot controls visible; report types only change defaults."""
         if not getattr(self, "_plot_rows", None):
             return
-        single = self._selected_type == self.TYPE_INDIVIDUAL
-        for row in self._plot_rows.get("single", {}).values():
-            row.setVisible(single)
-        for row in self._plot_rows.get("collection", {}).values():
-            row.setVisible(not single)
+        for rows in self._plot_rows.values():
+            for row in rows.values():
+                row.setVisible(True)
+        if getattr(self, "_plots_header_lbl", None) is not None:
+            self._plots_header_lbl.setText("PLOTS TO INCLUDE")
 
     def _apply_type_preset(self, type_id: int) -> None:
         """Apply the canonical section/appendix state + selection mode for a type."""
@@ -1474,6 +1586,13 @@ class ReportingTab(QWidget):
                 row = self._section_rows.get(key)
                 if row is not None:
                     row.set_checked(val)
+            # Per-type collection-plot defaults (e.g. K-Focus leads with K plots,
+            # not the grain-size comparison). Only the multi-sample types define
+            # these; Individual keeps its own single-sample plot rows.
+            wanted = preset.get("collection_plots")
+            if wanted is not None:
+                for key, row in self._plot_rows.get("collection", {}).items():
+                    row.set_checked(key in wanted)
         finally:
             self._restoring_settings = False
 
@@ -1609,6 +1728,7 @@ class ReportingTab(QWidget):
             "Word (.docx)": " Save Word",
         }.get(fmt, " Save")
         self.btn_save.setText(label)
+        self._update_preview_action_buttons()
 
     @staticmethod
     def _type_short_name(type_id: int) -> str:
@@ -1825,8 +1945,73 @@ class ReportingTab(QWidget):
             self._logo_drop.setIcon(theme_icon("fa6s.upload", C.TEXT_MUTED, 14))
             self._logo_drop.setText("  Upload logo (PNG, SVG) \u2014 click to browse")
 
+    @staticmethod
+    def _normalized_report_color(value: str) -> str:
+        color = QColor(str(value or "").strip())
+        return color.name() if color.isValid() else "#990000"
+
+    def _sync_report_color_controls(self) -> None:
+        current = self._normalized_report_color(self.brand.primary_color)
+        self.brand.primary_color = current
+        preset_index = next(
+            (
+                index
+                for index in range(self._report_color_combo.count() - 1)
+                if self._report_color_combo.itemData(index).lower() == current
+            ),
+            self._report_color_combo.count() - 1,
+        )
+        self._report_color_combo.blockSignals(True)
+        self._report_color_combo.setCurrentIndex(preset_index)
+        self._report_color_combo.blockSignals(False)
+        self._update_report_color_button()
+
+    def _set_report_color(self, value: str) -> None:
+        self.brand.primary_color = self._normalized_report_color(value)
+        self.brand.save()
+        self._sync_report_color_controls()
+
+    def _on_report_color_preset_changed(self, index: int) -> None:
+        color = self._report_color_combo.itemData(index)
+        if color:
+            self._set_report_color(color)
+            return
+        self._pick_report_color()
+
+    def _pick_report_color(self) -> None:
+        chosen = QColorDialog.getColor(
+            QColor(self.brand.primary_color),
+            self,
+            "Choose Report Accent",
+        )
+        if chosen.isValid():
+            self._set_report_color(chosen.name())
+        else:
+            self._sync_report_color_controls()
+
+    def _update_report_color_button(self) -> None:
+        color = QColor(self.brand.primary_color)
+        luminance = (
+            0.299 * color.red()
+            + 0.587 * color.green()
+            + 0.114 * color.blue()
+        )
+        text_color = "#ffffff" if luminance < 150 else "#1a1a1a"
+        self._report_color_button.setText(color.name().upper())
+        self._report_color_button.setStyleSheet(f"""
+            QPushButton {{
+                background: {color.name()};
+                color: {text_color};
+                border: 1px solid {C.BORDER_DK};
+                border-radius: 4px;
+                font-family: "{F.MONO}";
+                font-size: {F.SZ_XS}pt;
+                font-weight: 700;
+            }}
+            QPushButton:hover {{ border: 2px solid {C.TEXT}; }}
+        """)
+
     def _collect_brand(self) -> ReportBrand:
-        # No in-UI editing of org/color — persist current values
         self.brand.save()
         return self.brand
 
@@ -1963,15 +2148,107 @@ class ReportingTab(QWidget):
     # Preview output wrappers
     # ══════════════════════════════════════════════════════════
 
+    def _report_export_in_progress(self) -> bool:
+        return bool(
+            getattr(self, "_report_export_worker", None) is not None
+            or getattr(self, "_pdf_export_path", None)
+        )
+
+    def _update_preview_action_buttons(self) -> None:
+        has_report = bool(getattr(self, "current_report_html", ""))
+        preview_ready = bool(getattr(self, "_preview_load_ready", True))
+        busy = self._report_export_in_progress()
+        fmt = self._format_combo.currentText() if hasattr(self, "_format_combo") else "PDF"
+        if hasattr(self, "btn_print"):
+            self.btn_print.setEnabled(
+                has_report and HAS_WEBENGINE and preview_ready and not busy
+            )
+        if hasattr(self, "btn_save"):
+            waits_for_preview = fmt == "PDF" and (not HAS_WEBENGINE or not preview_ready)
+            self.btn_save.setEnabled(has_report and not waits_for_preview and not busy)
+
+    def _on_preview_load_finished(self, ok: bool) -> None:
+        expected = getattr(self, "_preview_loading_path", None)
+        current = ""
+        try:
+            current = self.web_view.url().toLocalFile()
+        except Exception:
+            current = ""
+        if expected and current:
+            loaded_expected = os.path.abspath(current) == os.path.abspath(expected)
+        else:
+            loaded_expected = True
+        self._preview_load_ready = bool(ok and loaded_expected)
+        self._update_preview_action_buttons()
+
     def _set_preview_html(self, html: str) -> None:
-        self.web_view.setHtml(html)
+        """Load *html* into the preview.
+
+        QWebEngine's ``setHtml`` percent-encodes the page into a ``data:`` URL,
+        which Chromium caps at ~2 MB - a Full report with many base64-embedded
+        plots exceeds that and silently fails to load (the tail, e.g. per-sample
+        plots, never renders, and PDF export prints the same blank page). So we
+        write the HTML to a temp file and load it by URL, which has no size limit.
+        The QTextEdit fallback (no web engine) keeps ``setHtml`` - its content is
+        always the tiny empty/error placeholder.
+        """
+        if not HAS_WEBENGINE:
+            self._preview_loading_path = None
+            self._preview_load_ready = True
+            self.web_view.setHtml(html)
+            self._update_preview_action_buttons()
+            return
+        try:
+            path = self._write_preview_tempfile(html)
+            self._preview_loading_path = path
+            self._preview_load_ready = False
+            self._update_preview_action_buttons()
+            self.web_view.setUrl(QUrl.fromLocalFile(path))
+        except Exception:
+            # Last-resort fallback; fine for small placeholder content.
+            self._preview_loading_path = None
+            self._preview_load_ready = True
+            self.web_view.setHtml(html)
+            self._update_preview_action_buttons()
+
+    def _write_preview_tempfile(self, html: str) -> str:
+        """Write *html* to a reused temp file and return its path.
+
+        One file per tab instance, overwritten each render and removed on close,
+        so large previews don't accumulate on disk.
+        """
+        path = getattr(self, "_preview_tmp_path", None)
+        if not path:
+            fd, path = tempfile.mkstemp(suffix=".html", prefix="gsa_report_")
+            os.close(fd)
+            self._preview_tmp_path = path
+        with open(path, "w", encoding="utf-8") as fh:
+            fh.write(html)
+        return path
+
+    def closeEvent(self, event):
+        path = getattr(self, "_preview_tmp_path", None)
+        if path:
+            try:
+                os.remove(path)
+            except OSError:
+                pass
+            self._preview_tmp_path = None
+        super().closeEvent(event)
 
     def _set_report_output(self, report_html: str) -> None:
         self.current_report_html = report_html
+        analysis = self.report_generator.analyze_tables(report_html)
+        if hasattr(self, "_excel_appendix_panel"):
+            self._excel_appendix_panel.setVisible(analysis.excel_recommended)
+            self._excel_appendix_status.setText(
+                analysis.recommendation_text or "Large tables detected"
+            )
+            if not analysis.excel_recommended:
+                self._excel_appendix_check.setChecked(False)
         self._set_preview_html(self._inject_preview_css(report_html))
         self.btn_refresh.setEnabled(True)
-        self.btn_print.setEnabled(HAS_WEBENGINE)
-        self.btn_save.setEnabled(True)
+        self._update_preview_action_buttons()
 
     def _clear_report_output(self, message: Optional[str] = None) -> None:
         self.current_report_html = ""
@@ -2024,6 +2301,8 @@ class ReportingTab(QWidget):
             self._clear_report_output(message)
             QMessageBox.warning(self, title, message)
             return
+        if getattr(self, "_report_worker", None) is not None:
+            return  # a generation is already running
 
         type_id = self._selected_type
         brand = self._collect_brand()
@@ -2031,20 +2310,82 @@ class ReportingTab(QWidget):
         sections = self._collect_sections()
         appendix_cfg = self._collect_appendix_label_config()
 
+        # Build a thunk that produces the HTML given (progress, cancel_check).
+        # Sample data is gathered now (on the UI thread, touching widgets); the
+        # heavy plot rendering happens inside the thunk on the worker thread.
         try:
             if type_id == self.TYPE_INDIVIDUAL:
-                html = self._gen_individual("Grain Size", brand, metadata, sections, appendix_cfg)
-            elif type_id == self.TYPE_KFOCUS:
-                # K-Focus is multi-sample → route through the comparison generator
-                html = self._gen_comparison(brand, metadata, sections)
+                build = self._build_individual_thunk(
+                    "Grain Size", brand, metadata, sections, appendix_cfg)
             elif type_id == self.TYPE_FULL:
-                html = self._gen_full(brand, metadata, sections)
-            else:
-                html = self._gen_comparison(brand, metadata, sections)
-            self._set_report_output(html)
+                build = self._build_comparison_thunk(
+                    brand, metadata, sections, self._sample_contexts, scope="full")
+            else:  # comparison + K-focus both route through the comparison generator
+                build = self._build_comparison_thunk(
+                    brand, metadata, sections, self._selected_sample_contexts())
         except Exception as exc:
             self._clear_report_output(str(exc))
             QMessageBox.critical(self, "Report Error", f"Failed to generate report:\n{exc}")
+            return
+
+        self._run_report_generation(build)
+
+    def _run_report_generation(self, build) -> None:
+        """Run *build* on a worker thread behind a LoadingDialog with progress."""
+        from gui.report_worker import ReportWorker
+
+        dialog = LoadingDialog(
+            "Generating report",
+            "Rendering plots and assembling the document.",
+            parent=self,
+            cancellable=True,
+        )
+        dialog.update_progress(0, 1, "Preparing", "Collecting report content.")
+        dialog.set_activity("The report is being rendered in the background.")
+
+        worker = ReportWorker(build, parent=self)
+        self._report_worker = worker
+        self._report_dialog = dialog
+
+        worker.progress.connect(
+            lambda cur, total, label: dialog.update_progress(
+                cur, total, label, f"Step {cur} of {total}."
+            )
+        )
+        worker.finished_html.connect(self._on_report_finished)
+        worker.failed.connect(self._on_report_failed)
+        worker.cancelled.connect(self._on_report_cancelled)
+        dialog.cancellation_requested.connect(worker.cancel)
+        worker.finished.connect(worker.deleteLater)
+
+        worker.start()
+        dialog.exec()
+
+    def _cleanup_report_worker(self) -> None:
+        self._report_worker = None
+        self._report_dialog = None
+
+    def _on_report_finished(self, html: str) -> None:
+        dialog = getattr(self, "_report_dialog", None)
+        if dialog is not None:
+            dialog.accept()
+        self._set_report_output(html)
+        self._cleanup_report_worker()
+
+    def _on_report_failed(self, message: str) -> None:
+        dialog = getattr(self, "_report_dialog", None)
+        if dialog is not None:
+            dialog.reject()
+        self._clear_report_output(message)
+        QMessageBox.critical(self, "Report Error", f"Failed to generate report:\n{message}")
+        self._cleanup_report_worker()
+
+    def _on_report_cancelled(self) -> None:
+        dialog = getattr(self, "_report_dialog", None)
+        if dialog is not None:
+            dialog.reject()
+        self._clear_report_output("Report generation cancelled.")
+        self._cleanup_report_worker()
 
     def _first_selected_context(self) -> Optional[dict]:
         selected = self._selected_sample_contexts()
@@ -2054,34 +2395,51 @@ class ReportingTab(QWidget):
             return self._sample_contexts[0]
         return None
 
-    def _gen_individual(self, subtype: str, brand, metadata, sections, appendix_cfg) -> str:
+    def _build_individual_thunk(self, subtype: str, brand, metadata, sections, appendix_cfg):
+        """Return a ``build(progress, cancel_check) -> html`` for an Individual report.
+
+        Widget data (dataset, results, plot context) is captured now on the UI
+        thread; the returned closure does only the heavy rendering, so it is safe
+        to run on the worker thread.
+        """
         ctx = self._first_selected_context()
         if ctx is None:
             raise ValueError("No sample selected.")
         tab = ctx["tab"]
         dataset = tab.get_dataset()
-
-        if subtype == "K-Values":
-            return self.report_generator.generate_k_value_report(
-                dataset, tab.get_results(), tab.temperature, tab.porosity,
-                metadata=metadata, sections=sections, brand=brand,
-            )
+        results = list(tab.get_results() or [])
+        temperature, porosity = tab.temperature, tab.porosity
         plot_context = build_plot_context_from_tab(tab, self._scheme)
-        return self.report_generator.generate_grain_size_report(
-            dataset, metadata=metadata, sections=sections, brand=brand,
-            appendix_label_config=appendix_cfg,
-            plot_context=plot_context,
-            k_results=list(tab.get_results() or []),
-            selected_plots=self._collect_selected_plots("single"),
-        )
+        selected_plots = self._collect_selected_plots("single")
+        gen = self.report_generator
 
-    def _gen_comparison(self, brand, metadata, sections) -> str:
-        selected = self._selected_sample_contexts()
-        if not selected:
-            raise ValueError("Select at least one sample.")
+        def build(progress, cancel_check):
+            if subtype == "K-Values":
+                return gen.generate_k_value_report(
+                    dataset, results, temperature, porosity,
+                    metadata=metadata, sections=sections, brand=brand,
+                )
+            return gen.generate_grain_size_report(
+                dataset, metadata=metadata, sections=sections, brand=brand,
+                appendix_label_config=appendix_cfg,
+                plot_context=plot_context,
+                k_results=results,
+                selected_plots=selected_plots,
+            )
+        return build
 
+    def _build_comparison_thunk(self, brand, metadata, sections, contexts, *, scope="comparison"):
+        """Return a ``build(progress, cancel_check) -> html`` for a multi-sample report.
+
+        Used by Comparison, K-Focus and Full (each just supplies its sample set).
+        Sample data is captured now on the UI thread; the closure renders.
+        """
+        if not contexts:
+            raise ValueError(
+                "No samples loaded." if scope == "full" else "Select at least one sample."
+            )
         sample_details = []
-        for ctx in selected:
+        for ctx in contexts:
             tab = ctx["tab"]
             sample_details.append({
                 "label":       ctx["label"],
@@ -2091,38 +2449,24 @@ class ReportingTab(QWidget):
                 "porosity":    tab.porosity,
                 "plot_context": build_plot_context_from_tab(tab, self._scheme),
             })
+        datasets = [item["dataset"] for item in sample_details]
+        selected_plots = self._collect_selected_plots("collection")
+        plot_breakdowns = self._collect_plot_breakdowns("collection")
+        plot_style = self._resolve_report_plot_style()
+        gen = self.report_generator
 
-        return self.report_generator.generate_comparison_report(
-            [item["dataset"] for item in sample_details],
-            metadata=metadata, sections=sections, brand=brand,
-            sample_details=sample_details,
-            selected_plots=self._collect_selected_plots("collection"),
-            plot_breakdowns=self._collect_plot_breakdowns("collection"),
-            plot_style=self._resolve_report_plot_style(),
-        )
-
-    def _gen_full(self, brand, metadata, sections) -> str:
-        if not self._sample_contexts:
-            raise ValueError("No samples loaded.")
-        sample_details = []
-        for ctx in self._sample_contexts:
-            tab = ctx["tab"]
-            sample_details.append({
-                "label":       ctx["label"],
-                "dataset":     tab.get_dataset(),
-                "k_results":   list(tab.get_results() or []),
-                "temperature": tab.temperature,
-                "porosity":    tab.porosity,
-                "plot_context": build_plot_context_from_tab(tab, self._scheme),
-            })
-        return self.report_generator.generate_comparison_report(
-            [item["dataset"] for item in sample_details],
-            metadata=metadata, sections=sections, brand=brand,
-            sample_details=sample_details,
-            selected_plots=self._collect_selected_plots("collection"),
-            plot_breakdowns=self._collect_plot_breakdowns("collection"),
-            plot_style=self._resolve_report_plot_style(),
-        )
+        def build(progress, cancel_check):
+            return gen.generate_comparison_report(
+                datasets,
+                metadata=metadata, sections=sections, brand=brand,
+                sample_details=sample_details,
+                selected_plots=selected_plots,
+                plot_breakdowns=plot_breakdowns,
+                plot_style=plot_style,
+                progress=progress,
+                cancel_check=cancel_check,
+            )
+        return build
 
     def _collect_selected_plots(self, scope: str) -> set:
         """Return the chosen plot-type keys for the given report scope.
@@ -2154,129 +2498,13 @@ class ReportingTab(QWidget):
         return resolve_report_style()
 
     def _build_plot_style_group(self, alay: QVBoxLayout) -> None:
-        """Preset dropdown + Customize button for the global report/export style."""
-        row = QWidget()
-        row.setStyleSheet("background: transparent;")
-        rlay = QHBoxLayout(row)
-        rlay.setContentsMargins(9, 2, 9, 2)
-        rlay.setSpacing(7)
+        """Preset + palette + Customize controls for the global report/export style.
 
-        lbl = QLabel("Preset")
-        lbl.setStyleSheet(
-            f'color: {C.TEXT_MID}; font-family: "{F.UI}"; font-size: {F.SZ_MD}pt; '
-            f'background: transparent;'
-        )
-        rlay.addWidget(lbl)
-
-        self._style_preset_combo = QComboBox()
-        self._style_preset_combo.addItems(get_available_style_names())
-        current = get_report_style_preset()
-        idx = self._style_preset_combo.findText(current)
-        if idx >= 0:
-            self._style_preset_combo.setCurrentIndex(idx)
-        self._style_preset_combo.currentTextChanged.connect(self._on_report_style_preset_changed)
-        rlay.addWidget(self._style_preset_combo, 1)
-
-        self._style_customize_btn = QPushButton("Customize…")
-        self._style_customize_btn.setCursor(Qt.CursorShape.PointingHandCursor)
-        self._style_customize_btn.clicked.connect(self._open_report_style_dialog)
-        rlay.addWidget(self._style_customize_btn)
-
-        alay.addWidget(row)
-
-    def _on_report_style_preset_changed(self, name: str) -> None:
-        set_report_style_preset(name)
-
-    def _open_report_style_dialog(self) -> None:
-        """Compact typography/legend override panel for the global report style."""
-        from .sidebar_controls import (
-            LEGEND_LOCATIONS as _LOCS,
-            LEGEND_LAYOUTS as _LAYOUTS,
-            make_combo_row, make_dspin_row, make_spin_row,
-        )
-        from .report_plot_style import (
-            get_report_style_overrides,
-            set_report_style_overrides,
-            clear_report_style_overrides,
-        )
-
-        style = resolve_report_style()
-        dlg = QDialog(self.window())
-        dlg.setWindowTitle("Report Plot Style")
-        dlg.setMinimumWidth(320)
-        root = QVBoxLayout(dlg)
-        root.setContentsMargins(12, 12, 12, 12)
-        root.setSpacing(4)
-
-        intro = QLabel(
-            f"Custom tweaks on top of the '{get_report_style_preset()}' preset. "
-            "Applied to every report and export plot."
-        )
-        intro.setWordWrap(True)
-        intro.setStyleSheet(f"color: {C.TEXT_MUTED}; font-size: {F.SZ_XS}pt;")
-        root.addWidget(intro)
-
-        row_loc, loc_combo = make_combo_row("Legend position", [lbl for _, _, lbl in _LOCS])
-        loc_idx = next((i for i, (loc, bbox, _l) in enumerate(_LOCS)
-                        if loc == style.legend_loc and bbox == style.legend_bbox_to_anchor), 0)
-        loc_combo.setCurrentIndex(loc_idx)
-        root.addWidget(row_loc)
-
-        row_layout, layout_combo = make_combo_row("Legend layout", [lbl for _, lbl in _LAYOUTS])
-        layout_idx = next((i for i, (ncol, _l) in enumerate(_LAYOUTS)
-                           if ncol == getattr(style, "legend_ncol", 1)), 0)
-        layout_combo.setCurrentIndex(layout_idx)
-        root.addWidget(row_layout)
-
-        row_alpha, alpha_spin = make_dspin_row("Legend opacity", 0.0, 1.0, 0.05, 2)
-        alpha_spin.setValue(float(style.legend_framealpha))
-        root.addWidget(row_alpha)
-
-        row_title, title_spin = make_spin_row("Title size", 6, 36)
-        title_spin.setValue(int(style.title_fontsize))
-        root.addWidget(row_title)
-
-        row_label, label_spin = make_spin_row("Axis label size", 6, 36)
-        label_spin.setValue(int(style.label_fontsize))
-        root.addWidget(row_label)
-
-        row_tick, tick_spin = make_spin_row("Tick size", 5, 24)
-        tick_spin.setValue(int(style.tick_fontsize))
-        root.addWidget(row_tick)
-
-        row_legend, legend_spin = make_spin_row("Legend size", 5, 24)
-        legend_spin.setValue(int(style.legend_fontsize))
-        root.addWidget(row_legend)
-
-        buttons = QDialogButtonBox()
-        reset_btn = buttons.addButton("Reset to preset", QDialogButtonBox.ButtonRole.ResetRole)
-        buttons.addButton(QDialogButtonBox.StandardButton.Save)
-        buttons.addButton(QDialogButtonBox.StandardButton.Cancel)
-        root.addWidget(buttons)
-
-        def on_reset():
-            clear_report_style_overrides()
-            dlg.reject()
-
-        def on_save():
-            loc, bbox, _l = _LOCS[loc_combo.currentIndex()]
-            ncol, _l2 = _LAYOUTS[layout_combo.currentIndex()]
-            set_report_style_overrides({
-                "legend_loc": loc,
-                "legend_bbox_to_anchor": bbox,
-                "legend_ncol": ncol,
-                "legend_framealpha": alpha_spin.value(),
-                "title_fontsize": title_spin.value(),
-                "label_fontsize": label_spin.value(),
-                "tick_fontsize": tick_spin.value(),
-                "legend_fontsize": legend_spin.value(),
-            })
-            dlg.accept()
-
-        reset_btn.clicked.connect(on_reset)
-        buttons.accepted.connect(on_save)
-        buttons.rejected.connect(dlg.reject)
-        dlg.exec()
+        Uses the shared ``ReportStyleControls`` so the Report and Export tabs
+        expose identical "restyle once" controls over the same persisted store.
+        """
+        self._style_controls = ReportStyleControls()
+        alay.addWidget(self._style_controls)
 
     # ══════════════════════════════════════════════════════════
     # Preview-topbar actions
@@ -2284,6 +2512,11 @@ class ReportingTab(QWidget):
 
     def _on_print(self) -> None:
         if not self.current_report_html or not HAS_WEBENGINE:
+            return
+        if not getattr(self, "_preview_load_ready", False):
+            QMessageBox.information(
+                self, "Preview Loading", "The report preview is still loading. Try again when it finishes."
+            )
             return
         try:
             from PyQt6.QtPrintSupport import QPrinter, QPrintDialog
@@ -2315,25 +2548,192 @@ class ReportingTab(QWidget):
                 return f"{safe}_report.{ext}"
         return f"report.{ext}"
 
+    def _excel_appendix_requested(self) -> bool:
+        return bool(
+            self.current_report_html
+            and hasattr(self, "_excel_appendix_check")
+            and not self._excel_appendix_panel.isHidden()
+            and self._excel_appendix_check.isChecked()
+        )
+
+    def _capture_excel_appendix_inputs(self) -> Optional[tuple[str, str]]:
+        if not self._excel_appendix_requested():
+            return None
+        title = self.project_name_edit.text().strip() or "Report data appendix"
+        return self.current_report_html, title
+
+    @staticmethod
+    def _excel_appendix_path(primary_path: str) -> str:
+        base, _extension = os.path.splitext(primary_path)
+        return f"{base}_tables.xlsx"
+
+    def _start_report_export_worker(self, build, dialog: LoadingDialog) -> None:
+        worker = ReportExportWorker(build, parent=self)
+        self._report_export_worker = worker
+        self._report_export_dialog = dialog
+
+        worker.progress.connect(
+            lambda cur, total, label: dialog.update_progress(
+                cur,
+                total,
+                label,
+                f"Step {cur} of {total}.",
+                count_label=f"{cur} of {total} steps",
+                activity_label=label,
+            )
+        )
+        worker.finished_export.connect(self._on_report_export_finished)
+        worker.failed.connect(self._on_report_export_failed)
+        worker.cancelled.connect(self._on_report_export_cancelled)
+        dialog.cancellation_requested.connect(worker.cancel)
+        worker.finished.connect(worker.deleteLater)
+        self._update_preview_action_buttons()
+        worker.start()
+
+    def _run_report_file_export(self, build, title: str, subtitle: str) -> None:
+        if self._report_export_in_progress():
+            return
+        dialog = LoadingDialog(
+            title,
+            subtitle,
+            parent=self,
+            cancellable=True,
+        )
+        dialog.update_progress(0, 1, "Preparing export", "Preparing the output file.")
+        dialog.set_activity("Document conversion and file writing run in the background.")
+        self._start_report_export_worker(build, dialog)
+        dialog.exec()
+
+    def _cleanup_report_export(self) -> None:
+        self._report_export_worker = None
+        self._report_export_dialog = None
+        self._pdf_export_path = None
+        self._pdf_appendix_inputs = None
+        self._update_preview_action_buttons()
+
+    def _on_report_export_finished(self, result: dict) -> None:
+        dialog = getattr(self, "_report_export_dialog", None)
+        primary_path = str(result.get("primary_path", ""))
+        primary_label = str(result.get("primary_label", "Report"))
+        appendix_path = result.get("appendix_path")
+        if dialog is not None:
+            dialog.mark_finished(
+                "Export complete",
+                f"{primary_label} saved successfully.",
+                ok=True,
+            )
+            dialog.accept()
+        self._cleanup_report_export()
+
+        detail = f"{primary_label} saved to:\n{primary_path}"
+        if appendix_path:
+            detail += f"\n\nExcel appendix:\n{appendix_path}"
+        QMessageBox.information(self, "Exported", detail)
+
+    def _on_report_export_failed(self, message: str) -> None:
+        dialog = getattr(self, "_report_export_dialog", None)
+        if dialog is not None:
+            dialog.mark_finished("Export failed", message, ok=False)
+            dialog.reject()
+        self._cleanup_report_export()
+        QMessageBox.critical(self, "Export Error", f"Failed to export report:\n{message}")
+
+    def _on_report_export_cancelled(self) -> None:
+        dialog = getattr(self, "_report_export_dialog", None)
+        if dialog is not None:
+            dialog.reject()
+        self._cleanup_report_export()
+
     def _on_export_html(self) -> None:
-        if not self.current_report_html:
+        if not self.current_report_html or self._report_export_in_progress():
             return
         path, _ = QFileDialog.getSaveFileName(
             self, "Export HTML", self._default_export_name("html"), "HTML (*.html)"
         )
-        if path:
-            with open(path, "w", encoding="utf-8") as fh:
-                fh.write(self.current_report_html)
-            QMessageBox.information(self, "Exported", f"Saved to:\n{path}")
+        if not path:
+            return
+
+        html = self.current_report_html
+        appendix_inputs = self._capture_excel_appendix_inputs()
+        appendix_path = self._excel_appendix_path(path) if appendix_inputs else None
+        generator = self.report_generator
+        accent_color = self.brand.primary_color
+
+        def build(progress, cancel_check):
+            total = 2 if appendix_inputs else 1
+            if cancel_check():
+                raise ReportExportCancelled()
+            progress(0, total, "Saving HTML report")
+            atomic_write_text(path, html)
+            progress(1, total, "HTML report saved")
+
+            if appendix_inputs:
+                appendix_html, appendix_title = appendix_inputs
+                if cancel_check():
+                    raise ReportExportCancelled()
+                progress(1, total, "Creating Excel appendix")
+                data = generator.generate_excel_appendix(
+                    appendix_html,
+                    title=appendix_title,
+                    accent_color=accent_color,
+                )
+                if cancel_check():
+                    raise ReportExportCancelled()
+                atomic_write_bytes(appendix_path, data)
+                progress(2, total, "Excel appendix saved")
+
+            return {
+                "primary_path": path,
+                "primary_label": "HTML report",
+                "appendix_path": appendix_path,
+            }
+
+        self._run_report_file_export(
+            build,
+            "Exporting HTML report",
+            "Writing the report and optional table appendix.",
+        )
 
     def _on_export_pdf(self) -> None:
-        if not self.current_report_html or not HAS_WEBENGINE:
+        if (
+            not self.current_report_html
+            or not HAS_WEBENGINE
+            or self._report_export_in_progress()
+        ):
+            return
+        if not getattr(self, "_preview_load_ready", False):
+            QMessageBox.information(
+                self, "Preview Loading", "The report preview is still loading. Try again when it finishes."
+            )
             return
         path, _ = QFileDialog.getSaveFileName(
             self, "Export PDF", self._default_export_name("pdf"), "PDF (*.pdf)"
         )
         if not path:
             return
+
+        dialog = LoadingDialog(
+            "Exporting PDF report",
+            "Printing the loaded report preview to an A4 PDF.",
+            parent=self,
+            cancellable=False,
+        )
+        dialog.update_progress(
+            0,
+            1,
+            "Printing PDF",
+            "WebEngine is laying out and writing the report.",
+            count_label="PDF",
+            activity_label="Printing the loaded report preview.",
+        )
+        dialog.set_activity(
+            "PDF printing is asynchronous and remains on the GUI thread as required by WebEngine."
+        )
+        self._report_export_dialog = dialog
+        self._pdf_export_path = path
+        self._pdf_appendix_inputs = self._capture_excel_appendix_inputs()
+        self._update_preview_action_buttons()
+
         try:
             layout = QPageLayout(
                 QPageSize(QPageSize.PageSizeId.A4),
@@ -2342,16 +2742,65 @@ class ReportingTab(QWidget):
             )
             self.web_view.page().printToPdf(path, layout)
         except Exception as exc:
+            dialog.reject()
+            self._cleanup_report_export()
             QMessageBox.critical(self, "PDF Error", f"Failed to export PDF:\n{exc}")
+            return
+        dialog.exec()
 
-    def _on_pdf_done(self, path: str, success: bool) -> None:
-        if success:
-            QMessageBox.information(self, "Exported", f"PDF saved to:\n{path}")
-        else:
-            QMessageBox.critical(self, "Export Error", "PDF export failed.")
+    def _on_pdf_done(self, _path: str, success: bool) -> None:
+        path = getattr(self, "_pdf_export_path", None)
+        if not path:
+            return
+        if not success:
+            self._on_report_export_failed("PDF printing failed.")
+            return
+
+        appendix_inputs = getattr(self, "_pdf_appendix_inputs", None)
+        if not appendix_inputs:
+            self._on_report_export_finished({
+                "primary_path": path,
+                "primary_label": "PDF report",
+                "appendix_path": None,
+            })
+            return
+
+        appendix_path = self._excel_appendix_path(path)
+        appendix_html, appendix_title = appendix_inputs
+        generator = self.report_generator
+        accent_color = self.brand.primary_color
+        dialog = self._report_export_dialog
+        self._pdf_export_path = None
+        dialog.update_progress(
+            1,
+            2,
+            "Creating Excel appendix",
+            "The PDF is complete; packaging its report tables.",
+            count_label="1 of 2 steps",
+            activity_label="Building the companion workbook.",
+        )
+
+        def build(progress, cancel_check):
+            progress(1, 2, "Creating Excel appendix")
+            data = generator.generate_excel_appendix(
+                appendix_html,
+                title=appendix_title,
+                accent_color=accent_color,
+            )
+            if cancel_check():
+                raise ReportExportCancelled()
+            atomic_write_bytes(appendix_path, data)
+            progress(2, 2, "Excel appendix saved")
+            return {
+                "primary_path": path,
+                "primary_label": "PDF report",
+                "appendix_path": appendix_path,
+            }
+
+        self._start_report_export_worker(build, dialog)
 
     def _on_export_docx(self) -> None:
-        if not self.current_report_html:
+        if not self.current_report_html or self._report_export_in_progress():
             return
         if not self.report_generator.docx_export_available():
             QMessageBox.warning(
@@ -2365,18 +2814,51 @@ class ReportingTab(QWidget):
         )
         if not path:
             return
-        try:
-            docx_bytes = self.report_generator.generate_docx_from_html(
-                self.current_report_html, brand=self.brand,
-            )
-            with open(path, "wb") as fh:
-                fh.write(docx_bytes)
-        except Exception as exc:
-            QMessageBox.critical(self, "DOCX Error", f"Failed to export Word file:\n{exc}")
-            return
-        QMessageBox.information(self, "Exported", f"Word document saved to:\n{path}")
 
-    # ══════════════════════════════════════════════════════════
+        html = self.current_report_html
+        brand = self.brand
+        appendix_inputs = self._capture_excel_appendix_inputs()
+        appendix_path = self._excel_appendix_path(path) if appendix_inputs else None
+        generator = self.report_generator
+        accent_color = self.brand.primary_color
+
+        def build(progress, cancel_check):
+            total = 2 if appendix_inputs else 1
+            if cancel_check():
+                raise ReportExportCancelled()
+            progress(0, total, "Creating Word document")
+            docx_bytes = generator.generate_docx_from_html(html, brand=brand)
+            if cancel_check():
+                raise ReportExportCancelled()
+            atomic_write_bytes(path, docx_bytes)
+            progress(1, total, "Word document saved")
+
+            if appendix_inputs:
+                appendix_html, appendix_title = appendix_inputs
+                if cancel_check():
+                    raise ReportExportCancelled()
+                progress(1, total, "Creating Excel appendix")
+                data = generator.generate_excel_appendix(
+                    appendix_html,
+                    title=appendix_title,
+                    accent_color=accent_color,
+                )
+                if cancel_check():
+                    raise ReportExportCancelled()
+                atomic_write_bytes(appendix_path, data)
+                progress(2, total, "Excel appendix saved")
+
+            return {
+                "primary_path": path,
+                "primary_label": "Word document",
+                "appendix_path": appendix_path,
+            }
+
+        self._run_report_file_export(
+            build,
+            "Exporting Word report",
+            "Converting the report and optional table appendix.",
+        )
     # Preview HTML helpers (unchanged from prior version)
     # ══════════════════════════════════════════════════════════
 

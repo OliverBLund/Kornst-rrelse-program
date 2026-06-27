@@ -157,13 +157,17 @@ def render_k_bar_chart(
     sample_name: str = "Sample",
     tick_fontsize_override: Optional[float] = None,
     value_label_fontsize: float = 8.0,
+    colors: Optional[Sequence[str]] = None,
 ) -> None:
     """Draw a K-value bar chart on *ax*.
 
     *methods* and *k_values* must be parallel sequences (already
     converted to display units if required).  ``reference_values`` can be used
     for the OK-only population behind the mean reference lines while still
-    drawing warning/error bars in the chart.
+    drawing warning/error bars in the chart. *colors* (one per method) overrides
+    the bar colours entirely — reports/exports pass palette colours so the colour
+    follows the global palette, not the preset; when omitted the preset's
+    method-specific / flat colouring applies (the live GUI tabs).
     """
     if not methods:
         return
@@ -171,7 +175,9 @@ def render_k_bar_chart(
     x_pos = np.arange(len(methods))
 
     # Colours ─────────────────────────────────────────────────────
-    if style.use_method_specific_colors:
+    if colors is not None:
+        colors = list(colors)
+    elif style.use_method_specific_colors:
         colors = [METHOD_COLORS.get(m, "#888888") for m in methods]
     else:
         colors = [
@@ -600,30 +606,12 @@ def heterogeneity_label(sigma: Optional[float]) -> str:
     return "highly heterogeneous"
 
 
-def render_k_histogram(
-    ax: Axes,
-    scopes: Sequence[dict],
-    *,
-    axis: str = "lnk",
-    unit_symbol: str = "m/s",
-    bins: "str | int" = "auto",
-    style: PlotStyle = PROFESSIONAL_STYLE,
-    show_grid: bool = True,
-    show_legend: bool = True,
-    title: str = "K Distribution (lognormal)",
-) -> None:
-    """Draw the lognormal K histogram (Poul's distribution function for K).
+def _prepare_k_hist_scopes(scopes: Sequence[dict]) -> list[dict]:
+    """Normalise raw scope dicts into prepared lognormal stats.
 
-    K is lognormal, so on the ``lnk`` axis the data forms a bell with a fitted
-    normal curve; on the ``k`` axis it is right-skewed with a fitted lognormal
-    curve. Each scope shows histogram bars + a fitted PDF + a Kgeo line, plus a
-    K_geo / σ_lnK annotation for a single scope. Group bars are drawn dodged
-    (side-by-side, black-outlined). ``bins`` controls the bars: ``"auto"`` draws
-    data-sized bars (dodged for groups), ``"off"`` shows fitted curves only, and
-    an integer forces that many bins. Values must be positive, in display units.
+    Keeps only positive values (K is lognormal) and pre-computes ``logs``,
+    ``mu`` (mean lnK), ``sigma`` (σ_lnK = population std of lnK) and ``n``.
     """
-    use_lnk = axis != "k"
-
     prepared: list[dict] = []
     for scope in scopes:
         values = sorted(
@@ -640,9 +628,204 @@ def render_k_histogram(
             "color": scope.get("color") or "#2b5797",
             "values": values, "logs": logs, "mu": mu, "sigma": sigma, "n": len(values),
         })
-    if not prepared:
+    return prepared
+
+
+def _annotate_bar_counts(ax: Axes, rects, counts) -> None:
+    """Print the sample count above each populated bar (the ``N`` labels)."""
+    for rect, count in zip(rects, counts):
+        n = int(count)
+        if n > 0:
+            ax.annotate(
+                str(n),
+                (rect.get_x() + rect.get_width() / 2, rect.get_height()),
+                textcoords="offset points", xytext=(0, 1.5),
+                ha="center", va="bottom", fontsize=6, color="#3a2e1c", zorder=4,
+            )
+
+
+def _render_k_hist_collapsed(
+    ax: Axes,
+    prepared: list[dict],
+    bin_edges,
+    use_lnk: bool,
+    *,
+    frequency: bool,
+    show_n: bool,
+    single: bool,
+) -> None:
+    """Draw the histogram on a categorical axis with all-empty bins dropped.
+
+    Every bin with no data in *any* scope is removed so the populated bars sit
+    adjacent (no empty interior space). Bars are dodged per scope; a faint
+    separator marks where an interior gap was collapsed. No continuous fitted
+    curve is drawn here — the broken axis would distort it — so the σ_lnK / Kgeo
+    figures carry the lognormal fit instead (annotation/legend).
+    """
+    edges = np.asarray(bin_edges, dtype=float)
+    widths = np.diff(edges)
+    centers = 0.5 * (edges[:-1] + edges[1:])
+    counts = [
+        np.histogram(p["logs"] if use_lnk else p["values"], bins=edges)[0]
+        for p in prepared
+    ]
+    total = np.sum(counts, axis=0)
+    retained = [i for i in range(len(total)) if total[i] > 0]
+    if not retained:
         return
 
+    num = len(prepared)
+    group_width = 0.8
+    bar_width = group_width / num
+
+    for s, p in enumerate(prepared):
+        positions = [
+            c - group_width / 2 + bar_width * (s + 0.5)
+            for c in range(len(retained))
+        ]
+        bin_counts = [counts[s][i] for i in retained]
+        if frequency:
+            heights = [float(c) for c in bin_counts]
+        else:
+            heights = [
+                counts[s][i] / (p["n"] * widths[i]) if widths[i] > 0 else 0.0
+                for i in retained
+            ]
+        label = p["label"]
+        if not single:
+            label = f'{p["label"]} (Kgeo={math.exp(p["mu"]):.1e}, σ={p["sigma"]:.2f})'
+        bars = ax.bar(
+            positions, heights, width=bar_width, color=p["color"],
+            edgecolor="black", linewidth=0.5,
+            alpha=0.85 if num > 1 else 0.7, label=label, zorder=2,
+        )
+        ax.set_axisbelow(True)
+        if show_n:
+            _annotate_bar_counts(ax, bars, bin_counts)
+
+    # Categorical ticks show each retained bin's representative value.
+    ax.set_xticks(range(len(retained)))
+    if use_lnk:
+        tick_labels = [f"{centers[i]:.1f}" for i in retained]
+    else:
+        tick_labels = [f"{centers[i]:.1e}" for i in retained]
+    ax.set_xticklabels(tick_labels, rotation=45, ha="right")
+    ax.set_xlim(-0.5, len(retained) - 0.5)
+
+    # Flag every collapsed interior gap so the compaction stays honest.
+    for pos in range(len(retained) - 1):
+        if retained[pos + 1] - retained[pos] > 1:
+            sep_x = pos + 0.5
+            ax.axvline(sep_x, color="#b8ad97", linestyle=(0, (2, 2)),
+                       linewidth=0.8, zorder=1)
+            ax.annotate("//", (sep_x, 0.5), xycoords=("data", "axes fraction"),
+                        ha="center", va="center", fontsize=8, color="#9a8c78")
+
+
+def _render_k_hist_continuous(
+    ax: Axes,
+    prepared: list[dict],
+    bar_scopes: list[dict],
+    bin_edges,
+    xs,
+    use_lnk: bool,
+    *,
+    frequency: bool,
+    show_n: bool,
+    single: bool,
+    style: PlotStyle,
+) -> None:
+    """Draw the histogram on the true linear lnK/K axis (real gaps preserved).
+
+    Bars (dodged per scope) sit under the fitted lognormal PDF curve + a Kgeo
+    line for each scope. In frequency mode the PDF is scaled to per-bin counts
+    (``pdf · n · bin_width``) so the curve tracks the bars; with no bars
+    (``bins="off"``) a probability density is drawn instead.
+    """
+    edges = np.asarray(bin_edges, dtype=float)
+    bin_width = float(edges[1] - edges[0]) if len(edges) > 1 else 1.0
+
+    # Draw all scopes' bars in one call so matplotlib dodges them side-by-side
+    # (black outlines) instead of muddily overlapping translucent bars.
+    if bar_scopes:
+        bar_data = [(p["logs"] if use_lnk else p["values"]) for p in bar_scopes]
+        bar_colors = [p["color"] for p in bar_scopes]
+        raw_counts = [np.histogram(data, bins=edges)[0] for data in bar_data]
+        _n, _bins, patch_groups = ax.hist(
+            bar_data, bins=edges, density=not frequency, color=bar_colors,
+            histtype="bar", edgecolor="black", linewidth=0.5,
+            alpha=0.85 if len(bar_data) > 1 else 0.45, zorder=1,
+        )
+        ax.set_axisbelow(True)
+        if show_n:
+            containers = patch_groups if len(bar_data) > 1 else [patch_groups]
+            for counts_arr, container in zip(raw_counts, containers):
+                _annotate_bar_counts(ax, container, counts_arr)
+
+    for p in prepared:
+        color = p["color"]
+        label = p["label"]
+        if not single:
+            label = f'{p["label"]} (Kgeo={math.exp(p["mu"]):.1e}, σ={p["sigma"]:.2f})'
+
+        scale = (p["n"] * bin_width) if (frequency and bar_scopes) else 1.0
+        if p["sigma"] > 0:
+            if use_lnk:
+                pdf = (1.0 / (p["sigma"] * math.sqrt(2 * math.pi))) * np.exp(
+                    -((xs - p["mu"]) ** 2) / (2 * p["sigma"] ** 2)
+                )
+            else:
+                safe_xs = np.where(xs > 0, xs, np.nan)
+                pdf = (1.0 / (safe_xs * p["sigma"] * math.sqrt(2 * math.pi))) * np.exp(
+                    -((np.log(safe_xs) - p["mu"]) ** 2) / (2 * p["sigma"] ** 2)
+                )
+            ax.plot(xs, pdf * scale, color=color, linewidth=style.curve_linewidth + 0.3,
+                    label=label, zorder=3)
+        else:
+            ax.axvline(p["mu"] if use_lnk else p["values"][0], color=color, label=label)
+
+        center = p["mu"] if use_lnk else math.exp(p["mu"])
+        ax.axvline(center, color=color, linestyle=":", linewidth=1.1, alpha=0.7, zorder=2)
+
+
+def render_k_histogram(
+    ax: Axes,
+    scopes: Sequence[dict],
+    *,
+    axis: str = "lnk",
+    unit_symbol: str = "m/s",
+    bins: "str | int" = "auto",
+    y_mode: str = "frequency",
+    show_n: bool = True,
+    drop_empty_bins: bool = True,
+    style: PlotStyle = PROFESSIONAL_STYLE,
+    show_grid: bool = True,
+    show_legend: bool = True,
+    title: str = "K Distribution (lognormal)",
+) -> None:
+    """Draw the lognormal K histogram (Poul's distribution function for K).
+
+    K is lognormal, so on the ``lnk`` axis the data forms a bell with a fitted
+    normal curve; on the ``k`` axis it is right-skewed with a fitted lognormal
+    curve. A K_geo / σ_lnK annotation is shown for a single scope; group bars are
+    dodged side-by-side (black-outlined).
+
+    *y_mode* picks the vertical axis: ``"frequency"`` (per-bin counts, the
+    default) or ``"density"`` (a probability density the fitted PDF integrates
+    to). *show_n* annotates each drawn bar with its sample count. *drop_empty_bins*
+    (default) collapses every all-empty interior bin so populated bars sit
+    adjacent on a categorical axis — set it False to keep the true linear K/lnK
+    axis with the fitted PDF curve overlaid (real gaps shown). ``bins`` controls
+    the bars: ``"auto"`` sizes them to the data, ``"off"`` shows fitted curves
+    only (always the continuous view), and an integer forces that many bins.
+    Values must be positive, in display units.
+    """
+    use_lnk = axis != "k"
+    frequency = y_mode != "density"
+
+    prepared = _prepare_k_hist_scopes(scopes)
+    if not prepared:
+        return
     single = len(prepared) == 1
 
     # Shared evaluation range + bin edges across every scope so fitted curves
@@ -677,52 +860,35 @@ def render_k_histogram(
     bin_edges = np.linspace(x_lo, x_hi, n_bins + 1)
     xs = np.linspace(x_lo, x_hi, 320)
 
-    # Draw all scopes' bars in one call so matplotlib dodges them side-by-side
-    # (with black outlines) instead of muddily overlapping translucent bars.
-    bar_scopes = [p for p in prepared if draw_bars and p["n"] >= 3]
-    if bar_scopes:
-        bar_data = [(p["logs"] if use_lnk else p["values"]) for p in bar_scopes]
-        bar_colors = [p["color"] for p in bar_scopes]
-        ax.hist(
-            bar_data, bins=bin_edges, density=True, color=bar_colors,
-            histtype="bar", edgecolor="black", linewidth=0.5,
-            alpha=0.85 if len(bar_data) > 1 else 0.45, zorder=1,
+    # Collapsed view: drop all-empty bins onto a categorical axis (default).
+    # Continuous view: real axis + fitted curves (bins="off" or gaps shown).
+    collapsed = draw_bars and drop_empty_bins
+    bars_present = collapsed or (draw_bars and any(p["n"] >= 3 for p in prepared))
+    if collapsed:
+        _render_k_hist_collapsed(
+            ax, prepared, bin_edges, use_lnk,
+            frequency=frequency, show_n=show_n, single=single,
         )
-
-    for p in prepared:
-        color = p["color"]
-        label = p["label"]
-        if not single:
-            label = f'{p["label"]} (Kgeo={math.exp(p["mu"]):.1e}, σ={p["sigma"]:.2f})'
-
-        if p["sigma"] > 0:
-            if use_lnk:
-                pdf = (1.0 / (p["sigma"] * math.sqrt(2 * math.pi))) * np.exp(
-                    -((xs - p["mu"]) ** 2) / (2 * p["sigma"] ** 2)
-                )
-            else:
-                safe_xs = np.where(xs > 0, xs, np.nan)
-                pdf = (1.0 / (safe_xs * p["sigma"] * math.sqrt(2 * math.pi))) * np.exp(
-                    -((np.log(safe_xs) - p["mu"]) ** 2) / (2 * p["sigma"] ** 2)
-                )
-            ax.plot(xs, pdf, color=color, linewidth=style.curve_linewidth + 0.3,
-                    label=label, zorder=3)
-        else:
-            ax.axvline(p["mu"] if use_lnk else p["values"][0], color=color, label=label)
-
-        center = p["mu"] if use_lnk else math.exp(p["mu"])
-        ax.axvline(center, color=color, linestyle=":", linewidth=1.1, alpha=0.7, zorder=2)
-
-    ax.set_xlim(x_lo, x_hi)
-
-    if use_lnk:
-        ax.set_xlabel(f"ln K   (K in {unit_symbol})",
-                      fontsize=style.label_fontsize, fontfamily=style.font_family)
     else:
-        ax.set_xlabel(f"Hydraulic Conductivity K ({unit_symbol})",
-                      fontsize=style.label_fontsize, fontfamily=style.font_family)
-    ax.set_ylabel("Probability density",
-                  fontsize=style.label_fontsize, fontfamily=style.font_family)
+        bar_scopes = [p for p in prepared if draw_bars and p["n"] >= 3]
+        _render_k_hist_continuous(
+            ax, prepared, bar_scopes, bin_edges, xs, use_lnk,
+            frequency=frequency, show_n=show_n, single=single, style=style,
+        )
+        ax.set_xlim(x_lo, x_hi)
+
+    # ── Shared axis labels / title ────────────────────────────────
+    if use_lnk:
+        x_label = f"ln K   (K in {unit_symbol})"
+    else:
+        x_label = f"Hydraulic Conductivity K ({unit_symbol})"
+    if collapsed:
+        x_label += "  (populated bins only)"
+    ax.set_xlabel(x_label, fontsize=style.label_fontsize, fontfamily=style.font_family)
+    ax.set_ylabel(
+        "Frequency (count)" if (frequency and bars_present) else "Probability density",
+        fontsize=style.label_fontsize, fontfamily=style.font_family,
+    )
     ax.set_title(title, fontsize=style.title_fontsize,
                  fontweight=style.title_fontweight, fontfamily=style.font_family)
     ax.set_ylim(bottom=0)

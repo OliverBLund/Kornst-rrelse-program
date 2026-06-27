@@ -148,7 +148,7 @@ if "%USE_CLEAN_ENV%"=="2" (
     echo Installing dependencies from requirements.txt...
     call "!VENV_DIR!\Scripts\activate.bat"
     python -m pip install --upgrade pip >nul 2>&1
-    python -m pip install PyInstaller>=6.0.0
+    python -m pip install "PyInstaller>=6.0.0"
 
     if exist "requirements.txt" (
         python -m pip install -r requirements.txt
@@ -167,7 +167,7 @@ if "%USE_CLEAN_ENV%"=="2" (
     python -c "import PyInstaller" 2>NUL
     if ERRORLEVEL 1 (
         echo PyInstaller not found. Installing...
-        python -m pip install PyInstaller>=6.0.0
+        python -m pip install "PyInstaller>=6.0.0"
         if ERRORLEVEL 1 (
             echo ERROR: Failed to install PyInstaller
             pause
@@ -180,7 +180,7 @@ if "%USE_CLEAN_ENV%"=="2" (
 )
 
 echo Verifying pinned Qt runtime...
-%PYTHON_CMD% -c "from importlib import metadata; from PyQt6.QtCore import QT_VERSION_STR, PYQT_VERSION_STR; expected={'PyQt6':'6.9.1','PyQt6-Qt6':'6.9.1','PyQt6-sip':'13.10.2','PyQt6-WebEngine':'6.9.0','PyQt6-WebEngine-Qt6':'6.9.2'}; installed={name: metadata.version(name) for name in expected}; print('Qt runtime:', QT_VERSION_STR, 'PyQt:', PYQT_VERSION_STR); bad={k:(v, installed[k]) for k,v in expected.items() if installed[k] != v}; assert QT_VERSION_STR == '6.9.1' and PYQT_VERSION_STR == '6.9.1' and not bad, f'Unexpected PyQt stack: {bad}'"
+"%PYTHON_CMD%" -c "from importlib import metadata; from PyQt6.QtCore import QT_VERSION_STR, PYQT_VERSION_STR; expected={'PyQt6':'6.9.1','PyQt6-Qt6':'6.9.1','PyQt6-sip':'13.10.2','PyQt6-WebEngine':'6.9.0','PyQt6-WebEngine-Qt6':'6.9.2'}; installed={name: metadata.version(name) for name in expected}; print('Qt runtime:', QT_VERSION_STR, 'PyQt:', PYQT_VERSION_STR); bad={k:(v, installed[k]) for k,v in expected.items() if not installed[k] == v}; assert QT_VERSION_STR == '6.9.0' and PYQT_VERSION_STR == '6.9.1' and not bad, f'Unexpected PyQt stack: {bad}'"
 if ERRORLEVEL 1 (
     echo ERROR: The active Python environment does not match the pinned Qt versions.
     echo        Rebuild with option 2 ^(clean virtual environment^) or reinstall requirements.txt.

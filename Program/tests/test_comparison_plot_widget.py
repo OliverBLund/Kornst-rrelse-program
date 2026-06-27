@@ -2,6 +2,7 @@
 Regression tests for comparison plot widget behavior.
 """
 
+import math
 import os
 import sys
 import csv
@@ -20,7 +21,7 @@ from PyQt6.QtWidgets import QApplication, QFileDialog, QMessageBox
 
 from data_loader import GrainSizeData
 from gui.comparison_plot_widget import ComparisonPlotWidget
-from gui.plot_renderers import render_k_boxplot
+from gui.plot_renderers import render_k_boxplot, render_k_histogram
 from gui.group_styles import (
     clear_dataset_line_style,
     clear_group_color,
@@ -167,6 +168,39 @@ class TestComparisonPlotWidget(unittest.TestCase):
         self.assertEqual(set(results_m_s.keys()), {'Layer A', 'Layer B'})
         self.assertEqual(len(colors), 2)
         self.assertTrue(all(not flag for flag in flagged.values()))
+        self.assertAlmostEqual(
+            results_m_s['Layer A']['Hazen'],
+            math.sqrt(1.0e-4 * 1.5e-4),
+        )
+        self.assertEqual(self.widget.figure.axes[0].get_title(), 'Hydraulic Conductivity by Group')
+        self.assertEqual(self.widget._drawer_title.text(), 'K-value plotted bars')
+        self.assertEqual({row[0] for row in self.widget._drawer_rows}, {'Layer A', 'Layer B'})
+        self.assertTrue(
+            all(row[4] == 'Group method geometric mean (OK only)' for row in self.widget._drawer_rows)
+        )
+
+    def test_k_values_group_bars_can_use_arithmetic_mean(self):
+        self.widget.set_datasets([
+            DummyDatasetTab('Layer A-1', 1.0, group='Layer A'),
+            DummyDatasetTab('Layer A-2', 4.0, group='Layer A'),
+            DummyDatasetTab('Layer B-1', 9.0, group='Layer B'),
+        ])
+        self.widget.on_plot_type_changed('K-Values')
+        self.widget.set_display_mode('overlay')
+        self.widget._k_group_agg_combo.setCurrentIndex(1)
+
+        results_m_s, _colors, _flagged = self.widget._group_overlay_inputs()
+
+        self.assertEqual(self.widget.k_group_aggregation, 'arithmetic')
+        self.assertFalse(self.widget._sect_k_group_agg.isHidden())
+        self.assertAlmostEqual(results_m_s['Layer A']['Hazen'], 2.5e-4)
+        self.assertAlmostEqual(results_m_s['Layer A']['Beyer'], 3.75e-4)
+        title = self.widget.figure.axes[0].get_title().lower()
+        self.assertNotIn('arithmetic', title)
+        self.assertNotIn('geometric', title)
+        self.assertTrue(
+            all(row[4] == 'Group method arithmetic mean (OK only)' for row in self.widget._drawer_rows)
+        )
 
     def test_histogram_facets_by_group_when_grouped(self):
         self.widget.set_datasets([
@@ -183,6 +217,8 @@ class TestComparisonPlotWidget(unittest.TestCase):
         self.assertEqual(len(self.widget.figure.axes), 2)
         heights = [patch.get_height() for patch in self.widget.figure.axes[0].patches]
         self.assertTrue(all(height >= 0 for height in heights))
+        self.assertEqual(self.widget._drawer_title.text(), 'Histogram plotted size-class data')
+        self.assertEqual({row[0] for row in self.widget._drawer_rows}, {'Layer A', 'Layer B'})
 
     def test_combined_facets_use_group_geomean_when_grouped(self):
         self.widget.set_datasets([
@@ -196,12 +232,48 @@ class TestComparisonPlotWidget(unittest.TestCase):
         facets = self.widget._combined_facets()
         self.assertEqual([f['label'] for f in facets], ['Layer A', 'Layer B'])
         self.assertTrue(all(f['k'] for f in facets))
+        self.assertEqual(self.widget._drawer_title.text(), 'Combined plotted data')
+        self.assertIn('Distribution', {row[1] for row in self.widget._drawer_rows})
+        self.assertIn('K values', {row[1] for row in self.widget._drawer_rows})
 
     def test_k_distribution_controls_visible_only_for_that_type(self):
         self.widget.on_plot_type_changed('K Distribution')
         self.assertTrue(self.widget._sect_kdist.isVisibleTo(self.widget))
         self.widget.on_plot_type_changed('Distribution')
         self.assertFalse(self.widget._sect_kdist.isVisibleTo(self.widget))
+
+    def test_k_distribution_defaults_to_lognormal_histogram_frequency(self):
+        # The lognormal histogram with a frequency axis is the default view now;
+        # bars are drawn (not the empirical CDF) with no manual selection.
+        self.widget.on_plot_type_changed('K Distribution')
+        self.widget.refresh_plot()
+
+        self.assertEqual(self.widget.k_dist_view, 'histogram')
+        self.assertEqual(self.widget.k_hist_y_mode, 'frequency')
+        self.assertTrue(self.widget.k_hist_show_n)
+        self.assertTrue(self.widget.k_hist_drop_empty)
+
+        ax = self.widget.figure.axes[0]
+        self.assertEqual(ax.get_ylabel(), 'Frequency (count)')
+        self.assertGreater(len(ax.patches), 0)
+        # N labels are on by default — the count annotation appears atop a bar.
+        self.assertTrue(any(t.get_text().isdigit() for t in ax.texts))
+
+    def test_k_distribution_histogram_density_toggle_changes_axis(self):
+        self.widget.on_plot_type_changed('K Distribution')
+        self.widget._on_kdist_ymode_changed('density')
+        self.widget.refresh_plot()
+
+        ax = self.widget.figure.axes[0]
+        self.assertEqual(ax.get_ylabel(), 'Probability density')
+
+    def test_k_distribution_show_n_toggle_removes_count_labels(self):
+        self.widget.on_plot_type_changed('K Distribution')
+        self.widget._on_kdist_show_n_toggled(False)
+        self.widget.refresh_plot()
+
+        ax = self.widget.figure.axes[0]
+        self.assertFalse(any(t.get_text().isdigit() for t in ax.texts))
 
     def test_k_distribution_histogram_lnk_view_annotates_sigma(self):
         self.widget.on_plot_type_changed('K Distribution')
@@ -329,6 +401,8 @@ class TestComparisonPlotWidget(unittest.TestCase):
         ])
 
         self.widget.on_plot_type_changed('K Distribution')
+        # Histogram is the default view now; this test covers the empirical CDF.
+        self.widget._on_kdist_view_changed('cdf')
         self.widget.refresh_plot()
 
         ax = self.widget.figure.axes[0]
@@ -432,6 +506,8 @@ class TestComparisonPlotWidget(unittest.TestCase):
 
     def test_data_drawer_updates_for_k_distribution(self):
         self.widget.on_plot_type_changed('K Distribution')
+        # Histogram is the default view now; this test covers the CDF drawer.
+        self.widget._on_kdist_view_changed('cdf')
         self.widget.refresh_plot()
 
         headers = [
@@ -439,8 +515,8 @@ class TestComparisonPlotWidget(unittest.TestCase):
             for col in range(self.widget._drawer_table.columnCount())
         ]
 
-        self.assertEqual(self.widget._drawer_title.text(), 'K distribution summary - OK only')
-        self.assertIn('sigma lnK', headers)
+        self.assertEqual(self.widget._drawer_title.text(), 'K distribution CDF points - OK only')
+        self.assertIn('CDF probability (%)', headers)
         self.assertGreaterEqual(self.widget._drawer_table.rowCount(), 1)
         self.assertEqual(self.widget._drawer_table.verticalHeader().defaultSectionSize(), 24)
         self.assertEqual(self.widget._drawer_table.rowHeight(0), 24)
@@ -470,10 +546,10 @@ class TestComparisonPlotWidget(unittest.TestCase):
         self.widget.on_plot_type_changed('Histogram')
         self.widget.refresh_plot()
 
-        self.assertEqual(self.widget._drawer_title.text(), 'Histogram size-class data')
+        self.assertEqual(self.widget._drawer_title.text(), 'Histogram plotted size-class data')
         self.assertEqual(
             self.widget._drawer_headers,
-            ['Dataset', 'Size class', 'Particle size (mm)', 'Weight (%)'],
+            ['Scope', 'Size class', 'Particle size (mm)', 'Weight (%)'],
         )
         sample_a_weights = [
             float(row[3])
@@ -528,7 +604,7 @@ class TestComparisonPlotWidget(unittest.TestCase):
             self.widget._drawer_table.horizontalHeaderItem(col).text()
             for col in range(self.widget._drawer_table.columnCount())
         ]
-        self.assertIn('Kgeo (m/d)', headers)
+        self.assertIn('K (m/d)', headers)
 
     def test_k_value_overlay_staggers_value_labels_between_datasets(self):
         self.widget.on_plot_type_changed('K-Values')
@@ -850,6 +926,60 @@ class TestComparisonPlotWidget(unittest.TestCase):
         self.widget._on_canvas_click(SimpleNamespace(inaxes=second_ax, dblclick=False, button=1, key=None))
 
         self.assertGreater(second_ax.spines['left'].get_linewidth(), first_ax.spines['left'].get_linewidth())
+
+
+class TestKHistogramRenderer(unittest.TestCase):
+    """Direct coverage of render_k_histogram's frequency/N/collapse options."""
+
+    # Two clusters with a wide interior gap: a low band and a high band with no
+    # K-values in between, so several middle bins are empty in every scope.
+    GAPPED = [
+        {'label': 'Low', 'color': '#6b8e23',
+         'values': [1e-6, 1.1e-6, 1.2e-6, 1.3e-6, 9e-7, 1.0e-6]},
+        {'label': 'High', 'color': '#b46428',
+         'values': [2e-4, 2.2e-4, 2.5e-4, 2.8e-4, 3.0e-4]},
+    ]
+
+    def test_drop_empty_collapses_interior_bins(self):
+        collapsed = Figure().add_subplot(1, 1, 1)
+        render_k_histogram(collapsed, self.GAPPED, drop_empty_bins=True)
+
+        full = Figure().add_subplot(1, 1, 1)
+        render_k_histogram(full, self.GAPPED, drop_empty_bins=False)
+
+        # Collapsing all-empty interior bins leaves strictly fewer bars than the
+        # true-axis view, and uses a categorical x-axis (integer tick positions).
+        self.assertGreater(len(full.patches), len(collapsed.patches))
+        self.assertEqual(list(collapsed.get_xticks()),
+                         list(range(len(collapsed.get_xticks()))))
+        # Every retained column carries data in at least one scope (no kept bin
+        # is empty across all scopes). Bars are laid out scope-by-scope, so
+        # column j is patches[j] + patches[cols + j].
+        cols = len(collapsed.get_xticks())
+        heights = [p.get_height() for p in collapsed.patches]
+        for j in range(cols):
+            column_total = sum(heights[j::cols])
+            self.assertGreater(column_total, 0)
+
+    def test_frequency_mode_uses_integer_bar_heights(self):
+        ax = Figure().add_subplot(1, 1, 1)
+        render_k_histogram(ax, self.GAPPED, drop_empty_bins=True, y_mode='frequency')
+
+        self.assertEqual(ax.get_ylabel(), 'Frequency (count)')
+        heights = [p.get_height() for p in ax.patches]
+        # Counts are whole numbers and account for every value across scopes.
+        self.assertTrue(all(abs(h - round(h)) < 1e-9 for h in heights))
+        total = sum(len(s['values']) for s in self.GAPPED)
+        self.assertEqual(sum(round(h) for h in heights), total)
+
+    def test_show_n_annotations_track_toggle(self):
+        on = Figure().add_subplot(1, 1, 1)
+        render_k_histogram(on, self.GAPPED, show_n=True)
+        self.assertTrue(any(t.get_text().isdigit() for t in on.texts))
+
+        off = Figure().add_subplot(1, 1, 1)
+        render_k_histogram(off, self.GAPPED, show_n=False)
+        self.assertFalse(any(t.get_text().isdigit() for t in off.texts))
 
 
 if __name__ == '__main__':

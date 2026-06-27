@@ -355,7 +355,7 @@ class BuildEnvironment:
             if installed[package] != expected
         }
 
-        if QT_VERSION_STR != "6.9.1" or PYQT_VERSION_STR != "6.9.1" or mismatches:
+        if QT_VERSION_STR != "6.9.0" or PYQT_VERSION_STR != "6.9.1" or mismatches:
             package_details = ", ".join(
                 f"{package} expected {values['expected']} but found {values['installed']}"
                 for package, values in mismatches.items()

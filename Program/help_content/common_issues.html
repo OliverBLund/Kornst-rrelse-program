@@ -38,6 +38,34 @@
     <li>If K-values are missing, rerun calculations before exporting.</li>
   </ul>
 
+  <h2>Report Or Export Plots Look Wrong</h2>
+  <table>
+    <tr>
+      <th>Problem</th>
+      <th>Check first</th>
+    </tr>
+    <tr>
+      <td>Plot colours are not what you picked</td>
+      <td>Colour comes from the <strong>palette</strong>, not the preset. Set the <strong>Palette</strong> in <strong>Plot Style</strong> to a colour map (for example Viridis or Grayscale); <strong>Categorical</strong> keeps the standard colours.</td>
+    </tr>
+    <tr>
+      <td>Fonts too small or too large</td>
+      <td>Typography comes from the <strong>preset</strong>. Use <strong>Presentation</strong> for larger text, or open <strong>Customize…</strong> to adjust title, axis, tick, and legend sizes.</td>
+    </tr>
+    <tr>
+      <td>Report and export plots do not match</td>
+      <td>They share the same Plot Style. Make sure the same preset and palette are selected, and regenerate.</td>
+    </tr>
+    <tr>
+      <td>Per-sample plots are missing from a report</td>
+      <td>Per-sample grain curves and K-value bars are opt-in. Enable them under <strong>Plots to Include</strong> before generating.</td>
+    </tr>
+    <tr>
+      <td>A large report is slow</td>
+      <td>Generation runs in the background with a progress dialog; you can let it finish or press <strong>Cancel</strong>. Turning off per-sample plots reduces the number of figures.</td>
+    </tr>
+  </table>
+
   <h2>Excel Imported The Wrong Sheet Or Layout</h2>
   <ul>
     <li>Reopen the mapper from the error tab or reimport the workbook.</li>

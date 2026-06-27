@@ -1,64 +1,48 @@
 <div class="page">
   <p class="eyebrow">Main Workflow</p>
   <h1>Results, Comparison &amp; Export</h1>
-  <p class="lead">After a dataset loads, most of your work happens in the per-dataset subtabs and the Comparison or Export top-level tabs.</p>
+  <p class="lead">After a dataset loads, your work moves through the four top-level tabs. Each tab now has its own guide — use the links below for the details.</p>
 
-  <h2>Inspect One Dataset</h2>
+  <h2>The Four Tabs</h2>
   <table>
     <tr>
-      <th>Subtab</th>
-      <th>What to check</th>
+      <th>Tab</th>
+      <th>Use it for</th>
     </tr>
     <tr>
-      <td>Plot</td>
-      <td>The grain-size distribution curve and plot controls for viewing or saving graphics.</td>
+      <td><a href="individual_samples_tab.html">Individual Samples</a></td>
+      <td>One dataset at a time: the Plot, Results, and Statistics subtabs.</td>
     </tr>
     <tr>
-      <td>Results</td>
-      <td>The method table, status column, K-value units, and the detail panel for the selected method.</td>
+      <td><a href="comparison_tab.html">Comparison</a></td>
+      <td>Two or more datasets together: comparison plots, details, and aggregate statistics.</td>
     </tr>
     <tr>
-      <td>Statistics</td>
-      <td>Percentiles, gradation parameters, classification, environmental values, and summary K-statistics.</td>
+      <td><a href="reports_tab.html">Reports</a></td>
+      <td>A formatted HTML, PDF, or Word document from a report-type template.</td>
+    </tr>
+    <tr>
+      <td><a href="export_tab.html">Export</a></td>
+      <td>Data tables and plot image files for a chosen scope of datasets.</td>
     </tr>
   </table>
 
   <h2>Calculate Or Recalculate</h2>
   <ul>
     <li>Loading a dataset normally calculates K-values immediately.</li>
-    <li>Changing temperature or porosity settings recalculates affected datasets automatically.</li>
-    <li>Use <strong>Calculate K</strong> in the toolbar when you want to rerun all open datasets explicitly.</li>
+    <li>Changing temperature or porosity recalculates affected datasets automatically.</li>
+    <li>Use <strong>Analysis &gt; Recalculate K Values</strong> (<code>Ctrl+K</code>) to rerun all open datasets explicitly.</li>
   </ul>
-
-  <h2>Use The Comparison Tab</h2>
-  <ul>
-    <li>You need at least <strong>2 datasets</strong> to compare.</li>
-    <li>The comparison view contains <strong>Plot</strong>, <strong>Details</strong>, and <strong>Statistics</strong>.</li>
-    <li>The dataset subset comes from the sidebar selection or the comparison selection dialog.</li>
-    <li>If nothing is selected in the sidebar, comparison uses all loaded datasets.</li>
-  </ul>
-
-  <h2>Use The Export Tab</h2>
-  <ol>
-    <li>Open the <strong>Export</strong> top-level tab.</li>
-    <li>Choose the export scope: <strong>All</strong>, <strong>Current</strong>, or <strong>Selected</strong> datasets.</li>
-    <li>Select the file formats and included content you want.</li>
-    <li>Review the live preview, files-to-create tree, and destination folder.</li>
-    <li>Run the export.</li>
-  </ol>
-
-  <div class="callout note">
-    <div class="callout-title">Selected scope</div>
-    <p>When the export scope is set to <strong>Selected</strong>, export follows the dataset subset managed through the sidebar selection state or comparison dataset management workflow.</p>
-  </div>
 
   <div class="callout tip">
-    <div class="callout-title">Use the right export path</div>
-    <p>For formal output across multiple datasets, use the main <strong>Export</strong> tab. Do not rely on per-widget copy or placeholder export buttons when you need the final project deliverables.</p>
+    <div class="callout-title">Reports and Export share one Plot Style</div>
+    <p>Both tabs use the same <strong>Plot Style</strong> control: a <strong>preset</strong> sets typography and a <strong>palette</strong> sets colour. The rule is simple — the preset sizes the text, the palette colours the data. See the <a href="reports_tab.html">Reports</a> and <a href="export_tab.html">Export</a> guides.</p>
   </div>
 
   <p class="link-list">
-    <a href="workspace_tour.html">Workspace Tour</a>
-    <a href="common_issues.html">Common Issues</a>
+    <a href="individual_samples_tab.html">Individual Samples Tab</a>
+    <a href="comparison_tab.html">Comparison Tab</a>
+    <a href="reports_tab.html">Reports Tab</a>
+    <a href="export_tab.html">Export Tab</a>
   </p>
 </div>

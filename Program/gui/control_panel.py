@@ -2132,7 +2132,7 @@ class ControlPanel(QFrame):
         dtu_pill.setObjectName("sidebar-credit-logo")
         dtu_pill.setAlignment(Qt.AlignmentFlag.AlignCenter)
         dtu_pill.setStyleSheet(
-            "background: #000; border-radius: 3px; border: 1px solid rgba(0,0,0,0.16);")
+            "background: transparent; border-radius: 3px; border: 1px solid rgba(0,0,0,0.16);")
         logo_px = QPixmap(self._resource_file("DTU_logo.png"))
         if not logo_px.isNull():
             dtu_pill.setText("")
@@ -2164,7 +2164,7 @@ class ControlPanel(QFrame):
         dtu_dept = QLabel(
             "Developed by Oliver Lund\n"
             "Inspired by HydrogeoSieveXL by J.F Devlin\n"
-            "Supervisor: Poul Løgstrup Bjerg\n"
+            "Made in collaboration with Poul Løgstrup Bjerg\n"
             "DTU Sustain"
         )
         self._sidebar_credit_text = dtu_dept

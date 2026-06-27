@@ -20,6 +20,12 @@ from .plot_text_options import (
 )
 
 
+# Report and exported plot figures use one canonical K unit so the same plot
+# has identical values and axis labels in both paths. Tab-local display units
+# remain live-view context; tabular exports have their own explicit unit choices.
+REPORT_EXPORT_PLOT_K_UNIT = HydraulicConductivityUnit.M_PER_S
+
+
 def plot_context_value(context: Optional[Dict[str, Any]], key: str, default: Any) -> Any:
     if context and key in context:
         return context[key]
@@ -32,6 +38,21 @@ def plot_style_from_context(
 ) -> PlotStyle:
     style = plot_context_value(context, "style", default_style)
     return style if style is not None else PROFESSIONAL_STYLE
+
+
+def context_with_style(
+    context: Optional[Dict[str, Any]],
+    style: PlotStyle,
+) -> Dict[str, Any]:
+    """Return a copy of *context* with its ``style`` replaced by *style*.
+
+    Used so reports/exports can force the global report style onto a plot while
+    keeping the rest of the captured context (display unit, axis limits, text
+    options, grid/legend toggles). ``None`` context yields ``{"style": style}``.
+    """
+    merged = dict(context or {})
+    merged["style"] = style
+    return merged
 
 
 def k_display_unit_from_context(

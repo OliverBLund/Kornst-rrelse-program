@@ -1,0 +1,53 @@
+<div class="page">
+  <p class="eyebrow">Tab Guide</p>
+  <h1>Export Tab</h1>
+  <p class="lead">The <strong>Export</strong> tab writes data tables and plot image files to a structured export folder. Choose a scope, the formats, and the content to include, then run the export.</p>
+
+  <h2>Choose A Scope</h2>
+  <table>
+    <tr>
+      <th>Scope</th>
+      <th>Exports</th>
+    </tr>
+    <tr><td>All</td><td>Every loaded dataset.</td></tr>
+    <tr><td>Current</td><td>The dataset currently open in Individual Samples.</td></tr>
+    <tr><td>Selected</td><td>The dataset subset chosen through the sidebar / comparison selection.</td></tr>
+  </table>
+
+  <div class="callout note">
+    <div class="callout-title">Scope is independent of the sidebar</div>
+    <p>Sidebar selection does <strong>not</strong> limit export unless the scope is set to <strong>Selected</strong>. If an export has more or fewer datasets than you expected, check the scope selector first.</p>
+  </div>
+
+  <h2>Formats</h2>
+  <ul>
+    <li><strong>Tables</strong>: CSV (long and wide layouts), Excel workbooks, and JSON.</li>
+    <li><strong>Plots</strong>: PNG, SVG, and PDF image files.</li>
+  </ul>
+
+  <h2>Included Content</h2>
+  <ul>
+    <li><strong>K-values</strong>, <strong>Statistics</strong>, and <strong>Metadata</strong> control which columns and sections appear in the tables.</li>
+    <li><strong>Plots/Figures</strong> selects which plots are exported — per-dataset plots (grain-size curve, K-value bar, applicability heatmap) and collection plots (distribution comparison, K-value comparison, K box plots, the lognormal K distribution, and the reliability matrix).</li>
+  </ul>
+
+  <h2>Plot Style</h2>
+  <p>The Export tab has the same <strong>Plot Style</strong> control as the Reports tab: a <strong>preset</strong> for typography and a <strong>palette</strong> for colour, plus <strong>Customize…</strong>. They share one setting, so report and export plots match. The rule is the same: <strong>the preset sizes the text, the palette colours the data.</strong></p>
+
+  <h2>Run The Export</h2>
+  <ol>
+    <li>Review the live preview, the files-to-create tree, and the destination folder.</li>
+    <li>Run the export. Large exports run in the background with a progress dialog you can cancel.</li>
+  </ol>
+
+  <div class="callout tip">
+    <div class="callout-title">Use the right output path</div>
+    <p>For formal deliverables across multiple datasets, use this tab rather than per-widget copy buttons. For a formatted document (HTML/PDF/Word), use the <a href="reports_tab.html">Reports</a> tab instead.</p>
+  </div>
+
+  <p class="link-list">
+    <a href="reports_tab.html">Reports Tab</a>
+    <a href="comparison_tab.html">Comparison Tab</a>
+    <a href="common_issues.html">Common Issues</a>
+  </p>
+</div>

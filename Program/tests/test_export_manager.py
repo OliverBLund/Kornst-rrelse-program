@@ -716,6 +716,46 @@ class TestExportManagerExports(unittest.TestCase):
             self.assertTrue(any(name.endswith('_reliability_matrix.png') for name in basenames))
             self.assertTrue(all(name.startswith('all_datasets_results_') for name in basenames))
 
+    def test_k_distribution_collection_plot_renders_lognormal_histogram(self):
+        dataset_b = build_dataset('Sample B')
+        self.dataset.group_name = 'Layer A'
+        dataset_b.group_name = 'Layer B'
+        datasets = [
+            (self.dataset.sample_name, self.dataset, self.results),
+            (dataset_b.sample_name, dataset_b, self.results),
+        ]
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            config = self.make_config(temp_dir, csv=False, png=True, plots=True)
+            figure = ExportManager()._build_collection_plot_figure(
+                'k_distribution', datasets, config,
+            )
+
+        ax = figure.axes[0]
+        # The export reuses the shared spec's lognormal-histogram defaults
+        # (frequency axis), matching the Comparison tab and the report.
+        self.assertEqual(ax.get_title(), 'K Distribution (lognormal)')
+        self.assertEqual(ax.get_ylabel(), 'Frequency (count)')
+        self.assertGreater(len(ax.patches), 0)
+
+    def test_k_distribution_is_a_selectable_collection_export(self):
+        dataset_b = build_dataset('Sample B')
+        datasets = [
+            (self.dataset.sample_name, self.dataset, self.results),
+            (dataset_b.sample_name, dataset_b, self.results),
+        ]
+        with tempfile.TemporaryDirectory() as temp_dir:
+            config = self.make_config(
+                temp_dir, csv=False, png=True, plots=True,
+                selected_plot_types=['k_distribution'],
+            )
+
+            exported = ExportManager().export(datasets, config)
+
+        basenames = {os.path.basename(path) for path in exported}
+        self.assertEqual(len(exported), 1)
+        self.assertTrue(any(name.endswith('_k_distribution.png') for name in basenames))
+
     def test_grouped_statistical_boxplot_uses_grouped_scope_series(self):
         dataset_b = build_dataset('Sample B')
         self.dataset.group_name = 'Layer A'
@@ -856,7 +896,7 @@ class TestExportManagerExports(unittest.TestCase):
         self.assertAlmostEqual(ax.get_ylim()[1], 95.0)
         figure.clear()
 
-    def test_k_value_bar_figure_uses_display_unit_from_context(self):
+    def test_k_value_bar_figure_uses_canonical_m_s_unit(self):
         manager = ExportManager()
         results = build_results()
 
@@ -868,15 +908,184 @@ class TestExportManagerExports(unittest.TestCase):
         )
         ax = figure.axes[0]
 
-        self.assertIn('m/d', ax.get_ylabel())
-        # Bars should be in m/d, i.e. converted from the stored m/s values.
-        max_k_m_s = max(r.k_value for r in results)
-        expected = HydraulicConductivityConverter.convert_from_m_per_s(
-            max_k_m_s, HydraulicConductivityUnit.M_PER_DAY
-        )
+        self.assertIn('m/s', ax.get_ylabel())
         bar_heights = [patch.get_height() for patch in ax.patches]
-        self.assertAlmostEqual(max(bar_heights), expected, places=6)
+        self.assertAlmostEqual(
+            max(bar_heights), max(r.k_value for r in results), places=12
+        )
         figure.clear()
+
+    def test_single_sample_export_uses_global_style_over_context(self):
+        # The global report style must win over any captured live-tab style, so
+        # the Customize panel themes every export plot uniformly.
+        import dataclasses
+        from unittest.mock import patch
+        from gui.plot_styles import PROFESSIONAL_STYLE
+
+        sentinel = dataclasses.replace(PROFESSIONAL_STYLE, figure_facecolor='#123456')
+        other = dataclasses.replace(PROFESSIONAL_STYLE, figure_facecolor='#abcdef')
+
+        manager = ExportManager()
+        with patch('gui.export_manager.resolve_report_style', return_value=sentinel):
+            figure = manager._build_grain_size_plot_figure(
+                self.dataset.sample_name, self.dataset,
+                self.make_config(output_dir='unused', csv=False),
+                {'style': other},  # captured live-tab style must be overridden
+            )
+        from matplotlib.colors import to_rgba
+        self.assertEqual(figure.patch.get_facecolor(), to_rgba('#123456'))
+        figure.clear()
+
+    def test_collection_export_spec_uses_canonical_m_s_unit(self):
+        from gui.plot_styles import PROFESSIONAL_STYLE
+
+        dataset_b = build_dataset('Sample B')
+        datasets = [
+            (self.dataset.sample_name, self.dataset, self.results),
+            (dataset_b.sample_name, dataset_b, self.results),
+        ]
+        spec = ExportManager()._build_export_comparison_spec(
+            datasets,
+            self.make_config(output_dir='unused', csv=False),
+            {'display_unit': HydraulicConductivityUnit.M_PER_DAY},
+            plot_type='k-values',
+            style=PROFESSIONAL_STYLE,
+        )
+        self.assertEqual(spec.display_unit, HydraulicConductivityUnit.M_PER_S)
+
+    def test_collection_export_spec_uses_global_palette(self):
+        import gui.report_plot_style as rps
+        from gui.plot_styles import PROFESSIONAL_STYLE
+
+        dataset_b = build_dataset('Sample B')
+        dataset_c = build_dataset('Sample C')
+        datasets = [
+            (self.dataset.sample_name, self.dataset, self.results),
+            (dataset_b.sample_name, dataset_b, self.results),
+            (dataset_c.sample_name, dataset_c, self.results),
+        ]
+        config = self.make_config(output_dir='unused', csv=False)
+        manager = ExportManager()
+        try:
+            rps.set_report_palette('Viridis')
+            spec = manager._build_export_comparison_spec(
+                datasets, config, None,
+                plot_type='distribution', style=PROFESSIONAL_STYLE,
+            )
+            self.assertEqual(spec.palette, rps.resolve_report_palette_colors(3))
+            # Viridis is not the categorical default, so the resolved colours differ.
+            from gui.plot_constants import DATASET_COLORS
+            self.assertNotEqual(spec.effective_colors[:3], DATASET_COLORS[:3])
+        finally:
+            rps.set_report_palette('Categorical')
+            rps._reset_cache_for_tests()
+
+    def test_export_k_bar_colors_follow_palette(self):
+        import gui.report_plot_style as rps
+        from gui.plot_constants import palette_colors
+        from matplotlib.colors import to_hex
+
+        manager = ExportManager()
+        results = build_results()
+        methods = [r.method_name for r in results]
+        try:
+            rps.set_report_palette('Viridis')
+            figure = manager._build_k_value_bar_figure(
+                'Sample A', results,
+                self.make_config(output_dir='unused', csv=False), None,
+            )
+            colors = [to_hex(p.get_facecolor()) for p in figure.axes[0].patches]
+            self.assertEqual(colors, palette_colors('Viridis', len(methods)))
+        finally:
+            rps.set_report_palette('Categorical')
+            rps._reset_cache_for_tests()
+            figure.clear()
+
+    def test_collection_k_value_comparison_figure_uses_palette_colors(self):
+        import gui.report_plot_style as rps
+        from gui.plot_constants import DATASET_COLORS, palette_colors
+        from matplotlib.colors import to_hex
+
+        manager = ExportManager()
+        dataset_b = build_dataset('Sample B')
+        datasets = [
+            (self.dataset.sample_name, self.dataset, self.results),
+            (dataset_b.sample_name, dataset_b, self.results),
+        ]
+        config = self.make_config(output_dir='unused', csv=False)
+        figure = None
+        try:
+            rps.set_report_palette('Viridis')
+            figure = manager._build_collection_plot_figure(
+                'k_value_comparison', datasets, config, None,
+            )
+            bar_colors = {to_hex(p.get_facecolor()) for p in figure.axes[0].patches}
+            self.assertEqual(bar_colors, set(palette_colors('Viridis', 2)))
+            self.assertNotEqual(bar_colors, set(DATASET_COLORS[:2]))
+        finally:
+            rps.set_report_palette('Categorical')
+            rps._reset_cache_for_tests()
+            if figure is not None:
+                figure.clear()
+
+    def test_ungrouped_statistical_boxplots_use_palette_colors(self):
+        import gui.report_plot_style as rps
+        from gui.plot_constants import palette_colors
+        from matplotlib.colors import to_hex
+
+        manager = ExportManager()
+        dataset_b = build_dataset('Sample B')
+        datasets = [
+            (self.dataset.sample_name, self.dataset, self.results),
+            (dataset_b.sample_name, dataset_b, self.results),
+        ]
+        config = self.make_config(output_dir='unused', csv=False)
+        figure = None
+        try:
+            rps.set_report_palette('Viridis')
+            snapshot = manager._build_comparison_snapshot_for_export(datasets, config)
+            from k_aggregation import k_scope_value_series
+            series = k_scope_value_series(snapshot.k)
+            self.assertEqual(
+                manager._k_scope_plot_colors(snapshot, series),
+                palette_colors('Viridis', len(series)),
+            )
+            figure = manager._build_collection_plot_figure(
+                'statistical_boxplots', datasets, config, None,
+            )
+            box_colors = [to_hex(p.get_facecolor()) for p in figure.axes[0].patches]
+            self.assertEqual(box_colors, palette_colors('Viridis', len(series)))
+        finally:
+            rps.set_report_palette('Categorical')
+            rps._reset_cache_for_tests()
+            if figure is not None:
+                figure.clear()
+
+    def test_k_distribution_overall_scope_uses_spec_palette(self):
+        import gui.report_plot_style as rps
+        from gui.comparison_plot_spec import k_distribution_scopes
+        from gui.plot_constants import palette_colors
+        from gui.plot_styles import PROFESSIONAL_STYLE
+
+        manager = ExportManager()
+        dataset_b = build_dataset('Sample B')
+        datasets = [
+            (self.dataset.sample_name, self.dataset, self.results),
+            (dataset_b.sample_name, dataset_b, self.results),
+        ]
+        config = self.make_config(output_dir='unused', csv=False)
+        try:
+            rps.set_report_palette('Viridis')
+            spec = manager._build_export_comparison_spec(
+                datasets, config, None,
+                plot_type='k-distribution', style=PROFESSIONAL_STYLE,
+            )
+            scopes = k_distribution_scopes(spec)
+            self.assertEqual(scopes[0]['label'], 'Overall')
+            self.assertEqual(scopes[0]['color'], palette_colors('Viridis', 2)[0])
+        finally:
+            rps.set_report_palette('Categorical')
+            rps._reset_cache_for_tests()
 
     def test_plot_export_applies_shared_text_options_from_context(self):
         manager = ExportManager()
@@ -914,6 +1123,12 @@ class TestExportTabConfig(unittest.TestCase):
 
     def tearDown(self):
         self.tab.deleteLater()
+
+    def test_k_distribution_plot_checkbox_is_exposed(self):
+        self.assertIn('plots_k_distribution', self.tab.content_checkboxes)
+        self.tab._toggle_content_item('plots', 'k_distribution', True)
+        config = self.tab._build_export_config()
+        self.assertIn('k_distribution', config['selected_plot_types'])
 
     def test_plot_content_options_are_written_to_export_config(self):
         self.tab._toggle_content_item('plots', 'include_legend', False)
@@ -1103,28 +1318,36 @@ class TestExportTabConfig(unittest.TestCase):
 
         self.assertEqual(requested, [self.dataset.sample_name])
 
-    def test_export_now_uses_loading_dialog_progress_adapter(self):
+    def test_export_now_runs_on_worker_behind_loading_dialog(self):
+        # Export is threaded: export_now builds a worker + cancellable
+        # LoadingDialog and exec()s the dialog (the worker runs off the UI thread).
         with tempfile.TemporaryDirectory() as temp_dir:
             self.tab.output_dir.setText(temp_dir)
             fake_dialog = Mock()
-
-            def export_side_effect(_datasets, config, progress):
-                progress.setMaximum(config['expected_file_count'])
-                progress.setValue(config['expected_file_count'])
-                return [os.path.join(config['output_dir'], 'tables', 'csv', 'combined_all_datasets.csv')]
+            fake_worker = Mock()
 
             with patch('gui.export_tab.LoadingDialog', return_value=fake_dialog) as dialog_cls, \
-                    patch('gui.export_manager.ExportManager.export', side_effect=export_side_effect), \
-                    patch('gui.export_tab.QMessageBox.information'):
+                    patch('gui.export_worker.ExportWorker', return_value=fake_worker) as worker_cls:
                 self.tab.export_now()
 
             dialog_cls.assert_called_once()
-            fake_dialog.show.assert_called_once()
-            fake_dialog.update_progress.assert_called()
-            update_kwargs = fake_dialog.update_progress.call_args.kwargs
-            self.assertIn('files', update_kwargs['count_label'])
-            fake_dialog.mark_finished.assert_called_once()
-            fake_dialog.close.assert_called_once()
+            # Dialog is cancellable now (cancel aborts the worker between files).
+            self.assertTrue(dialog_cls.call_args.kwargs.get('cancellable'))
+            worker_cls.assert_called_once()
+            fake_worker.start.assert_called_once()
+            fake_dialog.exec.assert_called_once()
+            self.assertIsNotNone(self.tab._export_worker)
+
+    def test_export_finished_shows_summary_and_clears_worker(self):
+        # The success handler reports the file count and resets the re-entrancy
+        # guard so a second export can run.
+        self.tab._export_dialog = Mock()
+        self.tab._export_worker = Mock()
+        self.tab._export_output_dir = "out"
+        with patch('gui.export_tab.QMessageBox.information') as info:
+            self.tab._on_export_finished(["out/a.csv", "out/b.csv"])
+        info.assert_called_once()
+        self.assertIsNone(self.tab._export_worker)
 
     def test_plot_file_tree_groups_plot_files_by_dataset(self):
         other_dataset = build_dataset('Sample B')

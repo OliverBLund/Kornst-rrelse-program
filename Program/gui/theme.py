@@ -439,6 +439,55 @@ def _get_combo_arrow_path() -> str:
     return str(arrow_path).replace("\\", "/")
 
 
+def combo_popup_qss(radius: int = 4) -> str:
+    """QSS for *just* a combo's dropdown list, kept opaque, set on the combo itself.
+
+    The app-wide ``QComboBox QAbstractItemView`` rule gives every dropdown an
+    opaque background, but a bare ``background: transparent`` on an ancestor
+    container bleeds into the popup and overrides it (an ancestor stylesheet beats
+    the app stylesheet). Append this to a combo's own stylesheet — set directly on
+    the combo, it wins over the bleed so the list never renders see-through, while
+    leaving the combo's existing field styling intact. Use ``opaque_combo_qss``
+    instead when the combo has no field styling of its own.
+    """
+    return f"""
+        QComboBox QAbstractItemView {{
+            background: {C.BG_RAISED};
+            border: 1px solid {C.BORDER};
+            border-radius: {radius}px;
+            selection-background-color: rgba(107,142,35,0.12);
+            selection-color: {C.TEXT};
+            outline: none;
+        }}
+        QComboBox QAbstractItemView::item {{ min-height: 22px; padding: 4px 8px; }}
+        QComboBox QAbstractItemView::item:hover {{ background: rgba(107,142,35,0.08); }}
+    """
+
+
+def opaque_combo_qss(radius: int = 4) -> str:
+    """Full opaque-combo QSS (field + dropdown list) to set directly on a combo.
+
+    For a combo with no styling of its own that sits inside a transparent panel;
+    pairs the standard field look with :func:`combo_popup_qss` so the popup can't
+    render see-through. See that function for why the QSS must live on the combo.
+    """
+    arrow_url = _get_combo_arrow_path()
+    return f"""
+        QComboBox {{
+            background: #ffffff;
+            border: 1px solid {C.BORDER_DK};
+            border-radius: {radius}px;
+            padding: 3px 22px 3px 7px;
+            color: {C.TEXT_MID};
+            min-height: 22px;
+        }}
+        QComboBox:hover {{ border-color: {C.EARTH}; }}
+        QComboBox:focus {{ border-color: {C.OLIVE}; }}
+        QComboBox::drop-down {{ border: none; width: 18px; }}
+        QComboBox::down-arrow {{ image: url("{arrow_url}"); width: 10px; height: 6px; }}
+    """ + combo_popup_qss(radius)
+
+
 def build_stylesheet() -> str:
     """
     Generate and return the full application QSS stylesheet.

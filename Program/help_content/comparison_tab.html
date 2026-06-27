@@ -1,0 +1,53 @@
+<div class="page">
+  <p class="eyebrow">Tab Guide</p>
+  <h1>Comparison Tab</h1>
+  <p class="lead">The <strong>Comparison</strong> tab works across datasets. It needs at least <strong>two</strong> datasets, and uses the subset selected in the sidebar (if nothing is selected, it uses all loaded datasets). Inside it are three subtabs — <strong>Plot</strong>, <strong>Details</strong>, and <strong>Statistics</strong>.</p>
+
+  <h2>Plot Subtab</h2>
+  <p>Choose a plot type, then how to lay it out and break it down.</p>
+  <table>
+    <tr>
+      <th>Plot type</th>
+      <th>Shows</th>
+    </tr>
+    <tr><td>Distribution</td><td>The grain-size curves of the datasets together.</td></tr>
+    <tr><td>K-Values</td><td>Hydraulic-conductivity bars across datasets (or groups).</td></tr>
+    <tr><td>K Distribution</td><td>The pooled K values as a lognormal histogram (or, optionally, an empirical CDF).</td></tr>
+    <tr><td>Combined</td><td>Distribution and K-values together, one panel per dataset or group.</td></tr>
+    <tr><td>Histogram</td><td>The grain-size histogram per dataset or group.</td></tr>
+  </table>
+  <ul>
+    <li><strong>Layout</strong>: <strong>Overlay</strong> draws everything on one set of axes; <strong>Grid</strong> gives each dataset or group its own panel (2&times;2 up to 4&times;3).</li>
+    <li><strong>Breakdown</strong> (shown when named groups exist): <strong>Per dataset</strong> draws each dataset; <strong>Per group</strong> aggregates each named group into one series.</li>
+    <li>The <strong>K Distribution</strong> sidebar adds its own controls — chart (lognormal histogram or empirical CDF), histogram axis (ln K or K), bins, frequency vs. density, drop-empty-bins, and N labels.</li>
+    <li>The plot sidebar also controls which datasets and groups are visible and the per-tab plot styling.</li>
+  </ul>
+
+  <div class="callout note">
+    <div class="callout-title">Groups</div>
+    <p>Group names come from <strong>Manage</strong> in the sidebar (Scope &amp; Groups). Groups feed the per-group breakdown, the aggregate statistics, and the group-aware report and export plots.</p>
+  </div>
+
+  <h2>Details Subtab</h2>
+  <ul>
+    <li>A side-by-side table of the selected datasets — percentiles, gradation, classification, and K values for direct comparison.</li>
+    <li>Use it to read exact numbers behind the plots.</li>
+  </ul>
+
+  <h2>Statistics Subtab</h2>
+  <ul>
+    <li>Aggregate statistics across the selected datasets, including overall and per-group summaries.</li>
+    <li>Group-aware box plots and a method reliability/applicability view summarise how methods behave across the set.</li>
+  </ul>
+
+  <div class="callout tip">
+    <div class="callout-title">If comparison looks incomplete</div>
+    <p>Check the sidebar selection first — comparison uses the selected subset. Clear the selection to fall back to all loaded datasets, or press <strong>Analysis &gt; Update Comparison</strong> after changing global settings.</p>
+  </div>
+
+  <p class="link-list">
+    <a href="individual_samples_tab.html">Individual Samples Tab</a>
+    <a href="reports_tab.html">Reports Tab</a>
+    <a href="export_tab.html">Export Tab</a>
+  </p>
+</div>

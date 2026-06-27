@@ -48,18 +48,16 @@ class TestReportGeneratorAppendices(unittest.TestCase):
         self.dataset = build_dataset()
         self.results = build_results()
 
-    def test_k_value_bar_chart_respects_plot_context_unit(self):
+    def test_k_value_bar_chart_uses_canonical_m_s_unit(self):
         ms_uri = self.generator._create_k_value_bar_chart(
             self.results, {'display_unit': HydraulicConductivityUnit.M_PER_S}
         )
-        md_uri = self.generator._create_k_value_bar_chart(
+        md_context_uri = self.generator._create_k_value_bar_chart(
             self.results, {'display_unit': HydraulicConductivityUnit.M_PER_DAY}
         )
 
         self.assertTrue(ms_uri.startswith('data:image/png;base64,'))
-        self.assertTrue(md_uri.startswith('data:image/png;base64,'))
-        # Different display unit -> different rendered chart.
-        self.assertNotEqual(ms_uri, md_uri)
+        self.assertEqual(ms_uri, md_context_uri)
 
     def test_individual_report_includes_k_bar_when_selected(self):
         html = self.generator.generate_grain_size_report(
@@ -181,6 +179,308 @@ class TestReportGeneratorAppendices(unittest.TestCase):
         )
         self.assertIn('Grain Size Distribution Comparison', html)
         self.assertNotIn('Hydraulic Conductivity by Method', html)
+
+    def test_comparison_report_includes_k_distribution_when_selected(self):
+        sample_b = build_dataset('Sample B')
+        details = [
+            {'label': 'Sample A', 'dataset': self.dataset, 'k_results': self.results,
+             'group_name': 'Layer A', 'temperature': 20.0, 'porosity': 0.35},
+            {'label': 'Sample B', 'dataset': sample_b, 'k_results': self.results,
+             'group_name': 'Layer B', 'temperature': 20.0, 'porosity': 0.35},
+        ]
+        captured = []
+
+        def fake_spec(spec, **kwargs):
+            captured.append(spec)
+            return 'data:image/png;base64,spec'
+
+        with patch('plot_export.export_comparison_spec', side_effect=fake_spec):
+            html = self.generator.generate_comparison_report(
+                [self.dataset, sample_b],
+                sections={'plots': True, 'k_statistics': False,
+                          'results': False, 'interpretation': False},
+                sample_details=details,
+                selected_plots={'k_distribution'},
+            )
+
+        kdist = [s for s in captured if s.current_plot_type == 'k-distribution']
+        # The K-distribution renders through the shared spec as a lognormal
+        # histogram (the new default view), not the empirical CDF.
+        self.assertEqual(len(kdist), 1)
+        self.assertEqual(kdist[0].k_dist_view, 'histogram')
+        self.assertIn('Lognormal', html)
+
+    def test_comparison_report_both_breakdown_emits_two_images(self):
+        sample_b = build_dataset('Sample B')
+        details = [
+            {'label': 'Sample A', 'dataset': self.dataset, 'k_results': self.results,
+             'group_name': 'Layer A', 'temperature': 20.0, 'porosity': 0.35},
+            {'label': 'Sample B', 'dataset': sample_b, 'k_results': self.results,
+             'group_name': 'Layer B', 'temperature': 20.0, 'porosity': 0.35},
+        ]
+        captured = []
+
+        def fake_spec(spec, **kwargs):
+            captured.append(spec)
+            return 'data:image/png;base64,spec'
+
+        with patch('plot_export.export_comparison_spec', side_effect=fake_spec):
+            html = self.generator.generate_comparison_report(
+                [self.dataset, sample_b],
+                sections={'plots': True, 'k_statistics': False,
+                          'results': False, 'interpretation': False},
+                sample_details=details,
+                selected_plots={'k_distribution'},
+                plot_breakdowns={'k_distribution': 'both'},
+            )
+
+        kdist = [s for s in captured if s.current_plot_type == 'k-distribution']
+        # "Both" renders the per-group and per-dataset variants as two figures.
+        self.assertEqual(len(kdist), 2)
+        self.assertEqual({s.use_group_breakdown for s in kdist}, {True, False})
+        self.assertEqual(html.count('alt="K Distribution"'), 2)
+        self.assertIn('per group', html)
+        self.assertIn('per dataset', html)
+
+    def _grouped_details(self):
+        sample_b = build_dataset('Sample B')
+        details = [
+            {'label': 'Sample A', 'dataset': self.dataset, 'k_results': self.results,
+             'group_name': 'Layer A', 'temperature': 20.0, 'porosity': 0.35},
+            {'label': 'Sample B', 'dataset': sample_b, 'k_results': self.results,
+             'group_name': 'Layer B', 'temperature': 20.0, 'porosity': 0.35},
+        ]
+        return [self.dataset, sample_b], details
+
+    def _capture_distribution_spec(self, palette_name):
+        from unittest.mock import patch
+        import gui.report_plot_style as rps
+        from gui.group_styles import set_group_color, clear_group_color
+
+        datasets, details = self._grouped_details()
+        captured = []
+
+        def fake_spec(spec, **kwargs):
+            captured.append(spec)
+            return 'data:image/png;base64,spec'
+
+        try:
+            set_group_color('Layer A', '#ff0000')  # persisted Comparison-tab override
+            rps.set_report_palette(palette_name)
+            with patch('plot_export.export_comparison_spec', side_effect=fake_spec):
+                self.generator.generate_comparison_report(
+                    datasets,
+                    sections={'plots': True, 'k_statistics': False,
+                              'results': False, 'interpretation': False},
+                    sample_details=details,
+                    selected_plots={'distribution_overlay'},
+                )
+        finally:
+            clear_group_color('Layer A')
+            rps.set_report_palette('Categorical')
+            rps._reset_cache_for_tests()
+        return [s for s in captured if s.current_plot_type == 'distribution'][0]
+
+    def test_non_categorical_palette_overrides_group_colors(self):
+        spec = self._capture_distribution_spec('Viridis')
+        colors = [c.lower() for c in spec.effective_colors]
+        # The persisted red Layer-A override is ignored: a non-Categorical palette
+        # is authoritative and re-colours every group.
+        self.assertNotIn('#ff0000', colors)
+
+    def test_categorical_palette_keeps_group_color_override(self):
+        spec = self._capture_distribution_spec('Categorical')
+        colors = [c.lower() for c in spec.effective_colors]
+        # Categorical keeps the user's Comparison-tab group colour.
+        self.assertIn('#ff0000', colors)
+
+    def test_group_colors_spread_across_colormap_with_many_datasets(self):
+        # Regression: with many datasets in a few groups, the groups must sample
+        # the colormap by GROUP count (spread across the whole map), not land in
+        # the first slice. palette_name drives the per-group re-sampling.
+        from gui.comparison_plot_capture import build_comparison_spec
+        from gui.plot_constants import palette_colors
+
+        datasets = []
+        groups = {}
+        for g in range(3):
+            for k in range(4):  # 4 datasets per group -> 12 datasets, 3 groups
+                d = build_dataset(f'S{g}-{k}')
+                datasets.append(d)
+                groups[d.sample_name] = f'Layer {g}'
+
+        spec = build_comparison_spec(
+            datasets,
+            dataset_groups=groups,
+            palette=palette_colors('Viridis', len(datasets)),
+            palette_name='Viridis',
+            group_palette_authoritative=True,
+        )
+        group_colors = list(spec.group_color_map.values())
+        # Three groups -> the proper 3-colour spread, not the first 3 of a
+        # 12-colour sample (which would all be dark purple/blue).
+        self.assertEqual(group_colors, palette_colors('Viridis', 3))
+        self.assertEqual(len(set(group_colors)), 3)
+
+    def test_k_scope_boxplot_receives_global_plot_style(self):
+        from unittest.mock import patch
+        import dataclasses
+        from gui.plot_styles import PROFESSIONAL_STYLE
+
+        datasets, details = self._grouped_details()
+        sentinel = dataclasses.replace(PROFESSIONAL_STYLE, title_fontsize=29)
+        captured = {}
+
+        def fake_boxplot(series, **kwargs):
+            captured.update(kwargs)
+            return 'data:image/png;base64,box'
+
+        with patch('plot_export.export_k_scope_boxplot', side_effect=fake_boxplot):
+            self.generator.generate_comparison_report(
+                datasets,
+                sections={'plots': True, 'k_statistics': False,
+                          'results': False, 'interpretation': False},
+                sample_details=details,
+                selected_plots={'statistical_boxplots'},
+                plot_style=sentinel,
+            )
+        # The K box-plot now receives the global style (was previously unstyled).
+        self.assertIn('style', captured)
+        self.assertEqual(captured['style'].title_fontsize, 29)
+
+    def test_comparison_report_includes_per_sample_plots_when_selected(self):
+        sample_b = build_dataset('Sample B')
+        details = [
+            {'label': 'Sample A', 'dataset': self.dataset, 'k_results': self.results,
+             'temperature': 20.0, 'porosity': 0.35, 'plot_context': None},
+            {'label': 'Sample B', 'dataset': sample_b, 'k_results': self.results,
+             'temperature': 20.0, 'porosity': 0.35, 'plot_context': None},
+        ]
+        html = self.generator.generate_comparison_report(
+            [self.dataset, sample_b],
+            sections={'plots': True, 'k_statistics': False,
+                      'results': False, 'interpretation': False},
+            sample_details=details,
+            selected_plots={'per_sample_grain', 'per_sample_kbar'},
+        )
+        # One per-sample sub-section per sample, with both plot types.
+        self.assertIn('Individual Sample Plots', html)
+        self.assertIn('<h3>Sample A</h3>', html)
+        self.assertIn('<h3>Sample B</h3>', html)
+        self.assertIn('Sample A grain size distribution', html)
+        self.assertIn('Sample A K-value bar chart', html)
+
+    def test_k_bar_colors_follow_palette_not_preset(self):
+        # K-bar colours come from the palette, never the preset: a colormap
+        # samples one colour per method; Categorical keeps semantic method colours.
+        import gui.report_plot_style as rps
+        from gui.plot_constants import METHOD_COLORS, palette_colors
+
+        methods = ['Hazen', 'Beyer', 'Terzaghi']
+        try:
+            rps.set_report_palette('Categorical')
+            self.assertEqual(
+                self.generator._k_bar_method_colors(methods),
+                [METHOD_COLORS[m] for m in methods],
+            )
+
+            rps.set_report_palette('Viridis')
+            rps.set_report_style_preset('Presentation')
+            with_pres = self.generator._k_bar_method_colors(methods)
+            rps.set_report_style_preset('Classic')
+            with_classic = self.generator._k_bar_method_colors(methods)
+            self.assertEqual(with_pres, palette_colors('Viridis', 3))
+            # The preset must not influence the K-bar colours.
+            self.assertEqual(with_pres, with_classic)
+        finally:
+            rps.set_report_palette('Categorical')
+            rps.set_report_style_preset('Professional')
+            rps._reset_cache_for_tests()
+
+    def test_individual_report_grain_curve_follows_palette(self):
+        # One rule everywhere: a chosen colormap palette colours the single grain
+        # curve too (Categorical keeps the preset colour). Fonts stay from the preset.
+        import gui.report_plot_style as rps
+
+        seen = []
+        original = self.generator._create_grain_size_plot
+
+        def spy(dataset, plot_context=None, curve_color=None):
+            resolved = curve_color if curve_color is not None else self.generator._palette_curve_color()
+            seen.append(resolved)
+            return original(dataset, plot_context, curve_color)
+
+        self.generator._create_grain_size_plot = spy
+        try:
+            rps.set_report_palette('Categorical')
+            self.generator.generate_grain_size_report(
+                self.dataset, sections={'plots': True}, selected_plots={'grain_size_curve'})
+            rps.set_report_palette('Viridis')
+            self.generator.generate_grain_size_report(
+                self.dataset, sections={'plots': True}, selected_plots={'grain_size_curve'})
+        finally:
+            rps.set_report_palette('Categorical')
+            rps._reset_cache_for_tests()
+
+        self.assertEqual(len(seen), 2)
+        self.assertIsNone(seen[0])                       # Categorical → preset colour
+        self.assertTrue(seen[1] and seen[1].startswith('#'))  # Viridis → palette colour
+
+    def test_per_sample_grain_curves_use_palette_colors(self):
+        # Each per-sample grain curve takes that sample's overlay (palette) colour
+        # while keeping the global typography — so Presentation fonts + palette
+        # colours can be combined on the individual plots.
+        import gui.report_plot_style as rps
+
+        sample_b = build_dataset('Sample B')
+        details = [
+            {'label': 'Sample A', 'dataset': self.dataset, 'k_results': self.results,
+             'temperature': 20.0, 'porosity': 0.35, 'plot_context': None},
+            {'label': 'Sample B', 'dataset': sample_b, 'k_results': self.results,
+             'temperature': 20.0, 'porosity': 0.35, 'plot_context': None},
+        ]
+        seen = []
+        original = self.generator._create_grain_size_plot
+
+        def spy(dataset, plot_context=None, curve_color=None):
+            seen.append((dataset.sample_name, curve_color))
+            return original(dataset, plot_context, curve_color)
+
+        self.generator._create_grain_size_plot = spy
+        try:
+            rps.set_report_palette('Viridis')
+            self.generator.generate_comparison_report(
+                [self.dataset, sample_b],
+                sections={'plots': True, 'k_statistics': False,
+                          'results': False, 'interpretation': False},
+                sample_details=details,
+                selected_plots={'per_sample_grain'},
+            )
+        finally:
+            rps.set_report_palette('Categorical')
+            rps._reset_cache_for_tests()
+
+        colors = [c for _name, c in seen]
+        self.assertEqual(len(colors), 2)
+        self.assertTrue(all(c and c.startswith('#') for c in colors))
+        self.assertNotEqual(colors[0], colors[1])  # distinct per-sample palette colours
+
+    def test_comparison_report_omits_per_sample_plots_by_default(self):
+        sample_b = build_dataset('Sample B')
+        details = [
+            {'label': 'Sample A', 'dataset': self.dataset, 'k_results': self.results,
+             'temperature': 20.0, 'porosity': 0.35, 'plot_context': None},
+            {'label': 'Sample B', 'dataset': sample_b, 'k_results': self.results,
+             'temperature': 20.0, 'porosity': 0.35, 'plot_context': None},
+        ]
+        html = self.generator.generate_comparison_report(
+            [self.dataset, sample_b],
+            sections={'plots': True, 'k_statistics': False,
+                      'results': False, 'interpretation': False},
+            sample_details=details,
+            selected_plots={'distribution_overlay'},
+        )
+        self.assertNotIn('Individual Sample Plots', html)
 
     def test_percentile_appendix_uses_curve_interpolation(self):
         html = self.generator._create_percentiles_table(self.dataset)
