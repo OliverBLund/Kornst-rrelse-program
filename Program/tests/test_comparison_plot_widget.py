@@ -20,6 +20,7 @@ from matplotlib.colors import to_hex
 from PyQt6.QtWidgets import QApplication, QFileDialog, QMessageBox
 
 from data_loader import GrainSizeData
+from grain_classification import USCS
 from gui.comparison_plot_widget import ComparisonPlotWidget
 from gui.plot_renderers import render_k_boxplot, render_k_histogram
 from gui.group_styles import (
@@ -217,7 +218,7 @@ class TestComparisonPlotWidget(unittest.TestCase):
         self.assertEqual(len(self.widget.figure.axes), 2)
         heights = [patch.get_height() for patch in self.widget.figure.axes[0].patches]
         self.assertTrue(all(height >= 0 for height in heights))
-        self.assertEqual(self.widget._drawer_title.text(), 'Histogram plotted size-class data')
+        self.assertEqual(self.widget._drawer_title.text(), 'Histogram classification-fraction data')
         self.assertEqual({row[0] for row in self.widget._drawer_rows}, {'Layer A', 'Layer B'})
 
     def test_combined_facets_use_group_geomean_when_grouped(self):
@@ -326,6 +327,9 @@ class TestComparisonPlotWidget(unittest.TestCase):
         self.assertTrue(all(height >= 0 for height in heights))
         self.assertAlmostEqual(sum(heights), 100.0, places=6)
         self.assertEqual(first_ax.get_ylabel(), 'Weight (%)')
+        self.assertEqual(first_ax.get_xlabel(), 'Grain-size class (ISO 14688)')
+        tick_labels = [tick.get_text() for tick in first_ax.get_xticklabels()]
+        self.assertEqual(tick_labels.count('Coarse sand'), 1)
         self.assertEqual(self.widget.display_mode, 'grid')
         self.assertTrue(self.widget.grid_radio.isChecked())
 
@@ -542,23 +546,52 @@ class TestComparisonPlotWidget(unittest.TestCase):
         self.assertEqual(self.widget._drawer_rows[0], ('Sample A', '4.750000', '100.0000'))
         self.assertEqual(self.widget._drawer_rows[7][0], 'Sample B')
 
-    def test_histogram_drawer_contains_visible_size_class_weights(self):
+    def test_histogram_drawer_contains_visible_class_fraction_weights(self):
         self.widget.on_plot_type_changed('Histogram')
         self.widget.refresh_plot()
 
-        self.assertEqual(self.widget._drawer_title.text(), 'Histogram plotted size-class data')
+        self.assertEqual(self.widget._drawer_title.text(), 'Histogram classification-fraction data')
         self.assertEqual(
             self.widget._drawer_headers,
-            ['Scope', 'Size class', 'Particle size (mm)', 'Weight (%)'],
+            [
+                'Scope',
+                'Fraction (ISO 14688)',
+                'Lower size (mm)',
+                'Upper size (mm)',
+                'Weight (%)',
+            ],
         )
-        sample_a_weights = [
-            float(row[3])
+        sample_a_rows = [
+            row
             for row in self.widget._drawer_rows
             if row[0] == 'Sample A'
         ]
+        sample_a_weights = [float(row[4]) for row in sample_a_rows]
 
-        self.assertEqual(len(sample_a_weights), 7)
+        self.assertEqual(len(sample_a_rows), 11)
+        self.assertEqual([row[1] for row in sample_a_rows].count('Coarse sand'), 1)
         self.assertAlmostEqual(sum(sample_a_weights), 100.0, places=6)
+
+    def test_histogram_uses_active_classification_scheme(self):
+        self.widget.set_scheme(USCS)
+        self.widget.on_plot_type_changed('Histogram')
+        self.widget.refresh_plot()
+
+        ax = self.widget.figure.axes[0]
+        tick_labels = [tick.get_text() for tick in ax.get_xticklabels()]
+
+        self.assertEqual(ax.get_xlabel(), 'Grain-size class (USCS)')
+        self.assertEqual(tick_labels, ['Clay', 'Silt', 'Sand', 'Gravel', 'Cobble'])
+        self.assertEqual(
+            self.widget._drawer_headers,
+            [
+                'Scope',
+                'Fraction (USCS)',
+                'Lower size (mm)',
+                'Upper size (mm)',
+                'Weight (%)',
+            ],
+        )
 
     def test_comparison_drawer_exports_current_rows(self):
         self.widget.on_plot_type_changed('K-Values')

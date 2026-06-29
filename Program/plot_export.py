@@ -68,6 +68,10 @@ def _new_fig(figsize) -> Figure:
     return fig
 
 
+def _apply_comparison_spec_layout(fig: Figure, spec) -> None:
+    apply_legend_aware_layout(fig, spec.style)
+
+
 def _new_fig_ax(figsize):
     """Return ``(figure, axes)`` for a fresh single-axes Agg figure."""
     fig = _new_fig(figsize)
@@ -249,7 +253,7 @@ def export_comparison_spec(
     fig = _new_fig(figsize)
     fig.patch.set_facecolor(getattr(spec.style, "figure_facecolor", "white"))
     render_comparison(fig, spec)
-    apply_legend_aware_layout(fig, spec.style)
+    _apply_comparison_spec_layout(fig, spec)
     return _fig_to_base64(fig, dpi=dpi)
 
 

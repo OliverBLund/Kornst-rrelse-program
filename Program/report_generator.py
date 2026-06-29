@@ -31,7 +31,9 @@ from grain_classification import (
     cu_label as _gc_cu_label,
     permeability_class as _gc_perm_class,
     cc_label as _gc_cc_label,
+    sedimentology_descriptor as _gc_sed_descriptor,
 )
+from calculation_internals import compute_calculation_internals
 from gui.plot_constants import classify_k_status
 from gui.plot_context import (
     REPORT_EXPORT_PLOT_K_UNIT,
@@ -47,7 +49,7 @@ def _get_plot_export():
     """Lazy import to avoid circular dependency (plot_export -> gui -> report_generator)."""
     import plot_export as _pe
     return _pe
-from report_tables import analyze_report_tables, generate_excel_appendix
+from report_tables import analyze_report_tables, externalize_report_tables, generate_excel_appendix
 from report_model import (
     AppendixLabelConfig,
     HeadingBlock,
@@ -665,6 +667,10 @@ class ReportGenerator:
         )
 
     @staticmethod
+    def externalize_report_tables(html_text: str, table_titles: dict[str, str]) -> str:
+        return externalize_report_tables(html_text, table_titles)
+
+    @staticmethod
     def _node_classes(node: _HtmlNode) -> set[str]:
         return {name for name in node.attrs.get("class", "").split() if name}
 
@@ -1018,6 +1024,18 @@ class ReportGenerator:
             return
 
         if tag == "table":
+            table_id = node.attrs.get("data-report-table", "")
+            externalized_ids = ctx.get("externalized_table_ids", set())
+            if table_id and table_id in externalized_ids:
+                title = ctx.get("externalized_table_titles", {}).get(table_id) or table_id
+                self._add_docx_paragraph(
+                    container,
+                    f"Large table moved to companion Excel appendix: {title}.",
+                    ctx,
+                    bold=True,
+                )
+                state["started_content"] = True
+                return
             self._render_docx_table(container, node, ctx, brand_rgb)
             state["started_content"] = True
             return
@@ -1030,7 +1048,14 @@ class ReportGenerator:
         for child in self._child_nodes(node):
             self._render_docx_node(container, child, ctx, brand_rgb, state)
 
-    def generate_docx_from_html(self, html_text: str, brand=None) -> bytes:
+    def generate_docx_from_html(
+        self,
+        html_text: str,
+        brand=None,
+        *,
+        externalized_table_ids: Optional[set[str]] = None,
+        externalized_table_titles: Optional[dict[str, str]] = None,
+    ) -> bytes:
         if not DOCX_AVAILABLE:
             raise RuntimeError("python-docx is not installed.")
 
@@ -1065,6 +1090,8 @@ class ReportGenerator:
             "WD_TABLE_ALIGNMENT": WD_TABLE_ALIGNMENT,
             "parse_xml": parse_xml,
             "nsdecls": nsdecls,
+            "externalized_table_ids": set(externalized_table_ids or ()),
+            "externalized_table_titles": dict(externalized_table_titles or {}),
         }
         state = {"started_content": False}
         for child in self._child_nodes(body):
@@ -1338,6 +1365,40 @@ class ReportGenerator:
             classification_scheme=self._scheme,
         )
 
+    def _create_grain_size_histogram(
+        self,
+        dataset: GrainSizeData,
+        plot_context: Optional[Dict[str, Any]] = None,
+        plot_style=None,
+        bar_color: Optional[str] = None,
+    ) -> str:
+        """Create a class-fraction histogram for one sample."""
+        style = plot_style or self._global_report_style()
+        if bar_color:
+            import dataclasses
+            style = dataclasses.replace(style, curve_color=bar_color)
+        detail = {
+            "dataset": dataset,
+            "k_results": [],
+            "group_name": getattr(dataset, "group_name", None) or UNGROUPED_LABEL,
+            "plot_context": plot_context,
+        }
+        spec = self._build_comparison_spec(
+            [detail],
+            None,
+            plot_type="histogram",
+            display_mode="grid",
+            breakdown="dataset",
+            plot_style=style,
+        )
+        if bar_color:
+            spec.palette = [bar_color]
+            spec.effective_colors = [bar_color]
+            spec.color_by_name[dataset.sample_name] = bar_color
+            spec.palette_authoritative = True
+        spec.show_grid = bool(plot_context_value(plot_context, "show_grid", True))
+        return _get_plot_export().export_comparison_spec(spec, figsize=(10, 6))
+
     def _create_k_value_bar_chart(
         self,
         k_results: List[KCalculationResult],
@@ -1443,6 +1504,7 @@ class ReportGenerator:
             breakdown=breakdown,
             style=plot_style or PROFESSIONAL_STYLE,
             display_unit=REPORT_EXPORT_PLOT_K_UNIT,
+            classification_scheme=self._scheme,
             # Dataset/group colours follow the global report palette so every
             # comparison plot re-colours at once (Categorical → GUI defaults).
             # palette_name lets the spec re-sample per series-count so groups
@@ -1462,6 +1524,17 @@ class ReportGenerator:
         )
         return _get_plot_export().export_comparison_spec(spec)
 
+    def _create_comparison_grain_size_histogram(self, sample_details, comparison_snapshot,
+                                                breakdown: Optional[str] = None,
+                                                plot_style=None) -> str:
+        """Grain-size class histogram comparison, matching the Comparison tab."""
+        spec = self._build_comparison_spec(
+            sample_details, comparison_snapshot,
+            plot_type="histogram", display_mode="grid",
+            breakdown=breakdown, plot_style=plot_style,
+        )
+        return _get_plot_export().export_comparison_spec(spec)
+
     def _create_comparison_k_value_bar(self, sample_details, comparison_snapshot,
                                        breakdown: Optional[str] = None,
                                        plot_style=None) -> str:
@@ -1475,9 +1548,9 @@ class ReportGenerator:
         return _get_plot_export().export_comparison_spec(spec)
 
     def _create_per_sample_plots_section(self, sample_details, *,
-                                         include_grain: bool, include_kbar: bool,
+                                         include_grain: bool, include_histogram: bool, include_kbar: bool,
                                          advance=None, colors_by_name=None) -> str:
-        """Render each sample's own grain curve and/or K-value bar as one section.
+        """Render each sample's own grain curve, class histogram and/or K-value bar.
 
         Lets a multi-sample (Comparison/Full) report carry per-sample detail in
         addition to the cross-sample plots. Each sample becomes a sub-block; plots
@@ -1488,7 +1561,7 @@ class ReportGenerator:
         the comparison overlay (from the active palette), so each per-sample grain
         curve matches its overlay colour while keeping the global typography.
         """
-        if not (include_grain or include_kbar):
+        if not (include_grain or include_histogram or include_kbar):
             return ""
         colors_by_name = colors_by_name or {}
 
@@ -1506,17 +1579,29 @@ class ReportGenerator:
                 self._create_grain_size_plot(dataset, plot_context, curve_color=curve_color)
                 if include_grain else ""
             )
+            histogram = (
+                self._create_grain_size_histogram(
+                    dataset, plot_context, bar_color=curve_color
+                )
+                if include_histogram else ""
+            )
             kbar = (
                 self._create_k_value_bar_chart(list(item.get("k_results") or []), plot_context)
                 if include_kbar else ""
             )
-            if not (grain or kbar):
+            if not (grain or histogram or kbar):
                 continue
             images = ""
             if grain:
                 images += (
                     '<div class="plot-container">'
                     f'<img src="{grain}" alt="{label} grain size distribution" '
+                    'style="max-width: 100%; height: auto;"></div>'
+                )
+            if histogram:
+                images += (
+                    '<div class="plot-container">'
+                    f'<img src="{histogram}" alt="{label} grain-size class histogram" '
                     'style="max-width: 100%; height: auto;"></div>'
                 )
             if kbar:
@@ -1897,6 +1982,19 @@ class ReportGenerator:
 <div class="plot-container">
     <img src="{grain_plot}" alt="Grain Size Distribution" />
     <div class="figure-caption">Figure {figure_no}: Cumulative grain size distribution curve for {dataset.sample_name}</div>
+</div>
+</div>
+"""
+                figure_no += 1
+
+            if 'grain_size_histogram' in selected:
+                histogram_plot = self._create_grain_size_histogram(dataset, plot_context)
+                html += f"""
+<div class="page-break">
+<h2>Grain-size Class Histogram</h2>
+<div class="plot-container">
+    <img src="{histogram_plot}" alt="Grain-size class histogram" />
+    <div class="figure-caption">Figure {figure_no}: Retained weight by classification class for {dataset.sample_name}</div>
 </div>
 </div>
 """
@@ -2567,7 +2665,7 @@ class ReportGenerator:
             # Progress / cancellation: the cross-sample plots are one coarse step;
             # the per-sample loop reports per sample (the part that scales with
             # dataset count).
-            per_sample_on = bool({'per_sample_grain', 'per_sample_kbar'} & selected)
+            per_sample_on = bool({'per_sample_grain', 'per_sample_histogram', 'per_sample_kbar'} & selected)
             total_steps = 1 + (len(sample_details) if per_sample_on else 0) + 1
             step_state = {'n': 0}
 
@@ -2624,6 +2722,14 @@ class ReportGenerator:
                     'distribution_overlay'),
             )
             html += _plot_block(
+                "Grain-size Class Histogram", "Grain-size Class Histogram",
+                _plot_variants(
+                    lambda bd: self._create_comparison_grain_size_histogram(
+                        sample_details, comparison_snapshot,
+                        breakdown=bd, plot_style=plot_style),
+                    'grain_size_histogram_comparison'),
+            )
+            html += _plot_block(
                 "Hydraulic Conductivity by Method", "K-Value Comparison",
                 _plot_variants(
                     lambda bd: self._create_comparison_k_value_bar(
@@ -2662,7 +2768,7 @@ class ReportGenerator:
             # Resolve each sample's overlay colour (from the active palette) so its
             # per-sample grain curve matches the comparison overlay.
             per_sample_colors = {}
-            if per_sample_on and 'per_sample_grain' in selected:
+            if per_sample_on and {'per_sample_grain', 'per_sample_histogram'} & selected:
                 color_spec = self._build_comparison_spec(
                     sample_details, comparison_snapshot,
                     plot_type="distribution", plot_style=plot_style,
@@ -2671,6 +2777,7 @@ class ReportGenerator:
             html += self._create_per_sample_plots_section(
                 sample_details,
                 include_grain='per_sample_grain' in selected,
+                include_histogram='per_sample_histogram' in selected,
                 include_kbar='per_sample_kbar' in selected,
                 advance=_advance if per_sample_on else None,
                 colors_by_name=per_sample_colors,
@@ -2790,51 +2897,68 @@ class ReportGenerator:
         return html
 
     def _create_gradation_table(self, dataset: GrainSizeData, scheme=None) -> str:
-        """Generate HTML table showing gradation breakdown using scheme boundaries."""
-        s = scheme if scheme is not None else ISO14688
+        """Grain-size classification, detailed sub-class fractions, descriptor and
+        calculation internals \u2014 respecting the active classification scheme."""
+        s = scheme if scheme is not None else self._scheme
 
-        # Use the dataset's own classification to get accurate fractions
         try:
             result = dataset.classify(scheme=s)
-            fracs = result.fractions
-            gravel_percent = fracs.gravel_pct + getattr(fracs, 'cobble_pct', 0)
-            sand_percent   = fracs.sand_pct
-            fines_percent  = fracs.silt_pct + fracs.clay_pct
         except Exception:
-            # Fallback to 0 if classification fails
-            gravel_percent = sand_percent = fines_percent = 0.0
+            return ""
 
-        silt_bnd = s.silt_max
-        sand_bnd = s.sand_max
+        cu = (dataset.get_uniformity_coefficient()
+              if hasattr(dataset, "get_uniformity_coefficient") else None)
+        d50 = dataset.get_d50() if hasattr(dataset, "get_d50") else None
+        descriptor = _gc_sed_descriptor(result.fractions, d50, cu, s)
+        scheme_name = getattr(s, "name", "scheme")
 
-        html = f"""
+        html = f"<p><strong>Label ({self._esc(scheme_name)}):</strong> {self._esc(result.label)}</p>"
+        if descriptor:
+            html += f"<p><strong>Descriptor:</strong> {self._esc(descriptor)}</p>"
+
+        # Detailed, scheme-aware sub-class breakdown.
+        html += """
         <table data-report-table="gradation">
             <thead>
-                <tr>
-                    <th>Fraction</th>
-                    <th>Size Range ({s.name})</th>
-                    <th>Percentage</th>
-                </tr>
+                <tr><th>Sub-class</th><th>Size range (mm)</th><th>Percentage</th></tr>
             </thead>
             <tbody>
         """
-
-        gradations = [
-            ("Gravel", f"> {sand_bnd} mm",                  gravel_percent),
-            ("Sand",   f"{silt_bnd} \u2013 {sand_bnd} mm", sand_percent),
-            ("Fines",  f"< {silt_bnd} mm",                  fines_percent),
-        ]
-
-        for name, size_range, percent in gradations:
-            html += f"""
-            <tr>
-                <td><strong>{name}</strong></td>
-                <td>{size_range}</td>
-                <td style="text-align: right;"><strong>{percent:.1f}%</strong></td>
-            </tr>
-            """
-
+        for d in (result.detailed_fractions or ()):
+            rng = f"&lt; {d.upper_mm:g}" if d.lower_mm <= 0 else f"{d.lower_mm:g} &ndash; {d.upper_mm:g}"
+            dominant = " class=\"row-emphasis\"" if d.label == result.detailed_class else ""
+            html += (
+                f"<tr{dominant}><td><strong>{self._esc(d.label)}</strong></td>"
+                f"<td>{rng}</td>"
+                f"<td style=\"text-align: right;\">{d.pct:.1f}%</td></tr>"
+            )
         html += "</tbody></table>"
+
+        html += self._create_calculation_internals_html(dataset)
+        return html
+
+    def _create_calculation_internals_html(self, dataset: GrainSizeData) -> str:
+        """Render the intermediate K-calculation values (constants, effective
+        diameters, phi/Folk-Ward, porosity functions) as small HTML tables."""
+        porosity = (dataset.effective_porosity()
+                    if hasattr(dataset, "effective_porosity")
+                    else getattr(dataset, "porosity", None))
+        internals = compute_calculation_internals(
+            dataset.particle_sizes, dataset.percent_passing,
+            getattr(dataset, "temperature", 20.0), porosity,
+        )
+        html = "<h4>Calculation Internals</h4>"
+        for group in internals.groups():
+            html += (
+                f"<table data-report-table=\"calc-internals\">"
+                f"<thead><tr><th>{self._esc(group.title)}</th><th>Value</th></tr></thead><tbody>"
+            )
+            for label, value in group.rows:
+                html += (
+                    f"<tr><td>{self._esc(label)}</td>"
+                    f"<td style=\"text-align: right;\">{self._esc(value)}</td></tr>"
+                )
+            html += "</tbody></table>"
         return html
 
     def _create_k_statistics_table(self, k_results: List[KCalculationResult]) -> str:
@@ -3073,7 +3197,7 @@ class ReportGenerator:
         classification = """
         <table data-report-table="sample-classification">
             <thead><tr>
-                <th>Sample</th><th>Soil type</th><th class="num">K geometric mean (m/s)</th>
+                <th>Sample</th><th>Soil type</th><th>Descriptor</th><th class="num">K geometric mean (m/s)</th>
             </tr></thead><tbody>
         """
 
@@ -3105,10 +3229,13 @@ class ReportGenerator:
                     <td class="num">{f'{cu:.2f}' if cu else 'N/A'}</td>
                 </tr>
             """
+            _cls = dataset.classify(scheme=self._scheme)
+            _descriptor = _gc_sed_descriptor(_cls.fractions, d50, cu, self._scheme)
             classification += f"""
                 <tr>
                     <td>{self._esc(label)}</td>
-                    <td>{self._esc(dataset.classify(scheme=self._scheme).label)}</td>
+                    <td>{self._esc(_cls.label)}</td>
+                    <td>{self._esc(_descriptor or '—')}</td>
                     <td class="num">{mean_display}</td>
                 </tr>
             """

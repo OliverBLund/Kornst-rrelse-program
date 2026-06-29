@@ -839,6 +839,16 @@ class MainWindow(FramelessMainWindowMixin, QMainWindow):
         individual_guide_action.triggered.connect(self.show_individual_samples_guide)
         help_menu.addAction(individual_guide_action)
 
+        reports_guide_action = QAction("Guide &Reports", self)
+        reports_guide_action.setIcon(icon("fa6s.file-contract", C.TEXT_MUTED))
+        reports_guide_action.triggered.connect(self.show_reports_guide)
+        help_menu.addAction(reports_guide_action)
+
+        export_guide_action = QAction("Guide &Export", self)
+        export_guide_action.setIcon(icon("fa6s.file-export", C.TEXT_MUTED))
+        export_guide_action.triggered.connect(self.show_export_guide)
+        help_menu.addAction(export_guide_action)
+
         help_menu.addSeparator()
 
         help_action = QAction("&Help Topics", self)
@@ -2900,8 +2910,8 @@ class MainWindow(FramelessMainWindowMixin, QMainWindow):
                     "such as Cu, Cc, sorting, span, and the method-percentile reference."
                 ),
                 target=lambda: self._first_tour_target(
-                    getattr(stats, "percentiles_text", None),
-                    getattr(stats, "gradation_text", None),
+                    getattr(stats, "distribution_card", None),
+                    getattr(stats, "classification_card", None),
                     stats,
                 ),
                 tips=(
@@ -2919,8 +2929,8 @@ class MainWindow(FramelessMainWindowMixin, QMainWindow):
                     "and porosity."
                 ),
                 target=lambda: self._first_tour_target(
-                    getattr(stats, "k_stats_widget", None),
-                    getattr(stats, "quality_widget", None),
+                    getattr(stats, "k_summary_card", None),
+                    getattr(stats, "quality_card", None),
                     stats,
                 ),
                 tips=(
@@ -2929,6 +2939,609 @@ class MainWindow(FramelessMainWindowMixin, QMainWindow):
                 ),
                 kicker="Statistics",
                 before_step=stats_step,
+            ),
+        ]
+
+
+    def show_reports_guide(self):
+        """Open a guided tour for the Reports tab."""
+        self._switch_to_tab(2)
+        QApplication.processEvents()
+        self._start_tour_overlay(
+            self._reports_tour_steps(),
+            show_startup_checkbox=False,
+        )
+
+    def show_export_guide(self):
+        """Open a guided tour for the Export tab."""
+        self._switch_to_tab(3)
+        QApplication.processEvents()
+        self._start_tour_overlay(
+            self._export_tour_steps(),
+            show_startup_checkbox=False,
+        )
+
+    def _ensure_tour_target_visible(self, widget: QWidget | None) -> None:
+        """Ask a containing scroll area to reveal a tour target before spotlighting."""
+        if widget is None:
+            return
+
+        current = widget.parentWidget()
+        while current is not None:
+            ensure = getattr(current, "ensureWidgetVisible", None)
+            if callable(ensure):
+                try:
+                    ensure(widget, 18, 18)
+                    QApplication.processEvents()
+                except RuntimeError:
+                    pass
+                return
+            current = current.parentWidget()
+
+    def _prepare_reports_tour_step(
+        self,
+        *open_sections: str,
+        target: Callable[[], QWidget | None] | None = None,
+    ) -> None:
+        """Switch to Reports, open the relevant accordion, and reveal a target."""
+        self._switch_to_tab(2)
+        tab = self.reporting_tab
+        sections = {
+            "_acc_type": getattr(tab, "_acc_type", None),
+            "_acc_samples": getattr(tab, "_acc_samples", None),
+            "_acc_sects": getattr(tab, "_acc_sects", None),
+            "_acc_details": getattr(tab, "_acc_details", None),
+        }
+        if open_sections:
+            wanted = set(open_sections)
+            for name, section in sections.items():
+                if section is not None and hasattr(section, "set_open"):
+                    section.set_open(name in wanted)
+        QApplication.processEvents()
+        if target is not None:
+            self._ensure_tour_target_visible(target())
+
+    def _prepare_export_tour_step(
+        self,
+        *,
+        inspector_index: int = 0,
+        content_index: int | None = None,
+        open_sections: tuple[str, ...] = (),
+        target: Callable[[], QWidget | None] | None = None,
+    ) -> None:
+        """Switch to Export and put the inspector in the state a tour step needs."""
+        self._switch_to_tab(3)
+        tab = self.export_tab
+
+        inspector_tabs = getattr(tab, "export_inspector_tabs", None)
+        if inspector_tabs is not None:
+            inspector_tabs.setCurrentIndex(inspector_index)
+
+        sections = {
+            "dataset_scope_section": getattr(tab, "dataset_scope_section", None),
+            "format_section": getattr(tab, "format_section", None),
+            "content_section": getattr(tab, "content_section", None),
+            "output_folder_section": getattr(tab, "output_folder_section", None),
+            "file_tree_section": getattr(tab, "file_tree_section", None),
+            "plot_queue_section": getattr(tab, "plot_queue_section", None),
+        }
+        if open_sections:
+            wanted = set(open_sections)
+            for name, section in sections.items():
+                if section is not None and hasattr(section, "set_open"):
+                    section.set_open(name in wanted)
+
+        content_tabs = self._export_content_tabs()
+        if content_tabs is not None and content_index is not None:
+            content_tabs.setCurrentIndex(content_index)
+
+        QApplication.processEvents()
+        if target is not None:
+            self._ensure_tour_target_visible(target())
+
+    def _report_plot_tour_target(self) -> QWidget | None:
+        rows = getattr(self.reporting_tab, "_plot_rows", {})
+        for scope in ("collection", "single"):
+            for row in rows.get(scope, {}).values():
+                return row
+        return getattr(self.reporting_tab, "_acc_sects", self.reporting_tab)
+
+    def _export_format_card(self, format_key: str) -> QWidget | None:
+        return self.export_tab.findChild(QPushButton, f"format_card_{format_key}")
+
+    def _export_content_tabs(self) -> QTabWidget | None:
+        area = getattr(self.export_tab, "content_area", None)
+        if area is None:
+            return None
+        return area.findChild(QTabWidget)
+
+    def _export_content_checkbox(self, key: str) -> QWidget | None:
+        return getattr(self.export_tab, "content_checkboxes", {}).get(key)
+
+    def _export_first_plot_breakdown_combo(self) -> QWidget | None:
+        combos = getattr(self.export_tab, "plot_breakdown_combos", {})
+        for combo in combos.values():
+            return combo
+        return None
+
+    def _reports_tour_steps(self) -> list[TourStep]:
+        """Return a detailed tour for the Reports workflow."""
+        return [
+            TourStep(
+                title="Reports workspace",
+                body=(
+                    "Reports turns the loaded analysis state into a readable document. "
+                    "Use it when the deliverable is a report with narrative sections, "
+                    "tables, figures, project metadata, and a controlled preview."
+                ),
+                target=lambda: self._first_tour_target(
+                    self.app_toolbar._nav_btns[2],
+                    self.reporting_tab,
+                ),
+                tips=(
+                    "Use Reports for formal documents and review packages.",
+                    "Use Export when you need raw tables, workbooks, or batches of figure files.",
+                ),
+                kicker="Reports",
+                before_step=lambda: self._prepare_reports_tour_step(),
+            ),
+            TourStep(
+                title="Choose the report type",
+                body=(
+                    "The report type controls the default scope and section preset. "
+                    "Changing type is more than a label: it updates which samples are expected, "
+                    "which tables are emphasized, and which plots are selected by default."
+                ),
+                target=lambda: self._first_tour_target(
+                    getattr(self.reporting_tab, "_acc_type", None),
+                    self.reporting_tab,
+                ),
+                tips=(
+                    "Individual: exactly one sample, with detailed grain-size and K-method context.",
+                    "Comparison: two or more selected samples, with group and overall summaries.",
+                    "Full summary: every loaded sample, including appendices by default.",
+                    "K focus: K tables and K plots first, with grain-size detail reduced.",
+                ),
+                kicker="Reports",
+                before_step=lambda: self._prepare_reports_tour_step(
+                    "_acc_type",
+                    target=lambda: getattr(self.reporting_tab, "_acc_type", None),
+                ),
+            ),
+            TourStep(
+                title="Pick the output format",
+                body=(
+                    "The output format sets what the Save action will write after the report "
+                    "has been generated. The preview is always built first, then the chosen "
+                    "format is exported from that report state."
+                ),
+                target=lambda: self._first_tour_target(
+                    getattr(self.reporting_tab, "_format_combo", None),
+                    getattr(self.reporting_tab, "_acc_type", None),
+                ),
+                tips=(
+                    "PDF is fixed and static: best for print, archiving, and sending a version that should not change.",
+                    "Word (.docx) is editable: best when text, table layout, captions, or branding will be adjusted after export.",
+                    "HTML is useful for browser review, quick sharing, and debugging the generated report structure.",
+                    "The companion Excel appendix keeps large tables usable without overloading the report body.",
+                ),
+                kicker="Reports",
+                before_step=lambda: self._prepare_reports_tour_step(
+                    "_acc_type",
+                    target=lambda: getattr(self.reporting_tab, "_format_combo", None),
+                ),
+            ),
+            TourStep(
+                title="Select the samples",
+                body=(
+                    "The Samples section decides which loaded datasets feed the report. "
+                    "The table follows the report type: single selection for an Individual "
+                    "report, multiple selection for Comparison and K focus, and locked all-sample "
+                    "scope for a Full summary."
+                ),
+                target=lambda: self._first_tour_target(
+                    getattr(self.reporting_tab, "_samp_table", None),
+                    getattr(self.reporting_tab, "_acc_samples", None),
+                ),
+                tips=(
+                    "Checked samples are the source for report tables, figures, aggregate statistics, and appendices.",
+                    "Group names on datasets are reused in group summaries and group-based plots.",
+                    "If the Generate button is disabled, the current sample count probably does not match the report type.",
+                ),
+                kicker="Reports",
+                before_step=lambda: self._prepare_reports_tour_step(
+                    "_acc_samples",
+                    target=lambda: getattr(self.reporting_tab, "_samp_table", None),
+                ),
+            ),
+            TourStep(
+                title="Decide what the document contains",
+                body=(
+                    "Sections and appendices are the report outline. Main sections control "
+                    "what appears in the document body; appendices add larger backup material "
+                    "such as raw sieve data, full-size plots, and method detail."
+                ),
+                target=lambda: self._first_tour_target(
+                    getattr(self.reporting_tab, "_acc_sects", None),
+                    self.reporting_tab,
+                ),
+                tips=(
+                    "Cover Page is required for report types that need formal front matter.",
+                    "Sample & Grain Tables, K + Aggregate Tables, and Grain Statistics pull from the same calculated values as the live tabs.",
+                    "Method References documents which K methods were used and why results may be included or excluded.",
+                    "The outline updates so the user can see the expected document structure before generating.",
+                ),
+                kicker="Reports",
+                before_step=lambda: self._prepare_reports_tour_step(
+                    "_acc_sects",
+                    target=lambda: getattr(self.reporting_tab, "_acc_sects", None),
+                ),
+            ),
+            TourStep(
+                title="Choose report plots",
+                body=(
+                    "Plot rows decide which figures are embedded in the report. Single-sample "
+                    "plots are used for individual dataset detail; comparison plots summarize "
+                    "multiple datasets and can break out by group or by dataset when that makes the figure clearer."
+                ),
+                target=lambda: self._first_tour_target(
+                    self._report_plot_tour_target(),
+                    getattr(self.reporting_tab, "_acc_sects", None),
+                ),
+                tips=(
+                    "Distribution plots explain the grain-size curve; K plots explain method spread and comparison.",
+                    "Breakdowns such as per group create separate figures instead of forcing every dataset into one crowded plot.",
+                    "Reports and Export share the same plot vocabulary so the same plot choice means the same thing in both places.",
+                ),
+                kicker="Reports",
+                before_step=lambda: self._prepare_reports_tour_step(
+                    "_acc_sects",
+                    target=self._report_plot_tour_target,
+                ),
+            ),
+            TourStep(
+                title="Set report and export plot style",
+                body=(
+                    "The Plot Style controls are global for Reports and Export. The preset "
+                    "sets typography and figure density, the palette sets the data colors, "
+                    "and Customize stores detailed overrides for future generated output."
+                ),
+                target=lambda: self._first_tour_target(
+                    getattr(self.reporting_tab, "_style_controls", None),
+                    getattr(self.reporting_tab, "_acc_sects", None),
+                ),
+                tips=(
+                    "Change style here once when report figures and exported plot files should match.",
+                    "Screen styling inside Individual Samples is separate; this control is for generated deliverables.",
+                ),
+                kicker="Reports",
+                before_step=lambda: self._prepare_reports_tour_step(
+                    "_acc_sects",
+                    target=lambda: getattr(self.reporting_tab, "_style_controls", None),
+                ),
+            ),
+            TourStep(
+                title="Fill in details and branding",
+                body=(
+                    "Details & Branding adds project metadata, client/analyst fields, a report "
+                    "accent color, an optional logo, and notes. These fields do not change the "
+                    "calculations; they make the generated report traceable and presentable."
+                ),
+                target=lambda: self._first_tour_target(
+                    getattr(self.reporting_tab, "project_name_edit", None),
+                    getattr(self.reporting_tab, "_acc_details", None),
+                ),
+                tips=(
+                    "Project name, number, date, analyst, and client appear in report front matter or headers.",
+                    "Word export is the best option when the final branding or wording will be customized after generation.",
+                    "PDF is better when the branded result should be locked for delivery.",
+                ),
+                kicker="Reports",
+                before_step=lambda: self._prepare_reports_tour_step(
+                    "_acc_details",
+                    target=lambda: getattr(self.reporting_tab, "project_name_edit", None),
+                ),
+            ),
+            TourStep(
+                title="Generate the report state",
+                body=(
+                    "Generate captures the selected samples, result tables, plot settings, "
+                    "metadata, and section choices, then renders the report in the background. "
+                    "Export buttons stay tied to this generated state so stale content is not saved by accident."
+                ),
+                target=lambda: self._first_tour_target(
+                    getattr(self.reporting_tab, "generate_btn", None),
+                    self.reporting_tab,
+                ),
+                tips=(
+                    "Generation validates the selected report type before starting.",
+                    "If content changes after generation, use Refresh or Generate again before saving.",
+                    "Long reports can take time because plots and appendices are rendered into the document.",
+                ),
+                kicker="Reports",
+                before_step=lambda: self._prepare_reports_tour_step(
+                    target=lambda: getattr(self.reporting_tab, "generate_btn", None),
+                ),
+            ),
+            TourStep(
+                title="Preview, print, and save",
+                body=(
+                    "The preview is the document you are about to export. Refresh rebuilds it, "
+                    "Print sends the loaded preview to the printer workflow, and Save writes "
+                    "the selected PDF, HTML, or Word file."
+                ),
+                target=lambda: self._first_tour_target(
+                    getattr(self.reporting_tab, "btn_save", None),
+                    getattr(self.reporting_tab, "web_view", None),
+                    self.reporting_tab,
+                ),
+                tips=(
+                    "PDF export waits for the preview engine to finish layout so page breaks and embedded plots are correct.",
+                    "Word export is intentionally more flexible after export, but final formatting can depend on the word processor.",
+                    "HTML keeps the generated report structure visible and is useful for checking what the backend produced.",
+                ),
+                kicker="Reports",
+                before_step=lambda: self._prepare_reports_tour_step(
+                    target=lambda: getattr(self.reporting_tab, "btn_save", None),
+                ),
+            ),
+        ]
+
+    def _export_tour_steps(self) -> list[TourStep]:
+        """Return a detailed tour for the Export workflow."""
+        return [
+            TourStep(
+                title="Export workspace",
+                body=(
+                    "Export writes structured data files and figure files. Use it when the "
+                    "deliverable is machine-readable tables, a workbook, or a batch of plots "
+                    "rather than a formatted narrative report."
+                ),
+                target=lambda: self._first_tour_target(
+                    self.app_toolbar._nav_btns[3],
+                    self.export_tab,
+                ),
+                tips=(
+                    "Export is for reusable outputs: CSV, Excel, PNG, SVG, and plot PDFs.",
+                    "Reports is for a document; Export is for the underlying files and figures.",
+                ),
+                kicker="Export",
+                before_step=lambda: self._prepare_export_tour_step(),
+            ),
+            TourStep(
+                title="Set the dataset scope",
+                body=(
+                    "Dataset Scope decides which loaded datasets are included before any files "
+                    "are created. This scope affects table rows, aggregate statistics, plot batches, "
+                    "file counts, and the output preview."
+                ),
+                target=lambda: self._first_tour_target(
+                    getattr(self.export_tab, "scope_segment_frame", None),
+                    getattr(self.export_tab, "dataset_scope_section", None),
+                ),
+                tips=(
+                    "All exports every loaded dataset.",
+                    "Current exports only the dataset selected in the source combo.",
+                    "Selected exports the sidebar/comparison selection and can be managed from the Manage button.",
+                    "Group labels matter because group-aware statistics and comparison plots use them.",
+                ),
+                kicker="Export",
+                before_step=lambda: self._prepare_export_tour_step(
+                    inspector_index=0,
+                    open_sections=("dataset_scope_section",),
+                    target=lambda: getattr(self.export_tab, "scope_segment_frame", None),
+                ),
+            ),
+            TourStep(
+                title="Choose table formats",
+                body=(
+                    "Format cards are independent toggles. CSV and Excel options write numeric "
+                    "tables; they are the best outputs when another tool or reviewer needs to "
+                    "filter, calculate, compare, or reuse the results."
+                ),
+                target=lambda: self._first_tour_target(
+                    self._export_format_card("csv_long"),
+                    getattr(self.export_tab, "format_section", None),
+                ),
+                tips=(
+                    "CSV Long is tidy: one row per K-value result, good for R, Python, databases, and filtered analysis.",
+                    "CSV Wide is comparison-oriented: one row per dataset with method columns, good for spreadsheets and statistics.",
+                    "Excel creates one combined workbook with separate sheets and numeric cells, good for review and manual follow-up.",
+                ),
+                kicker="Export",
+                before_step=lambda: self._prepare_export_tour_step(
+                    inspector_index=0,
+                    open_sections=("format_section",),
+                    target=lambda: self._export_format_card("csv_long"),
+                ),
+            ),
+            TourStep(
+                title="Choose plot file formats",
+                body=(
+                    "PNG, SVG, and PDF create figure files for the selected plot types. "
+                    "They export the visual figure, not the full report document and not a hidden data dump."
+                ),
+                target=lambda: self._first_tour_target(
+                    self._export_format_card("png"),
+                    getattr(self.export_tab, "format_section", None),
+                ),
+                tips=(
+                    "PNG is a raster image: easy for slides, email, and quick insertion, but fixed resolution.",
+                    "SVG is vector graphics: best for scaling and editing later in tools such as Inkscape or Illustrator.",
+                    "PDF plot output is static and print-ready: good for publication-style figures and controlled sharing.",
+                ),
+                kicker="Export",
+                before_step=lambda: self._prepare_export_tour_step(
+                    inspector_index=0,
+                    open_sections=("format_section",),
+                    target=lambda: self._export_format_card("png"),
+                ),
+            ),
+            TourStep(
+                title="Select data table content",
+                body=(
+                    "Included Content controls which categories are written inside the selected "
+                    "table formats. The Data tables tab covers grain-size distribution data, "
+                    "K-value results, statistics, and sample metadata."
+                ),
+                target=lambda: self._first_tour_target(
+                    self._export_content_tabs(),
+                    getattr(self.export_tab, "content_section", None),
+                ),
+                tips=(
+                    "Grain-size rows are the measured or interpolated curve values.",
+                    "K-value rows come from the same calculation results shown in the Results tab.",
+                    "Statistics and metadata add context so files can be understood outside the application.",
+                ),
+                kicker="Export",
+                before_step=lambda: self._prepare_export_tour_step(
+                    inspector_index=0,
+                    content_index=0,
+                    open_sections=("content_section",),
+                    target=self._export_content_tabs,
+                ),
+            ),
+            TourStep(
+                title="Select individual plot exports",
+                body=(
+                    "The Individual plots tab controls figures created once per exported dataset. "
+                    "Use these when each sample needs its own grain-size curve, K-value figure, "
+                    "or other per-sample visual output."
+                ),
+                target=lambda: self._first_tour_target(
+                    self._export_content_checkbox("plot_scope_single_header"),
+                    self._export_content_tabs(),
+                    getattr(self.export_tab, "content_section", None),
+                ),
+                tips=(
+                    "Per-sample plot counts multiply by dataset count and by every selected plot file format.",
+                    "Plot file options such as legend and grid apply to generated figure files.",
+                    "The plot style here is shared with Reports so exported figures and report figures can match.",
+                ),
+                kicker="Export",
+                before_step=lambda: self._prepare_export_tour_step(
+                    inspector_index=0,
+                    content_index=1,
+                    open_sections=("content_section",),
+                    target=lambda: self._export_content_checkbox("plot_scope_single_header"),
+                ),
+            ),
+            TourStep(
+                title="Select comparison plot exports",
+                body=(
+                    "The Comparison plots tab controls figures built across the export scope. "
+                    "These plots are used for overlays, K-value comparisons, distributions, "
+                    "and other summary views where multiple datasets belong in one visual family."
+                ),
+                target=lambda: self._first_tour_target(
+                    self._export_first_plot_breakdown_combo(),
+                    self._export_content_checkbox("plot_scope_collection_header"),
+                    self._export_content_tabs(),
+                ),
+                tips=(
+                    "Per group creates one variant per group when group labels are available.",
+                    "Per dataset creates dataset-specific variants when a combined plot would be too crowded.",
+                    "The file tree updates immediately so the user sees how a breakdown changes the batch size.",
+                ),
+                kicker="Export",
+                before_step=lambda: self._prepare_export_tour_step(
+                    inspector_index=0,
+                    content_index=2,
+                    open_sections=("content_section",),
+                    target=lambda: self._export_first_plot_breakdown_combo()
+                    or self._export_content_checkbox("plot_scope_collection_header"),
+                ),
+            ),
+            TourStep(
+                title="Choose the output folder",
+                body=(
+                    "The Output tab shows where files will be written and what the batch will contain. "
+                    "The folder path is the root; Export creates the structured subfolders underneath it."
+                ),
+                target=lambda: self._first_tour_target(
+                    getattr(self.export_tab, "output_dir", None),
+                    getattr(self.export_tab, "output_folder_section", None),
+                ),
+                tips=(
+                    "Use a project-specific folder when exporting many datasets or many plot variants.",
+                    "The app writes tables, workbooks, and plots into predictable grouped folders.",
+                    "Changing scope, content, or formats updates the planned file set before anything is written.",
+                ),
+                kicker="Export",
+                before_step=lambda: self._prepare_export_tour_step(
+                    inspector_index=1,
+                    open_sections=("output_folder_section",),
+                    target=lambda: getattr(self.export_tab, "output_dir", None),
+                ),
+            ),
+            TourStep(
+                title="Review files to create",
+                body=(
+                    "Files to Create is the export manifest. It shows the folders and files that "
+                    "will be produced from the current scope, format cards, content switches, "
+                    "and plot breakdown choices."
+                ),
+                target=lambda: self._first_tour_target(
+                    getattr(self.export_tab, "file_tree", None),
+                    getattr(self.export_tab, "file_tree_section", None),
+                ),
+                tips=(
+                    "CSV files are grouped under tables/csv.",
+                    "Excel workbooks are grouped under workbooks.",
+                    "Plot files are grouped by dataset and by collection plot family.",
+                    "If the manifest looks wrong, adjust scope/content before exporting.",
+                ),
+                kicker="Export",
+                before_step=lambda: self._prepare_export_tour_step(
+                    inspector_index=1,
+                    open_sections=("file_tree_section",),
+                    target=lambda: getattr(self.export_tab, "file_tree", None),
+                ),
+            ),
+            TourStep(
+                title="Use the plot queue and preview",
+                body=(
+                    "Selected Plots lists the plot records that can be previewed on the right. "
+                    "Selecting a plot switches the preview to the Plots tab and renders the same "
+                    "figure backend that the export worker will use."
+                ),
+                target=lambda: self._first_tour_target(
+                    getattr(self.export_tab, "plot_queue_tree", None),
+                    getattr(self.export_tab, "preview_tabs", None),
+                    self.export_tab,
+                ),
+                tips=(
+                    "Open Source Sample is only enabled for single-sample plots, because collection plots do not belong to one dataset.",
+                    "CSV and Excel previews show representative table structure; plot preview shows the actual figure renderer.",
+                    "Preview is for checking the batch before committing files to disk.",
+                ),
+                kicker="Export",
+                before_step=lambda: self._prepare_export_tour_step(
+                    inspector_index=1,
+                    open_sections=("plot_queue_section",),
+                    target=lambda: getattr(self.export_tab, "plot_queue_tree", None),
+                ),
+            ),
+            TourStep(
+                title="Run the export",
+                body=(
+                    "The Export button builds one backend configuration from the selected scope, "
+                    "formats, content switches, plot choices, output folder, and style settings, "
+                    "then writes the files in a background worker."
+                ),
+                target=lambda: self._first_tour_target(
+                    getattr(self.export_tab, "export_btn", None),
+                    self.export_tab,
+                ),
+                tips=(
+                    "The button label and bottom summary show the estimated file count before running.",
+                    "The worker writes only the selected outputs; it does not silently include report files or hidden JSON.",
+                    "After completion, check the output folder and open a few representative CSV, Excel, and plot files.",
+                ),
+                kicker="Export",
+                before_step=lambda: self._prepare_export_tour_step(
+                    target=lambda: getattr(self.export_tab, "export_btn", None),
+                ),
             ),
         ]
 

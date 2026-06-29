@@ -19,6 +19,8 @@ from PyQt6.QtWidgets import (
 from PyQt6.QtCore import QMarginsF
 
 try:
+    if os.environ.get("GSA_DISABLE_WEBENGINE") == "1":
+        raise ImportError("WebEngine disabled by GSA_DISABLE_WEBENGINE")
     from PyQt6.QtWebEngineWidgets import QWebEngineView
     HAS_WEBENGINE = True
     WEBENGINE_IMPORT_ERROR = ""
@@ -449,6 +451,13 @@ class _SectionRow(QFrame):
             return None
         return self._breakdown_combo.currentData()
 
+    def set_breakdown(self, value: Optional[str]) -> None:
+        if self._breakdown_combo is None or value is None:
+            return
+        idx = self._breakdown_combo.findData(value)
+        if idx >= 0:
+            self._breakdown_combo.setCurrentIndex(idx)
+
     def _sync_breakdown_enabled(self, checked: bool) -> None:
         if self._breakdown_combo is not None:
             self._breakdown_combo.setEnabled(checked)
@@ -602,6 +611,8 @@ class ReportingTab(QWidget):
         self._sample_contexts: list[dict] = []
         self._sample_selected: list[bool] = []
         self._section_rows: dict[str, _SectionRow] = {}
+        self.SINGLE_PLOT_KEYS = report_plot_rows("single")
+        self.COLLECTION_PLOT_KEYS = report_plot_rows("collection")
         # Per-plot checkbox rows, keyed by scope ("single"/"collection") then key.
         self._plot_rows: dict[str, dict[str, _SectionRow]] = {"single": {}, "collection": {}}
         self._outline_items: list[tuple[QLabel, QLabel, bool]] = []  # (label, page, appendix?)
@@ -1042,6 +1053,13 @@ class ReportingTab(QWidget):
             for key, fa, label, default_on, has_breakdown in specs:
                 row = _SectionRow(fa, label, breakdown=has_breakdown)
                 row.set_checked(default_on)
+                row.toggled.connect(
+                    lambda _v, s=scope, k=key: self._on_plot_row_toggled(s, k)
+                )
+                if getattr(row, "_breakdown_combo", None) is not None:
+                    row._breakdown_combo.currentIndexChanged.connect(
+                        lambda *_a: self._save_report_settings()
+                    )
                 self._plot_rows[scope][key] = row
                 alay.addWidget(row)
         self._sync_plot_rows_visibility()
@@ -1628,6 +1646,9 @@ class ReportingTab(QWidget):
         if hasattr(self, "_samp_table"):
             self._rebuild_sample_table()
 
+    def _on_plot_row_toggled(self, _scope: str, _key: str) -> None:
+        self._save_report_settings()
+
     def _on_section_toggled(self, _key: str) -> None:
         self._update_outline()
         self._refresh_meta_pills()
@@ -2091,6 +2112,12 @@ class ReportingTab(QWidget):
         s.setValue("report/language", self._language_combo.currentText())
         for key in self._section_rows:
             s.setValue(f"report/section_{key}", self._section_rows[key].is_checked())
+        for scope, rows in getattr(self, "_plot_rows", {}).items():
+            for key, row in rows.items():
+                s.setValue(f"report/plot_{scope}_{key}", row.is_checked())
+                breakdown = row.breakdown()
+                if breakdown is not None:
+                    s.setValue(f"report/plot_breakdown_{key}", breakdown)
         s.setValue("report/project_name", self.project_name_edit.text())
         s.setValue("report/project_no",   self.project_no_edit.text())
         s.setValue("report/date",         self.date_edit.text())
@@ -2123,6 +2150,14 @@ class ReportingTab(QWidget):
             for key, row in self._section_rows.items():
                 default = defaults.get(key, True)
                 row.set_checked(s.value(f"report/section_{key}", default, type=bool))
+
+            for scope, rows in getattr(self, "_plot_rows", {}).items():
+                for key, row in rows.items():
+                    default = row.is_checked()
+                    row.set_checked(s.value(f"report/plot_{scope}_{key}", default, type=bool))
+                    breakdown = s.value(f"report/plot_breakdown_{key}", row.breakdown() or "")
+                    if breakdown:
+                        row.set_breakdown(str(breakdown))
 
             self.project_name_edit.setText(s.value("report/project_name", ""))
             self.project_no_edit.setText(s.value("report/project_no", ""))
@@ -2180,6 +2215,14 @@ class ReportingTab(QWidget):
             loaded_expected = True
         self._preview_load_ready = bool(ok and loaded_expected)
         self._update_preview_action_buttons()
+        if getattr(self, "_pdf_print_after_preview_load", False):
+            if self._preview_load_ready:
+                self._pdf_print_after_preview_load = False
+                self._print_current_preview_to_pdf()
+            elif ok is False:
+                self._pdf_print_after_preview_load = False
+                self._restore_preview_after_pdf_export()
+                self._on_report_export_failed("PDF export preview failed to load.")
 
     def _set_preview_html(self, html: str) -> None:
         """Load *html* into the preview.
@@ -2562,6 +2605,28 @@ class ReportingTab(QWidget):
         title = self.project_name_edit.text().strip() or "Report data appendix"
         return self.current_report_html, title
 
+    def _large_table_titles_for_appendix(self, html: str) -> dict[str, str]:
+        """Return large report table ids that should be replaced in primary exports."""
+        analysis = self.report_generator.analyze_tables(html)
+        return {
+            table.table_id: (table.title or table.table_id)
+            for table in analysis.large_tables
+            if table.table_id
+        }
+
+    def _primary_report_html_for_export(
+        self,
+        html: str,
+        appendix_inputs: Optional[tuple[str, str]],
+    ) -> str:
+        """Return primary-export HTML, replacing large tables when Excel is attached."""
+        if not appendix_inputs:
+            return html
+        large_tables = self._large_table_titles_for_appendix(html)
+        if not large_tables:
+            return html
+        return self.report_generator.externalize_report_tables(html, large_tables)
+
     @staticmethod
     def _excel_appendix_path(primary_path: str) -> str:
         base, _extension = os.path.splitext(primary_path)
@@ -2655,6 +2720,7 @@ class ReportingTab(QWidget):
 
         html = self.current_report_html
         appendix_inputs = self._capture_excel_appendix_inputs()
+        primary_html = self._primary_report_html_for_export(html, appendix_inputs)
         appendix_path = self._excel_appendix_path(path) if appendix_inputs else None
         generator = self.report_generator
         accent_color = self.brand.primary_color
@@ -2664,7 +2730,7 @@ class ReportingTab(QWidget):
             if cancel_check():
                 raise ReportExportCancelled()
             progress(0, total, "Saving HTML report")
-            atomic_write_text(path, html)
+            atomic_write_text(path, primary_html)
             progress(1, total, "HTML report saved")
 
             if appendix_inputs:
@@ -2693,6 +2759,29 @@ class ReportingTab(QWidget):
             "Exporting HTML report",
             "Writing the report and optional table appendix.",
         )
+
+    def _restore_preview_after_pdf_export(self) -> None:
+        restore_html = getattr(self, "_pdf_restore_preview_html", None)
+        self._pdf_restore_preview_html = None
+        self._pdf_print_after_preview_load = False
+        self._pdf_print_layout = None
+        if restore_html:
+            self._set_preview_html(self._inject_preview_css(restore_html))
+
+    def _print_current_preview_to_pdf(self) -> None:
+        path = getattr(self, "_pdf_export_path", None)
+        layout = getattr(self, "_pdf_print_layout", None)
+        dialog = getattr(self, "_report_export_dialog", None)
+        if not path or layout is None:
+            return
+        try:
+            self.web_view.page().printToPdf(path, layout)
+        except Exception as exc:
+            if dialog is not None:
+                dialog.reject()
+            self._restore_preview_after_pdf_export()
+            self._cleanup_report_export()
+            QMessageBox.critical(self, "PDF Error", f"Failed to export PDF:\n{exc}")
 
     def _on_export_pdf(self) -> None:
         if (
@@ -2732,20 +2821,24 @@ class ReportingTab(QWidget):
         self._report_export_dialog = dialog
         self._pdf_export_path = path
         self._pdf_appendix_inputs = self._capture_excel_appendix_inputs()
+        primary_html = self._primary_report_html_for_export(
+            self.current_report_html,
+            self._pdf_appendix_inputs,
+        )
+        self._pdf_restore_preview_html = None
+        self._pdf_print_layout = QPageLayout(
+            QPageSize(QPageSize.PageSizeId.A4),
+            QPageLayout.Orientation.Portrait,
+            QMarginsF(0, 0, 0, 0),
+        )
         self._update_preview_action_buttons()
 
-        try:
-            layout = QPageLayout(
-                QPageSize(QPageSize.PageSizeId.A4),
-                QPageLayout.Orientation.Portrait,
-                QMarginsF(0, 0, 0, 0),
-            )
-            self.web_view.page().printToPdf(path, layout)
-        except Exception as exc:
-            dialog.reject()
-            self._cleanup_report_export()
-            QMessageBox.critical(self, "PDF Error", f"Failed to export PDF:\n{exc}")
-            return
+        if primary_html != self.current_report_html:
+            self._pdf_restore_preview_html = self.current_report_html
+            self._pdf_print_after_preview_load = True
+            self._set_preview_html(self._inject_preview_css(primary_html))
+        else:
+            self._print_current_preview_to_pdf()
         dialog.exec()
 
     def _on_pdf_done(self, _path: str, success: bool) -> None:
@@ -2753,9 +2846,11 @@ class ReportingTab(QWidget):
         if not path:
             return
         if not success:
+            self._restore_preview_after_pdf_export()
             self._on_report_export_failed("PDF printing failed.")
             return
 
+        self._restore_preview_after_pdf_export()
         appendix_inputs = getattr(self, "_pdf_appendix_inputs", None)
         if not appendix_inputs:
             self._on_report_export_finished({
@@ -2819,6 +2914,9 @@ class ReportingTab(QWidget):
         brand = self.brand
         appendix_inputs = self._capture_excel_appendix_inputs()
         appendix_path = self._excel_appendix_path(path) if appendix_inputs else None
+        externalized_tables = (
+            self._large_table_titles_for_appendix(html) if appendix_inputs else {}
+        )
         generator = self.report_generator
         accent_color = self.brand.primary_color
 
@@ -2827,7 +2925,12 @@ class ReportingTab(QWidget):
             if cancel_check():
                 raise ReportExportCancelled()
             progress(0, total, "Creating Word document")
-            docx_bytes = generator.generate_docx_from_html(html, brand=brand)
+            docx_bytes = generator.generate_docx_from_html(
+                html,
+                brand=brand,
+                externalized_table_ids=set(externalized_tables),
+                externalized_table_titles=externalized_tables,
+            )
             if cancel_check():
                 raise ReportExportCancelled()
             atomic_write_bytes(path, docx_bytes)

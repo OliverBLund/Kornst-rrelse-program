@@ -43,6 +43,7 @@ from .group_styles import (
 )
 from .theme import C, SZ, apply_matplotlib_style, icon
 from analysis.comparison_snapshot import ComparisonSnapshotOptions, build_comparison_snapshot
+from grain_classification import ISO14688
 from k_aggregation import KAggregationOptions, UNGROUPED_LABEL, dataset_group_name
 from unit_conversions import HydraulicConductivityConverter, HydraulicConductivityUnit, get_default_plot_unit
 
@@ -143,6 +144,7 @@ class ComparisonPlotWidget(QWidget):
         self.display_unit: HydraulicConductivityUnit = get_default_plot_unit()
         self.log_k_y_scale = False
         self.k_group_aggregation = "geometric"
+        self._scheme = ISO14688
 
         # Active style — swapped by set_style(). Starts at the Professional preset
         # so the comparison view now honors the preset selector (previously it was
@@ -1504,18 +1506,6 @@ class ComparisonPlotWidget(QWidget):
         """Return K-methods in a stable, domain-specific order."""
         return ordered_methods(method_names)
 
-    def _calculate_histogram_frequencies(self, particle_sizes, percent_passing):
-        """Convert cumulative percent passing to retained fractions per size class."""
-        pairs = sorted(zip(particle_sizes, percent_passing), key=lambda pair: pair[0], reverse=True)
-        if not pairs:
-            return np.array([]), np.array([])
-
-        sizes = np.array([size for size, _ in pairs], dtype=float)
-        passing = np.array([passing for _, passing in pairs], dtype=float)
-        next_passing = np.append(passing[1:], 0.0)
-        freq = np.maximum(0.0, passing - next_passing)
-        return sizes, freq
-
     def on_grid_layout_changed(self, text: str):
         """Handle grid layout change"""
         layouts = {
@@ -1618,6 +1608,10 @@ class ComparisonPlotWidget(QWidget):
         selector.blockSignals(False)
 
 
+    def set_scheme(self, scheme) -> None:
+        """Set the classification scheme used by grain-size histograms."""
+        self._scheme = scheme or ISO14688
+
     def set_datasets(self, dataset_tabs: List):
         """Set the datasets to compare"""
         self.datasets = []
@@ -1630,7 +1624,8 @@ class ComparisonPlotWidget(QWidget):
                     include_warnings=False,
                     include_errors=False,
                     method_order=tuple(DEFAULT_METHOD_ORDER),
-                )
+                ),
+                classification_scheme=self._scheme,
             ),
         )
         
@@ -1708,6 +1703,7 @@ class ComparisonPlotWidget(QWidget):
             log_k_y_scale=self.log_k_y_scale,
             display_unit=self.display_unit,
             k_group_aggregation=self.k_group_aggregation,
+            classification_scheme=self._scheme,
             k_dist_view=self.k_dist_view,
             k_hist_axis=self.k_hist_axis,
             k_hist_bins=self.k_hist_bins,
@@ -1943,19 +1939,34 @@ class ComparisonPlotWidget(QWidget):
         return headers, rows
 
     def _histogram_drawer_rows(self, spec: cps.ComparisonPlotSpec) -> tuple[str, list[str], list[tuple]]:
-        headers = ["Scope", "Size class", "Particle size (mm)", "Weight (%)"]
+        scheme_label = cps._scheme_short_name(spec.classification_scheme)
+        headers = [
+            "Scope",
+            f"Fraction ({scheme_label})",
+            "Lower size (mm)",
+            "Upper size (mm)",
+            "Weight (%)",
+        ]
         rows: list[tuple] = []
         for unit in self._shown_plot_units(spec, cps.histogram_units(spec)):
-            sizes = unit.get("sizes", [])
+            labels = unit.get("class_labels", [])
+            lower_values = unit.get("lower", [])
+            upper_values = unit.get("upper", [])
             weights = unit.get("freq", [])
-            for index, (size, weight) in enumerate(zip(sizes, weights), start=1):
+            for label, lower, upper, weight in zip(
+                labels,
+                lower_values,
+                upper_values,
+                weights,
+            ):
                 rows.append((
                     unit.get("label", "Scope"),
-                    str(index),
-                    self._fmt_number(size, decimals=6),
+                    label,
+                    self._fmt_number(lower, decimals=6),
+                    self._fmt_number(upper, decimals=6),
                     self._fmt_number(weight, decimals=4),
                 ))
-        return "Histogram plotted size-class data", headers, rows
+        return "Histogram classification-fraction data", headers, rows
 
     def _k_distribution_drawer_rows(
         self, spec: cps.ComparisonPlotSpec

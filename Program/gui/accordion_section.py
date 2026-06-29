@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from PyQt6.QtCore import Qt, QSize
+from PyQt6.QtCore import Qt, QSize, pyqtSignal
 from PyQt6.QtWidgets import (
     QFrame,
     QHBoxLayout,
@@ -18,11 +18,15 @@ from .theme import C, F, icon
 class AccordionSection(QWidget):
     """Collapsible section with a themed icon, title, meta label, and chevron."""
 
+    toggled = pyqtSignal(bool)  # emitted with the new open state
+
     def __init__(self, fa_name: str, title: str, parent=None):
         super().__init__(parent)
         self._open = False
         self._fa_name = fa_name
+        self._expand_when_open = False
         self.setObjectName("accSection")
+        self.setSizePolicy(QSizePolicy.Policy.Preferred, QSizePolicy.Policy.Maximum)
 
         root = QVBoxLayout(self)
         root.setContentsMargins(0, 0, 0, 0)
@@ -67,6 +71,7 @@ class AccordionSection(QWidget):
         self._body_layout.setContentsMargins(0, 0, 0, 0)
         self._body_layout.setSpacing(0)
         self._body.setVisible(False)
+        self._body.setMaximumHeight(0)
 
         self._sep = QFrame()
         self._sep.setFrameShape(QFrame.Shape.HLine)
@@ -83,14 +88,34 @@ class AccordionSection(QWidget):
     def body_layout(self) -> QVBoxLayout:
         return self._body_layout
 
+    def set_expand_when_open(self, value: bool = True) -> None:
+        """When enabled, the section grows to fill available vertical space while
+        open (and stays compact while collapsed). Off by default."""
+        self._expand_when_open = bool(value)
+        self._apply_expand_policy()
+
+    def _apply_expand_policy(self) -> None:
+        if not self._expand_when_open:
+            return
+        vpol = (QSizePolicy.Policy.Expanding if self._open
+                else QSizePolicy.Policy.Maximum)
+        self.setSizePolicy(QSizePolicy.Policy.Preferred, vpol)
+
     def set_open(self, value: bool) -> None:
         value = bool(value)
         if value == self._open:
             return
         self._open = value
+        self._body.setMaximumHeight(16777215 if value else 0)
         self._body.setVisible(value)
         self._meta_lbl.setVisible(not value and bool(self._meta_lbl.text()))
+        self._apply_expand_policy()
         self._apply_header_style()
+        self.updateGeometry()
+        parent = self.parentWidget()
+        if parent is not None and parent.layout() is not None:
+            parent.layout().invalidate()
+        self.toggled.emit(self._open)
 
     def is_open(self) -> bool:
         return self._open

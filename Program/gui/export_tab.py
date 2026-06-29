@@ -26,6 +26,7 @@ from .export_manager import ExportManager
 from .report_export_plot_registry import (
     PLOT_TYPE_SPECS,
     export_plot_items,
+    export_plot_rows,
     plot_file_suffix,
     plot_keys_for_scope,
     plot_label,
@@ -59,6 +60,7 @@ class ExportTab(QWidget):
         self._plot_preview_table = None
         self._plot_preview_records: List[Dict[str, Any]] = []
         self._selected_plot_preview_row = 0
+        self.plot_breakdown_combos: Dict[str, QComboBox] = {}
         # Active background export (None when idle) — see export_now / _run_export.
         self._export_worker = None
         self._export_dialog = None
@@ -239,56 +241,35 @@ class ExportTab(QWidget):
         }
 
     def _create_format_card(self, format_key: str, title: str, description: str, icon_name: str) -> QPushButton:
-        """Create a compact clickable format selection card"""
+        """Create a dense clickable format toggle."""
         card = QPushButton()
         card.setCheckable(True)
         card.setChecked(self.selected_formats.get(format_key, False))
         card.setObjectName(f"format_card_{format_key}")
-        card.setMinimumHeight(44)
-        card.setMaximumHeight(48)
+        card.setMinimumHeight(34)
+        card.setMaximumHeight(36)
         card.setCursor(Qt.CursorShape.PointingHandCursor)
-
-        # Store format key as property
+        card.setToolTip(description)
         card.setProperty("format_key", format_key)
 
-        # Create layout for card contents
         card_layout = QHBoxLayout(card)
-        card_layout.setSpacing(7)
-        card_layout.setContentsMargins(7, 4, 7, 4)
+        card_layout.setSpacing(5)
+        card_layout.setContentsMargins(7, 2, 7, 2)
 
-        # Icon
         icon_label = QLabel()
-        icon_label.setPixmap(icon(icon_name, C.TEXT_MUTED, 14).pixmap(QSize(14, 14)))
-        icon_label.setFixedWidth(20)
+        icon_label.setPixmap(icon(icon_name, C.TEXT_MUTED, 12).pixmap(QSize(12, 12)))
+        icon_label.setFixedWidth(17)
         icon_label.setStyleSheet("background: transparent; border: none;")
         card_layout.addWidget(icon_label)
 
-        text_stack = QWidget()
-        text_stack.setStyleSheet("background: transparent; border: none;")
-        text_layout = QVBoxLayout(text_stack)
-        text_layout.setContentsMargins(0, 0, 0, 0)
-        text_layout.setSpacing(0)
-
         title_label = QLabel(title)
-        title_label.setFont(QFont("Segoe UI", 9, QFont.Weight.Bold))
+        title_label.setFont(QFont("Segoe UI", 8, QFont.Weight.Bold))
         title_label.setStyleSheet("background: transparent; border: none;")
-        text_layout.addWidget(title_label)
+        title_label.setWordWrap(False)
+        card_layout.addWidget(title_label, 1)
 
-        desc_label = QLabel(description)
-        desc_label.setFont(QFont("Segoe UI", 7))
-        desc_label.setStyleSheet(f"color: {C.TEXT_MUTED}; background: transparent; border: none;")
-        desc_label.setWordWrap(False)
-        text_layout.addWidget(desc_label)
-
-        card_layout.addWidget(text_stack, 1)
-        card_layout.addStretch()
-
-        # Update card style based on selection
         self._update_card_style(card, format_key)
-
-        # Connect click handler
         card.clicked.connect(lambda: self._toggle_format(format_key))
-
         return card
 
     def _update_card_style(self, card: QPushButton, format_key: str):
@@ -439,6 +420,14 @@ class ExportTab(QWidget):
                 self._set_tree_icon(wide_item, "fa6s.file-lines")
                 csv_folder.addChild(wide_item)
 
+            if (
+                self.content_selection['grain_size']['enabled']
+                and self.content_selection['grain_size']['items']['raw_distribution']
+            ):
+                grain_item = QTreeWidgetItem(["grain_distribution.csv", "raw curve rows"])
+                self._set_tree_icon(grain_item, "fa6s.file-lines")
+                csv_folder.addChild(grain_item)
+
             if len(datasets_to_export) > 1 and self._collection_aggregates_enabled():
                 aggregate_item = QTreeWidgetItem(["aggregate_statistics.csv", "overall + groups"])
                 self._set_tree_icon(aggregate_item, "fa6s.chart-simple")
@@ -453,15 +442,9 @@ class ExportTab(QWidget):
             self._set_tree_icon(excel_folder, "fa6s.folder")
             excel_folder.setFont(0, QFont("Segoe UI", 10, QFont.Weight.Bold))
 
-            for name, _, _ in datasets_to_export:
-                excel_item = QTreeWidgetItem([f"{name}.xlsx", "workbook"])
-                self._set_tree_icon(excel_item, "fa6s.file-excel")
-                excel_folder.addChild(excel_item)
-
-            if len(datasets_to_export) > 1 and self._collection_aggregates_enabled():
-                aggregate_item = QTreeWidgetItem(["aggregate_statistics.xlsx", "overall + groups"])
-                self._set_tree_icon(aggregate_item, "fa6s.chart-simple")
-                excel_folder.addChild(aggregate_item)
+            excel_item = QTreeWidgetItem(["combined_all_datasets.xlsx", "typed workbook"])
+            self._set_tree_icon(excel_item, "fa6s.file-excel")
+            excel_folder.addChild(excel_item)
 
             self.file_tree.addTopLevelItem(excel_folder)
             excel_folder.setExpanded(True)
@@ -499,21 +482,30 @@ class ExportTab(QWidget):
 
             collection_name = self._collection_sample_name()
             if collection_plot_types:
+                collection_file_count = sum(
+                    self._comparison_plot_variant_count(plot_type)
+                    for plot_type in collection_plot_types
+                ) * len(self._selected_plot_formats())
                 collection_folder = QTreeWidgetItem([
                     collection_name,
-                    f"{len(collection_plot_types) * len(self._selected_plot_formats())} files",
+                    f"{collection_file_count} files",
                 ])
                 self._set_tree_icon(collection_folder, "fa6s.layer-group")
                 collection_folder.setFont(0, QFont("Segoe UI", 9, QFont.Weight.Bold))
                 plots_folder.addChild(collection_folder)
                 for plot_type in collection_plot_types:
-                    for fmt in self._selected_plot_formats():
-                        plot_item = QTreeWidgetItem([
-                            f"{self._plot_file_suffix(plot_type)}.{fmt}",
-                            f"{labels[fmt]}",
-                        ])
-                        self._set_tree_icon(plot_item, "fa6s.images")
-                        collection_folder.addChild(plot_item)
+                    for variant_suffix, breakdown in self._comparison_plot_variants(plot_type):
+                        suffix = self._plot_file_suffix(plot_type)
+                        if variant_suffix:
+                            suffix = f"{suffix}_{variant_suffix}"
+                        for fmt in self._selected_plot_formats():
+                            plot_item = QTreeWidgetItem([
+                                f"{suffix}.{fmt}",
+                                f"{labels[fmt]}",
+                            ])
+                            plot_item.setToolTip(0, self._plot_record_label(plot_type, breakdown))
+                            self._set_tree_icon(plot_item, "fa6s.images")
+                            collection_folder.addChild(plot_item)
                 collection_folder.setExpanded(True)
 
             self.file_tree.addTopLevelItem(plots_folder)
@@ -539,19 +531,26 @@ class ExportTab(QWidget):
         if self.selected_formats.get('csv_wide'):
             file_count += 1
         if (
+            (self.selected_formats.get('csv_long') or self.selected_formats.get('csv_wide'))
+            and self.content_selection['grain_size']['enabled']
+            and self.content_selection['grain_size']['items']['raw_distribution']
+        ):
+            file_count += 1
+        if (
             dataset_count > 1
             and self._collection_aggregates_enabled()
             and (self.selected_formats.get('csv_long') or self.selected_formats.get('csv_wide'))
         ):
             file_count += 1
         if self.selected_formats.get('excel'):
-            file_count += dataset_count
-            if dataset_count > 1 and self._collection_aggregates_enabled():
-                file_count += 1
+            file_count += 1
 
         plot_formats = len(self._selected_plot_formats()) if self._plot_exports_enabled() else 0
         single_plot_types = len(self._selected_single_plot_types()) if self._plot_exports_enabled() else 0
-        collection_plot_types = len(self._selected_collection_plot_types()) if self._plot_exports_enabled() else 0
+        collection_plot_types = (
+            sum(self._comparison_plot_variant_count(plot_type) for plot_type in self._selected_collection_plot_types())
+            if self._plot_exports_enabled() else 0
+        )
         if plot_formats > 0 and (single_plot_types or collection_plot_types):
             file_count += ((dataset_count * single_plot_types) + collection_plot_types) * plot_formats
 
@@ -624,10 +623,13 @@ class ExportTab(QWidget):
         self.update_summary_card()
 
     def _create_content_selection_panel(self) -> QWidget:
-        """Create the scrollable, collapsible included-content section."""
+        """Create the reorganized included-content section."""
         section = AccordionSection("fa6s.sliders", "Included Content")
-        section.set_meta("testing package")
+        section.set_meta("tables + plots")
         section.set_open(True)
+
+        self.content_checkboxes = {}
+        self.plot_breakdown_combos = {}
 
         self.content_area = QWidget()
         self.content_area.setStyleSheet(f"""
@@ -659,77 +661,88 @@ class ExportTab(QWidget):
         content_area_layout.setContentsMargins(8, 8, 8, 8)
         content_area_layout.setSpacing(7)
 
-        content_area_layout.addWidget(self._create_content_preset_bar())
+        tabs = QTabWidget()
+        tabs.setDocumentMode(True)
+        tabs.setMinimumHeight(335)
+        tabs.setStyleSheet("""
+            QTabBar::tab {
+                padding: 5px 8px;
+                font-size: 9px;
+            }
+        """)
 
-        # === GRAIN SIZE DATA ===
-        grain_size_group = self._create_grain_size_category()
-        content_area_layout.addWidget(grain_size_group)
-
-        # === K-VALUE RESULTS ===
-        k_values_group = self._create_content_category(
+        data_tab = QWidget()
+        data_layout = QVBoxLayout(data_tab)
+        data_layout.setContentsMargins(6, 6, 6, 6)
+        data_layout.setSpacing(7)
+        data_layout.addWidget(self._create_content_preset_bar())
+        data_layout.addWidget(self._create_grain_size_category())
+        data_layout.addWidget(self._create_content_category(
             "K-Value Results",
             [
                 ("all_methods", "Active K methods"),
                 ("include_formulas", "Include formulas"),
                 ("include_validation", "Include validation messages"),
-                ("units_group", "Units: m/s, cm/s, m/d")
+                ("units_group", "Units: m/s, cm/s, m/d"),
             ],
-            'k_values'
-        )
-        content_area_layout.addWidget(k_values_group)
-
-        # === STATISTICS ===
-        stats_group = self._create_content_category(
+            'k_values',
+        ))
+        data_layout.addWidget(self._create_content_category(
             "Statistics & Aggregates",
             [
                 ("k_value_stats", "Per-dataset K statistics"),
                 ("collection_aggregates", "Overall/group aggregate table"),
-                ("grain_size_stats", "Per-dataset grain summary")
+                ("grain_size_stats", "Per-dataset grain summary"),
             ],
-            'statistics'
-        )
-        content_area_layout.addWidget(stats_group)
-
-        # === METADATA ===
-        metadata_group = self._create_content_category(
+            'statistics',
+        ))
+        data_layout.addWidget(self._create_content_category(
             "Metadata",
             [
                 ("sample_info", "Sample information"),
                 ("environmental", "Environmental parameters (T, n)"),
-                ("export_timestamp", "Export timestamp")
+                ("export_timestamp", "Export timestamp"),
             ],
-            'metadata'
-        )
-        content_area_layout.addWidget(metadata_group)
+            'metadata',
+        ))
+        data_layout.addStretch()
 
-        # === PLOTS ===
-        plot_items = [
-            (spec.key, spec.export_label)
-            for spec in PLOT_TYPE_SPECS
-            if spec.exportable
-        ] + [
-            ("include_legend", "Include legend"),
-            ("include_grid", "Include grid lines"),
-        ]
-        plots_group = self._create_content_category(
-            "Plots/Figures",
-            plot_items,
-            'plots'
-        )
-        content_area_layout.addWidget(plots_group)
+        individual_tab = QWidget()
+        individual_layout = QVBoxLayout(individual_tab)
+        individual_layout.setContentsMargins(6, 6, 6, 6)
+        individual_layout.setSpacing(7)
+        individual_layout.addWidget(self._create_plot_content_category("Individual Sample Plots", "single"))
+        individual_layout.addWidget(self._create_plot_file_options_category())
+        individual_layout.addStretch()
 
-        # === PLOT STYLE === (same global "restyle once" controls as the Report tab)
+        comparison_tab = QWidget()
+        comparison_layout = QVBoxLayout(comparison_tab)
+        comparison_layout.setContentsMargins(6, 6, 6, 6)
+        comparison_layout.setSpacing(7)
+        comparison_layout.addWidget(self._create_plot_content_category("Comparison Plots", "collection"))
+        comparison_layout.addStretch()
+
+        tabs.addTab(self._create_content_tab_scroll(data_tab), icon("fa6s.table", C.TEXT_MUTED, 11), "Data tables")
+        tabs.addTab(self._create_content_tab_scroll(individual_tab), icon("fa6s.chart-line", C.TEXT_MUTED, 11), "Individual plots")
+        tabs.addTab(self._create_content_tab_scroll(comparison_tab), icon("fa6s.images", C.TEXT_MUTED, 11), "Comparison plots")
+        content_area_layout.addWidget(tabs, 1)
+
+        # Plot Style applies to every exported plot (individual and comparison),
+        # so it lives below the sub-tabs as a shared footer rather than inside one.
         content_area_layout.addWidget(self._create_plot_style_section())
 
-        content_scroll = QScrollArea()
-        content_scroll.setWidgetResizable(True)
-        content_scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
-        content_scroll.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAsNeeded)
-        content_scroll.setFrameShape(QFrame.Shape.NoFrame)
-        content_scroll.setMinimumHeight(185)
-        content_scroll.setMaximumHeight(320)
-        content_scroll.setWidget(self.content_area)
-        content_scroll.setStyleSheet(f"""
+        section.body_layout().addWidget(self.content_area, 1)
+        self.content_section = section
+        return section
+
+    def _create_content_tab_scroll(self, widget: QWidget) -> QScrollArea:
+        scroll = QScrollArea()
+        scroll.setWidgetResizable(True)
+        scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+        scroll.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAsNeeded)
+        scroll.setFrameShape(QFrame.Shape.NoFrame)
+        scroll.setWidget(widget)
+        scroll.setStyleSheet(f"""
             QScrollArea {{
                 background: {C.BG_RAISED};
                 border: none;
@@ -748,15 +761,162 @@ class ExportTab(QWidget):
             QScrollBar::sub-line:vertical {{
                 height: 0px;
             }}
-            QScrollBar::add-page:vertical,
-            QScrollBar::sub-page:vertical {{
+        """)
+        return scroll
+
+    def _create_plot_content_category(self, title: str, scope: str) -> QWidget:
+        section = AccordionSection(
+            "fa6s.chart-line" if scope == "single" else "fa6s.images",
+            title,
+        )
+        rows = export_plot_rows(scope)  # shared report/export vocabulary
+        section.set_meta(f"{len(rows)} types")
+        section.set_open(True)
+
+        group = QFrame()
+        group.setStyleSheet(f"""
+            QFrame {{
+                background-color: {C.BG_RAISED};
+                border: none;
+            }}
+            QCheckBox,
+            QLabel {{
                 background: transparent;
+                border: none;
+            }}
+            QComboBox {{
+                background: #fbf8f1;
+                border: 1px solid {C.BORDER_DK};
+                border-radius: 4px;
+                padding: 1px 5px;
+                color: {C.TEXT_MID};
+                font-size: 8pt;
             }}
         """)
+        layout = QVBoxLayout(group)
+        layout.setContentsMargins(6, 4, 6, 4)
+        layout.setSpacing(4)
 
-        section.body_layout().addWidget(content_scroll)
-        self.content_section = section
+        scope_keys = [key for key, *_rest in rows]
+        header_cb = QCheckBox(f"Include {title.lower()}")
+        header_cb.setFont(QFont("Segoe UI", 9, QFont.Weight.Bold))
+        header_cb.setChecked(any(self.content_selection['plots']['items'].get(key, False) for key in scope_keys))
+        header_cb.stateChanged.connect(lambda state, keys=scope_keys: self._toggle_plot_scope(keys, state == 2))
+        layout.addWidget(header_cb)
+        self.content_checkboxes[f'plot_scope_{scope}_header'] = header_cb
+
+        for key, _fa, label, _default_on, has_breakdown, source_label in rows:
+            row = QFrame()
+            row_layout = QHBoxLayout(row)
+            row_layout.setContentsMargins(20, 0, 0, 0)
+            row_layout.setSpacing(6)
+
+            item_cb = QCheckBox(label)
+            item_cb.setFont(QFont("Segoe UI", 8))
+            item_cb.setToolTip(source_label)
+            item_cb.setChecked(self._content_item_checked('plots', key))
+            item_cb.stateChanged.connect(
+                lambda state, item_key=key: self._toggle_content_item('plots', item_key, state == 2)
+            )
+            row_layout.addWidget(item_cb, 1)
+            self.content_checkboxes[f'plots_{key}'] = item_cb
+
+            if has_breakdown:
+                combo = QComboBox()
+                combo.addItem("Per group", "group")
+                combo.addItem("Per dataset", "dataset")
+                combo.addItem("Both", "both")
+                combo.setFixedHeight(22)
+                combo.setMinimumWidth(108)
+                combo.setEnabled(item_cb.isChecked())
+                combo.currentIndexChanged.connect(lambda _idx, item_key=key: self._on_plot_breakdown_changed(item_key))
+                row_layout.addWidget(combo)
+                self.plot_breakdown_combos[key] = combo
+
+            layout.addWidget(row)
+
+        section.body_layout().addWidget(group)
         return section
+
+    def _create_plot_file_options_category(self) -> QWidget:
+        return self._create_content_category(
+            "Plot File Options",
+            [
+                ("include_legend", "Include legend"),
+                ("include_grid", "Include grid lines"),
+            ],
+            'plots',
+        )
+
+    def _toggle_plot_scope(self, keys: list[str], enabled: bool) -> None:
+        for key in keys:
+            cb = self.content_checkboxes.get(f'plots_{key}')
+            if cb is not None and cb.isChecked() != enabled:
+                cb.setChecked(enabled)
+            else:
+                self.content_selection['plots']['items'][key] = enabled
+        self.content_selection['plots']['enabled'] = any(
+            bool(self.content_selection['plots']['items'].get(key, False))
+            for key in export_plot_items().keys()
+        )
+        self.update_file_tree()
+        self.update_summary_card()
+        self.update_preview()
+
+    def _sync_plot_scope_headers(self) -> None:
+        for scope in ('single', 'collection'):
+            rows = export_plot_rows(scope)
+            keys = [key for key, *_rest in rows]
+            header = self.content_checkboxes.get(f'plot_scope_{scope}_header')
+            if header is not None:
+                header.blockSignals(True)
+                header.setChecked(any(self.content_selection['plots']['items'].get(key, False) for key in keys))
+                header.blockSignals(False)
+        for key, combo in self.plot_breakdown_combos.items():
+            combo.setEnabled(
+                bool(self.content_selection['plots'].get('enabled', True))
+                and bool(self.content_selection['plots']['items'].get(key, False))
+            )
+
+    def _on_plot_breakdown_changed(self, _plot_key: str) -> None:
+        self.update_file_tree()
+        self.update_summary_card()
+        self.update_preview()
+
+    def _plot_breakdown_choice(self, plot_key: str) -> Optional[str]:
+        combo = self.plot_breakdown_combos.get(plot_key)
+        if combo is None:
+            return None
+        value = combo.currentData()
+        return str(value) if value else None
+
+    def _collect_plot_breakdowns(self) -> Dict[str, str]:
+        return {
+            key: choice
+            for key, combo in self.plot_breakdown_combos.items()
+            if self.content_selection['plots']['items'].get(key, False)
+            for choice in [str(combo.currentData() or '')]
+            if choice
+        }
+
+    def _comparison_plot_variants(self, plot_type: str) -> list[tuple[Optional[str], Optional[str]]]:
+        choice = self._plot_breakdown_choice(plot_type)
+        if choice == 'both':
+            return [('per_group', 'group'), ('per_dataset', 'dataset')]
+        if choice in ('group', 'dataset'):
+            return [(None, choice)]
+        return [(None, None)]
+
+    def _comparison_plot_variant_count(self, plot_type: str) -> int:
+        return len(self._comparison_plot_variants(plot_type))
+
+    def _plot_record_label(self, plot_type: str, breakdown: Optional[str] = None) -> str:
+        label = self._plot_type_label(plot_type)
+        if breakdown == 'group':
+            return f"{label} - per group"
+        if breakdown == 'dataset':
+            return f"{label} - per dataset"
+        return label
 
     def _create_content_preset_bar(self) -> QWidget:
         panel = QFrame()
@@ -1205,6 +1365,8 @@ class ExportTab(QWidget):
         for key, cb in self.content_checkboxes.items():
             if key.startswith(f'{category_key}_') and key != f'{category_key}_header':
                 cb.setEnabled(enabled)
+        if category_key == 'plots':
+            self._sync_plot_scope_headers()
         self.update_file_tree()
         self.update_summary_card()
         self.update_preview()
@@ -1233,6 +1395,13 @@ class ExportTab(QWidget):
             elif item_key == 'units_group':
                 for unit_key in category['units']:
                     category['units'][unit_key] = enabled
+
+        if category_key == 'plots':
+            self.content_selection['plots']['enabled'] = any(
+                bool(category.get('items', {}).get(key, False))
+                for key in export_plot_items().keys()
+            )
+            self._sync_plot_scope_headers()
 
         self.update_file_tree()
         self.update_summary_card()
@@ -1355,9 +1524,10 @@ class ExportTab(QWidget):
                 if checkbox_key.startswith(prefix) and checkbox_key != f'{category_key}_header':
                     item_key = checkbox_key[len(prefix):]
                     cb.setChecked(self._content_item_checked(category_key, item_key))
+        self._sync_plot_scope_headers()
 
     def setup_ui(self):
-        """Setup the export tab as a three-pane preview/export workspace."""
+        """Setup the export tab as a two-pane preview/export workspace."""
         main_layout = QVBoxLayout(self)
         main_layout.setSpacing(0)
         main_layout.setContentsMargins(0, 0, 0, 0)
@@ -1376,15 +1546,12 @@ class ExportTab(QWidget):
 
         left_column = self._create_left_sidebar()
         center_column = self._create_preview_area()
-        right_column = self._create_right_sidebar()
 
         splitter.addWidget(left_column)
         splitter.addWidget(center_column)
-        splitter.addWidget(right_column)
         splitter.setStretchFactor(0, 0)
         splitter.setStretchFactor(1, 1)
-        splitter.setStretchFactor(2, 0)
-        splitter.setSizes([360, 900, 340])
+        splitter.setSizes([430, 1180])
 
         main_layout.addWidget(splitter, 1)
         self._export_splitter = splitter
@@ -1397,8 +1564,8 @@ class ExportTab(QWidget):
     def _create_left_sidebar(self) -> QWidget:
         panel = QFrame()
         panel.setObjectName("exportLeftPanel")
-        panel.setMinimumWidth(330)
-        panel.setMaximumWidth(440)
+        panel.setMinimumWidth(380)
+        panel.setMaximumWidth(560)
         panel.setStyleSheet(f"""
             QFrame#exportLeftPanel {{
                 background: {C.BG};
@@ -1410,10 +1577,65 @@ class ExportTab(QWidget):
         layout.setContentsMargins(0, 0, 0, 0)
         layout.setSpacing(0)
 
-        layout.addWidget(self._create_dataset_scope_section())
-        layout.addWidget(self._create_format_section())
-        layout.addWidget(self._create_content_selection_panel())
-        layout.addWidget(self._create_plot_queue_section(), 1)
+        inspector_tabs = QTabWidget()
+        inspector_tabs.setObjectName("exportInspectorTabs")
+        inspector_tabs.setDocumentMode(True)
+        inspector_tabs.setStyleSheet(f"""
+            QTabWidget::pane {{
+                border: none;
+                background: {C.BG};
+            }}
+            QTabBar::tab {{
+                min-height: 30px;
+                padding: 5px 12px;
+                font-size: 9pt;
+                color: {C.TEXT_MUTED};
+                background: {C.BG_LOW};
+                border: none;
+                border-right: 1px solid {C.BORDER};
+            }}
+            QTabBar::tab:selected {{
+                color: {C.TEXT};
+                background: {C.BG_RAISED};
+                font-weight: 700;
+                border-bottom: 2px solid {C.OLIVE};
+            }}
+        """)
+
+        setup_tab = QWidget()
+        setup_layout = QVBoxLayout(setup_tab)
+        setup_layout.setContentsMargins(0, 0, 0, 0)
+        setup_layout.setSpacing(0)
+        setup_layout.addWidget(self._create_dataset_scope_section())
+        setup_layout.addWidget(self._create_format_section())
+        content_panel = self._create_content_selection_panel()
+        # Included Content fills the spare vertical space while open, but must
+        # stack tightly with a trailing spacer while closed. A static stretch
+        # factor can't do both, so we switch the stretch between the panel and a
+        # trailing spacer based on the panel's open state.
+        content_panel.set_expand_when_open(True)
+        setup_layout.addWidget(content_panel)
+        self._setup_layout = setup_layout
+        self._content_panel_index = setup_layout.count() - 1
+        setup_layout.addStretch(0)
+        self._setup_spacer_index = setup_layout.count() - 1
+        content_panel.toggled.connect(self._sync_content_panel_stretch)
+        self._sync_content_panel_stretch(content_panel.is_open())
+
+        output_tab = QWidget()
+        output_layout = QVBoxLayout(output_tab)
+        output_layout.setContentsMargins(0, 0, 0, 0)
+        output_layout.setSpacing(0)
+        output_layout.addWidget(self._create_output_folder_section())
+        output_layout.addWidget(self._create_file_tree_section())
+        output_layout.addWidget(self._create_plot_queue_section())
+        output_layout.addStretch(1)
+
+        inspector_tabs.addTab(setup_tab, icon("fa6s.sliders", C.TEXT_MUTED, 12), "Setup")
+        inspector_tabs.addTab(output_tab, icon("fa6s.folder-tree", C.TEXT_MUTED, 12), "Output")
+        self.export_inspector_tabs = inspector_tabs
+        layout.addWidget(inspector_tabs, 1)
+        layout.addWidget(self._create_export_actions())
 
         summary = QFrame()
         summary.setObjectName("exportSummaryStrip")
@@ -1442,6 +1664,15 @@ class ExportTab(QWidget):
         layout.addWidget(summary)
 
         return panel
+
+    def _sync_content_panel_stretch(self, is_open: bool) -> None:
+        """Give the spare vertical space to Included Content when it is open, or
+        to a trailing spacer when it is collapsed (so the accordions stack tight)."""
+        layout = getattr(self, "_setup_layout", None)
+        if layout is None:
+            return
+        layout.setStretch(self._content_panel_index, 1 if is_open else 0)
+        layout.setStretch(self._setup_spacer_index, 0 if is_open else 1)
 
     def _create_dataset_scope_section(self) -> QWidget:
         section = AccordionSection("fa6s.vials", "Dataset Scope")
@@ -1613,20 +1844,21 @@ class ExportTab(QWidget):
             }}
         """)
         self.formats_layout = QGridLayout(body)
-        self.formats_layout.setContentsMargins(10, 8, 10, 10)
-        self.formats_layout.setSpacing(6)
+        self.formats_layout.setContentsMargins(10, 7, 10, 8)
+        self.formats_layout.setHorizontalSpacing(5)
+        self.formats_layout.setVerticalSpacing(5)
 
         cards = [
             ('csv_long', 'CSV Long', 'One row per K-value result', 'fa6s.table-columns'),
             ('csv_wide', 'CSV Wide', 'For statistical analysis', 'fa6s.table-cells'),
-            ('excel', 'Excel', 'Multi-sheet workbooks', 'fa6s.file-excel'),
+            ('excel', 'Excel', 'Combined workbook', 'fa6s.file-excel'),
             ('png', 'PNG', 'High-resolution images', 'fa6s.image'),
             ('svg', 'SVG', 'Vector graphics', 'fa6s.pen-nib'),
             ('pdf', 'PDF', 'Publication-ready plots', 'fa6s.file-pdf'),
         ]
         for index, args in enumerate(cards):
             card = self._create_format_card(*args)
-            self.formats_layout.addWidget(card, index // 2, index % 2)
+            self.formats_layout.addWidget(card, index // 3, index % 3)
 
         section.body_layout().addWidget(body)
         self.format_section = section
@@ -1655,6 +1887,22 @@ class ExportTab(QWidget):
             }}
         """)
         section.body_layout().addWidget(self.plot_queue_tree)
+
+        action_row = QWidget()
+        action_row.setStyleSheet(f"background: {C.BG}; border: none;")
+        action_layout = QHBoxLayout(action_row)
+        action_layout.setContentsMargins(10, 6, 10, 8)
+        action_layout.setSpacing(6)
+
+        self.open_dataset_btn = QPushButton("Open Source Sample")
+        self.open_dataset_btn.setIcon(icon("fa6s.arrow-up-right-from-square", C.TEXT_MID, 11))
+        self.open_dataset_btn.setMinimumHeight(26)
+        self.open_dataset_btn.setToolTip("Open the sample used by the selected single-sample plot.")
+        self.open_dataset_btn.clicked.connect(self._open_selected_plot_dataset)
+        self.open_dataset_btn.setEnabled(False)
+        action_layout.addWidget(self.open_dataset_btn)
+        section.body_layout().addWidget(action_row)
+
         self.plot_queue_section = section
         return section
 
@@ -1767,7 +2015,7 @@ class ExportTab(QWidget):
     def _create_export_actions(self) -> QWidget:
         footer = QFrame()
         footer.setObjectName("exportActions")
-        footer.setFixedHeight(124)
+        footer.setFixedHeight(58)
         footer.setStyleSheet(f"""
             QFrame#exportActions {{
                 background: {C.BG_RAISED};
@@ -1775,20 +2023,8 @@ class ExportTab(QWidget):
             }}
         """)
         layout = QVBoxLayout(footer)
-        layout.setContentsMargins(10, 9, 10, 10)
-        layout.setSpacing(7)
-
-        self.open_dataset_btn = QPushButton("Open Dataset")
-        self.open_dataset_btn.setIcon(icon("fa6s.arrow-up-right-from-square", C.TEXT_MID, 12))
-        self.open_dataset_btn.setMinimumHeight(28)
-        self.open_dataset_btn.clicked.connect(self._open_selected_plot_dataset)
-        layout.addWidget(self.open_dataset_btn)
-
-        self.plot_options_btn = QPushButton("Plot Options")
-        self.plot_options_btn.setIcon(icon("fa6s.sliders", C.TEXT_MID, 12))
-        self.plot_options_btn.setMinimumHeight(28)
-        self.plot_options_btn.clicked.connect(self._open_selected_plot_dataset)
-        layout.addWidget(self.plot_options_btn)
+        layout.setContentsMargins(10, 10, 10, 10)
+        layout.setSpacing(0)
 
         self.export_btn = QPushButton("Export")
         self.export_btn.setIcon(icon("fa6s.file-export", "#ffffff", 13))
@@ -1974,8 +2210,6 @@ class ExportTab(QWidget):
             self._populate_plot_queue([])
             if hasattr(self, "open_dataset_btn"):
                 self.open_dataset_btn.setEnabled(False)
-            if hasattr(self, "plot_options_btn"):
-                self.plot_options_btn.setEnabled(False)
 
         # If no formats selected, show help
         if self.preview_tabs.count() == 0:
@@ -2289,23 +2523,17 @@ class ExportTab(QWidget):
 
         text = []
         if datasets_to_export:
-            name = datasets_to_export[0][0]
-            text.append(f"Example workbook: {name}.xlsx")
+            text.append("Workbook: combined_all_datasets.xlsx")
             text.append("")
             text.append("Sheets:")
-            text.append("  - Summary - Dataset overview and key parameters")
-            text.append("  - Grain_Size_Data - Particle size distribution")
-            text.append("  - Percentiles - D10, D20, D30, D50, D60, etc.")
-            text.append("  - K_Values - All calculation methods and results")
-            text.append("  - Statistics - Summary statistics")
+            text.append("  - K_Results_Long - selected K rows and table context")
+            text.append("  - Sample_Wide - one row per exported dataset")
+            if self.content_selection['grain_size']['enabled'] and self.content_selection['grain_size']['items']['raw_distribution']:
+                text.append("  - Grain_Distribution - measured curve points")
             if len(datasets_to_export) > 1 and self._collection_aggregates_enabled():
-                text.append("")
-                text.append("Collection workbook:")
-                text.append("  - aggregate_statistics.xlsx - Overall, group, and dataset aggregate rows")
+                text.append("  - Aggregate_Statistics - overall, group, and dataset rows")
             text.append("")
-            text.append(f"Total workbooks to create: {len(datasets_to_export)}")
-            if len(datasets_to_export) > 1 and self._collection_aggregates_enabled():
-                text.append("  + 1 aggregate statistics workbook")
+            text.append("Total workbooks to create: 1")
 
         preview.setPlainText("\n".join(text))
         self.preview_tabs.addTab(preview, icon("fa6s.file-excel", C.TEXT_MUTED, 12), "Excel")
@@ -2335,8 +2563,10 @@ class ExportTab(QWidget):
                 "dataset_index": -1,
                 "dataset_name": "All datasets",
                 "plot_type": plot_type,
+                "breakdown": breakdown,
             }
             for plot_type in collection_plot_types
+            for _variant_suffix, breakdown in self._comparison_plot_variants(plot_type)
         )
         self._plot_preview_records = preview_rows
         self._populate_plot_preview_table(preview_rows)
@@ -2373,7 +2603,9 @@ class ExportTab(QWidget):
             name_item = QTableWidgetItem(record["dataset_name"])
             name_item.setData(Qt.ItemDataRole.UserRole, record)
             self._plot_preview_table.setItem(row, 0, name_item)
-            self._plot_preview_table.setItem(row, 1, QTableWidgetItem(self._plot_type_label(record["plot_type"])))
+            self._plot_preview_table.setItem(
+                row, 1, QTableWidgetItem(self._plot_record_label(record["plot_type"], record.get("breakdown")))
+            )
             self._plot_preview_table.setItem(row, 2, QTableWidgetItem(format_label))
             self._plot_preview_table.setItem(row, 3, QTableWidgetItem(self._plot_data_source_label(record["plot_type"])))
         self._plot_preview_table.itemSelectionChanged.connect(self._on_hidden_plot_table_selection_changed)
@@ -2411,7 +2643,7 @@ class ExportTab(QWidget):
             return collection_folder
 
         for row, record in enumerate(preview_rows):
-            label = self._plot_type_label(record["plot_type"])
+            label = self._plot_record_label(record["plot_type"], record.get("breakdown"))
             if record["scope"] == "single":
                 text = f"{label} - {format_label}"
                 icon_name = "fa6s.chart-line"
@@ -2525,8 +2757,6 @@ class ExportTab(QWidget):
         is_single_record = record.get("scope") == "single"
         if hasattr(self, "open_dataset_btn"):
             self.open_dataset_btn.setEnabled(is_single_record)
-        if hasattr(self, "plot_options_btn"):
-            self.plot_options_btn.setEnabled(is_single_record)
 
         if self._plot_preview_canvas is not None:
             self._plot_preview_canvas.setParent(None)
@@ -2544,6 +2774,7 @@ class ExportTab(QWidget):
             context = self._plot_context_for_export_index(0)
             figure = manager._build_collection_plot_figure(
                 record["plot_type"], datasets_to_export, config, context,
+                breakdown=record.get("breakdown"),
             )
         else:
             export_index = record["dataset_index"]
@@ -2583,7 +2814,7 @@ class ExportTab(QWidget):
         text.append("  CSV Wide - One row per dataset, columns for each method")
         text.append("     Best for: Statistical analysis, method comparison")
         text.append("")
-        text.append("  Excel - Multi-sheet workbooks (one per dataset)")
+        text.append("  Excel - Combined typed workbook")
         text.append("     Best for: Comprehensive reports, sharing results")
         text.append("")
         text.append("  PNG - High-resolution plot images")
@@ -2935,20 +3166,20 @@ class ExportTab(QWidget):
                 preview_text.append("=" * 60)
                 preview_text.append("")
 
-            preview_text.append("=== EXCEL WORKBOOK (PER DATASET) ===")
+            preview_text.append("=== EXCEL WORKBOOK (COMBINED) ===")
             preview_text.append("")
 
             if datasets_to_export:
-                name, dataset, results = datasets_to_export[0]
-                preview_text.append(f"Example workbook: {name}.xlsx")
+                preview_text.append("Workbook: combined_all_datasets.xlsx")
                 preview_text.append("  Sheets:")
-                preview_text.append("    - Summary (overview)")
-                preview_text.append("    - Grain_Size_Data (particle distribution)")
-                preview_text.append("    - Percentiles (D10, D50, etc.)")
-                preview_text.append("    - K_Values (all calculation methods)")
-                preview_text.append("    - Statistics (summary stats)")
+                preview_text.append("    - K_Results_Long")
+                preview_text.append("    - Sample_Wide")
+                if self.content_selection['grain_size']['enabled'] and self.content_selection['grain_size']['items']['raw_distribution']:
+                    preview_text.append("    - Grain_Distribution")
+                if len(datasets_to_export) > 1 and self._collection_aggregates_enabled():
+                    preview_text.append("    - Aggregate_Statistics")
                 preview_text.append("")
-                preview_text.append(f"Total: {len(datasets_to_export)} workbook(s) will be created")
+                preview_text.append("Total: 1 workbook will be created")
 
         # Show plot formats preview if selected
         labels = {'png': 'PNG', 'svg': 'SVG', 'pdf': 'PDF'}
@@ -2965,14 +3196,19 @@ class ExportTab(QWidget):
             preview_text.append("Plot files export figures. Numeric data behind the active plot can be exported from that plot's table drawer.")
             preview_text.append("")
             preview_text.append("Queued plot types:")
-            for plot_type in self._selected_single_plot_types() + self._selected_collection_plot_types():
+            for plot_type in self._selected_single_plot_types():
                 preview_text.append(
                     f"  - {self._plot_type_label(plot_type)} - {self._plot_data_source_label(plot_type)}"
                 )
+            for plot_type in self._selected_collection_plot_types():
+                for _variant_suffix, breakdown in self._comparison_plot_variants(plot_type):
+                    preview_text.append(
+                        f"  - {self._plot_record_label(plot_type, breakdown)} - {self._plot_data_source_label(plot_type)}"
+                    )
             preview_text.append("")
             total_plots = (
                 len(datasets_to_export) * len(self._selected_single_plot_types())
-                + len(self._selected_collection_plot_types())
+                + sum(self._comparison_plot_variant_count(plot_type) for plot_type in self._selected_collection_plot_types())
             ) * len(plot_formats)
             preview_text.append(f"Total: {total_plots} plot file(s) will be created")
             preview_text.append(f"  ({len(datasets_to_export)} datasets × {len(plot_formats)} format(s))")
@@ -2983,7 +3219,7 @@ class ExportTab(QWidget):
             preview_text.append("Available formats:")
             preview_text.append("  CSV Long - One row per K-value result")
             preview_text.append("  CSV Wide - Statistical analysis format")
-            preview_text.append("  Excel - Multi-sheet workbooks")
+            preview_text.append("  Excel - Combined typed workbook")
             preview_text.append("  PNG - High-resolution plots")
             preview_text.append("  SVG - Vector plots")
             preview_text.append("  PDF - Publication-ready plots")
@@ -3054,22 +3290,34 @@ class ExportTab(QWidget):
         if self.selected_formats.get('csv_wide'):
             preview_lines.append("  - CSV Wide Format: 1 file")
             file_count += 1
+        if (
+            (self.selected_formats.get('csv_long') or self.selected_formats.get('csv_wide'))
+            and self.content_selection['grain_size']['enabled']
+            and self.content_selection['grain_size']['items']['raw_distribution']
+        ):
+            preview_lines.append("  - Grain distribution CSV: 1 file")
+            file_count += 1
 
         if self.selected_formats.get('excel'):
-            preview_lines.append(f"  - Excel workbooks: {total_datasets} files (one per dataset)")
-            file_count += total_datasets
+            preview_lines.append("  - Excel workbook: 1 file")
+            file_count += 1
 
         if self._plot_exports_enabled():
             plot_formats = len(self._selected_plot_formats())
             count = (
                 total_datasets * len(self._selected_single_plot_types())
-                + len(self._selected_collection_plot_types())
+                + sum(self._comparison_plot_variant_count(plot_type) for plot_type in self._selected_collection_plot_types())
             ) * plot_formats
             preview_lines.append(f"  - Plot files: ~{count} files ({plot_formats} formats × {total_datasets} datasets)")
-            for plot_type in self._selected_single_plot_types() + self._selected_collection_plot_types():
+            for plot_type in self._selected_single_plot_types():
                 preview_lines.append(
                     f"      {self._plot_type_label(plot_type)} - {self._plot_data_source_label(plot_type)}"
                 )
+            for plot_type in self._selected_collection_plot_types():
+                for _variant_suffix, breakdown in self._comparison_plot_variants(plot_type):
+                    preview_lines.append(
+                        f"      {self._plot_record_label(plot_type, breakdown)} - {self._plot_data_source_label(plot_type)}"
+                    )
             file_count += count
 
         preview_lines.append("")
@@ -3333,7 +3581,7 @@ class ExportTab(QWidget):
             'csv_wide': self.selected_formats.get('csv_wide', False),
 
             'excel': self.selected_formats.get('excel', False),
-            'excel_mode': 'per_dataset',  # Default mode
+            'excel_mode': 'combined',
 
             'json': False,
 
@@ -3352,6 +3600,7 @@ class ExportTab(QWidget):
             'statistics': statistics_enabled,
             'plots': plots_enabled,
             'selected_plot_types': self._selected_plot_types(),
+            'plot_breakdowns': self._collect_plot_breakdowns(),
             'plot_include_legend': plots_items.get('include_legend', True),
             'plot_include_grid': plots_items.get('include_grid', True),
             'formulas': k_values_enabled and k_values_config['include_formulas'],

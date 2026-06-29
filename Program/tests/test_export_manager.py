@@ -15,7 +15,7 @@ sys.path.insert(0, 'Program')
 
 from data_loader import GrainSizeData
 from matplotlib.figure import Figure
-from PyQt6.QtWidgets import QApplication, QPushButton, QTableWidget
+from PyQt6.QtWidgets import QApplication, QPushButton, QTableWidget, QTabWidget
 from gui.export_tab import ExportTab
 from gui.export_manager import ExportManager
 from gui.plot_styles import PROFESSIONAL_STYLE
@@ -378,6 +378,85 @@ class TestExportManagerExports(unittest.TestCase):
 
             self.assertEqual(payload['metadata']['porosity'], 0.5)
             self.assertIn('Manual override', payload['metadata']['porosity_source'])
+
+
+    def test_combined_csv_exports_raw_grain_distribution_table(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            config = self.make_config(
+                temp_dir,
+                csv_long=True,
+                csv_wide=False,
+                grain_distribution=True,
+            )
+
+            exported = ExportManager().export(self.datasets, config)
+
+            grain_path = next(path for path in exported if 'grain_distribution' in os.path.basename(path))
+            rows = read_csv_rows(grain_path)
+            self.assertEqual(rows[0], ['Sample Name', 'Point', 'Particle Size (mm)', 'Percent Passing (%)'])
+            self.assertEqual(rows[1], ['Sample A', '1', '4.75', '100.0'])
+            self.assertEqual(len(rows), len(self.dataset.particle_sizes) + 1)
+
+    def test_combined_excel_uses_shared_typed_tables(self):
+        try:
+            from openpyxl import load_workbook
+        except ImportError:
+            self.skipTest('openpyxl not installed')
+
+        dataset_b = build_dataset('Sample B')
+        datasets = [
+            (self.dataset.sample_name, self.dataset, self.results),
+            (dataset_b.sample_name, dataset_b, self.results),
+        ]
+        with tempfile.TemporaryDirectory() as temp_dir:
+            config = self.make_config(
+                temp_dir,
+                csv=False,
+                excel=True,
+                excel_mode='combined',
+                grain_distribution=True,
+                statistics=True,
+            )
+
+            exported = ExportManager().export(datasets, config)
+
+            self.assertEqual(len(exported), 1)
+            workbook = load_workbook(exported[0], data_only=True)
+            self.assertIn('K_Results_Long', workbook.sheetnames)
+            self.assertIn('Sample_Wide', workbook.sheetnames)
+            self.assertIn('Grain_Distribution', workbook.sheetnames)
+            self.assertIn('Aggregate_Statistics', workbook.sheetnames)
+
+            wide_rows = list(workbook['Sample_Wide'].iter_rows(values_only=True))
+            header = list(wide_rows[0])
+            hazen_col = header.index('K_Hazen_m/s')
+            self.assertIsInstance(wide_rows[1][hazen_col], float)
+            self.assertAlmostEqual(wide_rows[1][hazen_col], 1.0e-4)
+
+            grain_rows = list(workbook['Grain_Distribution'].iter_rows(values_only=True))
+            self.assertIsInstance(grain_rows[1][2], float)
+            self.assertIsInstance(grain_rows[1][3], (int, float))
+
+    def test_duplicate_sample_names_get_stable_plot_file_labels(self):
+        duplicate = build_dataset('Sample A')
+        datasets = [
+            (self.dataset.sample_name, self.dataset, self.results),
+            (duplicate.sample_name, duplicate, build_results()),
+        ]
+        with tempfile.TemporaryDirectory() as temp_dir:
+            config = self.make_config(
+                temp_dir,
+                csv=False,
+                png=True,
+                plots=True,
+                selected_plot_types=['grain_size_curve'],
+            )
+
+            exported = ExportManager().export(datasets, config)
+
+            self.assertEqual(len(exported), 2)
+            self.assertTrue(any('Sample A (1)' in path for path in exported))
+            self.assertTrue(any('Sample A (2)' in path for path in exported))
 
     def test_export_statistics_use_shared_ok_only_summary(self):
         warning_result = KCalculationResult(
@@ -1123,6 +1202,59 @@ class TestExportTabConfig(unittest.TestCase):
 
     def tearDown(self):
         self.tab.deleteLater()
+
+
+    def test_export_workspace_uses_two_panes_and_grouped_content_tabs(self):
+        self.assertEqual(self.tab._export_splitter.count(), 2)
+        tab_sets = []
+        for tabs in self.tab.findChildren(QTabWidget):
+            tab_sets.append({tabs.tabText(index) for index in range(tabs.count())})
+        self.assertTrue(any(
+            {'Data tables', 'Individual plots', 'Comparison plots'}.issubset(labels)
+            for labels in tab_sets
+        ))
+
+
+    def test_closed_export_accordions_stack_without_internal_whitespace(self):
+        self.tab.resize(430, 760)
+        self.tab.show()
+        APP.processEvents()
+
+        self.tab.export_inspector_tabs.setCurrentIndex(0)
+        self.tab.format_section.set_open(False)
+        self.tab.content_section.set_open(False)
+        APP.processEvents()
+
+        format_bottom = self.tab.format_section.geometry().bottom()
+        content_top = self.tab.content_section.geometry().top()
+
+        self.assertLessEqual(self.tab.format_section.height(), 40)
+        self.assertLessEqual(self.tab.content_section.height(), 40)
+        self.assertLessEqual(content_top - format_bottom, 2)
+
+    def test_plot_actions_are_contextual_to_selected_plots(self):
+        self.assertFalse(hasattr(self.tab, 'plot_options_btn'))
+        self.assertEqual(self.tab.open_dataset_btn.text(), 'Open Source Sample')
+        self.assertTrue(self.tab.export_btn.text().startswith('Export'))
+
+    def test_excel_format_defaults_to_combined_workbook(self):
+        self.tab.selected_formats['excel'] = True
+        self.tab.selected_formats['png'] = False
+        config = self.tab._build_export_config()
+
+        self.assertTrue(config['excel'])
+        self.assertEqual(config['excel_mode'], 'combined')
+        self.assertEqual(self.tab._estimate_export_file_count(), 4)
+
+    def test_comparison_plot_breakdown_is_written_to_config(self):
+        self.tab._toggle_content_item('plots', 'distribution_overlay', True)
+        combo = self.tab.plot_breakdown_combos['distribution_overlay']
+        combo.setCurrentIndex(combo.findData('both'))
+
+        config = self.tab._build_export_config()
+
+        self.assertEqual(config['plot_breakdowns']['distribution_overlay'], 'both')
+        self.assertIn('distribution_overlay', config['selected_plot_types'])
 
     def test_k_distribution_plot_checkbox_is_exposed(self):
         self.assertIn('plots_k_distribution', self.tab.content_checkboxes)

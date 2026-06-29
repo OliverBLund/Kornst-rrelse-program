@@ -5,6 +5,8 @@ Export Manager - Handles all export operations for grain size analysis data
 import os
 import csv
 import json
+import copy
+from collections import Counter, defaultdict
 from datetime import datetime
 from typing import List, Dict, Optional, Any
 from PyQt6.QtWidgets import QProgressDialog
@@ -23,7 +25,13 @@ from k_aggregation import (
     build_k_result_summary,
     k_scope_value_series,
 )
-from grain_classification import ISO14688, permeability_class
+from grain_classification import (
+    ISO14688,
+    permeability_class,
+    sedimentology_descriptor,
+)
+from calculation_internals import compute_calculation_internals
+from exporting.table_model import ExportTable, write_csv_table, write_excel_table
 from method_registry import DEFAULT_METHOD_ORDER, METHOD_CATEGORY_MAP, ordered_methods
 from .plot_renderers import (
     apply_legend_aware_layout,
@@ -53,6 +61,10 @@ from .report_plot_style import (
 from .report_export_plot_colors import k_scope_plot_colors
 from .report_export_plot_registry import export_plot_keys, plot_file_suffix
 from .theme import apply_matplotlib_style
+
+
+def _apply_comparison_export_layout(figure: Figure, style, _plot_type: str) -> None:
+    apply_legend_aware_layout(figure, style)
 
 
 class ExportManager:
@@ -97,9 +109,60 @@ class ExportManager:
         self.exported_files = []
         self._scheme = ISO14688  # Active classification scheme; set via set_scheme()
 
+    def _stable_export_datasets(self, datasets: List[tuple]) -> List[tuple]:
+        """Return export tuples with deterministic labels for duplicate sample names."""
+        base_names: list[str] = []
+        for index, (name, dataset, _results) in enumerate(datasets):
+            fallback = getattr(dataset, 'sample_name', None) or f"Dataset {index + 1}"
+            base = str(name or fallback).strip() or f"Dataset {index + 1}"
+            base_names.append(base)
+
+        counts = Counter(base_names)
+        seen: defaultdict[str, int] = defaultdict(int)
+        used: set[str] = set()
+        stable: list[tuple] = []
+
+        for base, (_name, dataset, results) in zip(base_names, datasets):
+            seen[base] += 1
+            root = f"{base} ({seen[base]})" if counts[base] > 1 else base
+            label = root
+            suffix = 2
+            while label in used:
+                label = f"{root} - {suffix}"
+                suffix += 1
+            used.add(label)
+
+            if getattr(dataset, 'sample_name', None) == label:
+                export_dataset = dataset
+            else:
+                export_dataset = copy.copy(dataset)
+                export_dataset.sample_name = label
+            stable.append((label, export_dataset, results))
+
+        return stable
+
     def set_scheme(self, scheme) -> None:
         """Set the active classification scheme used in all exports."""
         self._scheme = scheme
+
+    def _sed_descriptor(self, dataset: GrainSizeData, result=None) -> str:
+        """Sedimentology compound descriptor for a dataset (active scheme)."""
+        if result is None:
+            result = dataset.classify(scheme=self._scheme)
+        cu = (dataset.get_uniformity_coefficient()
+              if hasattr(dataset, 'get_uniformity_coefficient') else None)
+        d50 = dataset.get_d50() if hasattr(dataset, 'get_d50') else None
+        return sedimentology_descriptor(result.fractions, d50, cu, self._scheme)
+
+    def _dataset_internals(self, dataset: GrainSizeData):
+        """Shared calculation internals for a dataset (constants, dₑ, φ, fₙ)."""
+        porosity = (dataset.effective_porosity()
+                    if hasattr(dataset, 'effective_porosity')
+                    else getattr(dataset, 'porosity', None))
+        return compute_calculation_internals(
+            dataset.particle_sizes, dataset.percent_passing,
+            getattr(dataset, 'temperature', 20.0), porosity,
+        )
 
     def _get_enabled_unit_specs(self, config: Dict) -> List[tuple]:
         """Return enabled K-value units in a stable display order."""
@@ -166,10 +229,18 @@ class ExportManager:
             return dataset.porosity_source_label()
         return "Current dataset value"
 
+    def _converted_value(self, k_value: Optional[float], unit_spec: tuple) -> Optional[float]:
+        """Return a typed conductivity value in the requested unit."""
+        if k_value is None:
+            return None
+        _, _, _, _, multiplier, _fmt = unit_spec
+        return k_value * multiplier
+
     def _format_converted_value(self, k_value: float, unit_spec: tuple) -> str:
-        """Format a conductivity value in the requested unit."""
-        _, _, _, _, multiplier, fmt = unit_spec
-        return format(k_value * multiplier, fmt)
+        """Format a conductivity value in the requested unit for legacy text sheets."""
+        value = self._converted_value(k_value, unit_spec)
+        _, _, _, _, _multiplier, fmt = unit_spec
+        return format(value, fmt) if value is not None else ''
 
     def _ordered_method_names(self, method_names) -> List[str]:
         """Return methods in the preferred domain order."""
@@ -298,7 +369,9 @@ class ExportManager:
             ])
 
         if config.get('classification', True):
-            row.append(dataset.classify(scheme=self._scheme).label)
+            _cls = dataset.classify(scheme=self._scheme)
+            row.append(_cls.label)
+            row.append(self._sed_descriptor(dataset, _cls))
 
         if include_timestamp:
             row.append(self._get_export_timestamp(config))
@@ -310,6 +383,7 @@ class ExportManager:
         max_data_rows: Optional[int] = None,
     ) -> List[List[Any]]:
         """Build CSV Long rows using the same schema as the exported file."""
+        datasets = self._stable_export_datasets(datasets)
         k_values_enabled = config.get('k_values', True)
         unit_specs = self._get_enabled_unit_specs(config) if k_values_enabled else []
         include_environmental = self._metadata_enabled(config, 'environmental')
@@ -332,6 +406,7 @@ class ExportManager:
             header.extend(['Cu', 'Cc'])
         if config.get('classification', True):
             header.append('Soil Classification')
+            header.append('Descriptor')
         if include_timestamp:
             header.append('Export Timestamp')
 
@@ -342,7 +417,7 @@ class ExportManager:
             if k_values_enabled:
                 for result in self._filter_results(results, config):
                     row = [name, result.method_name]
-                    row.extend(self._format_converted_value(result.k_value, unit_spec) for unit_spec in unit_specs)
+                    row.extend(self._converted_value(result.k_value, unit_spec) for unit_spec in unit_specs)
                     row.append(result.status.value if hasattr(result.status, 'value') else str(result.status))
                     if config.get('validation', False):
                         row.append(result.status_message)
@@ -374,6 +449,7 @@ class ExportManager:
         max_data_rows: Optional[int] = None,
     ) -> List[List[Any]]:
         """Build CSV Wide rows using the same schema as the exported file."""
+        datasets = self._stable_export_datasets(datasets)
         k_values_enabled = config.get('k_values', True)
         method_names = self._collect_method_names(datasets, config) if k_values_enabled else []
         unit_specs = self._get_enabled_unit_specs(config)
@@ -394,6 +470,7 @@ class ExportManager:
 
         if config.get('classification', True):
             header.append('Soil_Classification')
+            header.append('Descriptor')
 
         if k_values_enabled:
             for method in method_names:
@@ -427,16 +504,18 @@ class ExportManager:
 
             for _key, _label, percentile_num in percentile_specs:
                 value = self._percentile_value(dataset, percentile_num)
-                row.append(f"{value:.4f}" if value is not None else '')
+                row.append(value if value is not None else '')
 
             if config.get('gradation', True):
                 cu = dataset.get_uniformity_coefficient() if hasattr(dataset, 'get_uniformity_coefficient') else None
                 cc = dataset.get_coefficient_of_curvature() if hasattr(dataset, 'get_coefficient_of_curvature') else None
-                row.append(f"{cu:.2f}" if cu is not None else '')
-                row.append(f"{cc:.2f}" if cc is not None else '')
+                row.append(cu if cu is not None else '')
+                row.append(cc if cc is not None else '')
 
             if config.get('classification', True):
-                row.append(dataset.classify(scheme=self._scheme).label)
+                _cls = dataset.classify(scheme=self._scheme)
+                row.append(_cls.label)
+                row.append(self._sed_descriptor(dataset, _cls))
 
             if k_values_enabled:
                 filtered_results = self._filter_results(results, config)
@@ -445,7 +524,7 @@ class ExportManager:
                 for method in method_names:
                     result = method_results.get(method)
                     for unit_spec in unit_specs:
-                        row.append(self._format_converted_value(result.k_value, unit_spec) if result else '')
+                        row.append(self._converted_value(result.k_value, unit_spec) if result else '')
 
                 for method in method_names:
                     result = method_results.get(method)
@@ -459,11 +538,11 @@ class ExportManager:
                 for _, _, _, value_key in selected_stats:
                     if value_key != 'valid_count':
                         stat_value = stats_values.get(value_key)
-                        row.append(self._format_converted_value(stat_value, unit_spec) if stat_value is not None else '')
+                        row.append(self._converted_value(stat_value, unit_spec) if stat_value is not None else '')
 
             if any(value_key == 'valid_count' for _, _, _, value_key in selected_stats):
                 count_value = stats_values.get('valid_count')
-                row.append(str(count_value) if count_value is not None else '')
+                row.append(count_value if count_value is not None else '')
 
             if include_timestamp:
                 row.append(self._get_export_timestamp(config))
@@ -471,6 +550,44 @@ class ExportManager:
             rows.append(row)
 
         return rows
+
+
+    def _table_from_rows(self, name: str, rows: List[List[Any]]) -> ExportTable:
+        headers = rows[0] if rows else []
+        body = rows[1:] if len(rows) > 1 else []
+        return ExportTable.from_rows(name, headers, body)
+
+    def build_csv_long_model(self, datasets: List[tuple], config: Dict) -> ExportTable:
+        return self._table_from_rows('csv_long', self.build_csv_long_table(datasets, config))
+
+    def build_csv_wide_model(self, datasets: List[tuple], config: Dict) -> ExportTable:
+        return self._table_from_rows('csv_wide', self.build_csv_wide_table(datasets, config))
+
+    def build_grain_distribution_table(
+        self,
+        datasets: List[tuple],
+        config: Dict,
+        max_data_rows: Optional[int] = None,
+    ) -> List[List[Any]]:
+        """Build raw measured grain distribution rows for CSV/XLSX exports."""
+        headers = ['Sample Name', 'Point', 'Particle Size (mm)', 'Percent Passing (%)']
+        rows: List[List[Any]] = [headers]
+        written = 0
+        for name, dataset, _results in self._stable_export_datasets(datasets):
+            for point_index, (size, percent) in enumerate(
+                zip(dataset.particle_sizes, dataset.percent_passing), start=1
+            ):
+                rows.append([name, point_index, size, percent])
+                written += 1
+                if max_data_rows is not None and written >= max_data_rows:
+                    return rows
+        return rows
+
+    def build_grain_distribution_model(self, datasets: List[tuple], config: Dict) -> ExportTable:
+        return self._table_from_rows(
+            'grain_distribution',
+            self.build_grain_distribution_table(datasets, config),
+        )
 
     def _collection_statistics_enabled(self, datasets: List[tuple], config: Dict) -> bool:
         return bool(
@@ -577,23 +694,29 @@ class ExportManager:
                 k_stats.total_cells,
                 k_stats.warning_count,
                 k_stats.error_count,
-                self._format_optional_float(geo_mean, '.3e'),
-                self._format_optional_float(k_stats.arithmetic_mean_m_s, '.3e'),
-                self._format_optional_float(k_stats.median_m_s, '.3e'),
+                geo_mean if geo_mean is not None else '',
+                k_stats.arithmetic_mean_m_s if k_stats.arithmetic_mean_m_s is not None else '',
+                k_stats.median_m_s if k_stats.median_m_s is not None else '',
                 self._format_scope_range(k_stats.min_m_s, k_stats.max_m_s),
-                self._format_optional_float(k_stats.ln_std_dev, '.3f'),
+                k_stats.ln_std_dev if k_stats.ln_std_dev is not None else '',
                 permeability_class(geo_mean) if geo_mean is not None else '',
-                self._format_optional_float(grain_metric(scope_name, 'D10'), '.4f'),
-                self._format_optional_float(grain_metric(scope_name, 'D50'), '.4f'),
-                self._format_optional_float(grain_metric(scope_name, 'D60'), '.4f'),
-                self._format_optional_float(grain_metric(scope_name, 'Dmean'), '.4f'),
-                self._format_optional_float(grain_metric(scope_name, 'Cu'), '.3f'),
-                self._format_optional_float(grain_metric(scope_name, 'Fines%'), '.2f'),
+                grain_metric(scope_name, 'D10') if grain_metric(scope_name, 'D10') is not None else '',
+                grain_metric(scope_name, 'D50') if grain_metric(scope_name, 'D50') is not None else '',
+                grain_metric(scope_name, 'D60') if grain_metric(scope_name, 'D60') is not None else '',
+                grain_metric(scope_name, 'Dmean') if grain_metric(scope_name, 'Dmean') is not None else '',
+                grain_metric(scope_name, 'Cu') if grain_metric(scope_name, 'Cu') is not None else '',
+                grain_metric(scope_name, 'Fines%') if grain_metric(scope_name, 'Fines%') is not None else '',
                 dominant_class(scope_name),
             ])
             written += 1
 
         return rows
+
+    def build_aggregate_statistics_model(self, datasets: List[tuple], config: Dict) -> ExportTable:
+        return self._table_from_rows(
+            'aggregate_statistics',
+            self.build_aggregate_statistics_table(datasets, config),
+        )
 
     def export(self, datasets: List[tuple], config: Dict, progress: Optional[QProgressDialog] = None) -> List[str]:
         """
@@ -608,6 +731,7 @@ class ExportManager:
             List of exported file paths
         """
         self.exported_files = []
+        datasets = self._stable_export_datasets(datasets)
         config = dict(config)
         if self._metadata_enabled(config, 'export_timestamp') and '_export_timestamp' not in config:
             config['_export_timestamp'] = datetime.now().isoformat(timespec='seconds')
@@ -641,6 +765,10 @@ class ExportManager:
                     self._export_csv_wide_format_filtered(datasets, config)
                     if progress:
                         progress.setValue(len(self.exported_files))
+                if config.get('grain_distribution', False):
+                    self._export_grain_distribution_csv(datasets, config)
+                    if progress:
+                        progress.setValue(len(self.exported_files))
                 if self._collection_statistics_enabled(datasets, config):
                     self._export_aggregate_statistics_csv(datasets, config)
                     if progress:
@@ -666,7 +794,7 @@ class ExportManager:
                 if progress:
                     progress.setValue(len(self.exported_files))
 
-            if self._collection_statistics_enabled(datasets, config):
+            if excel_mode != 'combined' and self._collection_statistics_enabled(datasets, config):
                 self._export_aggregate_statistics_excel(datasets, config)
                 if progress:
                     progress.setValue(len(self.exported_files))
@@ -777,6 +905,37 @@ class ExportManager:
         apply_legend_aware_layout(figure, style)
         return figure
 
+    def _build_grain_size_histogram_figure(
+        self,
+        name: str,
+        dataset: GrainSizeData,
+        config: Dict,
+        context: Optional[Dict] = None,
+    ) -> Figure:
+        """Create a class-fraction histogram figure for one sample."""
+        apply_matplotlib_style()
+        context = context_with_style(context, resolve_report_style())
+        style = context["style"]
+        spec = build_comparison_spec(
+            [dataset],
+            {},
+            current_plot_type="histogram",
+            display_mode="grid",
+            breakdown="dataset",
+            style=style,
+            show_grid=config.get('plot_include_grid', True),
+            show_legend=config.get('plot_include_legend', True),
+            classification_scheme=self._scheme,
+            palette=resolve_report_palette_colors(1),
+            palette_name=get_report_palette(),
+            group_palette_authoritative=get_report_palette() != CATEGORICAL_PALETTE,
+        )
+        figure = Figure(figsize=config.get('plot_figsize', (10, 6)))
+        figure.patch.set_facecolor(style.figure_facecolor)
+        render_comparison(figure, spec)
+        _apply_comparison_export_layout(figure, style, "histogram")
+        return figure
+
     def _build_k_value_bar_figure(
         self,
         name: str,
@@ -884,6 +1043,7 @@ class ExportManager:
         plot_type: str,
         style,
         display_mode: str = "overlay",
+        breakdown: Optional[str] = None,
     ):
         """Capture a ComparisonPlotSpec for a collection export figure.
 
@@ -908,11 +1068,13 @@ class ExportManager:
             dataset_groups=dataset_groups,
             current_plot_type=plot_type,
             display_mode=display_mode,
+            breakdown=breakdown,
             style=style,
             show_grid=config.get('plot_include_grid', True),
             show_legend=config.get('plot_include_legend', True),
             log_k_y_scale=bool(plot_context_value(context, 'log_k_y_scale', False)),
             display_unit=REPORT_EXPORT_PLOT_K_UNIT,
+            classification_scheme=self._scheme,
             # Match the report side: comparison colours follow the global palette,
             # re-sampled per series-count so many groups spread across the colormap.
             palette=resolve_report_palette_colors(max(len(ds_objects), 1)),
@@ -926,7 +1088,9 @@ class ExportManager:
         datasets: List[tuple],
         config: Dict,
         context: Optional[Dict] = None,
+        breakdown: Optional[str] = None,
     ) -> Figure:
+        datasets = self._stable_export_datasets(datasets)
         apply_matplotlib_style()
         # Default to the global report/export style when the live tab context
         # carries none, so exports honor the "restyle once" report setting.
@@ -936,22 +1100,27 @@ class ExportManager:
         context = context_with_style(context, resolve_report_style())
         style = context["style"]
 
-        if plot_type in ('distribution_overlay', 'k_value_comparison', 'k_distribution'):
+        if plot_type in (
+            'distribution_overlay', 'grain_size_histogram_comparison',
+            'k_value_comparison', 'k_distribution',
+        ):
             # Render through the shared comparison spec so exports get the same
             # group-aware breakdown, palette and styling as the Comparison tab
             # and the report.
             spec_plot_type = {
                 'distribution_overlay': 'distribution',
+                'grain_size_histogram_comparison': 'histogram',
                 'k_value_comparison': 'k-values',
                 'k_distribution': 'k-distribution',
             }[plot_type]
             spec = self._build_export_comparison_spec(
                 datasets, config, context, plot_type=spec_plot_type, style=style,
+                breakdown=breakdown,
             )
             figure = Figure(figsize=config.get('plot_figsize', (12, 7)))
             figure.patch.set_facecolor(style.figure_facecolor)
             render_comparison(figure, spec)
-            apply_legend_aware_layout(figure, style)
+            _apply_comparison_export_layout(figure, style, spec_plot_type)
             return figure
 
         figure = Figure(figsize=config.get('plot_figsize', (12, 7)))
@@ -998,6 +1167,8 @@ class ExportManager:
     ) -> Figure:
         if plot_type == 'grain_size_curve':
             return self._build_grain_size_plot_figure(name, dataset, config, context)
+        if plot_type == 'grain_size_histogram':
+            return self._build_grain_size_histogram_figure(name, dataset, config, context)
         if plot_type == 'k_value_bar':
             return self._build_k_value_bar_figure(name, results, config, context)
         if plot_type == 'applicability_heatmap':
@@ -1010,7 +1181,7 @@ class ExportManager:
             'plots',
             config.get('_active_plot_folder', 'collection'),
         )
-        suffix = self.PLOT_FILE_SUFFIXES.get(plot_type, plot_type)
+        suffix = config.get('_active_plot_suffix') or self.PLOT_FILE_SUFFIXES.get(plot_type, plot_type)
         figure.patch.set_facecolor('white')
         figure.patch.set_alpha(1.0)
 
@@ -1076,6 +1247,22 @@ class ExportManager:
             name, dataset, results, config, context, ['grain_size_curve'],
         )
 
+    def _collection_plot_variants(self, plot_type: str, config: Dict) -> list[tuple[Optional[str], Optional[str]]]:
+        breakdowns = config.get('plot_breakdowns') or {}
+        choice = breakdowns.get(plot_type)
+        if choice == 'both':
+            base_suffix = self.PLOT_FILE_SUFFIXES.get(plot_type, plot_type)
+            return [
+                (f"{base_suffix}_per_group", 'group'),
+                (f"{base_suffix}_per_dataset", 'dataset'),
+            ]
+        if choice in ('group', 'dataset'):
+            return [(None, choice)]
+        return [(None, None)]
+
+    def _collection_plot_variant_count(self, plot_type: str, config: Dict) -> int:
+        return len(self._collection_plot_variants(plot_type, config))
+
     def _export_collection_plots(
         self,
         datasets: List[tuple],
@@ -1089,18 +1276,30 @@ class ExportManager:
         base_filename = self._format_filename(template, collection_name, '')
         context = plot_contexts[0] if plot_contexts else {}
         previous_folder = config.get('_active_plot_folder')
+        previous_suffix = config.get('_active_plot_suffix')
         config['_active_plot_folder'] = self._format_filename('{sample_name}', collection_name, '')
 
         try:
             for plot_type in plot_types or []:
-                figure = self._build_collection_plot_figure(plot_type, datasets, config, context)
-                self._save_plot_figure(figure, base_filename, plot_type, config)
-                figure.clear()
+                for suffix_override, breakdown in self._collection_plot_variants(plot_type, config):
+                    if suffix_override is None:
+                        config.pop('_active_plot_suffix', None)
+                    else:
+                        config['_active_plot_suffix'] = suffix_override
+                    figure = self._build_collection_plot_figure(
+                        plot_type, datasets, config, context, breakdown=breakdown,
+                    )
+                    self._save_plot_figure(figure, base_filename, plot_type, config)
+                    figure.clear()
         finally:
             if previous_folder is None:
                 config.pop('_active_plot_folder', None)
             else:
                 config['_active_plot_folder'] = previous_folder
+            if previous_suffix is None:
+                config.pop('_active_plot_suffix', None)
+            else:
+                config['_active_plot_suffix'] = previous_suffix
 
     def _calculate_total_steps(self, datasets: List[tuple], config: Dict) -> int:
         """Calculate expected output file count for progress reporting."""
@@ -1123,6 +1322,8 @@ class ExportManager:
                     steps += 1
                 if config.get('csv_wide', False):
                     steps += 1
+                if config.get('grain_distribution', False):
+                    steps += 1
             if self._collection_statistics_enabled(datasets, config):
                 steps += 1
 
@@ -1132,7 +1333,7 @@ class ExportManager:
                 steps += len(datasets)
             else:
                 steps += 1
-            if self._collection_statistics_enabled(datasets, config):
+            if excel_mode != 'combined' and self._collection_statistics_enabled(datasets, config):
                 steps += 1
 
         if config.get('json', False):
@@ -1146,7 +1347,11 @@ class ExportManager:
                 if config.get(key, False)
             )
             single_count = len([plot_type for plot_type in selected_plot_types if plot_type in self.SINGLE_PLOT_TYPES])
-            collection_count = len([plot_type for plot_type in selected_plot_types if plot_type in self.COLLECTION_PLOT_TYPES])
+            collection_count = sum(
+                self._collection_plot_variant_count(plot_type, config)
+                for plot_type in selected_plot_types
+                if plot_type in self.COLLECTION_PLOT_TYPES
+            )
             steps += ((len(datasets) * single_count) + collection_count) * plot_format_count
 
         return max(steps, 1)
@@ -1585,9 +1790,7 @@ class ExportManager:
         filename = self._format_filename(template, 'combined_all_datasets', '.csv')
         filepath = os.path.join(output_dir, filename)
 
-        with open(filepath, 'w', newline='', encoding='utf-8') as f:
-            writer = csv.writer(f)
-            writer.writerows(self.build_csv_long_table(datasets, config))
+        write_csv_table(filepath, self.build_csv_long_model(datasets, config))
 
         self.exported_files.append(filepath)
 
@@ -1599,9 +1802,18 @@ class ExportManager:
         filename = self._format_filename(template, 'wide_format_all_datasets', '.csv')
         filepath = os.path.join(output_dir, filename)
 
-        with open(filepath, 'w', newline='', encoding='utf-8') as f:
-            writer = csv.writer(f)
-            writer.writerows(self.build_csv_wide_table(datasets, config))
+        write_csv_table(filepath, self.build_csv_wide_model(datasets, config))
+
+        self.exported_files.append(filepath)
+
+    def _export_grain_distribution_csv(self, datasets: List[tuple], config: Dict):
+        """Export raw measured grain distribution rows for all selected datasets."""
+        output_dir = self._category_output_dir(config, 'tables', 'csv')
+        template = config['filename_template']
+        filename = self._format_filename(template, 'grain_distribution', '.csv')
+        filepath = os.path.join(output_dir, filename)
+
+        write_csv_table(filepath, self.build_grain_distribution_model(datasets, config))
 
         self.exported_files.append(filepath)
 
@@ -1612,9 +1824,7 @@ class ExportManager:
         filename = self._format_filename(template, 'aggregate_statistics', '.csv')
         filepath = os.path.join(output_dir, filename)
 
-        with open(filepath, 'w', newline='', encoding='utf-8') as f:
-            writer = csv.writer(f)
-            writer.writerows(self.build_aggregate_statistics_table(datasets, config))
+        write_csv_table(filepath, self.build_aggregate_statistics_model(datasets, config))
 
         self.exported_files.append(filepath)
 
@@ -1777,11 +1987,28 @@ class ExportManager:
         wb.save(filepath)
         self.exported_files.append(filepath)
 
+    def _safe_excel_sheet_name(self, name: str, used: set[str]) -> str:
+        base = str(name or 'Sheet').strip() or 'Sheet'
+        for char in ['\\', '/', '*', '[', ']', ':', '?']:
+            base = base.replace(char, '_')
+        base = base[:31] or 'Sheet'
+        candidate = base
+        suffix = 2
+        while candidate in used:
+            marker = f"_{suffix}"
+            candidate = f"{base[:31 - len(marker)]}{marker}"
+            suffix += 1
+        used.add(candidate)
+        return candidate
+
+    def _add_excel_table_sheet(self, wb, sheet_name: str, table: ExportTable, used: set[str]) -> None:
+        ws = wb.create_sheet(self._safe_excel_sheet_name(sheet_name, used))
+        write_excel_table(ws, table)
+
     def _export_excel_combined(self, datasets: List[tuple], config: Dict):
-        """Export all datasets to single Excel workbook"""
+        """Export selected datasets to one typed workbook backed by shared tables."""
         try:
             from openpyxl import Workbook
-            from openpyxl.styles import Font, Alignment, PatternFill
         except ImportError:
             raise ImportError("openpyxl is required for Excel export. Install with: pip install openpyxl")
 
@@ -1792,24 +2019,20 @@ class ExportManager:
         filepath = os.path.join(output_dir, filename)
 
         wb = Workbook()
-
-        # Remove default sheet
         if 'Sheet' in wb.sheetnames:
             wb.remove(wb['Sheet'])
 
-        # Create a summary sheet comparing all datasets
-        ws_summary = wb.create_sheet('All_Datasets_Summary')
-        self._write_excel_combined_summary(ws_summary, datasets, config)
-
-        # Create individual sheets for each dataset
-        for name, dataset, results in datasets:
-            # Sanitize sheet name (max 31 chars, no special chars)
-            sheet_name = name[:31]
-            for char in ['\\', '/', '*', '[', ']', ':', '?']:
-                sheet_name = sheet_name.replace(char, '_')
-
-            ws = wb.create_sheet(sheet_name)
-            self._write_excel_dataset_combined(ws, name, dataset, results, config)
+        used: set[str] = set()
+        self._add_excel_table_sheet(wb, 'K_Results_Long', self.build_csv_long_model(datasets, config), used)
+        self._add_excel_table_sheet(wb, 'Sample_Wide', self.build_csv_wide_model(datasets, config), used)
+        if config.get('grain_distribution', False):
+            self._add_excel_table_sheet(
+                wb, 'Grain_Distribution', self.build_grain_distribution_model(datasets, config), used
+            )
+        if self._collection_statistics_enabled(datasets, config):
+            self._add_excel_table_sheet(
+                wb, 'Aggregate_Statistics', self.build_aggregate_statistics_model(datasets, config), used
+            )
 
         wb.save(filepath)
         self.exported_files.append(filepath)
@@ -1872,19 +2095,7 @@ class ExportManager:
 
     def _write_excel_aggregate_statistics(self, ws, datasets: List[tuple], config: Dict):
         """Write the shared aggregate statistics table to an Excel worksheet."""
-        from openpyxl.styles import Font
-
-        rows = self.build_aggregate_statistics_table(datasets, config)
-        for row_index, values in enumerate(rows, start=1):
-            for col_index, value in enumerate(values, start=1):
-                cell = ws.cell(row=row_index, column=col_index)
-                cell.value = value
-                if row_index == 1:
-                    cell.font = Font(bold=True)
-
-        for col_index, header in enumerate(rows[0], start=1):
-            width = min(max(len(str(header)) + 2, 12), 34)
-            ws.column_dimensions[chr(64 + col_index) if col_index <= 26 else ws.cell(row=1, column=col_index).column_letter].width = width
+        write_excel_table(ws, self.build_aggregate_statistics_model(datasets, config))
 
 
     def _write_excel_grain_size(self, ws, dataset: GrainSizeData):
@@ -2138,17 +2349,33 @@ class ExportManager:
             ws[f'A{row}'] = 'Standard:'
             ws[f'B{row}'] = _cls.scheme.name
             row += 1
-            ws[f'A{row}'] = 'Clay %:'
-            ws[f'B{row}'] = _cls.fractions.clay_pct
+            _descriptor = self._sed_descriptor(dataset, _cls)
+            if _descriptor:
+                ws[f'A{row}'] = 'Descriptor:'
+                ws[f'B{row}'] = _descriptor
+                row += 1
+
+            # Detailed, scheme-aware sub-class fractions (supersedes the coarse
+            # clay/silt/sand/gravel rows; the sub-classes sum to them).
             row += 1
-            ws[f'A{row}'] = 'Silt %:'
-            ws[f'B{row}'] = _cls.fractions.silt_pct
+            ws[f'A{row}'] = 'Detailed Fractions (%)'
+            ws[f'A{row}'].font = Font(bold=True, size=12)
             row += 1
-            ws[f'A{row}'] = 'Sand %:'
-            ws[f'B{row}'] = _cls.fractions.sand_pct
-            row += 1
-            ws[f'A{row}'] = 'Gravel %:'
-            ws[f'B{row}'] = _cls.fractions.gravel_pct
+            for _d in (_cls.detailed_fractions or ()):
+                ws[f'A{row}'] = f'{_d.label}:'
+                ws[f'B{row}'] = _d.pct
+                row += 1
+
+            # Calculation internals (inline, under the classification toggle).
+            for _group in self._dataset_internals(dataset).groups():
+                row += 1
+                ws[f'A{row}'] = _group.title
+                ws[f'A{row}'].font = Font(bold=True, size=12)
+                row += 1
+                for _label, _value in _group.rows:
+                    ws[f'A{row}'] = f'{_label}:'
+                    ws[f'B{row}'] = _value
+                    row += 1
 
         stats_values = self._calculate_statistics(results, config) if config.get('statistics', True) else {}
         selected_stats = self._get_selected_stat_specs(config) if config.get('statistics', True) else []
@@ -2337,11 +2564,21 @@ class ExportManager:
             data['classification'] = {
                 'label':       _cls.label,
                 'scheme_name': _cls.scheme.name,
+                'descriptor':  self._sed_descriptor(dataset, _cls),
                 'clay_pct':    _cls.fractions.clay_pct,
                 'silt_pct':    _cls.fractions.silt_pct,
                 'sand_pct':    _cls.fractions.sand_pct,
                 'gravel_pct':  _cls.fractions.gravel_pct,
                 'cobble_pct':  _cls.fractions.cobble_pct,
+                'detailed_fractions': [
+                    {'label': d.label, 'lower_mm': d.lower_mm,
+                     'upper_mm': d.upper_mm, 'pct': d.pct}
+                    for d in (_cls.detailed_fractions or ())
+                ],
+                'calculation_internals': {
+                    group.title: dict(group.rows)
+                    for group in self._dataset_internals(dataset).groups()
+                },
             }
 
         if config.get('k_values', True) and filtered_results:

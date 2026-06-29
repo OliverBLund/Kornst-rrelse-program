@@ -1,1059 +1,982 @@
 """
-Enhanced Statistics Tab with Modular Design
+Statistics tab — per-sample descriptive summary ("Sample Summary", Concept A).
 
-This module provides a comprehensive statistics display for grain size analysis
-and hydraulic conductivity calculations. The design is modular to enable easy
-reuse in report generation.
+A read-only summary of everything computed for one dataset that the Results tab
+does not already present method-by-method:
 
-Phase 1: Layout and visual structure
+  * metric strip          — sample, soil class, D50, Cu, K geometric mean
+  * key grain distribution — D-facts, percentile "used by" table, full grid
+  * detailed classification — subdivided bar + ISO 14688 11-band table,
+                              plus Cu / Cc / sorting / span
+  * hydraulic conductivity — aggregate K summary (geo/arith/median/range/spread)
+  * interpretation         — short factual read of the numbers
+  * data support           — gradation-curve coverage checks
+  * calculation context    — temperature, porosity, permeability class
+  * calculation internals  — collapsible: physical constants, effective
+                              diameters, phi / Folk-Ward, porosity functions
+
+Everything respects the active classification scheme (stratigraphy) supplied via
+set_scheme(); detailed fractions come from grain_classification so the plot,
+this tab and the report/export builders share one definition.
 """
+
+from __future__ import annotations
+
+import math
+from typing import List, Optional
 
 from PyQt6.QtWidgets import (
     QWidget,
+    QFrame,
+    QLabel,
     QVBoxLayout,
     QHBoxLayout,
-    QLabel,
-    QFrame,
-    QGroupBox,
-    QPushButton,
+    QGridLayout,
+    QScrollArea,
     QTableWidget,
     QTableWidgetItem,
-    QTextEdit,
-    QLineEdit,
-    QSplitter,
+    QAbstractItemView,
     QHeaderView,
-    QMessageBox,
-    QScrollArea,
+    QSizePolicy,
 )
 from PyQt6.QtCore import Qt, pyqtSignal
-from PyQt6.QtGui import QColor, QFont
-from typing import Optional, List
-import numpy as np
+from PyQt6.QtGui import QColor
 
 from data_loader import GrainSizeData
-from k_calculations import KCalculationResult
-from k_aggregation import build_k_result_summary
-from .theme import C, F
+from k_calculations import KCalculationResult, KCalculator
+from k_aggregation import build_k_result_summary, AggregateStats
+from calculation_internals import (
+    compute_calculation_internals,
+    TITLE_CONSTANTS,
+    TITLE_DIAMETERS,
+    TITLE_SORTING,
+    TITLE_POROSITY,
+)
 from grain_classification import (
     ISO14688,
-    cu_label as _cu_label,
     permeability_class as _perm_class,
+    sedimentology_descriptor,
 )
+from .theme import C, F
+from .collapsible_section import CollapsibleSection
 
 
-class CompactInfoBar(QFrame):
-    """
-    Compact single-line info bar showing key statistics
-    Replaces the bulky summary cards
-    """
+# Standard percentiles shown in the full grid (ascending).
+_STD_PERCENTILES = [5, 10, 15, 16, 17, 20, 25, 30, 40, 50, 60, 70, 75, 80, 84, 85, 90, 95]
+_KEY_PERCENTILES = {10, 30, 50, 60}
+
+# Which characteristic diameters drive which methods (compact reference).
+_PCT_USED_BY = [
+    (5, "Barr"),
+    (10, "Most K methods"),
+    (50, "Median · Shepherd · Kruger"),
+    (60, "Cu · Beyer · Barr"),
+    (95, "Span · Krumbein-Monk"),
+]
+
+
+def _band_color(label: str) -> str:
+    """Fill colour for a detailed sub-class band, shaded fine→coarse."""
+    low = label.lower()
+    if "clay" in low:
+        return "#7a9bbd"
+    if "silt" in low:
+        return "#b09870"
+    if "sand" in low:
+        if "fine" in low:
+            return "#e6d099"
+        if "coarse" in low:
+            return "#bda154"
+        return "#d4b86a"
+    if "gravel" in low:
+        return "#a89a86"
+    if "cobble" in low:
+        return "#8d7660"
+    return "#cccccc"
+
+
+def _fmt_mm(value: Optional[float]) -> str:
+    return f"{value:.3f}" if value else "—"
+
+
+def _fmt_sci(value: Optional[float]) -> str:
+    return f"{value:.2e}" if value else "—"
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Small reusable building blocks
+# ─────────────────────────────────────────────────────────────────────────────
+
+class _Card(QFrame):
+    """A titled surface card with a header strip and a content body."""
+
+    def __init__(self, title: str, meta: str = "", parent=None):
+        super().__init__(parent)
+        self.setStyleSheet(
+            f"_Card {{ background: #fffdf8; border: 1px solid {C.BORDER};"
+            f" border-radius: 6px; }}"
+        )
+        root = QVBoxLayout(self)
+        root.setContentsMargins(0, 0, 0, 0)
+        root.setSpacing(0)
+
+        header = QFrame()
+        header.setStyleSheet(
+            f"QFrame {{ background: {C.BG_RAISED}; border: none;"
+            f" border-bottom: 1px solid {C.BORDER};"
+            f" border-top-left-radius: 6px; border-top-right-radius: 6px; }}"
+        )
+        hl = QHBoxLayout(header)
+        hl.setContentsMargins(10, 5, 10, 5)
+        hl.setSpacing(8)
+        title_lbl = QLabel(title.upper())
+        title_lbl.setStyleSheet(
+            f"color: {C.TEXT_MID}; font-family: '{F.UI}'; font-size: {F.SZ_SM}pt;"
+            f" font-weight: 800; letter-spacing: 0.7px; background: transparent;"
+        )
+        hl.addWidget(title_lbl)
+        hl.addStretch()
+        self._meta_label = QLabel(meta)
+        self._meta_label.setStyleSheet(
+            f"color: {C.TEXT_MUTED}; font-family: '{F.MONO}';"
+            f" font-size: {F.SZ_SM}pt; background: transparent;"
+        )
+        hl.addWidget(self._meta_label)
+        root.addWidget(header)
+
+        body_host = QWidget()
+        self.body = QVBoxLayout(body_host)
+        self.body.setContentsMargins(10, 10, 10, 10)
+        self.body.setSpacing(8)
+        root.addWidget(body_host)
+
+    def add(self, widget: QWidget) -> None:
+        self.body.addWidget(widget)
+
+    def add_layout(self, layout) -> None:
+        self.body.addLayout(layout)
+
+    def set_meta(self, text: str) -> None:
+        self._meta_label.setText(text)
+
+
+def _make_table(headers: List[str]) -> QTableWidget:
+    """A compact, non-interactive table that grows to fit its rows."""
+    table = QTableWidget(0, len(headers))
+    table.setHorizontalHeaderLabels(headers)
+    table.verticalHeader().setVisible(False)
+    table.setSelectionMode(QAbstractItemView.SelectionMode.NoSelection)
+    table.setEditTriggers(QAbstractItemView.EditTrigger.NoEditTriggers)
+    table.setFocusPolicy(Qt.FocusPolicy.NoFocus)
+    table.setShowGrid(False)
+    table.setAlternatingRowColors(True)
+    table.setWordWrap(False)
+    table.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+    table.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+    table.setStyleSheet(
+        f"QTableWidget {{ background: transparent; border: none;"
+        f" font-family: '{F.MONO}'; font-size: {F.SZ_MD}pt; color: {C.TEXT_MID};"
+        f" alternate-background-color: rgba(212,196,168,0.12); }}"
+        f"QHeaderView::section {{ background: {C.BG_RAISED}; border: none;"
+        f" border-bottom: 1px solid {C.BORDER}; padding: 3px 6px;"
+        f" font-family: '{F.UI}'; font-size: {F.SZ_SM}pt; font-weight: 800;"
+        f" color: {C.TEXT_MUTED}; }}"
+    )
+    header = table.horizontalHeader()
+    header.setHighlightSections(False)
+    header.setSectionResizeMode(0, QHeaderView.ResizeMode.Stretch)
+    for col in range(1, len(headers)):
+        header.setSectionResizeMode(col, QHeaderView.ResizeMode.ResizeToContents)
+    return table
+
+
+def _fit_table_height(table: QTableWidget) -> None:
+    """Size a table to its contents so it never scrolls inside the page."""
+    height = table.horizontalHeader().height()
+    for row in range(table.rowCount()):
+        height += table.rowHeight(row)
+    height += 2
+    table.setFixedHeight(height)
+
+
+def _cell(text: str, *, align_right: bool = False, key: bool = False,
+          muted: bool = False) -> QTableWidgetItem:
+    item = QTableWidgetItem(text)
+    flag = Qt.AlignmentFlag.AlignVCenter
+    flag |= Qt.AlignmentFlag.AlignRight if align_right else Qt.AlignmentFlag.AlignLeft
+    item.setTextAlignment(flag)
+    if key:
+        item.setForeground(QColor(C.OLIVE_DK))
+    elif muted:
+        item.setForeground(QColor(C.TEXT_MUTED))
+    return item
+
+
+class _FractionBar(QFrame):
+    """Horizontal stacked bar of detailed sub-class segments."""
 
     def __init__(self, parent=None):
         super().__init__(parent)
-        self.init_ui()
+        self.setFixedHeight(26)
+        self.setStyleSheet(
+            f"_FractionBar {{ background: {C.BG_LOW};"
+            f" border: 1px solid {C.BORDER_DK}; border-radius: 6px; }}"
+        )
+        self._lay = QHBoxLayout(self)
+        self._lay.setContentsMargins(1, 1, 1, 1)
+        self._lay.setSpacing(1)
 
-    def init_ui(self):
-        """Initialize compact info bar UI"""
-        self.setFrameStyle(QFrame.Shape.StyledPanel | QFrame.Shadow.Plain)
-        self.setStyleSheet(f"""
-            QFrame {{
-                background-color: {C.BG};
-                border: 1px solid {C.BORDER};
-                border-radius: 4px;
-                padding: 4px 12px;
-            }}
-        """)
+    def set_fractions(self, items: List[tuple]) -> None:
+        # items: list of (label, pct)
+        while self._lay.count():
+            child = self._lay.takeAt(0)
+            widget = child.widget()
+            if widget is not None:
+                widget.deleteLater()
 
-        layout = QHBoxLayout(self)
-        layout.setContentsMargins(8, 4, 8, 4)
-        layout.setSpacing(12)
-
-        # Create info label
-        self.info_label = QLabel("Load data to view statistics")
-        self.info_label.setStyleSheet(f"""
-            QLabel {{
-                font-size: {F.SZ_SM}pt;
-                font-family: "{F.MONO}";
-                color: {C.TEXT_MID};
-            }}
-        """)
-
-        layout.addWidget(self.info_label)
-        layout.addStretch()
-
-    def update_info(
-        self,
-        sample_name: str,
-        d50: float = None,
-        cu: float = None,
-        mean_k: float = None,
-        soil_type: str = "N/A",
-    ):
-        """Update the info bar with current statistics"""
-        parts = []
-
-        # Sample name
-        parts.append(f"<b>{sample_name}</b>")
-
-        # D50
-        if d50:
-            parts.append(f"D₅₀: {d50:.2f}mm")
-        else:
-            parts.append("D₅₀: N/A")
-
-        # Cu
-        if cu:
-            parts.append(f"Cu: {cu:.2f}")
-        else:
-            parts.append("Cu: N/A")
-
-        # K geometric mean
-        if mean_k:
-            parts.append(f"K geo. mean: {mean_k:.2e} m/s")
-        else:
-            parts.append("K geo. mean: Not calculated")
-
-        # Soil type
-        parts.append(f"Soil: {soil_type}")
-
-        # Join with separator
-        info_text = "  │  ".join(parts)
-
-        self.info_label.setText(info_text)
-
-
-class PercentileTableWidget(QGroupBox):
-    """
-    Table showing grain size percentiles with visual bars
-    """
-
-    def __init__(self, parent=None):
-        super().__init__("Grain Size Percentiles", parent)
-        self.init_ui()
-
-    def init_ui(self):
-        """Initialize table UI"""
-        layout = QVBoxLayout(self)
-
-        # Create table
-        self.table = QTableWidget(0, 3)
-        self.table.setHorizontalHeaderLabels(["Percentile", "Size (mm)", "Visual"])
-
-        # Configure table appearance
-        self.table.setAlternatingRowColors(True)
-        self.table.verticalHeader().setVisible(False)
-        self.table.setSelectionBehavior(QTableWidget.SelectionBehavior.SelectRows)
-        self.table.setMaximumHeight(400)
-
-        # Set column widths
-        header = self.table.horizontalHeader()
-        header.setSectionResizeMode(0, QHeaderView.ResizeMode.Fixed)
-        header.setSectionResizeMode(1, QHeaderView.ResizeMode.Fixed)
-        header.setSectionResizeMode(2, QHeaderView.ResizeMode.Stretch)
-        self.table.setColumnWidth(0, 80)
-        self.table.setColumnWidth(1, 100)
-
-        layout.addWidget(self.table)
-
-        # Info text below table
-        self.info_text = QLabel("Load data to view percentiles")
-        self.info_text.setStyleSheet(f"color: {C.TEXT_MUTED}; font-size: {F.SZ_SM}pt; font-style: italic;")
-        self.info_text.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        layout.addWidget(self.info_text)
-
-    def set_percentile_data(self, percentiles: dict):
-        """
-        Populate table with percentile data
-
-        Args:
-            percentiles: Dict mapping percentile -> size in mm
-        """
-        self.table.setRowCount(0)
-
-        if not percentiles:
-            return
-
-        # Standard percentiles to display (sorted descending)
-        standard_percentiles = [95, 90, 85, 80, 75, 70, 60, 50, 40, 30, 25, 20, 10, 5]
-
-        # Key percentiles get a star
-        key_percentiles = {10, 20, 30, 50, 60}
-
-        max_size = max(percentiles.values()) if percentiles else 1.0
-
-        for p in standard_percentiles:
-            if p not in percentiles:
-                continue
-
-            size = percentiles[p]
-            row = self.table.rowCount()
-            self.table.insertRow(row)
-
-            # Percentile column
-            percentile_text = f"D{p}"
-            if p in key_percentiles:
-                percentile_text += " ⭐"
-            percentile_item = QTableWidgetItem(percentile_text)
-            percentile_item.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
-            if p in key_percentiles:
-                percentile_item.setBackground(QColor(107, 142, 35, 30))  # Warm olive tint
-            self.table.setItem(row, 0, percentile_item)
-
-            # Size column
-            size_item = QTableWidgetItem(f"{size:.3f}")
-            size_item.setTextAlignment(
-                Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter
+        present = [(lbl, pct) for lbl, pct in items if pct > 0.05]
+        for lbl, pct in present:
+            seg = QLabel(f"{lbl} {pct:.0f}%" if pct >= 8 else "")
+            seg.setAlignment(Qt.AlignmentFlag.AlignCenter)
+            seg.setToolTip(f"{lbl}: {pct:.1f}%")
+            seg.setStyleSheet(
+                f"QLabel {{ background: {_band_color(lbl)}; color: #3a2e1c;"
+                f" font-family: '{F.UI}'; font-size: {F.SZ_SM}pt; font-weight: 800; }}"
             )
-            self.table.setItem(row, 1, size_item)
-
-            # Visual bar column
-            bar_length = int((size / max_size) * 100)
-            bar_text = "█" * (bar_length // 5)
-            bar_item = QTableWidgetItem(bar_text)
-            bar_item.setForeground(QColor(107, 142, 35))  # Olive green
-            self.table.setItem(row, 2, bar_item)
-
-        # Update info text
-        min_size = min(percentiles.values())
-        span = max_size / min_size if min_size > 0 else 0
-        self.info_text.setText(
-            f"Range: {min_size:.3f} - {max_size:.3f} mm  |  Span: {span:.1f}x"
-        )
+            self._lay.addWidget(seg, max(1, int(round(pct * 10))))
 
 
-class GradationAnalysisWidget(QGroupBox):
-    """
-    Widget showing gradation parameters and classification
-    """
+# ─────────────────────────────────────────────────────────────────────────────
+# Metric strip
+# ─────────────────────────────────────────────────────────────────────────────
+
+class _MetricStrip(QFrame):
+    """Top strip of headline metrics (sample, soil, D50, Cu, K geo. mean)."""
 
     def __init__(self, parent=None):
-        super().__init__("Gradation Analysis", parent)
-        self.init_ui()
-
-    def init_ui(self):
-        """Initialize gradation display"""
-        layout = QVBoxLayout(self)
-
-        # Text display for gradation info
-        self.text_display = QTextEdit()
-        self.text_display.setReadOnly(True)
-        self.text_display.setMaximumHeight(200)
-
-        self.text_display.setPlainText(
-            "Gradation Parameters:\n"
-            "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n\n"
-            "Load data to view gradation analysis"
+        super().__init__(parent)
+        self.setStyleSheet(
+            f"_MetricStrip {{ background: {C.BG_RAISED};"
+            f" border: 1px solid {C.BORDER}; border-radius: 6px; }}"
         )
+        self._lay = QHBoxLayout(self)
+        self._lay.setContentsMargins(0, 0, 0, 0)
+        self._lay.setSpacing(0)
+        self._values: dict[str, QLabel] = {}
+        self._subs: dict[str, QLabel] = {}
+        for spec_key, label, grow in (
+            ("sample", "Sample", True),
+            ("soil", "Soil", False),
+            ("d50", "D50", False),
+            ("cu", "Cu", False),
+            ("k", "K geo. mean", False),
+        ):
+            self._lay.addWidget(self._make_cell(spec_key, label, grow))
 
-        layout.addWidget(self.text_display)
-
-    def set_gradation_data(self, cu: float, cc: float, classification: str):
-        """Update gradation display"""
-        text = f"""Gradation Parameters:
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-
-Uniformity Coefficient (Cu): {cu:.2f}
-  └─ D60/D10 ratio
-  └─ {classification}
-
-Coefficient of Curvature (Cc): {cc:.2f}
-  └─ D30²/(D10×D60)
-  └─ {"Within range (1-3) ✓" if 1 <= cc <= 3 else "Outside typical range"}
-
-Gradation Type: Continuous distribution
-"""
-        self.text_display.setPlainText(text)
-
-
-class KStatisticsWidget(QGroupBox):
-    """
-    Widget showing hydraulic conductivity statistics
-    Contains multiple sub-panels for different analyses
-    """
-
-    def __init__(self, parent=None):
-        super().__init__("Hydraulic Conductivity Statistics", parent)
-        self.init_ui()
-
-    def init_ui(self):
-        """Initialize K-statistics display"""
-        layout = QVBoxLayout(self)
-
-        # Summary statistics table
-        self.summary_table = QTableWidget(0, 4)
-        self.summary_table.setHorizontalHeaderLabels(["Metric", "m/s", "cm/s", "m/d"])
-        self.summary_table.setMaximumHeight(250)
-        self.summary_table.verticalHeader().setVisible(False)
-        self.summary_table.setAlternatingRowColors(True)
-
-        header = self.summary_table.horizontalHeader()
-        header.setSectionResizeMode(QHeaderView.ResizeMode.Stretch)
-
-        layout.addWidget(self.summary_table)
-
-        # Method agreement section
-        self.agreement_text = QTextEdit()
-        self.agreement_text.setReadOnly(True)
-        self.agreement_text.setMaximumHeight(180)
-        self.agreement_text.setPlainText(
-            "Method Agreement Analysis:\n"
-            "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n\n"
-            "Calculate K-values to view method agreement"
+    def _make_cell(self, spec_key: str, label: str, grow: bool) -> QWidget:
+        cell = QFrame()
+        cell.setStyleSheet(f"QFrame {{ border: none; border-right: 1px solid {C.BORDER}; }}")
+        v = QVBoxLayout(cell)
+        v.setContentsMargins(12, 7, 12, 7)
+        v.setSpacing(1)
+        cap = QLabel(label.upper())
+        cap.setStyleSheet(
+            f"color: {C.TEXT_MUTED}; font-family: '{F.UI}'; font-size: {F.SZ_SM}pt;"
+            f" font-weight: 800; letter-spacing: 0.6px; border: none;"
         )
-
-        layout.addWidget(self.agreement_text)
-
-        # Permeability classification
-        self.classification_label = QLabel(
-            "Permeability Classification: Not calculated"
+        value = QLabel("—")
+        value.setStyleSheet(
+            f"color: {C.TEXT}; font-family: '{F.MONO}'; font-size: {F.SZ_LG}pt;"
+            f" font-weight: 700; border: none;"
         )
-        self.classification_label.setStyleSheet(f"""
-            font-size: {F.SZ_BASE}pt;
-            font-weight: 600;
-            color: {C.OLIVE};
-            padding: 8px;
-            background-color: rgba(107,142,35,0.06);
-            border: 1px solid {C.OLIVE_DK};
-            border-radius: 4px;
-        """)
-        self.classification_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        layout.addWidget(self.classification_label)
-
-
-class DataQualityWidget(QGroupBox):
-    """
-    Widget showing data quality indicators
-    """
-
-    def __init__(self, parent=None):
-        super().__init__("Data Quality Assessment", parent)
-        self.init_ui()
-
-    def init_ui(self):
-        """Initialize quality display"""
-        layout = QVBoxLayout(self)
-
-        self.quality_text = QTextEdit()
-        self.quality_text.setReadOnly(True)
-        self.quality_text.setMaximumHeight(150)
-
-        self.quality_text.setPlainText(
-            "Data Quality Indicators:\n"
-            "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n\n"
-            "✓ Curve Monotonicity      Excellent\n"
-            "✓ Data Coverage           Good\n"
-            "✓ Point Density           Adequate\n\n"
-            "Overall Quality: ★★★★☆ (Good)"
+        sub = QLabel("")
+        sub.setStyleSheet(
+            f"color: {C.TEXT_MUTED}; font-family: '{F.MONO}'; font-size: {F.SZ_SM}pt;"
+            f" border: none;"
         )
+        v.addWidget(cap)
+        v.addWidget(value)
+        v.addWidget(sub)
+        self._values[spec_key] = value
+        self._subs[spec_key] = sub
+        if grow:
+            cell.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Preferred)
+        return cell
 
-        layout.addWidget(self.quality_text)
-
-    def update_dataset(self, dataset: GrainSizeData) -> None:
-        sizes = [float(v) for v in getattr(dataset, "particle_sizes", []) or [] if v is not None]
-        passing = [float(v) for v in getattr(dataset, "percent_passing", []) or [] if v is not None]
-        pairs = sorted(
-            [(s, p) for s, p in zip(sizes, passing) if s > 0],
-            key=lambda pair: pair[0],
-        )
-        if not pairs:
-            self.quality_text.setPlainText(
-                "Data quality basis:\n"
-                "No valid particle-size / percent-passing pairs were found."
-            )
+    def update_metric(self, key: str, value: str, sub: str = "",
+                      color: Optional[str] = None) -> None:
+        if key not in self._values:
             return
-
-        sorted_sizes = [s for s, _ in pairs]
-        sorted_passing = [p for _, p in pairs]
-        reversals = sum(
-            1
-            for i in range(len(sorted_passing) - 1)
-            if sorted_passing[i] > sorted_passing[i + 1] + 1e-9
-        )
-        point_count = len(pairs)
-        min_size = min(sorted_sizes)
-        max_size = max(sorted_sizes)
-        range_ratio = max_size / min_size if min_size > 0 else 0.0
-
-        monotonicity = "OK" if reversals == 0 else f"Check ({reversals} reversal{'s' if reversals != 1 else ''})"
-        coverage = "Broad" if range_ratio >= 100 else "Moderate" if range_ratio >= 20 else "Limited"
-        density = "Good" if point_count >= 10 else "Adequate" if point_count >= 6 else "Sparse"
-        if reversals == 0 and point_count >= 6:
-            overall = "Usable"
-        elif reversals == 0:
-            overall = "Usable, sparse"
-        else:
-            overall = "Needs review"
-
-        self.quality_text.setPlainText(
-            "Data quality basis:\n"
-            "Based on the loaded gradation curve only.\n\n"
-            f"Monotonicity: {monotonicity}\n"
-            f"Size coverage: {coverage} ({min_size:.4g}-{max_size:.4g} mm)\n"
-            f"Point density: {density} ({point_count} points)\n\n"
-            f"Overall assessment: {overall}\n"
-            "This does not validate laboratory procedure or sample representativeness."
-        )
+        self._values[key].setText(value)
+        if color:
+            self._values[key].setStyleSheet(
+                f"color: {color}; font-family: '{F.MONO}'; font-size: {F.SZ_LG}pt;"
+                f" font-weight: 700; border: none;"
+            )
+        self._subs[key].setText(sub)
 
 
-class SoilClassificationWidget(QGroupBox):
-    """
-    Widget showing USCS soil classification and properties
-    """
-
-    def __init__(self, parent=None):
-        super().__init__("USCS Soil Classification", parent)
-        self.init_ui()
-
-    def init_ui(self):
-        """Initialize classification display"""
-        layout = QVBoxLayout(self)
-
-        self.classification_text = QTextEdit()
-        self.classification_text.setReadOnly(True)
-        self.classification_text.setMaximumHeight(150)
-
-        self.classification_text.setPlainText(
-            "USCS Classification:\n"
-            "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n\n"
-            "Load data to view soil classification"
-        )
-
-        layout.addWidget(self.classification_text)
-
+# ─────────────────────────────────────────────────────────────────────────────
+# Statistics tab
+# ─────────────────────────────────────────────────────────────────────────────
 
 class StatisticsTab(QWidget):
-    """
-    Enhanced statistics tab with modular design
+    """Per-sample descriptive statistics summary (read-only)."""
 
-    Phase 1: Layout and visual structure complete
-    Future phases will add data calculation and advanced features
-    """
-
-    # Signals
     statistics_updated = pyqtSignal()
 
     def __init__(self, dataset: GrainSizeData, parent=None):
         super().__init__(parent)
-
         self.dataset = dataset
         self.k_results: Optional[List[KCalculationResult]] = None
         self._scheme = ISO14688
+        self._calc = KCalculator()
 
-        # Get temperature and porosity from dataset
         self.temperature = dataset.temperature
         self.porosity = (
             dataset.current_porosity
-            if hasattr(dataset, "current_porosity")
+            if getattr(dataset, "current_porosity", None) is not None
             else dataset.porosity
         )
 
-        self.init_ui()
+        self._build_ui()
+        self.update_display()
 
-    def init_ui(self):
-        """Initialize the statistics tab UI with comprehensive grain analysis panels"""
-        outer_layout = QVBoxLayout(self)
-        outer_layout.setContentsMargins(0, 0, 0, 0)
-        outer_layout.setSpacing(0)
+    # ── UI construction ────────────────────────────────────────────────────
+
+    def _build_ui(self) -> None:
+        outer = QVBoxLayout(self)
+        outer.setContentsMargins(0, 0, 0, 0)
+        outer.setSpacing(0)
 
         scroll = QScrollArea()
         scroll.setWidgetResizable(True)
         scroll.setFrameShape(QFrame.Shape.NoFrame)
-        scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
         scroll.setStyleSheet("QScrollArea { background: transparent; border: none; }")
 
         content = QWidget()
-        layout = QVBoxLayout(content)
-        layout.setContentsMargins(8, 8, 8, 8)
-        layout.setSpacing(8)
+        col = QVBoxLayout(content)
+        col.setContentsMargins(8, 8, 8, 8)
+        col.setSpacing(8)
 
-        # 1. COMPACT INFO BAR (Top)
-        info_bar = self.create_summary_bar()
-        layout.addWidget(info_bar)
+        # 1. Metric strip
+        self.info_bar = _MetricStrip()
+        col.addWidget(self.info_bar)
 
-        # 2. GRAIN SIZE ANALYSIS SECTION (2x2 grid)
-        grain_analysis_section = self.create_grain_analysis_section()
-        layout.addWidget(grain_analysis_section)
+        # 2. Key grain distribution
+        self.distribution_card = self._build_distribution_card()
+        col.addWidget(self.distribution_card)
 
-        # 3. SPECIAL DIAMETERS & ENVIRONMENTAL PARAMETERS (side-by-side)
-        special_env_section = self.create_special_env_section()
-        layout.addWidget(special_env_section)
+        # 3. Classification & fractions
+        self.classification_card = self._build_classification_card()
+        col.addWidget(self.classification_card)
 
-        # 4. K-STATISTICS & CLASSIFICATION (side-by-side)
-        k_stats_section = self.create_k_stats_section()
-        layout.addWidget(k_stats_section)
+        # 4. Hydraulic conductivity summary
+        self.k_summary_card = self._build_k_summary_card()
+        col.addWidget(self.k_summary_card)
 
-        # 5. EXPORT BUTTONS
-        button_layout = self.create_export_buttons()
-        layout.addLayout(button_layout)
-        layout.addStretch(1)
+        # 5. Interpretation + data support + context (three columns)
+        col.addLayout(self._build_lower_row())
 
+        # 6. Calculation internals (collapsed by default)
+        self.internals_section = self._build_internals_section()
+        col.addWidget(self.internals_section)
+
+        col.addStretch(1)
         scroll.setWidget(content)
-        outer_layout.addWidget(scroll)
+        outer.addWidget(scroll)
 
-        # Initial display with placeholder data
-        self.update_display()
+    def _build_distribution_card(self) -> _Card:
+        card = _Card("Key Grain Distribution", "mm")
 
-    def create_summary_bar(self) -> CompactInfoBar:
-        """Create compact single-line info bar"""
-        self.info_bar = CompactInfoBar()
-        return self.info_bar
+        # D-facts (D10/D30/D60/D90)
+        facts = QHBoxLayout()
+        facts.setSpacing(8)
+        self._fact_labels: dict[int, QLabel] = {}
+        for p, sub in ((10, "effective size"), (30, "shape control"),
+                       (60, "uniformity basis"), (90, "coarse tail")):
+            facts.addWidget(self._make_fact(p, sub))
+        card.add_layout(facts)
 
-    def create_grain_analysis_section(self) -> QWidget:
-        """Create 2x2 grid with grain size percentiles and gradation parameters"""
-        widget = QWidget()
-        main_layout = QHBoxLayout(widget)
-        main_layout.setSpacing(8)
+        # "Used by" table
+        self._used_by_table = _make_table(["Percentile", "Size", "Used by"])
+        card.add(self._used_by_table)
 
-        # Left side: Grain Size Percentiles + Percentile Usage Reference
-        left_side = QWidget()
-        left_layout = QHBoxLayout(left_side)
-        left_layout.setSpacing(8)
+        # Full percentile grid
+        grid_host = QWidget()
+        self._pct_grid = QGridLayout(grid_host)
+        self._pct_grid.setContentsMargins(0, 0, 0, 0)
+        self._pct_grid.setSpacing(1)
+        self._pct_value_labels: dict[int, QLabel] = {}
+        for idx, p in enumerate(_STD_PERCENTILES):
+            r, c = divmod(idx, 6)
+            self._pct_grid.addWidget(self._make_pct_cell(p), r, c)
+        card.add(grid_host)
+        return card
 
-        # Percentiles values
-        percentiles_group = QGroupBox("Grain Size Percentiles")
-        percentiles_layout = QVBoxLayout(percentiles_group)
-
-        self.percentiles_text = QTextEdit()
-        self.percentiles_text.setReadOnly(True)
-        self.percentiles_text.setMinimumHeight(200)
-        self.percentiles_text.setPlainText(
-            "Calculate K-values to see grain size percentiles"
+    def _make_fact(self, percentile: int, sub: str) -> QFrame:
+        frame = QFrame()
+        frame.setStyleSheet(
+            f"QFrame {{ background: {C.BG}; border: 1px solid {C.BORDER};"
+            f" border-radius: 6px; }}"
         )
-        percentiles_layout.addWidget(self.percentiles_text)
-
-        left_layout.addWidget(percentiles_group, 50)
-
-        # Percentile usage reference
-        usage_group = QGroupBox("Percentile Usage by Methods")
-        usage_layout = QVBoxLayout(usage_group)
-
-        self.percentile_usage_text = QTextEdit()
-        self.percentile_usage_text.setReadOnly(True)
-        self.percentile_usage_text.setMinimumHeight(200)
-        usage_ref = f"""<pre style='font-family: {F.MONO}, monospace; font-size: {F.SZ_SM}pt;'>
-<b>Percentile Usage by Methods:</b>
-
-<b>D₅:</b>   Barr
-<b>D₁₀:</b>  Hazen, Hazen_1892, Slichter,
-       Terzaghi, Beyer, Kozeny-Carman,
-       Zunker, Zamarin, Chapuis,
-       Alyamani-Sen
-
-<b>D₁₆:</b>  Sorting Coefficient (σ)
-<b>D₁₇:</b>  Sauerbrei
-<b>D₂₀:</b>  USBR, Beyer (fallback)
-<b>D₃₀:</b>  Cu, Cc calculations
-<b>D₅₀:</b>  Kruger, Alyamani-Sen,
-       Shepherd
-
-<b>D₆₀:</b>  Beyer, Barr, Cu calculation
-<b>D₈₄:</b>  Sorting Coefficient (σ),
-       Krumbein-Monk
-<b>D₉₅:</b>  Krumbein-Monk
-</pre>"""
-        self.percentile_usage_text.setHtml(usage_ref)
-        usage_layout.addWidget(self.percentile_usage_text)
-
-        left_layout.addWidget(usage_group, 50)
-
-        main_layout.addWidget(left_side, 50)
-
-        # Right side: Gradation Parameters + Classification Criteria
-        right_side = QWidget()
-        right_layout = QHBoxLayout(right_side)
-        right_layout.setSpacing(8)
-
-        # Gradation parameters
-        gradation_group = QGroupBox("Gradation Parameters")
-        gradation_layout = QVBoxLayout(gradation_group)
-
-        self.gradation_text = QTextEdit()
-        self.gradation_text.setReadOnly(True)
-        self.gradation_text.setMinimumHeight(200)
-        self.gradation_text.setPlainText(
-            "Calculate K-values to see gradation parameters"
+        v = QVBoxLayout(frame)
+        v.setContentsMargins(9, 8, 9, 8)
+        v.setSpacing(1)
+        cap = QLabel(f"D{percentile}")
+        cap.setStyleSheet(
+            f"color: {C.TEXT_MUTED}; font-family: '{F.UI}'; font-size: {F.SZ_SM}pt;"
+            f" font-weight: 800; border: none;"
         )
-        gradation_layout.addWidget(self.gradation_text)
-
-        right_layout.addWidget(gradation_group, 50)
-
-        # Classification criteria
-        criteria_group = QGroupBox("Classification Criteria")
-        criteria_layout = QVBoxLayout(criteria_group)
-
-        self.classification_criteria_text = QTextEdit()
-        self.classification_criteria_text.setReadOnly(True)
-        self.classification_criteria_text.setMinimumHeight(200)
-        criteria_ref = f"""<pre style='font-family: {F.MONO}, monospace; font-size: {F.SZ_SM}pt;'>
-<b>Classification Criteria:</b>
-
-<b>Uniformity Coefficient (Cu):</b>
-  Cu &lt; 4      → Uniform
-  4 ≤ Cu &lt; 6  → Moderately graded
-  Cu ≥ 6      → Well-graded
-
-<b>Coefficient of Curvature (Cc):</b>
-  1 ≤ Cc ≤ 3  → Well-graded range
-  Outside     → Gap/poorly graded
-
-<b>Sorting Coefficient (σ):</b>
-  σ &lt; 2       → Well sorted
-  2 ≤ σ &lt; 4   → Moderately sorted
-  σ ≥ 4       → Poorly sorted
-</pre>"""
-        self.classification_criteria_text.setHtml(criteria_ref)
-        criteria_layout.addWidget(self.classification_criteria_text)
-
-        right_layout.addWidget(criteria_group, 50)
-
-        main_layout.addWidget(right_side, 50)
-
-        return widget
-
-    def create_special_env_section(self) -> QWidget:
-        """Create section with special method diameters and environmental parameters"""
-        widget = QWidget()
-        layout = QHBoxLayout(widget)
-        layout.setSpacing(8)
-
-        # Special Method Diameters
-        special_group = QGroupBox("Special Method Diameters")
-        special_layout = QVBoxLayout(special_group)
-
-        self.special_diameters_text = QTextEdit()
-        self.special_diameters_text.setReadOnly(True)
-        self.special_diameters_text.setMinimumHeight(120)
-        self.special_diameters_text.setPlainText(
-            "Calculate K-values to see special method diameters"
+        value = QLabel("—")
+        value.setStyleSheet(
+            f"color: {C.TEXT}; font-family: '{F.MONO}'; font-size: 16pt;"
+            f" font-weight: 700; border: none;"
         )
-        special_layout.addWidget(self.special_diameters_text)
-
-        layout.addWidget(special_group, 60)
-
-        # Environmental Parameters (READ-ONLY)
-        env_group = QGroupBox("Environmental Parameters")
-        env_layout = QVBoxLayout(env_group)
-
-        self.env_text = QTextEdit()
-        self.env_text.setReadOnly(True)
-        self.env_text.setMinimumHeight(120)
-        env_layout.addWidget(self.env_text)
-
-        # Populate environmental parameters immediately
-        self.update_environmental_parameters()
-
-        layout.addWidget(env_group, 40)
-
-        return widget
-
-    def create_k_stats_section(self) -> QWidget:
-        """Create K-statistics and classification section"""
-        widget = QWidget()
-        layout = QHBoxLayout(widget)
-        layout.setSpacing(8)
-
-        # K-Statistics Widget
-        self.k_stats_widget = KStatisticsWidget()
-        layout.addWidget(self.k_stats_widget, 60)
-
-        # Right side: Quality + Classification stacked
-        right_side = QWidget()
-        right_layout = QVBoxLayout(right_side)
-        right_layout.setSpacing(8)
-
-        self.quality_widget = DataQualityWidget()
-        self.classification_widget = SoilClassificationWidget()
-
-        right_layout.addWidget(self.quality_widget)
-        right_layout.addWidget(self.classification_widget)
-
-        layout.addWidget(right_side, 40)
-
-        return widget
-
-    def create_left_panel(self) -> QWidget:
-        """Create left panel with grain size statistics"""
-        widget = QWidget()
-        layout = QVBoxLayout(widget)
-        layout.setContentsMargins(0, 0, 0, 0)
-        layout.setSpacing(8)
-
-        # Percentile table
-        self.percentile_table = PercentileTableWidget()
-        layout.addWidget(self.percentile_table)
-
-        # Gradation analysis
-        self.gradation_widget = GradationAnalysisWidget()
-        layout.addWidget(self.gradation_widget)
-
-        # NOTE: Porosity Settings have been moved to the Results tab
-        # for better UX (edit porosity next to K-value calculations)
-
-        layout.addStretch()
-
-        return widget
-
-    def create_right_panel(self) -> QWidget:
-        """Create right panel with K-statistics"""
-        widget = QWidget()
-        layout = QVBoxLayout(widget)
-        layout.setContentsMargins(0, 0, 0, 0)
-
-        self.k_stats_widget = KStatisticsWidget()
-        layout.addWidget(self.k_stats_widget, 1)
-
-        return widget
-
-    def create_export_buttons(self) -> QHBoxLayout:
-        """Create export button row"""
-        layout = QHBoxLayout()
-
-        export_excel_btn = QPushButton("Export to Excel")
-        export_excel_btn.clicked.connect(self.export_to_excel)
-
-        export_csv_btn = QPushButton("Export to CSV")
-        export_csv_btn.clicked.connect(self.export_to_csv)
-
-        copy_btn = QPushButton("Copy Statistics")
-        copy_btn.clicked.connect(self.copy_to_clipboard)
-
-        layout.addWidget(export_excel_btn)
-        layout.addWidget(export_csv_btn)
-        layout.addWidget(copy_btn)
-        layout.addStretch()
-
-        return layout
-
-    # ===== DATA UPDATE METHODS =====
-
-    def update_display(self):
-        """Update all display widgets with current data"""
-        # Update info bar
-        self.update_summary_bar()
-
-        # Update comprehensive grain analysis panels
-        self.update_grain_analysis_panels()
-
-        # Update K-statistics if available
-        if self.k_results:
-            self.update_k_statistics()
-
-        # Update soil classification
-        self.update_soil_classification()
-
-        # Update data-quality basis text
-        self.quality_widget.update_dataset(self.dataset)
-
-    def update_summary_bar(self):
-        """Update the compact info bar at the top"""
-        d50 = self.dataset.get_d50()
-
-        # Cu
-        d10 = self.dataset.get_d10()
-        d60 = self.dataset.get_d60()
-        cu = None
-        if d10 and d60 and d10 > 0:
-            cu = d60 / d10
-
-        # K geometric mean (if calculated)
-        mean_k = None
-        if self.k_results:
-            summary = build_k_result_summary(
-                self.k_results,
-                dataset_name=self.dataset.sample_name,
-                group_name=getattr(self.dataset, "group_name", "Ungrouped"),
-            )
-            mean_k = summary.geometric_mean_m_s
-
-        soil_type = self.dataset.classify(scheme=self._scheme).label
-
-        # Update info bar
-        self.info_bar.update_info(
-            sample_name=self.dataset.sample_name,
-            d50=d50,
-            cu=cu,
-            mean_k=mean_k,
-            soil_type=soil_type,
+        sublbl = QLabel(sub)
+        sublbl.setStyleSheet(
+            f"color: {C.TEXT_MUTED}; font-family: '{F.UI}'; font-size: {F.SZ_SM}pt;"
+            f" border: none;"
         )
+        v.addWidget(cap)
+        v.addWidget(value)
+        v.addWidget(sublbl)
+        self._fact_labels[percentile] = value
+        return frame
 
-    # NOTE: update_percentile_table() and update_gradation() have been replaced
-    # by update_grain_analysis_panels() which handles all grain analysis updates
+    def _make_pct_cell(self, percentile: int) -> QFrame:
+        is_key = percentile in _KEY_PERCENTILES
+        frame = QFrame()
+        bg = "rgba(107,142,35,0.06)" if is_key else "#fffdf8"
+        frame.setStyleSheet(
+            f"QFrame {{ background: {bg}; border: 1px solid {C.BORDER}; }}"
+        )
+        v = QVBoxLayout(frame)
+        v.setContentsMargins(7, 5, 7, 5)
+        v.setSpacing(2)
+        cap = QLabel(f"D{percentile}")
+        cap.setStyleSheet(
+            f"color: {C.OLIVE_DK if is_key else C.TEXT_MUTED};"
+            f" font-family: '{F.MONO}'; font-size: {F.SZ_SM}pt; font-weight: 800;"
+            f" border: none;"
+        )
+        value = QLabel("—")
+        value.setStyleSheet(
+            f"color: {C.TEXT}; font-family: '{F.MONO}'; font-size: {F.SZ_MD}pt;"
+            f" font-weight: 600; border: none;"
+        )
+        v.addWidget(cap)
+        v.addWidget(value)
+        self._pct_value_labels[percentile] = value
+        return frame
 
-    def update_k_statistics(self):
-        """Update K-statistics display"""
+    def _build_classification_card(self) -> _Card:
+        card = _Card("Classification & Fractions", "")
+
+        self._class_label = self._make_def_row("Label")
+        self._descriptor_label = self._make_def_row("Descriptor")
+        card.add(self._class_label["row"])
+        card.add(self._descriptor_label["row"])
+
+        self._fraction_bar = _FractionBar()
+        card.add(self._fraction_bar)
+
+        self._detail_table = _make_table(["Sub-class", "Range (mm)", "%"])
+        card.add(self._detail_table)
+
+        # Cu / Cc / sorting / span strip
+        strip = QHBoxLayout()
+        strip.setSpacing(8)
+        self._grad_labels: dict[str, QLabel] = {}
+        self._grad_subs: dict[str, QLabel] = {}
+        for key, label in (("cu", "Cu"), ("cc", "Cc"),
+                           ("sorting", "Sorting"), ("span", "Span")):
+            strip.addWidget(self._make_grad_stat(key, label))
+        card.add_layout(strip)
+        return card
+
+    def _make_def_row(self, caption: str) -> dict:
+        row = QWidget()
+        h = QHBoxLayout(row)
+        h.setContentsMargins(0, 0, 0, 0)
+        h.setSpacing(8)
+        cap = QLabel(caption)
+        cap.setFixedWidth(90)
+        cap.setStyleSheet(
+            f"color: {C.TEXT_MUTED}; font-family: '{F.UI}'; font-size: {F.SZ_SM}pt;"
+            f" font-weight: 800; letter-spacing: 0.4px;"
+        )
+        value = QLabel("—")
+        value.setWordWrap(True)
+        value.setStyleSheet(
+            f"color: {C.TEXT}; font-family: '{F.UI}'; font-size: {F.SZ_MD}pt;"
+            f" font-weight: 600;"
+        )
+        h.addWidget(cap)
+        h.addWidget(value, 1)
+        return {"row": row, "caption": cap, "value": value}
+
+    def _make_grad_stat(self, key: str, label: str) -> QFrame:
+        frame = QFrame()
+        frame.setStyleSheet(
+            f"QFrame {{ background: {C.BG}; border: 1px solid {C.BORDER};"
+            f" border-radius: 6px; }}"
+        )
+        h = QHBoxLayout(frame)
+        h.setContentsMargins(10, 6, 10, 6)
+        h.setSpacing(8)
+        left = QVBoxLayout()
+        left.setSpacing(1)
+        cap = QLabel(label)
+        cap.setStyleSheet(
+            f"color: {C.TEXT_MUTED}; font-family: '{F.UI}'; font-size: {F.SZ_SM}pt;"
+            f" font-weight: 800; border: none;"
+        )
+        sub = QLabel("")
+        sub.setStyleSheet(
+            f"color: {C.TEXT_MUTED}; font-family: '{F.UI}'; font-size: {F.SZ_SM}pt;"
+            f" border: none;"
+        )
+        left.addWidget(cap)
+        left.addWidget(sub)
+        value = QLabel("—")
+        value.setStyleSheet(
+            f"color: {C.TEXT}; font-family: '{F.MONO}'; font-size: 15px;"
+            f" font-weight: 700; border: none;"
+        )
+        h.addLayout(left)
+        h.addStretch()
+        h.addWidget(value)
+        self._grad_labels[key] = value
+        self._grad_subs[key] = sub
+        return frame
+
+    def _build_k_summary_card(self) -> _Card:
+        card = _Card("Hydraulic Conductivity Summary", "aggregates from Results")
+        self._k_table = _make_table(["Statistic", "m/s", "cm/s", "m/d"])
+        card.add(self._k_table)
+        self._k_note = QLabel("Calculate K-values to see the aggregate summary.")
+        self._k_note.setStyleSheet(
+            f"color: {C.TEXT_MUTED}; font-family: '{F.UI}'; font-size: {F.SZ_SM}pt;"
+            f" font-style: italic;"
+        )
+        card.add(self._k_note)
+        return card
+
+    def _build_lower_row(self) -> QHBoxLayout:
+        row = QHBoxLayout()
+        row.setSpacing(8)
+
+        # Interpretation
+        self.interpretation_card = _Card("Interpretation", "")
+        self._interp_host = QVBoxLayout()
+        self._interp_host.setSpacing(6)
+        self.interpretation_card.add_layout(self._interp_host)
+        row.addWidget(self.interpretation_card, 5)
+
+        # Data support
+        self.quality_card = _Card("Data Support", "curve coverage")
+        self._support_table = _make_table(["Check", "Value"])
+        self.quality_card.add(self._support_table)
+        row.addWidget(self.quality_card, 3)
+
+        # Calculation context
+        self.context_card = _Card("Calculation Context", "")
+        self._context_table = _make_table(["Parameter", "Value"])
+        self.context_card.add(self._context_table)
+        row.addWidget(self.context_card, 3)
+        return row
+
+    def _build_internals_section(self) -> CollapsibleSection:
+        section = CollapsibleSection(
+            "Calculation Internals", "fa6s.gears",
+            CollapsibleSection.EARTH, expanded=False,
+        )
+        grid_host = QWidget()
+        grid = QGridLayout(grid_host)
+        grid.setContentsMargins(0, 6, 0, 0)
+        grid.setSpacing(8)
+
+        self._const_table = _make_table(["Physical constant", "Value"])
+        self._diam_table = _make_table(["Effective diameter", "Value"])
+        self._phi_table = _make_table(["Sorting / φ", "Value"])
+        self._poro_table = _make_table(["Porosity function", "Value"])
+
+        grid.addWidget(self._wrap_subcard(TITLE_CONSTANTS, self._const_table), 0, 0)
+        grid.addWidget(self._wrap_subcard(TITLE_DIAMETERS, self._diam_table), 0, 1)
+        grid.addWidget(self._wrap_subcard(TITLE_SORTING, self._phi_table), 1, 0)
+        grid.addWidget(self._wrap_subcard(TITLE_POROSITY, self._poro_table), 1, 1)
+        section.add_widget(grid_host)
+        return section
+
+    def _wrap_subcard(self, title: str, table: QTableWidget) -> QFrame:
+        frame = QFrame()
+        frame.setStyleSheet(
+            f"QFrame {{ background: #fffdf8; border: 1px solid {C.BORDER};"
+            f" border-radius: 6px; }}"
+        )
+        v = QVBoxLayout(frame)
+        v.setContentsMargins(8, 6, 8, 8)
+        v.setSpacing(4)
+        cap = QLabel(title.upper())
+        cap.setStyleSheet(
+            f"color: {C.TEXT_MUTED}; font-family: '{F.UI}'; font-size: {F.SZ_SM}pt;"
+            f" font-weight: 800; letter-spacing: 0.5px; border: none;"
+        )
+        v.addWidget(cap)
+        v.addWidget(table)
+        return frame
+
+    # ── Data plumbing ──────────────────────────────────────────────────────
+
+    def _grain_data(self) -> dict:
+        return {
+            "particle_sizes": list(self.dataset.particle_sizes or []),
+            "percent_passing": list(self.dataset.percent_passing or []),
+        }
+
+    def _percentiles(self, grain_data: dict) -> dict:
+        out: dict[int, float] = {}
+        for p in _STD_PERCENTILES:
+            value = self._calc._interpolate_percentile(grain_data, float(p))
+            if value:
+                out[p] = value
+        return out
+
+    def _k_summary(self) -> Optional[AggregateStats]:
         if not self.k_results:
-            return
-
+            return None
         summary = build_k_result_summary(
             self.k_results,
             dataset_name=self.dataset.sample_name,
             group_name=getattr(self.dataset, "group_name", "Ungrouped"),
         )
         if summary.geometric_mean_m_s is None:
-            return
+            return None
+        return summary
 
-        # Populate summary table
-        table = self.k_stats_widget.summary_table
-        table.setRowCount(0)
+    # ── Public API (kept stable for callers) ───────────────────────────────
 
-        metrics = [
-            ("Geometric Mean", summary.geometric_mean_m_s),
-            ("Arithmetic Mean", summary.arithmetic_mean_m_s),
-            ("Median", summary.median_m_s),
-            ("Std Dev", summary.std_dev_m_s),
-            ("Min", summary.min_m_s),
-            ("Max", summary.max_m_s),
-        ]
-
-        for metric_name, value in metrics:
-            if value is None:
-                continue
-            row = table.rowCount()
-            table.insertRow(row)
-
-            table.setItem(row, 0, QTableWidgetItem(metric_name))
-            table.setItem(row, 1, QTableWidgetItem(f"{value:.2e}"))
-            table.setItem(row, 2, QTableWidgetItem(f"{value * 100:.3e}"))
-            table.setItem(row, 3, QTableWidgetItem(f"{value * 86400:.1f}"))
-
-        # Update classification from the aggregate geometric mean.
-        classification = _perm_class(summary.geometric_mean_m_s)
-        self.k_stats_widget.classification_label.setText(
-            f"Permeability: {classification}"
-        )
-        self.k_stats_widget.agreement_text.setPlainText(
-            "Method Agreement Analysis:\n"
-            "--------------------------------\n\n"
-            f"Included methods: {summary.included_count} / {summary.total_cells}\n"
-            f"Warnings excluded: {summary.warning_count}\n"
-            f"Errors excluded: {summary.error_count}\n"
-            f"ln(K) standard deviation: {summary.ln_std_dev:.3f}"
-            if summary.ln_std_dev is not None
-            else "Method Agreement Analysis:\n--------------------------------\n\nNo included K-values."
-        )
-
-    def update_soil_classification(self):
-        """Update soil classification display"""
-        result = self.dataset.classify(scheme=self._scheme)
-        f = result.fractions
-        text = (
-            f"{result.scheme.name} Classification:\n"
-            f"{'─' * 35}\n\n"
-            f"Primary type:  {result.primary_type}\n"
-            f"Gradation:     {result.gradation or '—'}\n"
-        )
-        if result.uscs_symbol:
-            text += f"USCS symbol:   {result.uscs_symbol}\n"
-        text += (
-            f"\nLabel: {result.label}\n\n"
-            f"Grain fractions:\n"
-            f"  Clay:   {f.clay_pct:.1f}%\n"
-            f"  Silt:   {f.silt_pct:.1f}%\n"
-            f"  Sand:   {f.sand_pct:.1f}%\n"
-            f"  Gravel: {f.gravel_pct:.1f}%\n"
-            f"  Cobble: {f.cobble_pct:.1f}%\n\n"
-            f"Cu: {result.cu_label}  |  Cc: {result.cc_label}\n"
-        )
-        self.classification_widget.classification_text.setPlainText(text)
-
-    def set_scheme(self, scheme):
-        """Set the active classification scheme and refresh classification displays."""
+    def set_scheme(self, scheme) -> None:
         self._scheme = scheme
-        self.update_soil_classification()
-        self.update_summary_bar()
-
-    def set_k_results(self, results: List[KCalculationResult]):
-        """Set K-calculation results and update display"""
-        self.k_results = results
-        self.update_grain_analysis_panels()  # Update comprehensive grain analysis panels
         self.update_display()
 
-    # NOTE: Porosity management methods have been moved to DatasetTab (Results tab)
-    # where they can directly trigger K-value recalculation
+    def set_k_results(self, results: List[KCalculationResult]) -> None:
+        self.k_results = results
+        self.update_display()
 
-    # ===== GRAIN ANALYSIS UPDATE METHODS =====
+    def update_display(self) -> None:
+        grain_data = self._grain_data()
+        percentiles = self._percentiles(grain_data)
+        result = self.dataset.classify(scheme=self._scheme)
+        summary = self._k_summary()
 
-    def update_environmental_parameters(self):
-        """Update environmental parameters display (READ-ONLY)"""
-        text = f"Temperature: {self.temperature}°C\n"
+        self._update_metric_strip(percentiles, result, summary)
+        self._update_distribution(percentiles)
+        self._update_classification(result, percentiles)
+        self._update_k_summary(summary)
+        self._update_interpretation(result, summary)
+        self._update_data_support()
+        self._update_context(summary)
+        self._update_internals()
+
+        self.statistics_updated.emit()
+
+    # ── Section updates ────────────────────────────────────────────────────
+
+    def _update_metric_strip(self, percentiles, result, summary) -> None:
+        n_points = len(self.dataset.particle_sizes or [])
+        self.info_bar.update_metric(
+            "sample", self.dataset.sample_name, f"{n_points} gradation points")
+        soil_sub = result.detailed_class.lower() if result.detailed_class != "—" else result.scheme.name
+        self.info_bar.update_metric("soil", result.label or "—", soil_sub, color=C.OLIVE_DK)
+
+        d50 = percentiles.get(50)
+        self.info_bar.update_metric("d50", f"{d50:.3f} mm" if d50 else "—",
+                                    result.detailed_class.lower() if result.detailed_class != "—" else "")
+
+        d10, d60 = percentiles.get(10), percentiles.get(60)
+        cu = d60 / d10 if d10 and d60 else None
+        self.info_bar.update_metric("cu", f"{cu:.2f}" if cu else "—",
+                                    result.cu_label if cu else "")
+
+        if summary:
+            self.info_bar.update_metric(
+                "k", _fmt_sci(summary.geometric_mean_m_s),
+                f"m/s · {summary.included_count} OK methods", color=C.K_BLUE)
+        else:
+            self.info_bar.update_metric("k", "—", "not calculated")
+
+    def _update_distribution(self, percentiles) -> None:
+        for p, lbl in self._fact_labels.items():
+            value = percentiles.get(p)
+            lbl.setText(f"{value:.3f}" if value else "—")
+
+        self._used_by_table.setRowCount(0)
+        for p, used_by in _PCT_USED_BY:
+            value = percentiles.get(p)
+            row = self._used_by_table.rowCount()
+            self._used_by_table.insertRow(row)
+            is_key = p in _KEY_PERCENTILES
+            self._used_by_table.setItem(row, 0, _cell(f"D{p}", key=is_key))
+            self._used_by_table.setItem(
+                row, 1, _cell(f"{value:.3f} mm" if value else "—", align_right=True, key=is_key))
+            self._used_by_table.setItem(row, 2, _cell(used_by, align_right=True))
+        _fit_table_height(self._used_by_table)
+
+        for p, lbl in self._pct_value_labels.items():
+            value = percentiles.get(p)
+            lbl.setText(f"{value:.3f}" if value else "—")
+
+    def _update_classification(self, result, percentiles) -> None:
+        detailed = result.detailed_fractions or ()
+
+        self.classification_card.set_meta(self._scheme_short_name(result.scheme))
+        self._class_label["value"].setText(result.label or "—")
+
+        d50 = percentiles.get(50)
+        d10 = percentiles.get(10)
+        d60 = percentiles.get(60)
+        cu = d60 / d10 if d10 and d60 else None
+        descriptor = sedimentology_descriptor(result.fractions, d50, cu, self._scheme)
+        self._descriptor_label["value"].setText(descriptor or "—")
+
+        self._fraction_bar.set_fractions([(d.label, d.pct) for d in detailed])
+
+        self._detail_table.setRowCount(0)
+        for d in detailed:
+            row = self._detail_table.rowCount()
+            self._detail_table.insertRow(row)
+            is_dom = d.label == result.detailed_class
+            zero = d.pct <= 0.0
+            self._detail_table.setItem(row, 0, _cell(d.label, key=is_dom, muted=zero))
+            self._detail_table.setItem(
+                row, 1, _cell(self._range_text(d), align_right=True, muted=True))
+            self._detail_table.setItem(
+                row, 2, _cell(f"{d.pct:.1f}", align_right=True, key=is_dom, muted=zero))
+        _fit_table_height(self._detail_table)
+
+        d5 = percentiles.get(5)
+        d16 = percentiles.get(16)
+        d30 = percentiles.get(30)
+        d84 = percentiles.get(84)
+        d95 = percentiles.get(95)
+
+        cc = (d30 * d30) / (d10 * d60) if d10 and d30 and d60 else None
+        sorting = math.sqrt(d84 / d16) if d16 and d84 and d16 > 0 else None
+        span = d95 / d5 if d5 and d95 and d5 > 0 else None
+
+        self._set_grad("cu", cu, result.cu_label)
+        self._set_grad("cc", cc, result.cc_label)
+        self._set_grad("sorting", sorting, self._sorting_label(sorting))
+        self._set_grad("span", span, "D95/D5")
+
+    @staticmethod
+    def _scheme_short_name(scheme) -> str:
+        key = getattr(scheme, "key", "")
+        if key == "iso14688":
+            return "ISO 14688"
+        if key == "uscs":
+            return "USCS"
+        return getattr(scheme, "name", "scheme")
+
+    @staticmethod
+    def _range_text(d) -> str:
+        if d.lower_mm <= 0:
+            return f"< {d.upper_mm:g}"
+        return f"{d.lower_mm:g}–{d.upper_mm:g}"
+
+    @staticmethod
+    def _sorting_label(sigma: Optional[float]) -> str:
+        if sigma is None:
+            return ""
+        if sigma < 2:
+            return "well sorted"
+        if sigma < 4:
+            return "moderately sorted"
+        return "poorly sorted"
+
+    def _set_grad(self, key: str, value: Optional[float], sub: str) -> None:
+        self._grad_labels[key].setText(f"{value:.2f}" if value else "—")
+        self._grad_subs[key].setText(sub if value else "")
+
+    def _update_k_summary(self, summary) -> None:
+        self._k_table.setRowCount(0)
+        if not summary:
+            self._k_table.hide()
+            self._k_note.show()
+            return
+        self._k_note.hide()
+        self._k_table.show()
+
+        rows = [
+            ("Geometric mean", summary.geometric_mean_m_s, True),
+            ("Arithmetic mean", summary.arithmetic_mean_m_s, False),
+            ("Median", summary.median_m_s, False),
+        ]
+        for name, value, key in rows:
+            if value is None:
+                continue
+            r = self._k_table.rowCount()
+            self._k_table.insertRow(r)
+            self._k_table.setItem(r, 0, _cell(name, key=key))
+            self._k_table.setItem(r, 1, _cell(_fmt_sci(value), align_right=True, key=key))
+            self._k_table.setItem(r, 2, _cell(_fmt_sci(value * 100), align_right=True))
+            self._k_table.setItem(r, 3, _cell(f"{value * 86400:.2f}", align_right=True))
+
+        if summary.min_m_s is not None and summary.max_m_s is not None:
+            r = self._k_table.rowCount()
+            self._k_table.insertRow(r)
+            self._k_table.setItem(r, 0, _cell("Range"))
+            self._k_table.setItem(
+                r, 1, _cell(f"{summary.min_m_s:.2e} – {summary.max_m_s:.2e}", align_right=True))
+            self._k_table.setItem(
+                r, 2, _cell(f"{summary.min_m_s * 100:.2e} – {summary.max_m_s * 100:.2e}", align_right=True))
+            self._k_table.setItem(
+                r, 3, _cell(f"{summary.min_m_s * 86400:.1f} – {summary.max_m_s * 86400:.1f}", align_right=True))
+
+        if summary.ln_std_dev is not None:
+            r = self._k_table.rowCount()
+            self._k_table.insertRow(r)
+            self._k_table.setItem(r, 0, _cell("ln(K) std. dev."))
+            self._k_table.setItem(r, 1, _cell(f"{summary.ln_std_dev:.2f}", align_right=True))
+            self._k_table.setItem(r, 2, _cell("log spread", align_right=True, muted=True))
+            self._k_table.setItem(r, 3, _cell("dimensionless", align_right=True, muted=True))
+
+        r = self._k_table.rowCount()
+        self._k_table.insertRow(r)
+        excluded = summary.warning_count + summary.error_count
+        self._k_table.setItem(r, 0, _cell("Included methods"))
+        self._k_table.setItem(
+            r, 1, _cell(f"{summary.included_count} / {summary.total_cells}", align_right=True))
+        self._k_table.setItem(
+            r, 2, _cell(f"{summary.warning_count} warnings", align_right=True, muted=True))
+        self._k_table.setItem(
+            r, 3, _cell(f"{summary.error_count} errors", align_right=True, muted=True))
+        _fit_table_height(self._k_table)
+
+    def _update_interpretation(self, result, summary) -> None:
+        while self._interp_host.count():
+            child = self._interp_host.takeAt(0)
+            widget = child.widget()
+            if widget is not None:
+                widget.deleteLater()
+
+        f = result.fractions
+        insights: List[tuple] = []
+        if result.label and result.label != "Insufficient data for classification":
+            insights.append((
+                "Composition",
+                f"{result.label}. Sand {f.sand_pct:.0f}%, fines {f.fines_pct:.0f}%, "
+                f"gravel {f.gravel_pct:.0f}%.",
+            ))
+        if summary and summary.ln_std_dev is not None and summary.included_count:
+            spread = ("narrow" if summary.ln_std_dev < 0.5
+                      else "moderate" if summary.ln_std_dev < 1.0 else "wide")
+            insights.append((
+                "Method spread",
+                f"ln(K) spread is {summary.ln_std_dev:.2f} ({spread}) across "
+                f"{summary.included_count} included methods. The geometric mean is "
+                f"the primary aggregate.",
+            ))
+            excluded = summary.warning_count + summary.error_count
+            if excluded:
+                insights.append((
+                    "Excluded methods",
+                    f"{excluded} method(s) excluded from the means — see the Results "
+                    f"tab for the reason per method.",
+                ))
+        elif not summary:
+            insights.append((
+                "Hydraulic conductivity",
+                "Calculate K-values to see the aggregate summary and method spread.",
+            ))
+
+        for title, body in insights:
+            self._interp_host.addWidget(self._make_insight(title, body))
+
+    def _make_insight(self, title: str, body: str) -> QWidget:
+        host = QWidget()
+        v = QVBoxLayout(host)
+        v.setContentsMargins(0, 0, 0, 0)
+        v.setSpacing(1)
+        title_lbl = QLabel(title)
+        title_lbl.setStyleSheet(
+            f"color: {C.TEXT}; font-family: '{F.UI}'; font-size: {F.SZ_MD}pt;"
+            f" font-weight: 800;"
+        )
+        body_lbl = QLabel(body)
+        body_lbl.setWordWrap(True)
+        body_lbl.setStyleSheet(
+            f"color: {C.TEXT_MID}; font-family: '{F.UI}'; font-size: {F.SZ_MD}pt;"
+        )
+        v.addWidget(title_lbl)
+        v.addWidget(body_lbl)
+        return host
+
+    def _update_data_support(self) -> None:
+        sizes = [float(v) for v in (self.dataset.particle_sizes or []) if v is not None]
+        passing = [float(v) for v in (self.dataset.percent_passing or []) if v is not None]
+        messages = getattr(self.dataset, "validation_messages", []) or []
+        errors = sum(1 for m in messages
+                     if getattr(getattr(m, "severity", None), "value", "") == "error")
+
+        rows = []
+        if sizes:
+            rows.append(("Particle-size range", f"{min(sizes):.4g} – {max(sizes):.4g} mm"))
+        else:
+            rows.append(("Particle-size range", "—"))
+        if passing:
+            rows.append(("Percent-passing range", f"{min(passing):.1f} – {max(passing):.1f} %"))
+        else:
+            rows.append(("Percent-passing range", "—"))
+        rows.append(("Point count", str(len(sizes))))
+        rows.append(("Validation messages",
+                     f"{errors} error{'s' if errors != 1 else ''}" if errors
+                     else f"{len(messages)} note{'s' if len(messages) != 1 else ''}"))
+
+        self._fill_kv(self._support_table, rows)
+
+    def _update_context(self, summary) -> None:
         effective_porosity = (
             self.dataset.effective_porosity()
             if hasattr(self.dataset, "effective_porosity")
             else self.porosity
         )
-        if effective_porosity is None:
-            text += "Porosity: N/A"
-        else:
+        if effective_porosity is not None:
             self.porosity = effective_porosity
-            text += f"Porosity: {effective_porosity:.4f}"
+
+        rows = [("Temperature", f"{self.temperature:.1f} °C")]
+        if effective_porosity is None:
+            rows.append(("Porosity", "—"))
+        else:
+            rows.append(("Porosity", f"{effective_porosity:.4f}"))
         if hasattr(self.dataset, "porosity_source_label"):
-            text += f" ({self.dataset.porosity_source_label()})"
-        text += "\n\nNote: Edit porosity in the Results tab"
-        self.env_text.setPlainText(text)
+            rows.append(("Porosity source", self.dataset.porosity_source_label()))
+        if summary:
+            rows.append(("Permeability class", _perm_class(summary.geometric_mean_m_s)))
+        else:
+            rows.append(("Permeability class", "Not calculated"))
 
-    def update_grain_analysis_panels(self):
-        """Update all grain analysis panels with calculated values"""
-        import math
-        from k_calculations import KCalculator
+        self._fill_kv(self._context_table, rows)
 
-        calculator = KCalculator()
-
-        # Prepare grain_data dict for interpolation
-        grain_data = {
-            "particle_sizes": list(self.dataset.particle_sizes),
-            "percent_passing": list(self.dataset.percent_passing),
-        }
-        dmean = (
-            self.dataset.get_arithmetic_mean_grain_size()
-            if hasattr(self.dataset, "get_arithmetic_mean_grain_size")
-            else None
+    def _update_internals(self) -> None:
+        internals = compute_calculation_internals(
+            self.dataset.particle_sizes,
+            self.dataset.percent_passing,
+            self.temperature,
+            self.porosity,
         )
-        if dmean is not None:
-            grain_data["Dmean_arithmetic"] = dmean
+        self._fill_kv(self._const_table, list(internals.physical_constants.rows))
+        self._fill_kv(self._diam_table, list(internals.effective_diameters.rows))
+        self._fill_kv(self._phi_table, list(internals.phi_folk_ward.rows))
+        self._fill_kv(self._poro_table, list(internals.porosity_functions.rows))
 
-        # Calculate all percentiles
-        percentiles = {}
-        standard_percentiles = [
-            5,
-            10,
-            15,
-            16,
-            17,
-            20,
-            25,
-            30,
-            40,
-            50,
-            60,
-            70,
-            75,
-            80,
-            84,
-            85,
-            90,
-            95,
-        ]
-        for p in standard_percentiles:
-            value = calculator._interpolate_percentile(grain_data, p)
-            if value:
-                percentiles[p] = value
-
-        # === UPDATE PERCENTILES DISPLAY ===
-        html_text = f"<pre style='font-family: {F.MONO}, monospace; font-size: {F.SZ_SM}pt;'>"
-        html_text += "<b>Grain Size Percentiles (Linear Interpolation):</b>\n"
-        html_text += "━" * 45 + "\n\n"
-
-        # Display in 3 columns
-        for i in range(0, len(standard_percentiles), 3):
-            row_percentiles = standard_percentiles[i : i + 3]
-            for p in row_percentiles:
-                if p in percentiles:
-                    # Bold for key percentiles used by multiple methods
-                    if p in [10, 20, 30, 50, 60]:
-                        html_text += f"<b>D{p:>2}: {percentiles[p]:>6.3f} mm</b>    "
-                    else:
-                        html_text += f"D{p:>2}: {percentiles[p]:>6.3f} mm    "
-            html_text += "\n"
-
-        html_text += "\n<b>Bold</b> = Critical values used by multiple methods"
-        html_text += "</pre>"
-        self.percentiles_text.setHtml(html_text)
-
-        # === UPDATE GRADATION PARAMETERS DISPLAY ===
-        d5 = percentiles.get(5)
-        d10 = percentiles.get(10)
-        d16 = percentiles.get(16)
-        d30 = percentiles.get(30)
-        d50 = percentiles.get(50)
-        d60 = percentiles.get(60)
-        d84 = percentiles.get(84)
-        d95 = percentiles.get(95)
-
-        gradation_text = "<b>Gradation Parameters:</b>\n"
-        gradation_text += "━" * 35 + "\n\n"
-
-        # Uniformity Coefficient
-        if d10 and d60:
-            cu = d60 / d10
-            gradation_text += f"<b>Uniformity Coefficient (Cu):</b> {cu:.2f}\n"
-            gradation_text += f"  └─ D60/D10 = {d60:.3f}/{d10:.3f}\n"
-            gradation_text += f"  └─ <b>{_cu_label(cu)}</b>\n"
-
-        # Coefficient of Curvature
-        if d10 and d30 and d60:
-            cc = (d30 * d30) / (d10 * d60)
-            gradation_text += f"\n<b>Coefficient of Curvature (Cc):</b> {cc:.2f}\n"
-            gradation_text += f"  └─ D30²/(D10×D60)\n"
-            if 1 <= cc <= 3:
-                gradation_text += "  └─ <b>Well-graded range</b> ✓\n"
-            else:
-                gradation_text += "  └─ Outside typical range\n"
-
-        # Sorting Coefficient
-        if d16 and d84 and d16 > 0 and d84 > 0:
-            sigma = math.sqrt(d84 / d16)
-            gradation_text += f"\n<b>Sorting Coefficient (σ):</b> {sigma:.2f}\n"
-            gradation_text += f"  └─ √(D84/D16) = √({d84:.3f}/{d16:.3f})\n"
-            if sigma < 2:
-                gradation_text += "  └─ <b>Well sorted</b>\n"
-            elif sigma < 4:
-                gradation_text += "  └─ <b>Moderately sorted</b>\n"
-            else:
-                gradation_text += "  └─ <b>Poorly sorted</b>\n"
-
-        # Span Ratio
-        if d5 and d95:
-            span = d95 / d5
-            gradation_text += f"\n<b>Span Ratio:</b> {span:.1f}\n"
-            gradation_text += f"  └─ D95/D5 = {d95:.3f}/{d5:.3f}\n"
-
-        # Wrap in HTML pre tag
-        gradation_html = f"<pre style='font-family: {F.MONO}, monospace; font-size: {F.SZ_SM}pt;'>{gradation_text}</pre>"
-        self.gradation_text.setHtml(gradation_html)
-
-        # === UPDATE SPECIAL METHOD DIAMETERS DISPLAY ===
-        special_text = "<b>Special Method Diameters:</b>\n"
-        special_text += "━" * 50 + "\n\n"
-
-        # Calculate special diameters
-        kruger_de = calculator._kruger_diameter_cm(grain_data)
-        harmonic_de = calculator._harmonic_mean_diameter_cm(grain_data)
-        zunker_de = calculator._zunker_diameter_cm(grain_data)
-        zamarin_de = calculator._zamarin_diameter_cm(grain_data)
-        geom_mean = calculator._calculate_geometric_mean(grain_data)
-
-        if kruger_de:
-            special_text += f"<b>Kruger dₑ:</b>        {kruger_de:.4f} cm  ({kruger_de * 10:.4f} mm)\n"
-        if harmonic_de:
-            special_text += f"<b>Kozeny-Carman dₑ:</b> {harmonic_de:.4f} cm  ({harmonic_de * 10:.4f} mm)\n"
-        if zunker_de:
-            special_text += f"<b>Zunker dₑ:</b>        {zunker_de:.4f} cm  ({zunker_de * 10:.4f} mm)\n"
-        if zamarin_de:
-            special_text += f"<b>Zamarin dₑ:</b>       {zamarin_de:.4f} cm  ({zamarin_de * 10:.4f} mm)\n"
-        if geom_mean:
-            special_text += f"\n<b>Geometric Mean:</b>   {geom_mean:.4f} mm\n"
-
-        if not any([kruger_de, harmonic_de, zunker_de, zamarin_de, geom_mean]):
-            special_text += "No special diameters calculated (insufficient data)\n"
-
-        special_html = f"<pre style='font-family: {F.MONO}, monospace; font-size: {F.SZ_SM}pt;'>{special_text}</pre>"
-        self.special_diameters_text.setHtml(special_html)
-
-    # ===== EXPORT METHODS (Placeholders for now) =====
-
-    def export_to_excel(self):
-        """Export statistics to formatted Excel file"""
-        QMessageBox.information(
-            self, "Export to Excel", "Excel export will be implemented in Phase 5"
-        )
-
-    def export_to_csv(self):
-        """Export statistics to CSV"""
-        QMessageBox.information(
-            self, "Export to CSV", "CSV export will be implemented in Phase 5"
-        )
-
-    def copy_to_clipboard(self):
-        """Copy formatted statistics to clipboard"""
-        QMessageBox.information(
-            self, "Copy to Clipboard", "Clipboard copy will be implemented in Phase 5"
-        )
+    def _fill_kv(self, table: QTableWidget, rows: List[tuple]) -> None:
+        table.setRowCount(0)
+        for name, value in rows:
+            r = table.rowCount()
+            table.insertRow(r)
+            table.setItem(r, 0, _cell(name))
+            table.setItem(r, 1, _cell(value, align_right=True))
+        _fit_table_height(table)

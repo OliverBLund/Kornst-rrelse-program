@@ -11,7 +11,7 @@ from openpyxl import load_workbook
 from data_loader import GrainSizeData
 from k_calculations import CalculationStatus, KCalculationResult
 from report_generator import ReportGenerator
-from report_tables import analyze_report_tables, extract_report_tables, generate_excel_appendix
+from report_tables import analyze_report_tables, externalize_report_tables, extract_report_tables, generate_excel_appendix
 
 
 def build_dataset(name: str) -> GrainSizeData:
@@ -75,7 +75,7 @@ def test_large_comparison_tables_are_portrait_friendly_and_recommend_excel():
     by_id = {table.table_id: table for table in analysis.tables}
 
     assert by_id["sample-properties"].column_count == 7
-    assert by_id["sample-classification"].column_count == 3
+    assert by_id["sample-classification"].column_count == 4  # +Descriptor column
     assert by_id["k-aggregate-statistics"].column_count == 6
     assert by_id["k-aggregate-coverage"].column_count == 4
     assert by_id["k-method-results-comparison"].column_count == 6
@@ -90,6 +90,26 @@ def test_large_comparison_tables_are_portrait_friendly_and_recommend_excel():
 def test_small_comparison_does_not_recommend_excel():
     analysis = analyze_report_tables(comparison_html(5))
     assert not analysis.excel_recommended
+
+
+def test_externalize_report_tables_replaces_only_selected_tables():
+    html = """
+    <html><body>
+    <h3>Small Table</h3>
+    <table data-report-table="small-table"><tr><td>keep me</td></tr></table>
+    <h3>Large Table</h3>
+    <table data-report-table="large-table"><tr><td>remove<br>me</td></tr></table>
+    <p>after table</p>
+    </body></html>
+    """
+
+    rewritten = externalize_report_tables(html, {"large-table": "Large Table"})
+
+    assert "keep me" in rewritten
+    assert "remove" not in rewritten
+    assert "after table" in rewritten
+    assert "Large table moved to companion Excel appendix" in rewritten
+    assert 'data-externalized-table="large-table"' in rewritten
 
 
 def test_excel_appendix_preserves_colspan_and_uses_table_titles():
@@ -128,6 +148,34 @@ def test_docx_renderer_preserves_colspan():
 
     assert "w:gridSpan" in document_xml
     assert "No results" in document_xml
+
+
+def test_docx_renderer_replaces_externalized_tables_with_appendix_note():
+    rows = "".join(
+        f"<tr><td>Sample {index}</td><td>{index}</td></tr>"
+        for index in range(60)
+    )
+    html = f"""
+    <html><body>
+    <h3>Large Result Table</h3>
+    <table data-report-table="large-result-table">
+      <thead><tr><th>Sample</th><th>Value</th></tr></thead>
+      <tbody>{rows}</tbody>
+    </table>
+    </body></html>
+    """
+
+    blob = ReportGenerator().generate_docx_from_html(
+        html,
+        externalized_table_ids={"large-result-table"},
+        externalized_table_titles={"large-result-table": "Large Result Table"},
+    )
+    with zipfile.ZipFile(io.BytesIO(blob)) as archive:
+        document_xml = archive.read("word/document.xml").decode("utf-8")
+
+    assert "Large table moved to companion Excel appendix" in document_xml
+    assert "Large Result Table" in document_xml
+    assert "Sample 59" not in document_xml
 
 
 def test_k_report_does_not_duplicate_method_table():

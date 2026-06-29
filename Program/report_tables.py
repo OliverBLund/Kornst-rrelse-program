@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
+from html import escape
 from html.parser import HTMLParser
 import io
 import re
@@ -182,6 +183,90 @@ def extract_report_tables(html_text: str) -> list[ReportTable]:
 
 def analyze_report_tables(html_text: str) -> ReportTableAnalysis:
     return ReportTableAnalysis(extract_report_tables(html_text))
+
+
+class _ExternalizedTableHtmlRewriter(HTMLParser):
+    def __init__(self, table_titles: dict[str, str]) -> None:
+        super().__init__(convert_charrefs=False)
+        self.table_titles = dict(table_titles)
+        self.parts: list[str] = []
+        self._skip_table_depth = 0
+
+    def _externalized_note(self, table_id: str) -> str:
+        title = self.table_titles.get(table_id) or table_id
+        return (
+            '<div class="table-externalized-note" '
+            f'data-externalized-table="{escape(table_id, quote=True)}">'
+            '<strong>Large table moved to companion Excel appendix:</strong> '
+            f'{escape(title)}.'
+            '</div>'
+        )
+
+    def handle_starttag(self, tag: str, attrs) -> None:
+        attrs_dict = {key: value or "" for key, value in attrs}
+        if self._skip_table_depth:
+            if tag.lower() == "table":
+                self._skip_table_depth += 1
+            return
+        if tag.lower() == "table":
+            table_id = attrs_dict.get("data-report-table", "")
+            if table_id in self.table_titles:
+                self.parts.append(self._externalized_note(table_id))
+                self._skip_table_depth = 1
+                return
+        self.parts.append(self.get_starttag_text() or f"<{tag}>")
+
+    def handle_startendtag(self, tag: str, attrs) -> None:
+        attrs_dict = {key: value or "" for key, value in attrs}
+        if self._skip_table_depth:
+            return
+        if tag.lower() == "table":
+            table_id = attrs_dict.get("data-report-table", "")
+            if table_id in self.table_titles:
+                self.parts.append(self._externalized_note(table_id))
+                return
+        self.parts.append(self.get_starttag_text() or f"<{tag} />")
+
+    def handle_endtag(self, tag: str) -> None:
+        if self._skip_table_depth:
+            if tag.lower() == "table":
+                self._skip_table_depth -= 1
+            return
+        self.parts.append(f"</{tag}>")
+
+    def handle_data(self, data: str) -> None:
+        if not self._skip_table_depth:
+            self.parts.append(data)
+
+    def handle_entityref(self, name: str) -> None:
+        if not self._skip_table_depth:
+            self.parts.append(f"&{name};")
+
+    def handle_charref(self, name: str) -> None:
+        if not self._skip_table_depth:
+            self.parts.append(f"&#{name};")
+
+    def handle_comment(self, data: str) -> None:
+        if not self._skip_table_depth:
+            self.parts.append(f"<!--{data}-->")
+
+    def handle_decl(self, decl: str) -> None:
+        if not self._skip_table_depth:
+            self.parts.append(f"<!{decl}>")
+
+    def unknown_decl(self, data: str) -> None:
+        if not self._skip_table_depth:
+            self.parts.append(f"<![{data}]>")
+
+
+def externalize_report_tables(html_text: str, table_titles: dict[str, str]) -> str:
+    """Replace selected report tables with notes that point to the Excel appendix."""
+    if not table_titles:
+        return html_text
+    parser = _ExternalizedTableHtmlRewriter(table_titles)
+    parser.feed(html_text)
+    parser.close()
+    return "".join(parser.parts)
 
 
 def _safe_sheet_name(value: str, used: set[str]) -> str:

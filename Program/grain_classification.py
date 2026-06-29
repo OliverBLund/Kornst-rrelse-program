@@ -71,6 +71,19 @@ class GrainFractions:
         return self.clay_pct + self.silt_pct
 
 
+@dataclass(frozen=True)
+class DetailedFraction:
+    """One sub-class band of the detailed grain-size breakdown.
+
+    ``pct`` is the mass percentage of the sample whose grain size falls within
+    ``[lower_mm, upper_mm)``.
+    """
+    label: str
+    lower_mm: float
+    upper_mm: float
+    pct: float = 0.0
+
+
 @dataclass
 class ClassificationResult:
     """Structured result from classify().  All consumers should use this."""
@@ -85,6 +98,13 @@ class ClassificationResult:
     cu_label:     str           # "Well-graded" | "Moderately graded" | "Uniform" | "—"
     cc_label:     str           # "Well-graded range" | "Outside range" | "—"
     permeability_class: str     # "High" | "Moderate" | ...
+
+    # ── Detailed (sub-class) breakdown ────────────────────────────────────
+    # For ISO 14688 this is the 11-band fine/medium/coarse scale; for other
+    # schemes it falls back to the scheme's coarse classes.  detailed_class is
+    # the dominant (largest-mass) sub-class, e.g. "Fine sand".
+    detailed_fractions: tuple = ()          # tuple[DetailedFraction, ...]
+    detailed_class:     str   = "—"
 
     def __str__(self) -> str:
         return self.label
@@ -129,6 +149,53 @@ SCHEMES: dict[str, GrainClassificationScheme] = {
     "iso14688": ISO14688,
     "uscs":     USCS,
 }
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# DETAILED (SUB-CLASS) GRAIN-SIZE BANDS
+# ─────────────────────────────────────────────────────────────────────────────
+# The detailed fine/medium/coarse subdivision is an ISO 14688 concept.  Each
+# band is (lower_mm, upper_mm, label) with the lower bound inclusive.  This is
+# the single source of truth shared by the plot ruler, the Statistics tab and
+# the report/export builders.
+ISO_FRACTION_BANDS: tuple[tuple[float, float, str], ...] = (
+    (0.0,    0.002,  "Clay"),
+    (0.002,  0.0063, "Fine silt"),
+    (0.0063, 0.02,   "Medium silt"),
+    (0.02,   0.063,  "Coarse silt"),
+    (0.063,  0.2,    "Fine sand"),
+    (0.2,    0.63,   "Medium sand"),
+    (0.63,   2.0,    "Coarse sand"),
+    (2.0,    6.3,    "Fine gravel"),
+    (6.3,    20.0,   "Medium gravel"),
+    (20.0,   63.0,   "Coarse gravel"),
+    (63.0,   200.0,  "Cobble"),
+)
+
+
+def scheme_detail_bands(
+    scheme: Optional[GrainClassificationScheme] = None,
+) -> tuple[tuple[float, float, str], ...]:
+    """Return the sub-class bands appropriate to *scheme*.
+
+    ISO 14688 (and ``None``) get the full 11-band fine/medium/coarse scale.
+    Other schemes (USCS, custom) do not define a size-based subdivision, so they
+    fall back to their five coarse classes derived from the scheme boundaries.
+    """
+    if scheme is None or getattr(scheme, "key", "iso14688") == "iso14688":
+        return ISO_FRACTION_BANDS
+
+    clay_max   = float(getattr(scheme, "clay_max",   0.002))
+    silt_max   = float(getattr(scheme, "silt_max",   0.063))
+    sand_max   = float(getattr(scheme, "sand_max",   2.0))
+    gravel_max = float(getattr(scheme, "gravel_max", 63.0))
+    return (
+        (0.0,        clay_max,   "Clay"),
+        (clay_max,   silt_max,   "Silt"),
+        (silt_max,   sand_max,   "Sand"),
+        (sand_max,   gravel_max, "Gravel"),
+        (gravel_max, max(gravel_max * 4.0, 300.0), "Cobble"),
+    )
 
 
 def make_custom_scheme(
@@ -244,6 +311,115 @@ def compute_fractions(
     )
 
 
+def compute_detailed_fractions(
+    particle_sizes: list[float],
+    percent_passing: list[float],
+    scheme: Optional[GrainClassificationScheme] = None,
+) -> tuple[DetailedFraction, ...]:
+    """Compute the mass percentage in each detailed sub-class band.
+
+    Uses the same log-linear interpolation as :func:`compute_fractions`, applied
+    at every band boundary, then takes successive differences.  The bands are
+    chosen by :func:`scheme_detail_bands`, so the result respects the active
+    classification scheme (stratigraphy).  Percentages sum to ~100 and align
+    with the coarse fractions from :func:`compute_fractions`.
+    """
+    bands = scheme_detail_bands(scheme)
+
+    if not particle_sizes or not percent_passing:
+        return tuple(DetailedFraction(label, lo, hi, 0.0) for lo, hi, label in bands)
+
+    out: list[DetailedFraction] = []
+    cum_prev = 0.0  # cumulative % passing at the previous band's upper edge
+    for lo, hi, label in bands:
+        pct_at_hi = interpolate_at(particle_sizes, percent_passing, hi)
+        # interpolate_at returns None only when the boundary is coarser than the
+        # measured range; everything passes, so cumulative passing is 100%.
+        cum_hi = 100.0 if pct_at_hi is None else max(0.0, pct_at_hi)
+        band_pct = max(0.0, cum_hi - cum_prev)
+        out.append(DetailedFraction(label, lo, hi, round(band_pct, 1)))
+        cum_prev = cum_hi
+
+    return tuple(out)
+
+
+def dominant_detail_class(detailed: tuple[DetailedFraction, ...]) -> str:
+    """Return the label of the largest-mass sub-class, or '—' if none."""
+    present = [d for d in detailed if d.pct > 0.0]
+    if not present:
+        return "—"
+    return max(present, key=lambda d: d.pct).label
+
+
+def sedimentology_descriptor(
+    fractions: GrainFractions,
+    d50_mm: Optional[float],
+    cu: Optional[float],
+    scheme: Optional[GrainClassificationScheme] = None,
+) -> str:
+    """Build a compound sedimentology-style descriptor.
+
+    Example: ``"Moderately well sorted gravelly sand with fines"``.
+
+    This is an optional descriptive overlay (Wentworth/sedimentology style),
+    complementary to the ISO/USCS label:
+
+    * primary type — from D50 (median) against the scheme boundaries;
+    * modifiers    — secondary major fractions >= 10 %, listed finest-first
+                     (clayey / silty / sandy / gravelly);
+    * sorting      — Cu-based.  NOTE the inverse terminology: a high Cu reads as
+                     "poorly sorted" here but "well-graded" in geotechnical use;
+    * fines flag   — triggered at >= 5 % passing the silt/clay (fines) boundary.
+
+    Returns "" when D50 is unavailable.
+    """
+    if d50_mm is None or d50_mm <= 0:
+        return ""
+    if scheme is None:
+        scheme = ISO14688
+
+    # Primary type from the median grain size.
+    if d50_mm >= scheme.sand_max:
+        primary = "gravel"
+    elif d50_mm >= scheme.silt_max:
+        primary = "sand"
+    elif d50_mm >= scheme.clay_max:
+        primary = "silt"
+    else:
+        primary = "clay"
+
+    # Secondary modifiers: major fractions (excluding the primary) >= 10 %,
+    # listed finest -> coarsest.
+    adjective = {"clay": "clayey", "silt": "silty", "sand": "sandy", "gravel": "gravelly"}
+    pct = {
+        "clay":   fractions.clay_pct,
+        "silt":   fractions.silt_pct,
+        "sand":   fractions.sand_pct,
+        "gravel": fractions.gravel_pct + fractions.cobble_pct,
+    }
+    modifiers = [
+        adjective[k]
+        for k in ("clay", "silt", "sand", "gravel")
+        if k != primary and pct[k] >= 10.0
+    ]
+
+    # Sorting from Cu.
+    if cu is None:
+        sorting = ""
+    elif cu < 2.0:
+        sorting = "Uniform"
+    elif cu < 5.0:
+        sorting = "Moderately well sorted"
+    else:
+        sorting = "Poorly sorted"
+
+    fines = "with fines" if fractions.fines_pct >= 5.0 else "low in fines"
+
+    parts = [p for p in (sorting, " ".join(modifiers), primary, fines) if p]
+    text = " ".join(parts)
+    return text[:1].upper() + text[1:] if text else ""
+
+
 # ─────────────────────────────────────────────────────────────────────────────
 # SHARED CLASSIFICATION LADDERS
 # ─────────────────────────────────────────────────────────────────────────────
@@ -337,9 +513,12 @@ def classify(
             cu_label         = "—",
             cc_label         = "—",
             permeability_class = "—",
+            detailed_fractions = (),
+            detailed_class     = "—",
         )
 
     fractions = compute_fractions(particle_sizes, percent_passing, scheme)
+    detailed = compute_detailed_fractions(particle_sizes, percent_passing, scheme)
 
     # ── Primary type from dominant fraction ──────────────────────────────
     # Use the scheme's sand_max boundary: D50 or the dominant mass fraction
@@ -421,4 +600,6 @@ def classify(
         cu_label           = cu_label(cu),
         cc_label           = cc_label(cc, scheme),
         permeability_class = perm_class,
+        detailed_fractions = detailed,
+        detailed_class     = dominant_detail_class(detailed),
     )

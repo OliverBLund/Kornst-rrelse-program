@@ -27,6 +27,7 @@ class PlotTypeSpec:
     report_default: bool = False
     export_default: bool = False
     report_breakdown: bool = False
+    export_breakdown: bool = False
     exportable: bool = True
 
 
@@ -41,6 +42,15 @@ PLOT_TYPE_SPECS: tuple[PlotTypeSpec, ...] = (
         file_suffix="plot",
         report_default=True,
         export_default=True,
+    ),
+    PlotTypeSpec(
+        key="grain_size_histogram",
+        scope="single",
+        icon="fa6s.chart-column",
+        report_label="Grain-size class histogram",
+        export_label="Grain-size class histogram",
+        source_label="Class fractions from the active classification scheme",
+        file_suffix="histogram",
     ),
     PlotTypeSpec(
         key="k_value_bar",
@@ -71,6 +81,18 @@ PLOT_TYPE_SPECS: tuple[PlotTypeSpec, ...] = (
         file_suffix="distribution_overlay",
         report_default=True,
         report_breakdown=True,
+        export_breakdown=True,
+    ),
+    PlotTypeSpec(
+        key="grain_size_histogram_comparison",
+        scope="collection",
+        icon="fa6s.chart-column",
+        report_label="Class histogram comparison",
+        export_label="Class histogram comparison",
+        source_label="Class fractions from all selected datasets",
+        file_suffix="grain_size_histogram",
+        report_breakdown=True,
+        export_breakdown=True,
     ),
     PlotTypeSpec(
         key="k_value_comparison",
@@ -82,6 +104,7 @@ PLOT_TYPE_SPECS: tuple[PlotTypeSpec, ...] = (
         file_suffix="k_value_comparison",
         report_default=True,
         report_breakdown=True,
+        export_breakdown=True,
     ),
     PlotTypeSpec(
         key="statistical_boxplots",
@@ -102,6 +125,7 @@ PLOT_TYPE_SPECS: tuple[PlotTypeSpec, ...] = (
         source_label="Pooled K values fitted to a lognormal distribution",
         file_suffix="k_distribution",
         report_breakdown=True,
+        export_breakdown=True,
     ),
     PlotTypeSpec(
         key="reliability_matrix",
@@ -120,6 +144,16 @@ PLOT_TYPE_SPECS: tuple[PlotTypeSpec, ...] = (
         export_label="Per-sample grain curves",
         source_label="Individual grain-size curves embedded in a report",
         file_suffix="per_sample_grain",
+        exportable=False,
+    ),
+    PlotTypeSpec(
+        key="per_sample_histogram",
+        scope="collection",
+        icon="fa6s.chart-column",
+        report_label="Per-sample class histograms",
+        export_label="Per-sample class histograms",
+        source_label="Individual class histograms embedded in a report",
+        file_suffix="per_sample_histogram",
         exportable=False,
     ),
     PlotTypeSpec(
@@ -152,6 +186,21 @@ def report_plot_rows(scope: PlotScope) -> list[tuple[str, str, str, bool, bool]]
         )
         for spec in PLOT_TYPE_SPECS
         if spec.scope == scope
+    ]
+
+
+def export_plot_rows(scope: PlotScope) -> list[tuple[str, str, str, bool, bool, str]]:
+    return [
+        (
+            spec.key,
+            spec.icon,
+            spec.export_label,
+            spec.export_default,
+            spec.export_breakdown,
+            spec.source_label,
+        )
+        for spec in PLOT_TYPE_SPECS
+        if spec.exportable and spec.scope == scope
     ]
 
 

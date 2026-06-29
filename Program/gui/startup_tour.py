@@ -18,6 +18,7 @@ from PyQt6.QtWidgets import (
     QHBoxLayout,
     QLabel,
     QPushButton,
+    QScrollArea,
     QSizePolicy,
     QVBoxLayout,
     QWidget,
@@ -177,12 +178,12 @@ class StartupTourOverlay(QWidget):
         layout.setContentsMargins(0, 0, 0, 0)
         layout.setSpacing(0)
 
-        head = QWidget()
-        head.setStyleSheet(
+        self._head = QWidget()
+        self._head.setStyleSheet(
             f"background: {C.BG_RAISED}; border-bottom: 1px solid {C.BORDER};"
             "border-top-left-radius: 8px; border-top-right-radius: 8px;"
         )
-        head_lay = QVBoxLayout(head)
+        head_lay = QVBoxLayout(self._head)
         head_lay.setContentsMargins(14, 10, 14, 9)
         head_lay.setSpacing(4)
 
@@ -211,36 +212,51 @@ class StartupTourOverlay(QWidget):
             f"font-size: {F.SZ_LG}pt; font-weight: 700;"
         )
         head_lay.addWidget(self._title_lbl)
-        layout.addWidget(head)
+        layout.addWidget(self._head)
 
-        body = QWidget()
-        body_lay = QVBoxLayout(body)
-        body_lay.setContentsMargins(14, 11, 14, 12)
-        body_lay.setSpacing(8)
+        self._body_scroll = QScrollArea()
+        self._body_scroll.setWidgetResizable(True)
+        self._body_scroll.setFrameShape(QFrame.Shape.NoFrame)
+        self._body_scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+        self._body_scroll.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAsNeeded)
+        self._body_scroll.setStyleSheet(
+            "QScrollArea { background: transparent; border: none; }"
+            "QScrollArea > QWidget > QWidget { background: transparent; }"
+        )
+        self._body_scroll.viewport().setStyleSheet("background: transparent; border: none;")
+
+        self._body_content = QWidget()
+        self._body_content.setStyleSheet("background: transparent; border: none;")
+        self._body_lay = QVBoxLayout(self._body_content)
+        self._body_lay.setContentsMargins(14, 11, 14, 12)
+        self._body_lay.setSpacing(8)
 
         self._body_lbl = QLabel("")
         self._body_lbl.setWordWrap(True)
+        self._body_lbl.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Minimum)
         self._body_lbl.setStyleSheet(
             f"color: {C.TEXT_MID}; font-family: '{F.UI}'; "
             f"font-size: {F.SZ_MD}pt; line-height: 145%;"
         )
-        body_lay.addWidget(self._body_lbl)
+        self._body_lay.addWidget(self._body_lbl)
 
         self._tips_lbl = QLabel("")
         self._tips_lbl.setWordWrap(True)
+        self._tips_lbl.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Minimum)
         self._tips_lbl.setStyleSheet(
             f"color: {C.TEXT_MUTED}; font-family: '{F.UI}'; "
             f"font-size: {F.SZ_SM}pt;"
         )
-        body_lay.addWidget(self._tips_lbl)
-        layout.addWidget(body)
+        self._body_lay.addWidget(self._tips_lbl)
+        self._body_scroll.setWidget(self._body_content)
+        layout.addWidget(self._body_scroll)
 
-        footer = QWidget()
-        footer.setStyleSheet(
+        self._footer = QWidget()
+        self._footer.setStyleSheet(
             f"background: #f8f4ec; border-top: 1px solid {C.BORDER}; "
             "border-bottom-left-radius: 8px; border-bottom-right-radius: 8px;"
         )
-        foot_lay = QHBoxLayout(footer)
+        foot_lay = QHBoxLayout(self._footer)
         foot_lay.setContentsMargins(12, 9, 12, 9)
         foot_lay.setSpacing(7)
 
@@ -286,7 +302,7 @@ class StartupTourOverlay(QWidget):
         """)
         self._next_btn.clicked.connect(self._next)
         foot_lay.addWidget(self._next_btn)
-        layout.addWidget(footer)
+        layout.addWidget(self._footer)
 
     def _show_step(self, index: int) -> None:
         self._index = max(0, min(index, len(self._steps) - 1))
@@ -345,13 +361,56 @@ class StartupTourOverlay(QWidget):
         top_left = target.mapTo(parent, QPoint(0, 0))
         return QRect(top_left, target.size()).intersected(self.rect())
 
+    @staticmethod
+    def _wrapped_label_height(label: QLabel, width: int) -> int:
+        """Return the height needed by a word-wrapped label at a fixed width."""
+        if not label.isVisible():
+            return 0
+        if label.hasHeightForWidth():
+            return max(label.heightForWidth(width), label.sizeHint().height())
+        return label.sizeHint().height()
+
+    def _update_body_scroll_height(self, max_callout_height: int) -> None:
+        """Grow the tour body to fit text, with scrolling only when required."""
+        margins = self._body_lay.contentsMargins()
+        scrollbar_width = self._body_scroll.verticalScrollBar().sizeHint().width()
+        content_width = max(160, self._callout.width() - margins.left() - margins.right() - scrollbar_width)
+
+        body_height = self._wrapped_label_height(self._body_lbl, content_width)
+        tips_height = self._wrapped_label_height(self._tips_lbl, content_width)
+        spacing = self._body_lay.spacing() if self._tips_lbl.isVisible() and tips_height else 0
+        content_height = (
+            margins.top()
+            + body_height
+            + spacing
+            + tips_height
+            + margins.bottom()
+        )
+
+        self._body_content.setMinimumWidth(self._callout.width() - 2)
+        self._body_content.setMinimumHeight(content_height)
+
+        fixed_chrome_height = self._head.sizeHint().height() + self._footer.sizeHint().height()
+        available_body_height = max(96, max_callout_height - fixed_chrome_height)
+        body_view_height = min(content_height, available_body_height)
+        self._body_scroll.setMinimumHeight(body_view_height)
+        self._body_scroll.setMaximumHeight(body_view_height)
+        self._body_scroll.setVerticalScrollBarPolicy(
+            Qt.ScrollBarPolicy.ScrollBarAsNeeded
+            if content_height > body_view_height + 2
+            else Qt.ScrollBarPolicy.ScrollBarAlwaysOff
+        )
+
     def _position_callout(self, target_rect: QRect) -> None:
         margin = 16
         gap = 18
+        max_height = max(160, self.height() - (2 * margin))
+        self._update_body_scroll_height(max_height)
         self._callout.adjustSize()
         callout_size = self._callout.sizeHint()
         width = self._callout.width()
-        height = callout_size.height()
+        height = min(callout_size.height(), max_height)
+        self._callout.resize(width, height)
 
         right_x = target_rect.right() + gap
         left_x = target_rect.left() - width - gap

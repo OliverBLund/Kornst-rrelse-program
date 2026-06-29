@@ -147,20 +147,23 @@ class TestDatasetTabResultsTable(unittest.TestCase):
         self.assertLessEqual(self.tab.statistics_widget.minimumSizeHint().height(), 120)
         self.assertLessEqual(self.tab.minimumSizeHint().height(), 520)
 
-    def test_statistics_quality_box_explains_assessment_basis(self):
-        text = self.tab.statistics_tab.quality_widget.quality_text.toPlainText()
+    def test_statistics_data_support_reports_curve_coverage(self):
+        table = self.tab.statistics_tab._support_table
+        labels = [table.item(r, 0).text() for r in range(table.rowCount())]
 
-        self.assertIn("Based on the loaded gradation curve only", text)
-        self.assertIn("Monotonicity:", text)
-        self.assertIn("Point density:", text)
+        self.assertIn("Particle-size range", labels)
+        self.assertIn("Point count", labels)
+        self.assertIn("Validation messages", labels)
+        # "Monotonicity" was intentionally removed as ambiguous jargon.
+        self.assertNotIn("Monotonicity", " ".join(labels))
 
-    def test_statistics_tab_keeps_current_legacy_summary_panels_bounded(self):
+    def test_statistics_tab_exposes_summary_sections(self):
         stats = self.tab.statistics_tab
 
-        self.assertTrue(hasattr(stats, "percentiles_text"))
-        self.assertTrue(hasattr(stats, "gradation_text"))
-        self.assertTrue(hasattr(stats, "special_diameters_text"))
-        self.assertTrue(hasattr(stats, "k_stats_widget"))
+        for attr in ("info_bar", "distribution_card", "classification_card",
+                     "k_summary_card", "quality_card", "context_card",
+                     "internals_section"):
+            self.assertTrue(hasattr(stats, attr), attr)
         self.assertLessEqual(self.tab.statistics_widget.minimumSizeHint().height(), 520)
 
     def test_results_cards_surface_ok_only_geometric_and_arithmetic_means(self):

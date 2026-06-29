@@ -20,6 +20,7 @@ from __future__ import annotations
 from typing import Any, Dict, List, Mapping, Optional, Sequence
 
 from k_aggregation import UNGROUPED_LABEL, dataset_group_name
+from grain_classification import ISO14688
 
 from .comparison_plot_spec import ComparisonPlotSpec
 from .group_styles import (
@@ -76,6 +77,7 @@ def build_comparison_spec(
     show_legend: bool = True,
     log_k_y_scale: bool = False,
     display_unit: Optional[HydraulicConductivityUnit] = None,
+    classification_scheme: Any = None,
     palette: Optional[Sequence[str]] = None,
     palette_name: Optional[str] = None,
     group_palette_authoritative: bool = False,
@@ -197,6 +199,7 @@ def build_comparison_spec(
         color_by_name=color_by_name,
         dataset_linestyles=dataset_linestyles,
         palette=palette_list,
+        palette_authoritative=group_palette_authoritative,
         known_dataset_order=known_dataset_order,
         known_group_order=known_group_order,
         known_dataset_group=known_dataset_group,
@@ -205,6 +208,7 @@ def build_comparison_spec(
         show_legend=show_legend,
         log_k_y_scale=log_k_y_scale,
         display_unit=display_unit,
+        classification_scheme=classification_scheme or ISO14688,
         k_dist_view=k_dist_view,
         k_hist_axis=k_hist_axis,
         k_hist_bins=k_hist_bins,

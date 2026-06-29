@@ -225,8 +225,10 @@ class TestPlotWorkspaceWiring(unittest.TestCase):
         self.assertTrue(all(height >= 0 for height in heights))
         self.assertAlmostEqual(sum(heights), 100.0, places=6)
         self.assertEqual(ax.get_ylabel(), 'Weight (%)')
+        self.assertEqual(ax.get_xlabel(), 'Grain-size class (ISO 14688)')
         tick_labels = [tick.get_text() for tick in ax.get_xticklabels()]
-        self.assertTrue(any('sand' in label.lower() for label in tick_labels))
+        self.assertEqual(len(tick_labels), 11)
+        self.assertEqual(tick_labels.count('Coarse sand'), 1)
         self.assertTrue(any('gravel' in label.lower() for label in tick_labels))
 
     def test_histogram_export_data_writes_fraction_weight_rows(self):
@@ -261,7 +263,8 @@ class TestPlotWorkspaceWiring(unittest.TestCase):
                 'Weight (%)',
             ],
         )
-        self.assertTrue(any('sand' in row[0].lower() for row in rows[1:]))
+        self.assertEqual(len(rows), 12)
+        self.assertEqual([row[0] for row in rows[1:]].count('Coarse sand'), 1)
         self.assertAlmostEqual(sum(float(row[4]) for row in rows[1:]), 100.0, places=6)
 
     def test_histogram_fraction_labels_respect_active_scheme(self):
@@ -272,8 +275,8 @@ class TestPlotWorkspaceWiring(unittest.TestCase):
         ax = self.workspace.plot_widget.current_ax
         tick_labels = [tick.get_text() for tick in ax.get_xticklabels()]
 
-        self.assertEqual(ax.get_xlabel(), 'Particle-size fraction (USCS)')
-        self.assertTrue(any(label.startswith('Sand') for label in tick_labels))
+        self.assertEqual(ax.get_xlabel(), 'Grain-size class (USCS)')
+        self.assertEqual(tick_labels, ['Clay', 'Silt', 'Sand', 'Gravel', 'Cobble'])
         self.assertEqual(self.workspace._drawer_headers[0], 'Fraction (USCS)')
 
     def test_k_value_sidebar_context_hides_distribution_specific_controls(self):

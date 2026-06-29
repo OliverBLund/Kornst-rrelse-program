@@ -559,9 +559,9 @@ def facet_dims(spec: ComparisonPlotSpec, count: int) -> tuple[int, int, int, int
     nothing is silently dropped. A soft cap keeps pathological counts readable,
     surfacing the remainder through an overflow note.
     """
+    cols = max(1, spec.grid_cols)
     shown = max(0, min(count, spec.max_facet_panels))
     hidden = max(0, count - shown)
-    cols = min(max(1, spec.grid_cols), max(shown, 1))
     rows = max(1, math.ceil(max(shown, 1) / cols))
     return rows, cols, shown, hidden
 
@@ -963,13 +963,7 @@ def _plot_histogram(figure, spec: ComparisonPlotSpec) -> int:
         ax = figure.add_subplot(rows, cols, i + 1)
         labels = list(unit.get("class_labels", []))
         freq = unit["freq"]
-        single_dataset_histogram = (
-            len(units) == 1 and len(spec.datasets) == 1 and not spec.use_group_breakdown
-        )
-        use_unit_color = not single_dataset_histogram or spec.palette_authoritative
-        bar_color = (
-            (unit.get("color") or style.curve_color) if use_unit_color else style.curve_color
-        )
+        bar_color = style.curve_color if len(units) == 1 else (unit.get("color") or style.curve_color)
 
         ax.bar(
             range(len(labels)),

@@ -3619,6 +3619,8 @@ class ComparisonTab(QWidget):
     def set_scheme(self, scheme) -> None:
         """Update active classification scheme and refresh if data present."""
         self._active_scheme = scheme
+        if hasattr(self._plot_widget, "set_scheme"):
+            self._plot_widget.set_scheme(scheme)
         if len(self.selected_datasets) >= 2:
             self.update_comparison()
 
@@ -3787,6 +3789,8 @@ class ComparisonTab(QWidget):
                 self._plot_widget.show_empty_state("Select datasets and click Update")
             return
         plot_tabs = self._plot_dataset_tabs()
+        if hasattr(self._plot_widget, "set_scheme"):
+            self._plot_widget.set_scheme(self._active_scheme)
         if not plot_tabs:
             self._plot_widget.set_datasets([])
             if hasattr(self._plot_widget, "show_empty_state"):

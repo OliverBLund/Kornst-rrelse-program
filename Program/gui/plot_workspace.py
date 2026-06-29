@@ -21,6 +21,7 @@ import re
 import numpy as np
 
 from data_loader import GrainSizeData
+from grain_classification import compute_detailed_fractions
 from .plot_widget import PlotWidget
 from .plot_styles import PlotStyle, get_style, get_available_style_names
 from .toggle_switch import ToggleSwitch
@@ -101,64 +102,10 @@ def _sync_chk(btn: QPushButton, on: bool):
 # PlotWorkspace
 # ─────────────────────────────────────────────────────────────
 
-_ISO_FRACTION_BANDS = (
-    (0.0, 0.002, "Clay"),
-    (0.002, 0.0063, "Fine silt"),
-    (0.0063, 0.02, "Medium silt"),
-    (0.02, 0.063, "Coarse silt"),
-    (0.063, 0.2, "Fine sand"),
-    (0.2, 0.63, "Medium sand"),
-    (0.63, 2.0, "Coarse sand"),
-    (2.0, 6.3, "Fine gravel"),
-    (6.3, 20.0, "Medium gravel"),
-    (20.0, 63.0, "Coarse gravel"),
-    (63.0, 200.0, "Cobble"),
-)
-
-
 def _format_mm(value: float) -> str:
     if value == 0:
         return "0"
     return f"{value:.4g}"
-
-
-def _iso_fraction_label(lower_mm: float, upper_mm: float) -> str:
-    if upper_mm <= 0:
-        return "Unknown"
-    if lower_mm <= 0 and upper_mm <= 0.063:
-        return "Silt / clay"
-    lower = max(lower_mm, 0.0001)
-    midpoint = math.sqrt(lower * upper_mm)
-    for lo, hi, label in _ISO_FRACTION_BANDS:
-        if lo <= midpoint < hi:
-            return label
-    return "Coarser material"
-
-
-def _scheme_fraction_label(lower_mm: float, upper_mm: float, scheme) -> str:
-    """Label a retained-size interval using the active classification scheme."""
-    if scheme is None or getattr(scheme, "key", "iso14688") == "iso14688":
-        return _iso_fraction_label(lower_mm, upper_mm)
-    if upper_mm <= 0:
-        return "Unknown"
-
-    lower = max(lower_mm, 0.0001)
-    midpoint = math.sqrt(lower * upper_mm)
-    clay_max = float(getattr(scheme, "clay_max", 0.002))
-    silt_max = float(getattr(scheme, "silt_max", 0.063))
-    sand_max = float(getattr(scheme, "sand_max", 2.0))
-    gravel_max = float(getattr(scheme, "gravel_max", 63.0))
-    bands = (
-        (0.0, clay_max, "Clay"),
-        (clay_max, silt_max, "Silt"),
-        (silt_max, sand_max, "Sand"),
-        (sand_max, gravel_max, "Gravel"),
-        (gravel_max, 300.0, "Cobble"),
-    )
-    for lo, hi, label in bands:
-        if lo <= midpoint < hi:
-            return label
-    return "Coarser material"
 
 
 def _scheme_short_name(scheme) -> str:
@@ -1231,29 +1178,27 @@ class PlotWorkspace(QWidget):
 
     def _histogram_rows(self) -> list[dict[str, float | str]]:
         scheme = getattr(self.plot_widget, "_scheme", None) if self.plot_widget else None
-        pairs = sorted(
-            zip(self.dataset.particle_sizes, self.dataset.percent_passing),
-            key=lambda pair: pair[0],
-            reverse=True,
+        fractions = compute_detailed_fractions(
+            list(self.dataset.particle_sizes),
+            list(self.dataset.percent_passing),
+            scheme,
         )
         rows: list[dict[str, float | str]] = []
-        for index, (upper_mm, passing) in enumerate(pairs):
-            lower_mm = pairs[index + 1][0] if index + 1 < len(pairs) else 0.0
-            next_passing = pairs[index + 1][1] if index + 1 < len(pairs) else 0.0
-            weight_pct = max(0.0, float(passing) - float(next_passing))
-            fraction = _scheme_fraction_label(float(lower_mm), float(upper_mm), scheme)
+        for fraction in fractions:
+            lower_mm = float(fraction.lower_mm)
+            upper_mm = float(fraction.upper_mm)
             if lower_mm <= 0:
-                interval = f"<{_format_mm(float(upper_mm))} mm"
+                interval = f"<{_format_mm(upper_mm)} mm"
             else:
-                interval = f"{_format_mm(float(lower_mm))}-{_format_mm(float(upper_mm))} mm"
+                interval = f"{_format_mm(lower_mm)}-{_format_mm(upper_mm)} mm"
             rows.append(
                 {
-                    "fraction": fraction,
-                    "lower_mm": float(lower_mm),
-                    "upper_mm": float(upper_mm),
+                    "fraction": fraction.label,
+                    "lower_mm": lower_mm,
+                    "upper_mm": upper_mm,
                     "interval": interval,
-                    "weight_pct": weight_pct,
-                    "tick_label": f"{fraction}\n{interval}",
+                    "weight_pct": float(fraction.pct),
+                    "tick_label": fraction.label,
                 }
             )
         return rows
@@ -1274,7 +1219,7 @@ class PlotWorkspace(QWidget):
                    color=style.curve_color, alpha=0.8,
                    edgecolor='black', linewidth=0.8)
             scheme = getattr(self.plot_widget, "_scheme", None)
-            ax.set_xlabel(f'Particle-size fraction ({_scheme_short_name(scheme)})', fontsize=style.label_fontsize,
+            ax.set_xlabel(f'Grain-size class ({_scheme_short_name(scheme)})', fontsize=style.label_fontsize,
                           fontfamily=style.font_family)
             ax.set_ylabel('Weight (%)', fontsize=style.label_fontsize,
                           fontfamily=style.font_family)
@@ -1295,7 +1240,7 @@ class PlotWorkspace(QWidget):
             ax.bar(range(len(rows)), weights,
                    tick_label=tick_labels)
             scheme = getattr(self.plot_widget, "_scheme", None)
-            ax.set_xlabel(f'Particle-size fraction ({_scheme_short_name(scheme)})')
+            ax.set_xlabel(f'Grain-size class ({_scheme_short_name(scheme)})')
             ax.set_ylabel('Weight (%)')
             ax.set_title(
                 f'Grain Size Histogram - {self.dataset.sample_name}')
