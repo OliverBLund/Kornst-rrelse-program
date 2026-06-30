@@ -11,7 +11,9 @@ os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 sys.path.insert(0, "Program")
 
 from PyQt6.QtCore import Qt
-from PyQt6.QtWidgets import QApplication, QPushButton, QVBoxLayout, QWidget
+from PyQt6.QtWidgets import (
+    QApplication, QPushButton, QScrollArea, QVBoxLayout, QWidget,
+)
 
 from gui.main_window import MainWindow
 from gui.startup_tour import StartupTourOverlay, TourStep
@@ -119,6 +121,101 @@ class TestStartupTourOverlay(unittest.TestCase):
             overlay.deleteLater()
             host.deleteLater()
 
+    def test_overlay_reveals_scrolled_out_target(self):
+        """A target scrolled out of a scroll area is revealed and spotlighted on it,
+        not clipped to a corner sliver."""
+        host = QWidget()
+        layout = QVBoxLayout(host)
+        scroll = QScrollArea()
+        scroll.setWidgetResizable(True)
+        content = QWidget()
+        content_layout = QVBoxLayout(content)
+        far_target = None
+        for i in range(40):
+            btn = QPushButton(f"Row {i}")
+            btn.setMinimumHeight(40)
+            content_layout.addWidget(btn)
+            if i == 38:
+                far_target = btn
+        scroll.setWidget(content)
+        layout.addWidget(scroll)
+        host.resize(480, 360)
+        host.show()
+        APP.processEvents()
+
+        overlay = StartupTourOverlay(
+            host,
+            [TourStep(title="Deep row", body="Far down the scroll area.",
+                      target=lambda: far_target)],
+            show_startup_checkbox=False,
+        )
+        try:
+            overlay.start()
+            APP.processEvents()
+
+            self.assertFalse(overlay._spotlight_rect.isNull())
+            # The spotlight should cover a real, sizeable region (the revealed row),
+            # not a tiny clipped corner.
+            self.assertGreater(overlay._spotlight_rect.width(), 60)
+            self.assertGreater(overlay._spotlight_rect.height(), 20)
+            # And it should sit within the visible host, not pinned at the origin.
+            self.assertTrue(host.rect().intersects(overlay._spotlight_rect))
+        finally:
+            overlay.close()
+            host.close()
+            overlay.deleteLater()
+            host.deleteLater()
+
+    def test_overlay_retries_until_deferred_target_is_visible(self):
+        """A target on a stacked page that only becomes current after a tab fade
+        is spotlighted once it appears, instead of snapping to a centered fallback."""
+        import time
+        from PyQt6.QtWidgets import QStackedWidget
+
+        host = QWidget()
+        layout = QVBoxLayout(host)
+        stack = QStackedWidget()
+        page0 = QWidget()
+        page1 = QWidget()
+        p1_layout = QVBoxLayout(page1)
+        target = QPushButton("Deferred target")
+        target.setMinimumSize(120, 32)
+        p1_layout.addWidget(target)
+        stack.addWidget(page0)
+        stack.addWidget(page1)
+        stack.setCurrentIndex(0)  # target's page is NOT current yet
+        layout.addWidget(stack)
+        host.resize(480, 360)
+        host.show()
+        APP.processEvents()
+
+        overlay = StartupTourOverlay(
+            host,
+            [TourStep(title="Deferred", body="Becomes visible later.",
+                      target=lambda: target)],
+            show_startup_checkbox=False,
+        )
+        try:
+            overlay.start()
+            APP.processEvents()
+            # Target not visible yet → no spotlight, a retry is pending.
+            self.assertTrue(overlay._spotlight_rect.isNull())
+
+            # Simulate the fade completing and the page becoming current.
+            stack.setCurrentIndex(1)
+            deadline = time.monotonic() + 1.0
+            while overlay._spotlight_rect.isNull() and time.monotonic() < deadline:
+                APP.processEvents()
+                time.sleep(0.02)
+
+            self.assertFalse(overlay._spotlight_rect.isNull())
+            self.assertGreater(overlay._spotlight_rect.width(), 60)
+        finally:
+            overlay.close()
+            host.close()
+            overlay.deleteLater()
+            host.deleteLater()
+
     def test_overlay_runs_step_callback_before_positioning(self):
         host = QWidget()
         layout = QVBoxLayout(host)
@@ -209,10 +306,39 @@ class TestStartupTourOverlay(unittest.TestCase):
         self.assertIn("Plot", steps_source)
         self.assertIn("Results", steps_source)
         self.assertIn("Statistics", steps_source)
-        self.assertIn("controls sidebar", steps_source)
-        self.assertIn("result cards", steps_source)
+        self.assertIn("Controls sidebar", steps_source)
+        self.assertIn("summary cards", steps_source)
         self.assertNotIn("_mean_summary_bar", steps_source)
+        # Dense step bodies explain the actual controls, not just name the panels.
+        self.assertIn("Dist. Curve", steps_source)
+        self.assertIn("Zone % in fill", steps_source)
+        self.assertIn("detail panel", steps_source)
+        # Statistics steps describe the rebuilt tab (detailed classification +
+        # calculation internals), not the old percentile/gradation text panels.
+        self.assertIn("classification_card", steps_source)
+        self.assertIn("internals_section", steps_source)
+        self.assertIn("before_step=stats_internals_step", steps_source)
+        self.assertIn("descriptor", steps_source)
+        self.assertNotIn("percentiles_text", steps_source)
 
+    def test_main_window_exposes_comparison_guide(self):
+        setup_menus_source = inspect.getsource(MainWindow.setup_menus)
+        show_source = inspect.getsource(MainWindow.show_comparison_guide)
+        steps_source = inspect.getsource(MainWindow._comparison_tour_steps)
+
+        self.assertIn("Guide &Comparison", setup_menus_source)
+        self.assertIn("show_comparison_guide", setup_menus_source)
+        self.assertIn("_switch_to_tab(1)", show_source)
+        self.assertIn("show_startup_checkbox=False", show_source)
+        self.assertIn("_comparison_tour_steps", show_source)
+        # Walks all three comparison subtabs with the right targets.
+        self.assertIn("_plot_widget", steps_source)
+        self.assertIn("_k_table", steps_source)
+        self.assertIn("_stats_scope_table", steps_source)
+        self.assertIn("_stats_metric_geo_btn", steps_source)
+        self.assertIn("before_step=plot_step", steps_source)
+        self.assertIn("before_step=details_step", steps_source)
+        self.assertIn("before_step=stats_step", steps_source)
 
     def test_main_window_exposes_reports_guide(self):
         setup_menus_source = inspect.getsource(MainWindow.setup_menus)

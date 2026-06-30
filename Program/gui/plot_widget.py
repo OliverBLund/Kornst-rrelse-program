@@ -56,6 +56,7 @@ class PlotWidget(QWidget):
         self.show_d_lines = True
         self.show_markers = False
         self.fill_curve = False
+        self.curve_color_override = None  # per-sample colour from the sidebar
         self.show_k_value_labels = True
         self.k_value_label_fontsize = 8
         self.log_k_y_scale = False
@@ -237,6 +238,7 @@ class PlotWidget(QWidget):
             classification_scheme=self._scheme,
             fill_curve=self.fill_curve,
             fill_zone_labels=self.fill_zone_labels,
+            curve_color=self.curve_color_override,
             **plot_text_options_to_renderer_kwargs(self.plot_text_options),
         )
 
@@ -284,6 +286,7 @@ class PlotWidget(QWidget):
             classification_scheme=self._scheme,
             fill_curve=self.fill_curve,
             fill_zone_labels=self.fill_zone_labels,
+            curve_color=self.curve_color_override,
             title="Grain Size Distribution",
         )
 

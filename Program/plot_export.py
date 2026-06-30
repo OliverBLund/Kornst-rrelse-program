@@ -79,7 +79,7 @@ def _new_fig_ax(figsize):
     return fig, ax
 
 
-def _fig_to_base64(fig: Figure, *, dpi: int = 150) -> str:
+def _fig_to_base64(fig: Figure, *, dpi: int = 220) -> str:
     """Render *fig* to a base64-encoded PNG data-URL.
 
     No ``plt.close`` is needed — the figure carries its own canvas and holds no
@@ -100,7 +100,7 @@ def export_grain_size_plot(
     *,
     style: PlotStyle = PROFESSIONAL_STYLE,
     figsize: tuple[float, float] = (10, 6),
-    dpi: int = 150,
+    dpi: int = 220,
     show_d_lines: bool = True,
     show_markers: bool = True,
     show_grid: bool = True,
@@ -168,7 +168,7 @@ def export_k_bar_chart(
     reference_values: Optional[list[float]] = None,
     style: PlotStyle = PROFESSIONAL_STYLE,
     figsize: tuple[float, float] = (12, 6),
-    dpi: int = 150,
+    dpi: int = 220,
     show_grid: bool = True,
     show_legend: bool = True,
     show_reference_lines: bool = True,
@@ -216,7 +216,7 @@ def export_distribution_overlay(
     colors: Optional[List[str]] = None,
     style: PlotStyle = PROFESSIONAL_STYLE,
     figsize: tuple[float, float] = (12, 7),
-    dpi: int = 150,
+    dpi: int = 220,
     show_grid: bool = True,
     show_legend: bool = True,
     title: str = "Grain Size Distribution Comparison",
@@ -241,7 +241,7 @@ def export_comparison_spec(
     spec,
     *,
     figsize: tuple[float, float] = (12, 7),
-    dpi: int = 150,
+    dpi: int = 220,
 ) -> str:
     """Return a base64-encoded PNG of a comparison plot rendered from *spec*.
 
@@ -265,7 +265,7 @@ def export_k_overlay(
     flagged_methods_dict: Optional[Dict[str, Set[str]]] = None,
     style: PlotStyle = PROFESSIONAL_STYLE,
     figsize: tuple[float, float] = (12, 7),
-    dpi: int = 150,
+    dpi: int = 220,
     show_grid: bool = True,
     show_legend: bool = True,
     show_value_labels: bool = True,
@@ -298,7 +298,7 @@ def export_k_boxplot(
     *,
     style: PlotStyle = PROFESSIONAL_STYLE,
     figsize: tuple[float, float] = (12, 7),
-    dpi: int = 150,
+    dpi: int = 220,
     show_grid: bool = True,
     title: str = "K-Value Distribution Comparison",
 ) -> str:
@@ -325,7 +325,7 @@ def export_k_scope_boxplot(
     colors: Optional[List[str]] = None,
     style: PlotStyle = PROFESSIONAL_STYLE,
     figsize: tuple[float, float] = (12, 7),
-    dpi: int = 150,
+    dpi: int = 220,
     show_grid: bool = True,
     title: str = "Hydraulic Conductivity Distribution by Scope",
 ) -> str:
@@ -468,7 +468,7 @@ def export_applicability_heatmap(
     *,
     style: PlotStyle = PROFESSIONAL_STYLE,
     figsize: tuple[float, float] | None = None,
-    dpi: int = 150,
+    dpi: int = 220,
     title: str = "Method Applicability Status",
 ) -> str:
     """Return a base64-encoded PNG of a method applicability heatmap."""
@@ -489,7 +489,7 @@ def export_reliability_matrix(
     *,
     style: PlotStyle = PROFESSIONAL_STYLE,
     figsize: tuple[float, float] | None = None,
-    dpi: int = 150,
+    dpi: int = 220,
     title: str = "Method Applicability Matrix \u2014 All Samples",
 ) -> str:
     """Return a base64-encoded PNG of a multi-sample reliability matrix."""

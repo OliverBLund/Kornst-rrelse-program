@@ -521,35 +521,26 @@ class ComparisonTab(QWidget):
         actions_lay.setContentsMargins(8, 6, 8, 6)
         actions_lay.setSpacing(6)
 
-        self._plot_scope_edit_btn = QPushButton("Scope")
-        self._plot_scope_edit_btn.setToolTip("Edit comparison scope and group labels")
-        self._plot_scope_edit_btn.setCursor(Qt.CursorShape.PointingHandCursor)
-        self._plot_scope_edit_btn.clicked.connect(self._on_manage_datasets)
-
+        # Scope & Groups lives in the always-visible header; this panel only needs
+        # the plot-local "Show all" to clear focus/hidden datasets.
         self._plot_show_all_btn = QPushButton("Show all")
         self._plot_show_all_btn.setToolTip("Clear plot focus and hidden datasets")
         self._plot_show_all_btn.setCursor(Qt.CursorShape.PointingHandCursor)
         self._plot_show_all_btn.clicked.connect(self._show_all_plot_datasets)
-
-        for btn in (self._plot_scope_edit_btn, self._plot_show_all_btn):
-            btn.setFixedHeight(24)
-            btn.setStyleSheet(
-                f"QPushButton {{ background: rgba(255,255,255,0.48); border: 1px solid {C.BORDER}; "
-                f"border-radius: 4px; color: {C.TEXT_MID}; font-size: {F.SZ_XS}pt; padding: 2px 7px; }}"
-                f"QPushButton:hover {{ background: rgba(107,142,35,0.08); color: {C.TEXT}; }}"
-                f"QPushButton:disabled {{ color: {C.TEXT_MUTED}; background: transparent; }}"
-            )
+        self._plot_show_all_btn.setFixedHeight(24)
+        self._plot_show_all_btn.setStyleSheet(
+            f"QPushButton {{ background: rgba(255,255,255,0.48); border: 1px solid {C.BORDER}; "
+            f"border-radius: 4px; color: {C.TEXT_MID}; font-size: {F.SZ_XS}pt; padding: 2px 7px; }}"
+            f"QPushButton:hover {{ background: rgba(107,142,35,0.08); color: {C.TEXT}; }}"
+            f"QPushButton:disabled {{ color: {C.TEXT_MUTED}; background: transparent; }}"
+        )
         try:
-            self._plot_scope_edit_btn.setIcon(
-                theme_icon("fa6s.layer-group", C.TEXT_MID, size=10)
-            )
             self._plot_show_all_btn.setIcon(theme_icon("fa6s.eye", C.TEXT_MID, size=10))
-            self._plot_scope_edit_btn.setIconSize(QSize(10, 10))
             self._plot_show_all_btn.setIconSize(QSize(10, 10))
         except Exception:
             pass
-        actions_lay.addWidget(self._plot_scope_edit_btn)
         actions_lay.addWidget(self._plot_show_all_btn)
+        actions_lay.addStretch(1)
         sb_lay.addWidget(actions)
 
         # Scrollable pin list
@@ -985,18 +976,8 @@ class ComparisonTab(QWidget):
             status_buttons, ["OK only", "Warnings"], min_width=90
         )
         tb.addWidget(status_frame)
-
-        self._details_scope_btn = QPushButton("Scope & Groups")
-        self._details_scope_btn.setProperty("pw-btn", True)
-        self._details_scope_btn.setFixedHeight(24)
-        self._details_scope_btn.setCursor(Qt.CursorShape.PointingHandCursor)
-        self._details_scope_btn.setIcon(
-            theme_icon("fa6s.layer-group", C.OLIVE, size=12)
-        )
-        self._details_scope_btn.setIconSize(QSize(12, 12))
-        self._details_scope_btn.setEnabled(False)
-        self._details_scope_btn.clicked.connect(self._on_manage_datasets)
-        tb.addWidget(self._details_scope_btn)
+        # Scope & Groups is reachable from the always-visible header, so the
+        # Details bar no longer duplicates it here.
         tb.addStretch(1)
 
         self._details_unit_lbl = QLabel("Unit")
@@ -2432,16 +2413,8 @@ class ComparisonTab(QWidget):
             status_buttons, ["OK only", "Warnings"], min_width=90
         )
         tb.addWidget(status_frame, 0)
-
-        self._stats_scope_btn = QPushButton("Scope & Groups")
-        self._stats_scope_btn.setProperty("pw-btn", True)
-        self._stats_scope_btn.setFixedHeight(24)
-        self._stats_scope_btn.setCursor(Qt.CursorShape.PointingHandCursor)
-        self._stats_scope_btn.setIcon(theme_icon("fa6s.layer-group", C.OLIVE, size=12))
-        self._stats_scope_btn.setIconSize(QSize(12, 12))
-        self._stats_scope_btn.setEnabled(False)
-        self._stats_scope_btn.clicked.connect(self._on_manage_datasets)
-        tb.addWidget(self._stats_scope_btn, 0)
+        # Scope & Groups is reachable from the always-visible header (no per-subtab
+        # duplicate here).
 
         self._stats_context = QLabel("")
         self._stats_context.setMinimumWidth(0)
@@ -3716,12 +3689,6 @@ class ComparisonTab(QWidget):
             else f"{n_selected} selected  ·  {n_loaded} loaded  ·  {plot_scope}"
         )
         self._manage_btn.setEnabled(n_loaded >= 1)
-        if hasattr(self, "_details_scope_btn"):
-            self._details_scope_btn.setEnabled(n_loaded >= 1)
-        if hasattr(self, "_stats_scope_btn"):
-            self._stats_scope_btn.setEnabled(n_loaded >= 1)
-        if hasattr(self, "_plot_scope_edit_btn"):
-            self._plot_scope_edit_btn.setEnabled(n_loaded >= 1)
         if hasattr(self, "_plot_show_all_btn"):
             self._plot_show_all_btn.setEnabled(bool(self._pinned or self._plot_hidden))
 

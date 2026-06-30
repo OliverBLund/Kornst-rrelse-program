@@ -10,7 +10,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import Callable, Iterable
 
-from PyQt6.QtCore import QEvent, QPoint, QRect, QRectF, Qt, pyqtSignal
+from PyQt6.QtCore import QEvent, QPoint, QRect, QRectF, Qt, QTimer, pyqtSignal
 from PyQt6.QtGui import QColor, QFont, QPainter, QPainterPath, QPen
 from PyQt6.QtWidgets import (
     QCheckBox,
@@ -65,6 +65,7 @@ class StartupTourOverlay(QWidget):
         self._index = 0
         self._spotlight_rect = QRect()
         self._target_rect = QRect()
+        self._reposition_retries = 0
         self._show_startup_checkbox = show_startup_checkbox
 
         self._build_callout()
@@ -306,6 +307,7 @@ class StartupTourOverlay(QWidget):
 
     def _show_step(self, index: int) -> None:
         self._index = max(0, min(index, len(self._steps) - 1))
+        self._reposition_retries = 0
         step = self._steps[self._index]
         if step.before_step is not None:
             try:
@@ -322,12 +324,21 @@ class StartupTourOverlay(QWidget):
         step = self._steps[self._index]
         target_rect = self._target_rect_for(step)
         if target_rect is None:
+            # The target may not be laid out yet — e.g. switching to this tab
+            # runs a fade animation that defers the page becoming current. Retry
+            # briefly before falling back to a centered callout.
+            if self._reposition_retries < 6:
+                self._reposition_retries += 1
+                QTimer.singleShot(100, self._position_current_step)
+                return
             target_rect = QRect(
                 max(16, self.width() // 2 - 80),
                 max(16, self.height() // 2 - 30),
                 160,
                 60,
             )
+        else:
+            self._reposition_retries = 0
 
         self._target_rect = target_rect
         self._spotlight_rect = target_rect.adjusted(-8, -8, 8, 8)
@@ -358,8 +369,27 @@ class StartupTourOverlay(QWidget):
         parent = self.parentWidget()
         if parent is None or not target.isVisibleTo(parent):
             return None
+        # A target inside a scroll area can be "visible" yet scrolled out of the
+        # viewport; reveal it first so the spotlight lands on it instead of a
+        # clipped corner sliver.
+        self._scroll_target_into_view(target)
         top_left = target.mapTo(parent, QPoint(0, 0))
         return QRect(top_left, target.size()).intersected(self.rect())
+
+    @staticmethod
+    def _scroll_target_into_view(target: QWidget) -> None:
+        """Ask the nearest containing scroll area to reveal the target widget."""
+        current = target.parentWidget()
+        while current is not None:
+            ensure = getattr(current, "ensureWidgetVisible", None)
+            if callable(ensure):
+                try:
+                    ensure(target, 24, 24)
+                    QApplication.processEvents()
+                except RuntimeError:
+                    pass
+                return
+            current = current.parentWidget()
 
     @staticmethod
     def _wrapped_label_height(label: QLabel, width: int) -> int:

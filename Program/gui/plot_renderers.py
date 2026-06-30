@@ -69,6 +69,7 @@ def render_grain_size_distribution(
     classification_scheme=None,
     fill_curve: bool = False,
     fill_zone_labels: bool = False,
+    curve_color: Optional[str] = None,
     title: Optional[str] = None,
     show_title: bool = True,
     x_label: str = "Grain Diameter (mm)",
@@ -90,11 +91,12 @@ def render_grain_size_distribution(
         _draw_classification_zones(ax, classification_scheme)
 
     # Curve ───────────────────────────────────────────────────────
+    effective_curve_color = curve_color or style.curve_color
     marker = style.curve_marker if show_markers else None
     ax.semilogx(
         particle_sizes,
         percent_passing,
-        color=style.curve_color,
+        color=effective_curve_color,
         linewidth=style.curve_linewidth,
         label=sample_name,
         marker=marker,
@@ -104,7 +106,7 @@ def render_grain_size_distribution(
     )
     if fill_curve:
         ax.fill_between(particle_sizes, percent_passing, 0,
-                         color=style.curve_color, alpha=0.12)
+                         color=effective_curve_color, alpha=0.12)
         if fill_zone_labels and grain_size_data is not None and classification_scheme is not None:
             _draw_fill_zone_labels(ax, particle_sizes, percent_passing,
                                    grain_size_data, classification_scheme)

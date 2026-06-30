@@ -719,6 +719,31 @@ class ReportGenerator:
         for run in paragraph.runs:
             run.font.color.rgb = rgb
 
+    def _style_docx_heading(self, paragraph, level: int,
+                            brand_rgb: tuple[int, int, int], ctx: dict[str, Any]) -> None:
+        self._set_docx_heading_color(paragraph, brand_rgb, ctx)
+        sizes = {0: 22, 1: 18, 2: 13, 3: 11, 4: 10}
+        for run in paragraph.runs:
+            run.bold = True
+            run.font.name = "Calibri"
+            run.font.size = ctx["Pt"](sizes.get(level, 10))
+        paragraph.paragraph_format.keep_with_next = True
+        paragraph.paragraph_format.space_before = ctx["Pt"](14 if level <= 2 else 9)
+        paragraph.paragraph_format.space_after = ctx["Pt"](6)
+
+    def _add_docx_heading(self, container, text: str, level: int,
+                          ctx: dict[str, Any], brand_rgb: tuple[int, int, int]):
+        clean = re.sub(r"\s+", " ", text).strip()
+        if not clean:
+            return None
+        if hasattr(container, "add_heading"):
+            paragraph = container.add_heading(clean, level=level)
+        else:
+            style = "Title" if level == 0 else f"Heading {level}"
+            paragraph = container.add_paragraph(clean, style=style)
+        self._style_docx_heading(paragraph, level, brand_rgb, ctx)
+        return paragraph
+
     def _add_docx_paragraph(self, container, text: str, ctx: dict[str, Any],
                             *, bold: bool = False, align=None, style: Optional[str] = None) -> None:
         clean = re.sub(r"\s+", " ", text).strip()
@@ -729,7 +754,94 @@ class ReportGenerator:
             paragraph.alignment = align
         run = paragraph.add_run(clean)
         run.bold = bold
+        run.font.name = "Calibri"
         paragraph.paragraph_format.space_after = ctx["Pt"](6)
+        paragraph.paragraph_format.line_spacing = 1.15
+
+    @staticmethod
+    def _docx_rgb_hex(rgb: tuple[int, int, int]) -> str:
+        return "".join(f"{value:02X}" for value in rgb)
+
+    def _apply_docx_box_style(self, cell, fill_hex: str, accent_hex: str,
+                              ctx: dict[str, Any]) -> None:
+        tc_pr = cell._tc.get_or_add_tcPr()
+        tc_pr.append(ctx["parse_xml"](
+            f'<w:shd {ctx["nsdecls"]("w")} w:fill="{fill_hex}"/>'
+        ))
+        tc_pr.append(ctx["parse_xml"](
+            f'<w:tcBorders {ctx["nsdecls"]("w")}>'
+            f'<w:top w:val="single" w:sz="6" w:space="0" w:color="D0D0D0"/>'
+            f'<w:left w:val="single" w:sz="18" w:space="0" w:color="{accent_hex}"/>'
+            f'<w:bottom w:val="single" w:sz="6" w:space="0" w:color="D0D0D0"/>'
+            f'<w:right w:val="single" w:sz="6" w:space="0" w:color="D0D0D0"/>'
+            f'</w:tcBorders>'
+        ))
+        tc_pr.append(ctx["parse_xml"](
+            f'<w:tcMar {ctx["nsdecls"]("w")}>'
+            f'<w:top w:w="140" w:type="dxa"/>'
+            f'<w:left w:w="180" w:type="dxa"/>'
+            f'<w:bottom w:w="140" w:type="dxa"/>'
+            f'<w:right w:w="180" w:type="dxa"/>'
+            f'</w:tcMar>'
+        ))
+
+    def _render_docx_box(self, container, node: _HtmlNode, ctx: dict[str, Any],
+                         brand_rgb: tuple[int, int, int], state: dict[str, bool],
+                         fill_hex: str) -> None:
+        table = container.add_table(rows=1, cols=1)
+        table.alignment = ctx["WD_TABLE_ALIGNMENT"].LEFT
+        table.autofit = True
+        cell = table.cell(0, 0)
+        self._apply_docx_box_style(cell, fill_hex, self._docx_rgb_hex(brand_rgb), ctx)
+        cell._tc.clear_content()
+        for child in self._child_nodes(node):
+            self._render_docx_node(cell, child, ctx, brand_rgb, state)
+        spacer = container.add_paragraph()
+        spacer.paragraph_format.space_after = ctx["Pt"](4)
+        state["started_content"] = True
+
+    def _apply_docx_header_footer(self, document, metadata: dict[str, str],
+                                  brand, brand_rgb: tuple[int, int, int],
+                                  ctx: dict[str, Any]) -> None:
+        section = document.sections[0]
+        section.header_distance = ctx["Mm"](8)
+        section.footer_distance = ctx["Mm"](8)
+
+        project = (metadata.get("project_name") or "Grain Size Analysis Report").strip()
+        project_no = (metadata.get("project_no") or "").strip()
+        header_parts = [project]
+        if project_no:
+            header_parts.append(project_no)
+        org_name = getattr(brand, "org_name", "") if brand is not None else ""
+        if org_name and org_name not in header_parts:
+            header_parts.append(org_name)
+
+        header = section.header.paragraphs[0]
+        header.text = ""
+        header_run = header.add_run(" | ".join(header_parts))
+        header_run.bold = True
+        header_run.font.name = "Calibri"
+        header_run.font.size = ctx["Pt"](8.5)
+        header_run.font.color.rgb = ctx["RGBColor"](*brand_rgb)
+        header.paragraph_format.space_after = ctx["Pt"](2)
+
+        footer_bits = []
+        client = (metadata.get("client") or "").strip()
+        analyst = (metadata.get("analyst") or "").strip()
+        report_date = (metadata.get("date") or "").strip()
+        if client:
+            footer_bits.append(client)
+        if analyst:
+            footer_bits.append(f"Analyst: {analyst}")
+        footer_bits.append(f"Date: {report_date or datetime.now().strftime('%Y-%m-%d')}")
+
+        footer = section.footer.paragraphs[0]
+        footer.text = ""
+        footer.alignment = ctx["WD_ALIGN_PARAGRAPH"].CENTER
+        footer_run = footer.add_run(" | ".join(footer_bits))
+        footer_run.font.name = "Calibri"
+        footer_run.font.size = ctx["Pt"](8)
+        footer_run.font.color.rgb = ctx["RGBColor"](108, 117, 125)
 
     def _render_docx_metadata_grid(self, container, node: _HtmlNode,
                                    ctx: dict[str, Any], brand_rgb: tuple[int, int, int]) -> None:
@@ -957,6 +1069,18 @@ class ReportGenerator:
                 return
             if "page-break" in classes and state.get("started_content") and hasattr(container, "add_page_break"):
                 container.add_page_break()
+            box_fills = {
+                "metadata": "F7F7F7",
+                "info-box": "F7F7F7",
+                "success-box": "F4F9F4",
+                "warning-box": "FFFBF0",
+                "error-box": "FFF4F4",
+                "appendix-item": "F7F7F7",
+            }
+            for class_name, fill_hex in box_fills.items():
+                if class_name in classes:
+                    self._render_docx_box(container, node, ctx, brand_rgb, state, fill_hex)
+                    return
             if "metadata-grid" in classes:
                 self._render_docx_metadata_grid(container, node, ctx, brand_rgb)
                 state["started_content"] = True
@@ -966,9 +1090,11 @@ class ReportGenerator:
                 state["started_content"] = True
                 return
             if "cover-title" in classes:
-                paragraph = container.add_heading(self._node_text(node), level=0)
-                paragraph.alignment = ctx["WD_ALIGN_PARAGRAPH"].CENTER
-                self._set_docx_heading_color(paragraph, brand_rgb, ctx)
+                paragraph = self._add_docx_heading(
+                    container, self._node_text(node), 0, ctx, brand_rgb
+                )
+                if paragraph is not None:
+                    paragraph.alignment = ctx["WD_ALIGN_PARAGRAPH"].CENTER
                 state["started_content"] = True
                 return
             if "cover-subtitle" in classes:
@@ -1003,11 +1129,11 @@ class ReportGenerator:
 
         if tag in {"h1", "h2", "h3", "h4"}:
             heading_level = {"h1": 1, "h2": 2, "h3": 3, "h4": 4}[tag]
-            paragraph = container.add_heading(self._node_text(node), level=heading_level)
-            self._set_docx_heading_color(paragraph, brand_rgb, ctx)
+            self._add_docx_heading(
+                container, self._node_text(node), heading_level, ctx, brand_rgb
+            )
             state["started_content"] = True
             return
-
         if tag == "p":
             self._add_docx_paragraph(container, self._node_text(node), ctx)
             state["started_content"] = True
@@ -1053,6 +1179,7 @@ class ReportGenerator:
         html_text: str,
         brand=None,
         *,
+        metadata: Optional[dict[str, str]] = None,
         externalized_table_ids: Optional[set[str]] = None,
         externalized_table_titles: Optional[dict[str, str]] = None,
     ) -> bytes:
@@ -1093,6 +1220,7 @@ class ReportGenerator:
             "externalized_table_ids": set(externalized_table_ids or ()),
             "externalized_table_titles": dict(externalized_table_titles or {}),
         }
+        self._apply_docx_header_footer(document, dict(metadata or {}), brand, brand_rgb, ctx)
         state = {"started_content": False}
         for child in self._child_nodes(body):
             self._render_docx_node(document, child, ctx, brand_rgb, state)
@@ -1530,7 +1658,7 @@ class ReportGenerator:
         """Grain-size class histogram comparison, matching the Comparison tab."""
         spec = self._build_comparison_spec(
             sample_details, comparison_snapshot,
-            plot_type="histogram", display_mode="grid",
+            plot_type="histogram", display_mode="overlay",
             breakdown=breakdown, plot_style=plot_style,
         )
         return _get_plot_export().export_comparison_spec(spec)

@@ -9,7 +9,9 @@ from PyQt6.QtWidgets import (
     QPushButton, QLabel, QFileDialog, QMessageBox, QLineEdit,
     QSizePolicy, QButtonGroup, QSpinBox, QDoubleSpinBox, QScrollArea,
     QSplitter, QTableWidget, QTableWidgetItem, QHeaderView, QAbstractItemView,
+    QColorDialog,
 )
+from PyQt6.QtGui import QColor
 from PyQt6.QtCore import (
     Qt, pyqtSignal, QPropertyAnimation, QEasingCurve, QSize,
 )
@@ -31,7 +33,7 @@ from .sidebar_controls import (
     LEGEND_LOCATIONS as _LEGEND_LOCATIONS,
     LEGEND_LAYOUTS as _LEGEND_LAYOUTS,
     make_axis_row, make_color_row, make_combo_row, make_dspin_row,
-    make_spin_row, make_toggle_row,
+    make_spin_row, make_toggle_row, set_swatch_color,
 )
 from .plot_renderers import apply_legend_aware_layout
 from .plot_text_options import (
@@ -143,6 +145,7 @@ class PlotWorkspace(QWidget):
         self.show_dlines = True
         self.fill_curve = False
         self.fill_zone_labels = False
+        self._curve_color = None  # per-sample colour override (None = use preset)
         self.log_x_scale = True
         self.show_k_value_labels = True
         self.k_value_label_fontsize = 8
@@ -577,9 +580,9 @@ class PlotWorkspace(QWidget):
         self._sect_display.add_widget(self._row_k_log)
         lay.addWidget(self._sect_display)
 
-        # ── Curve Color ──
+        # ── Sample Color ──
         self._sect_curve_color = CollapsibleSection(
-            "Curve Color", "fa6s.palette",
+            "Sample color", "fa6s.palette",
             CollapsibleSection.PURPLE, expanded=False,
         )
         self._color_container = QWidget()
@@ -730,8 +733,34 @@ class PlotWorkspace(QWidget):
         return make_dspin_row(label, minimum, maximum, step, decimals)
 
     def _add_color_row(self, name: str, color: str):
-        row, _dot = make_color_row(name, color)
+        row, dot = make_color_row(name, color)
+        self._curve_dot = dot
+        dot.mousePressEvent = lambda _event: self._pick_curve_color()
         self._color_container_lay.addWidget(row)
+
+    def _pick_curve_color(self):
+        """Open a colour picker for the sample's curve/series colour."""
+        current = self._curve_color or (
+            self.plot_widget.current_style.curve_color if self.plot_widget else "#1f4e79"
+        )
+        chosen = QColorDialog.getColor(
+            QColor(current), self, "Sample color"
+        )
+        if not chosen.isValid():
+            return
+        self._curve_color = chosen.name()
+        set_swatch_color(self._curve_dot, self._curve_color)
+        self.refresh_plot()
+
+    def _sync_curve_swatch(self):
+        """Reflect the effective sample colour (override or preset) in the swatch."""
+        if not hasattr(self, "_curve_dot"):
+            return
+        effective = self._curve_color or (
+            self.plot_widget.current_style.curve_color if self.plot_widget else None
+        )
+        if effective:
+            set_swatch_color(self._curve_dot, effective)
 
     # ── Sidebar toggle ─────────────────────────────────────────
 
@@ -1087,8 +1116,11 @@ class PlotWorkspace(QWidget):
         self._set_context_visibility(self._row_k_log, supports_k_units)
         self._set_context_visibility(self._row_k_label_size, supports_k_units)
 
-        self._set_context_visibility(self._sect_curve_color, not is_k_plot)
-        self._set_context_visibility(self._color_container, not is_k_plot)
+        # Sample colour applies to the curve/series (distribution + combined);
+        # histograms use classification-zone bar colours, K plots use bar colours.
+        supports_curve_color = plot_type in {"distribution", "combined"}
+        self._set_context_visibility(self._sect_curve_color, supports_curve_color)
+        self._set_context_visibility(self._color_container, supports_curve_color)
         self._set_context_visibility(self._sect_units, supports_k_units)
         self._set_context_visibility(self._row_units, supports_k_units)
 
@@ -1124,6 +1156,8 @@ class PlotWorkspace(QWidget):
         self.plot_widget.show_markers = self.show_markers
         self.plot_widget.fill_curve = self.fill_curve
         self.plot_widget.fill_zone_labels = self.fill_zone_labels
+        self.plot_widget.curve_color_override = self._curve_color
+        self._sync_curve_swatch()
         self.plot_widget.show_k_value_labels = self.show_k_value_labels
         self.plot_widget.k_value_label_fontsize = self.k_value_label_fontsize
         self.plot_widget.log_k_y_scale = self.log_k_y_scale

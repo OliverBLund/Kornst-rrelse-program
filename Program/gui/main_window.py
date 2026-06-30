@@ -839,6 +839,11 @@ class MainWindow(FramelessMainWindowMixin, QMainWindow):
         individual_guide_action.triggered.connect(self.show_individual_samples_guide)
         help_menu.addAction(individual_guide_action)
 
+        comparison_guide_action = QAction("Guide &Comparison", self)
+        comparison_guide_action.setIcon(icon("fa6s.code-compare", C.TEXT_MUTED))
+        comparison_guide_action.triggered.connect(self.show_comparison_guide)
+        help_menu.addAction(comparison_guide_action)
+
         reports_guide_action = QAction("Guide &Reports", self)
         reports_guide_action.setIcon(icon("fa6s.file-contract", C.TEXT_MUTED))
         reports_guide_action.triggered.connect(self.show_reports_guide)
@@ -2760,6 +2765,12 @@ class MainWindow(FramelessMainWindowMixin, QMainWindow):
         results_step = lambda: self._show_individual_tour_subtab(dataset_tab, 1)
         stats_step = lambda: self._show_individual_tour_subtab(dataset_tab, 2)
 
+        def stats_internals_step() -> None:
+            stats_step()
+            section = getattr(stats, "internals_section", None)
+            if section is not None:
+                section.set_expanded(True)
+
         return [
             TourStep(
                 title="Individual Samples workspace",
@@ -2780,11 +2791,15 @@ class MainWindow(FramelessMainWindowMixin, QMainWindow):
                 before_step=plot_step,
             ),
             TourStep(
-                title="Plot: choose what to inspect",
+                title="Plot: choose the plot type",
                 body=(
-                    "The Plot subtab starts with the distribution curve. Use the segmented "
-                    "buttons and More Plots menu for K-values, combined plots, cumulative "
-                    "views, and the grain-size histogram."
+                    "Pick what to draw from the toolbar:\n"
+                    "• Dist. Curve — the cumulative grain-size distribution.\n"
+                    "• K-Values — a bar chart of hydraulic conductivity per method.\n"
+                    "• More Plots — Combined (curve + K bars side by side) and Histogram "
+                    "(mass retained per size fraction).\n"
+                    "Quick toolbar toggles add the Classification zones (shaded size bands) "
+                    "and the D10/D50/D60 reference lines."
                 ),
                 target=lambda: self._first_tour_target(
                     getattr(plot, "_seg_dist", None),
@@ -2792,34 +2807,43 @@ class MainWindow(FramelessMainWindowMixin, QMainWindow):
                     plot,
                 ),
                 tips=(
-                    "D10/D50/D60 reference lines are controlled from the D-lines toggle.",
-                    "The histogram follows the active stratigraphy scheme.",
+                    "The histogram and zones follow the active stratigraphy scheme.",
+                    "Each plot type has its own relevant sidebar controls.",
                 ),
                 kicker="Plot",
                 before_step=plot_step,
             ),
             TourStep(
-                title="Plot: controls sidebar",
+                title="Plot: the Controls sidebar",
                 body=(
-                    "The Controls button opens the detailed plot settings sidebar for axes, "
-                    "units, labels, reference lines, and K-value display options."
+                    "The Controls button opens the settings sidebar, grouped into sections:\n"
+                    "• Display options — grid, classification zones, D-lines, Fill curve "
+                    "area and its Zone % in fill labels, point markers, K-value labels, and "
+                    "a log K axis.\n"
+                    "• Sample color — the colour of this sample's curve/series; click the "
+                    "swatch to change it.\n"
+                    "• Axis controls — fix the X and Y min/max instead of auto-ranging.\n"
+                    "• Units — choose the K unit (on K-value plots).\n"
+                    "• Legend & Typography — legend placement and font sizes."
                 ),
                 target=lambda: self._first_tour_target(
                     getattr(plot, "_tb_sidebar_btn", None),
                     plot,
                 ),
                 tips=(
-                    "Quick toggles stay in the toolbar.",
-                    "Detailed settings stay in the sidebar.",
+                    "Only the sections relevant to the active plot type are shown.",
+                    "Quick toggles stay in the toolbar; detailed settings in the sidebar.",
                 ),
                 kicker="Plot",
                 before_step=plot_step,
             ),
             TourStep(
-                title="Plot: visible chart and table data",
+                title="Plot: chart, data drawer & export",
                 body=(
-                    "The chart is the visual result. The table drawer gives the exact rows "
-                    "behind the active plot and exports those same rows."
+                    "The chart is the visual result. The Table button opens a drawer "
+                    "beneath it with the exact rows behind the active plot — the same rows "
+                    "you can export to CSV. The figure itself exports as PNG (or other "
+                    "image formats) from the toolbar."
                 ),
                 target=lambda: self._first_tour_target(
                     getattr(plot, "plot_widget", None),
@@ -2827,117 +2851,348 @@ class MainWindow(FramelessMainWindowMixin, QMainWindow):
                     plot,
                 ),
                 tips=(
-                    "Use PNG export for the figure.",
-                    "Use the drawer CSV export for the plotted data.",
+                    "PNG export saves the figure; the drawer's CSV saves the plotted data.",
+                    "What you see here is what reports and exports reproduce.",
                 ),
                 kicker="Plot",
                 before_step=plot_step,
             ),
             TourStep(
-                title="Results: K-method overview",
+                title="Results: the K-method table",
                 body=(
-                    "The Results subtab is the main per-sample K-value table. It shows "
-                    "each method, K in multiple units, and whether the method is OK, "
-                    "warning, or excluded."
+                    "The Results subtab is the per-sample K-value table: one row per method, "
+                    "with K shown in m/s, cm/s and m/d, plus a status — OK, warning, or "
+                    "excluded. Click a column header to sort (e.g. by K value). Warnings and "
+                    "failed applicability conditions are flagged here, never silently "
+                    "averaged into the means."
                 ),
                 target=lambda: self._first_tour_target(
                     getattr(dataset_tab, "results_table", None),
                     getattr(dataset_tab, "results_widget", None),
                 ),
                 tips=(
-                    "Warnings and failed applicability conditions are not silently averaged.",
-                    "Manual fallback remains in Analysis > Recalculate K Values.",
+                    "Which methods are active is set via Analysis > method selection.",
+                    "Manual recalculation lives in Analysis > Recalculate K Values.",
                 ),
                 kicker="Results",
                 before_step=results_step,
             ),
             TourStep(
-                title="Results: selected method details",
+                title="Results: method detail panel",
                 body=(
-                    "Selecting a method row updates the right detail panel with formula, "
-                    "parameters, applicability, status explanation, and reference."
+                    "Selecting a method row fills the detail panel on the right with that "
+                    "method's formula, the parameter values it used (D-sizes, porosity, "
+                    "temperature), its applicability range, an explanation of the status, "
+                    "and the literature reference — so you can see exactly why a method is "
+                    "included or excluded from the means."
                 ),
                 target=lambda: self._first_tour_target(
                     getattr(dataset_tab, "detail_panel", None),
                     getattr(dataset_tab, "results_table", None),
                 ),
                 tips=(
-                    "This panel explains why a method is included or excluded from K means.",
-                    "It is the place to resolve method-specific warnings.",
+                    "This is the place to understand and resolve method-specific warnings.",
                 ),
                 kicker="Results",
                 before_step=results_step,
             ),
             TourStep(
-                title="Results: result cards",
+                title="Results: summary cards & export",
                 body=(
-                    "The cards at the top summarize the active dataset: geometric K mean, "
-                    "arithmetic K mean, included methods, D50, and temperature."
+                    "The cards across the top summarize the sample: geometric and arithmetic "
+                    "K means (m/d, from the included OK methods), the included-method count, "
+                    "D50, and the temperature used. The Export and Copy buttons send the "
+                    "table to a file or the clipboard. These per-sample values are what feed "
+                    "the Comparison, Reports and Export views."
                 ),
                 target=lambda: self._first_tour_target(
                     getattr(dataset_tab, "res_bar", None),
                     getattr(dataset_tab, "results_widget", None),
                 ),
                 tips=(
-                    "Means are based on included OK methods.",
-                    "These per-dataset values feed aggregate views, reports, and export.",
+                    "Means use only included OK methods — excluded ones are left out.",
+                    "Temperature and porosity are set in the controls sidebar / Analysis.",
                 ),
                 kicker="Results",
                 before_step=results_step,
             ),
             TourStep(
-                title="Statistics: per-sample summary",
+                title="Statistics: the sample at a glance",
                 body=(
-                    "Statistics is a read-only summary for the active dataset. It gathers "
-                    "grain-size percentiles, gradation parameters, K statistics, data "
-                    "quality, and classification context."
+                    "Statistics is a read-only summary of everything computed for the "
+                    "active sample that the Results table does not already list. The strip "
+                    "along the top is the headline: sample name and point count, the soil "
+                    "class, D50, the uniformity coefficient Cu, and the geometric-mean K "
+                    "with how many methods were included."
                 ),
                 target=lambda: self._first_tour_target(
                     getattr(stats, "info_bar", None),
                     stats,
                 ),
                 tips=(
-                    "Use Results for method decisions.",
-                    "Use Statistics for descriptive grain-size and K summaries.",
+                    "Everything here is descriptive — it never changes your K results.",
+                    "All values honour the classification scheme set in Stratigraphy.",
                 ),
                 kicker="Statistics",
                 before_step=stats_step,
             ),
             TourStep(
-                title="Statistics: grain-size metrics",
+                title="Statistics: grain-size distribution",
                 body=(
-                    "The upper statistics panels show percentiles and gradation metrics "
-                    "such as Cu, Cc, sorting, span, and the method-percentile reference."
+                    "The Key Grain Distribution card lists the characteristic diameters "
+                    "(D10/D30/D60/D90), a full percentile grid (D5–D95 by interpolation), "
+                    "and a 'used by' column showing which K methods each diameter feeds. "
+                    "These are read straight off the loaded gradation curve."
                 ),
                 target=lambda: self._first_tour_target(
                     getattr(stats, "distribution_card", None),
+                    stats,
+                ),
+                tips=(
+                    "Critical percentiles (D10/D30/D50/D60) are highlighted.",
+                    "Values stay consistent with the plot labels and report tables.",
+                ),
+                kicker="Statistics",
+                before_step=stats_step,
+            ),
+            TourStep(
+                title="Statistics: classification & fractions",
+                body=(
+                    "This card is the detailed classification. The bar and table break the "
+                    "sample into the full ISO 14688 sub-classes (fine/medium/coarse sand, "
+                    "etc.) for the active scheme, with the dominant class highlighted. Above "
+                    "them sit the standard label (e.g. 'Poorly-graded sand') and a plain-"
+                    "language descriptor (e.g. 'Moderately well sorted sand'). Cu, Cc, "
+                    "sorting and span are shown at the bottom."
+                ),
+                target=lambda: self._first_tour_target(
                     getattr(stats, "classification_card", None),
                     stats,
                 ),
                 tips=(
-                    "These values come from the loaded gradation curve.",
-                    "They should remain consistent with plot labels and report tables.",
+                    "Switch the scheme in Stratigraphy (ISO/USCS) to change these bands.",
+                    "The same label and descriptor appear in reports and exports.",
                 ),
                 kicker="Statistics",
                 before_step=stats_step,
             ),
             TourStep(
-                title="Statistics: K and quality context",
+                title="Statistics: hydraulic conductivity",
                 body=(
-                    "The lower statistics panels summarize K spread, data-quality basis, "
-                    "soil classification, and environmental parameters such as temperature "
-                    "and porosity."
+                    "The K summary aggregates the included methods into geometric mean, "
+                    "arithmetic mean, median, range and the ln(K) spread, in m/s, cm/s and "
+                    "m/d. The geometric mean is the primary value because K is "
+                    "log-distributed. The Interpretation note beside it states the result "
+                    "in words; Data Support and Calculation Context list the curve "
+                    "coverage, temperature, porosity and permeability class."
                 ),
                 target=lambda: self._first_tour_target(
                     getattr(stats, "k_summary_card", None),
-                    getattr(stats, "quality_card", None),
                     stats,
                 ),
                 tips=(
-                    "This tab should explain what the dataset looks like, not replace export.",
-                    "Report and export should reuse the same backend values.",
+                    "Excluded methods (warnings/errors) are counted, not silently averaged.",
+                    "Calculate K values first if this card is empty.",
                 ),
                 kicker="Statistics",
+                before_step=stats_step,
+            ),
+            TourStep(
+                title="Statistics: calculation internals",
+                body=(
+                    "Expanded at the bottom is Calculation Internals — the intermediate "
+                    "values behind the K methods: water physical constants at the sample "
+                    "temperature (ρ, μ, ρg/μ, τ), the per-method effective diameters, the "
+                    "φ-unit Folk-Ward sorting that feeds Krumbein-Monk, and the porosity "
+                    "functions. It is collapsed by default; open it when you need to audit "
+                    "a number."
+                ),
+                target=lambda: self._first_tour_target(
+                    getattr(stats, "internals_section", None),
+                    stats,
+                ),
+                tips=(
+                    "These echo the engine exactly — useful for checking a method by hand.",
+                    "Reports and exports can include this same block.",
+                ),
+                kicker="Statistics",
+                before_step=stats_internals_step,
+            ),
+        ]
+
+    def show_comparison_guide(self):
+        """Open a guided tour for the Comparison tab."""
+        if len(self.dataset_tabs) < 2:
+            QMessageBox.information(
+                self,
+                "Need Two Samples",
+                "Load at least two datasets before starting the Comparison guide.",
+            )
+            return
+        self._switch_to_tab(1)
+        QApplication.processEvents()
+        self._start_tour_overlay(
+            self._comparison_tour_steps(),
+            show_startup_checkbox=False,
+        )
+
+    def _show_comparison_subtab(self, index: int) -> None:
+        """Switch to the Comparison tab and a given subtab before a tour step."""
+        self._switch_to_tab(1)
+        tabs = getattr(self.comparison_tab, "_tabs", None)
+        if tabs is not None and 0 <= index < tabs.count():
+            tabs.setCurrentIndex(index)
+        QApplication.processEvents()
+
+    def _comparison_tour_steps(self) -> list[TourStep]:
+        """Return a focused tour that walks the Comparison Plot/Details/Statistics."""
+        cmp = self.comparison_tab
+        plot_step = lambda: self._show_comparison_subtab(0)
+        details_step = lambda: self._show_comparison_subtab(1)
+        stats_step = lambda: self._show_comparison_subtab(2)
+
+        return [
+            TourStep(
+                title="Comparison workspace",
+                body=(
+                    "The Comparison tab puts two or more loaded samples side by side. Start "
+                    "with 'Scope & Groups' to choose which datasets are included and how "
+                    "they are grouped; 'Export Selected' saves the current view. The "
+                    "comparison refreshes automatically when you enter the tab — 'Update' "
+                    "is a manual rebuild if you need it."
+                ),
+                target=lambda: self._first_tour_target(
+                    getattr(cmp, "_manage_btn", None),
+                    getattr(cmp, "_update_btn", None),
+                    cmp,
+                ),
+                tips=(
+                    "You need at least two datasets loaded for a comparison.",
+                    "Scope & Groups is where you control what is being compared.",
+                ),
+                kicker="Comparison",
+                before_step=plot_step,
+            ),
+            TourStep(
+                title="Comparison: three views",
+                body=(
+                    "The subtabs give three angles on the same selection: Plot (a visual "
+                    "overlay of the curves or K bars), Details (cross-sample data tables), "
+                    "and Statistics (aggregated K across scopes and methods). The guide "
+                    "walks each in turn."
+                ),
+                target=lambda: self._first_tour_target(
+                    cmp._tabs.tabBar() if getattr(cmp, "_tabs", None) is not None else None,
+                    getattr(cmp, "_tabs", None),
+                    cmp,
+                ),
+                tips=("All three views reflect the current Scope & Groups selection.",),
+                kicker="Comparison",
+                before_step=plot_step,
+            ),
+            TourStep(
+                title="Plot: choose what to compare",
+                body=(
+                    "The toolbar above the chart controls the visual comparison:\n"
+                    "• Plot type — Distribution (overlaid grain-size curves), K-Values "
+                    "(a bar per method/sample), K Distribution (the spread of K), Combined, "
+                    "or Histogram.\n"
+                    "• Layout — Overlay draws every sample on one set of axes; Grid gives "
+                    "each its own small chart (small multiples).\n"
+                    "• Breakdown — Per dataset shows one series per sample; Per group "
+                    "aggregates into one series per named group (it appears only once you "
+                    "have defined groups in Scope & Groups)."
+                ),
+                target=lambda: self._first_tour_target(
+                    getattr(getattr(cmp, "_plot_widget", None), "plot_selector", None),
+                    getattr(cmp, "_plot_widget", None),
+                    cmp,
+                ),
+                tips=(
+                    "Each dataset (or group) keeps its own colour across all views.",
+                    "Plot style (preset and palette) is shared with the Export tab.",
+                ),
+                kicker="Comparison",
+                before_step=plot_step,
+            ),
+            TourStep(
+                title="Plot: visibility & underlying data",
+                body=(
+                    "The 'Plot Visibility' rail on the right lists each dataset with a "
+                    "show/hide toggle, so you can focus on a subset without changing the "
+                    "scope; 'Show all' clears any focus or hidden datasets. To change which "
+                    "datasets and groups are compared, use 'Scope & Groups' in the header "
+                    "above. The collapsible Table drawer beneath the chart holds the exact "
+                    "data behind the active plot and can export it to CSV."
+                ),
+                target=lambda: self._first_tour_target(
+                    getattr(cmp, "_pin_list_widget", None),
+                    getattr(cmp, "_plot_show_all_btn", None),
+                    cmp,
+                ),
+                tips=(
+                    "Hiding a dataset here only affects the plot, not Details or Statistics.",
+                    "The drawer's CSV holds exactly what is plotted.",
+                ),
+                kicker="Comparison",
+                before_step=plot_step,
+            ),
+            TourStep(
+                title="Details: shaping the table",
+                body=(
+                    "Details is a standalone cross-sample table (not the data behind a "
+                    "plot — that is the Plot drawer). The control bar shapes it:\n"
+                    "• View — Individual puts one column per sample; Aggregate shows "
+                    "group/overall summary columns.\n"
+                    "• Mode — Grain shows size metrics (percentiles, Cu, Cc…); K-values "
+                    "shows hydraulic conductivity per method.\n"
+                    "• Rows — Summary keeps the key rows, All rows shows everything, "
+                    "Classification adds fraction & gradation context.\n"
+                    "• Status — include or exclude warning/error method results.\n"
+                    "• Unit sets the K unit; Heat-map shades cells to reveal high/low "
+                    "values across samples."
+                ),
+                target=lambda: self._first_tour_target(
+                    getattr(cmp, "_details_view_individual_btn", None),
+                    getattr(cmp, "_k_table", None),
+                    cmp,
+                ),
+                tips=("This table is what the Export tab writes for comparison data.",),
+                kicker="Comparison",
+                before_step=details_step,
+            ),
+            TourStep(
+                title="Statistics: aggregated K",
+                body=(
+                    "The Statistics subtab summarizes hydraulic conductivity two ways. The "
+                    "scope table aggregates K overall and per group (mean, range, and how "
+                    "many method results were included). The method table shows how each "
+                    "method behaves across all selected samples, including the ln(K) spread "
+                    "so you can see where methods agree or diverge."
+                ),
+                target=lambda: self._first_tour_target(
+                    getattr(cmp, "_stats_scope_table", None),
+                    getattr(cmp, "_stats_method_table", None),
+                    cmp,
+                ),
+                tips=("Warnings and errors are reported, not silently averaged in.",),
+                kicker="Comparison",
+                before_step=stats_step,
+            ),
+            TourStep(
+                title="Statistics: mean type and units",
+                body=(
+                    "Choose how the aggregates are summarized here: geometric mean (the "
+                    "default, since K is log-distributed) or arithmetic mean, and the K unit "
+                    "for the tables. These controls affect the Statistics view only."
+                ),
+                target=lambda: self._first_tour_target(
+                    getattr(cmp, "_stats_metric_geo_btn", None),
+                    getattr(cmp, "_stats_unit_combo", None),
+                    cmp,
+                ),
+                tips=("Geometric mean is recommended for reporting a single K value.",),
+                kicker="Comparison",
                 before_step=stats_step,
             ),
         ]
@@ -3168,6 +3423,7 @@ class MainWindow(FramelessMainWindowMixin, QMainWindow):
                 tips=(
                     "Cover Page is required for report types that need formal front matter.",
                     "Sample & Grain Tables, K + Aggregate Tables, and Grain Statistics pull from the same calculated values as the live tabs.",
+                    "Grain Statistics includes the detailed ISO sub-class breakdown, the plain-language descriptor, and the calculation internals.",
                     "Method References documents which K methods were used and why results may be included or excluded.",
                     "The outline updates so the user can see the expected document structure before generating.",
                 ),
@@ -3391,6 +3647,7 @@ class MainWindow(FramelessMainWindowMixin, QMainWindow):
                 tips=(
                     "Grain-size rows are the measured or interpolated curve values.",
                     "K-value rows come from the same calculation results shown in the Results tab.",
+                    "Soil Classification adds the label, descriptor, detailed sub-class fractions, and calculation internals (Excel/JSON); CSV gets the descriptor column.",
                     "Statistics and metadata add context so files can be understood outside the application.",
                 ),
                 kicker="Export",
@@ -3416,7 +3673,7 @@ class MainWindow(FramelessMainWindowMixin, QMainWindow):
                 tips=(
                     "Per-sample plot counts multiply by dataset count and by every selected plot file format.",
                     "Plot file options such as legend and grid apply to generated figure files.",
-                    "The plot style here is shared with Reports so exported figures and report figures can match.",
+                    "Plot Style (the shared footer below the tabs) sets the preset and palette for every exported plot — individual and comparison — and matches Reports.",
                 ),
                 kicker="Export",
                 before_step=lambda: self._prepare_export_tour_step(

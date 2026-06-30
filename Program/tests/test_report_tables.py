@@ -150,6 +150,39 @@ def test_docx_renderer_preserves_colspan():
     assert "No results" in document_xml
 
 
+def test_docx_renderer_adds_report_chrome_and_box_styling():
+    html = """
+    <html><body>
+    <h1>Grain Size Analysis Report</h1>
+    <div class="success-box"><p>Executive summary text</p></div>
+    <div class="info-box"><h3>Methodology</h3><p>Method text</p></div>
+    </body></html>
+    """
+
+    blob = ReportGenerator().generate_docx_from_html(
+        html,
+        metadata={
+            "project_name": "Project Alpha",
+            "project_no": "P-42",
+            "client": "Client Beta",
+            "analyst": "Analyst Gamma",
+            "date": "2026-06-30",
+        },
+    )
+    with zipfile.ZipFile(io.BytesIO(blob)) as archive:
+        document_xml = archive.read("word/document.xml").decode("utf-8")
+        header_xml = archive.read("word/header1.xml").decode("utf-8")
+        footer_xml = archive.read("word/footer1.xml").decode("utf-8")
+
+    assert "Executive summary text" in document_xml
+    assert "Methodology" in document_xml
+    assert 'w:fill="F4F9F4"' in document_xml
+    assert 'w:fill="F7F7F7"' in document_xml
+    assert "Project Alpha" in header_xml
+    assert "P-42" in header_xml
+    assert "Analyst Gamma" in footer_xml
+    assert "Client Beta" in footer_xml
+
 def test_docx_renderer_replaces_externalized_tables_with_appendix_note():
     rows = "".join(
         f"<tr><td>Sample {index}</td><td>{index}</td></tr>"

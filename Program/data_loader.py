@@ -459,7 +459,7 @@ class GrainSizeData:
             return "Imported/default value"
         mode_label = self.calculated_porosity_mode_label()
         if self.has_manual_porosity_override():
-            return f"Manual override (auto {mode_label}: {self.calculated_porosity:.4f})"
+            return f"Manual override (auto {mode_label})"
         return f"Calculated ({mode_label})"
 
     def _calculate_simple_porosity(self) -> Optional[float]:

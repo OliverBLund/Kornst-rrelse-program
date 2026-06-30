@@ -19,6 +19,7 @@ from PyQt6.QtWidgets import QApplication, QPushButton, QTableWidget, QTabWidget
 from gui.export_tab import ExportTab
 from gui.export_manager import ExportManager
 from gui.plot_styles import PROFESSIONAL_STYLE
+from gui.report_export_plot_registry import export_plot_keys
 from k_calculations_v2 import CalculationStatus, KCalculationResult
 from unit_conversions import HydraulicConductivityConverter, HydraulicConductivityUnit
 
@@ -795,6 +796,83 @@ class TestExportManagerExports(unittest.TestCase):
             self.assertTrue(any(name.endswith('_reliability_matrix.png') for name in basenames))
             self.assertTrue(all(name.startswith('all_datasets_results_') for name in basenames))
 
+    def test_grain_size_histogram_comparison_uses_single_axes_layout(self):
+        dataset_b = build_dataset('Sample B')
+        dataset_b.percent_passing = [100.0, 90.0, 74.0, 48.0, 21.0, 9.0, 2.0]
+        datasets = [
+            (self.dataset.sample_name, self.dataset, self.results),
+            (dataset_b.sample_name, dataset_b, self.results),
+        ]
+        config = self.make_config('unused', csv=False, png=True, plots=True)
+
+        figure = ExportManager()._build_collection_plot_figure(
+            'grain_size_histogram_comparison', datasets, config,
+        )
+        try:
+            self.assertEqual(len(figure.axes), 1)
+            ax = figure.axes[0]
+            self.assertEqual(ax.get_ylabel(), 'Weight (%)')
+            self.assertIn('Grain-size class', ax.get_xlabel())
+            legend_labels = ax.get_legend_handles_labels()[1]
+            self.assertIn('Sample A', legend_labels)
+            self.assertIn('Sample B', legend_labels)
+            self.assertGreater(len(ax.patches), len(ax.get_xticks()))
+        finally:
+            figure.clear()
+
+    def test_histogram_comparison_per_dataset_uses_dataset_colors_inside_groups(self):
+        import gui.report_plot_style as rps
+        from matplotlib.colors import to_hex
+
+        self.dataset.group_name = 'Layer A'
+        dataset_b = build_dataset('Sample B')
+        dataset_b.group_name = 'Layer A'
+        dataset_c = build_dataset('Sample C')
+        dataset_c.group_name = 'Layer A'
+        datasets = [
+            (self.dataset.sample_name, self.dataset, self.results),
+            (dataset_b.sample_name, dataset_b, self.results),
+            (dataset_c.sample_name, dataset_c, self.results),
+        ]
+        config = self.make_config('unused', csv=False, png=True, plots=True)
+        figure = None
+        try:
+            rps.set_report_palette('Categorical')
+            rps._reset_cache_for_tests()
+            figure = ExportManager()._build_collection_plot_figure(
+                'grain_size_histogram_comparison', datasets, config,
+                breakdown='dataset',
+            )
+            ax = figure.axes[0]
+            class_count = len(ax.get_xticks())
+            self.assertGreaterEqual(len(ax.patches), class_count * len(datasets))
+            dataset_colors = [
+                to_hex(ax.patches[i * class_count].get_facecolor())
+                for i in range(len(datasets))
+            ]
+            self.assertEqual(len(set(dataset_colors)), len(datasets))
+        finally:
+            rps.set_report_palette('Categorical')
+            rps._reset_cache_for_tests()
+            if figure is not None:
+                figure.clear()
+
+    def test_report_histogram_comparison_uses_overlay_spec(self):
+        from report_generator import ReportGenerator
+
+        dataset_b = build_dataset('Sample B')
+        sample_details = [
+            {'dataset': self.dataset, 'k_results': self.results},
+            {'dataset': dataset_b, 'k_results': self.results},
+        ]
+        with patch('plot_export.export_comparison_spec', return_value='data:image/png;base64,test') as renderer:
+            uri = ReportGenerator()._create_comparison_grain_size_histogram(sample_details, None)
+
+        self.assertEqual(uri, 'data:image/png;base64,test')
+        spec = renderer.call_args.args[0]
+        self.assertEqual(spec.current_plot_type, 'histogram')
+        self.assertEqual(spec.display_mode, 'overlay')
+
     def test_k_distribution_collection_plot_renders_lognormal_histogram(self):
         dataset_b = build_dataset('Sample B')
         self.dataset.group_name = 'Layer A'
@@ -1245,6 +1323,74 @@ class TestExportTabConfig(unittest.TestCase):
         self.assertTrue(config['excel'])
         self.assertEqual(config['excel_mode'], 'combined')
         self.assertEqual(self.tab._estimate_export_file_count(), 4)
+
+    def test_simple_preset_creates_one_table_without_figures(self):
+        self.tab._apply_preset('minimal')
+
+        config = self.tab._build_export_config()
+
+        self.assertEqual(
+            self.tab.selected_formats,
+            {
+                'csv_long': False,
+                'csv_wide': True,
+                'excel': False,
+                'png': False,
+                'svg': False,
+                'pdf': False,
+            },
+        )
+        self.assertFalse(config['grain_distribution'])
+        self.assertEqual(config['selected_percentiles'], ['d10', 'd30', 'd50', 'd60'])
+        self.assertFalse(config['plots'])
+        self.assertEqual(config['selected_plot_types'], [])
+
+    def test_client_preset_creates_workbook_and_common_figures(self):
+        self.tab._apply_preset('client')
+
+        config = self.tab._build_export_config()
+
+        self.assertEqual(
+            self.tab.selected_formats,
+            {
+                'csv_long': False,
+                'csv_wide': False,
+                'excel': True,
+                'png': True,
+                'svg': False,
+                'pdf': True,
+            },
+        )
+        self.assertFalse(config['grain_distribution'])
+        self.assertTrue(config['plots'])
+        self.assertIn('grain_size_histogram', config['selected_plot_types'])
+        self.assertIn('grain_size_histogram_comparison', config['selected_plot_types'])
+        self.assertIn('distribution_overlay', config['selected_plot_types'])
+        self.assertNotIn('k_distribution', config['selected_plot_types'])
+
+    def test_stats_preset_keeps_analysis_tables_without_figures(self):
+        self.tab._apply_preset('statistical')
+
+        config = self.tab._build_export_config()
+
+        self.assertTrue(config['csv_wide'])
+        self.assertTrue(config['excel'])
+        self.assertFalse(config['png'])
+        self.assertFalse(config['pdf_plot'])
+        self.assertFalse(config['grain_distribution'])
+        self.assertFalse(config['plots'])
+        self.assertEqual(config['selected_plot_types'], [])
+
+    def test_archive_preset_enables_all_exportable_outputs(self):
+        self.tab._apply_preset('full')
+
+        config = self.tab._build_export_config()
+
+        self.assertTrue(all(self.tab.selected_formats.values()))
+        self.assertTrue(config['grain_distribution'])
+        self.assertTrue(config['formulas'])
+        self.assertTrue(config['validation'])
+        self.assertEqual(config['selected_plot_types'], list(export_plot_keys()))
 
     def test_comparison_plot_breakdown_is_written_to_config(self):
         self.tab._toggle_content_item('plots', 'distribution_overlay', True)

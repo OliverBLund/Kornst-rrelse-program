@@ -1,10 +1,10 @@
 <div class="page">
   <p class="eyebrow">Global Controls</p>
   <h1>Analysis Parameters</h1>
-  <p class="lead">Global settings affect hydraulic-conductivity calculations and classification across loaded datasets. You can reach them two ways: the quick controls in the <strong>sidebar</strong>, and the <strong>Analysis</strong> menu in the top toolbar. Keep them consistent with the test conditions you want to report.</p>
+  <p class="lead">Global settings affect hydraulic-conductivity calculations and classification across all loaded datasets. You reach them from the <strong>Analysis</strong> menu in the menu bar (the top strip with File · Analysis · View · Help). Keep them consistent with the test conditions you want to report.</p>
 
   <h2>The Analysis Menu</h2>
-  <p>The <strong>Analysis</strong> button in the top toolbar opens a menu of global actions:</p>
+  <p>The <strong>Analysis</strong> menu in the menu bar opens a list of global actions:</p>
   <table>
     <tr>
       <th>Menu item</th>
@@ -12,7 +12,7 @@
     </tr>
     <tr>
       <td>Analysis Settings…</td>
-      <td>Opens a dialog with the global <strong>temperature</strong>, the <strong>calculated porosity mode</strong>, and the current <strong>classification scheme</strong>, plus buttons to open the porosity and scheme dialogs. These are the same values as the sidebar controls.</td>
+      <td>Opens a dialog with the global <strong>temperature</strong>, the <strong>calculated porosity mode</strong>, and the current <strong>classification scheme</strong>, plus buttons to open the porosity and scheme dialogs.</td>
     </tr>
     <tr>
       <td>Dataset Porosity…</td>
@@ -38,7 +38,7 @@
 
   <div class="callout note">
     <div class="callout-title">One source of truth</div>
-    <p>The temperature and porosity mode in the Analysis Settings dialog and the sidebar are the same setting — changing one updates the other, so reports, exports, plots, and tables all share the same parameters.</p>
+    <p>Temperature, porosity mode, and the classification scheme are global: one value applies to every loaded dataset, so tables, plots, reports, and exports all share the same parameters.</p>
   </div>
 
   <h2>Temperature</h2>
@@ -67,8 +67,14 @@
   </table>
   <ul>
     <li>The mode only applies to datasets that are <strong>not manually overridden</strong>.</li>
-    <li>Use <strong>Dataset Porosity…</strong> (Analysis menu or sidebar) to set a manual porosity for specific datasets.</li>
+    <li>Use <strong>Dataset Porosity…</strong> (Analysis menu) to set a manual porosity for specific datasets.</li>
     <li>The selected mode affects any method that depends on porosity; affected datasets recalculate after the change.</li>
+  </ul>
+
+  <h3>Where porosity appears, and how to override it</h3>
+  <ul>
+    <li>Each dataset's automatic porosity (symbol <em>n</em>) is derived from the uniformity coefficient <strong>Cu</strong> — it is <em>not</em> Cu itself. It shows as the <strong>Auto Value</strong> in <strong>Dataset Porosity…</strong> and as <strong>Porosity</strong> (with a <strong>Porosity source</strong> label) in the dataset's <strong>Statistics</strong> subtab.</li>
+    <li>In <strong>Dataset Porosity…</strong> the columns are <strong>Auto Value</strong> (calculated), <strong>Current</strong> (active), and <strong>Set Value</strong> (your override, 0.1–0.8). Applying a value makes it the dataset's current porosity and <strong>recalculates K immediately</strong>; the reset action restores the calculated value.</li>
   </ul>
 
   <div class="callout note">

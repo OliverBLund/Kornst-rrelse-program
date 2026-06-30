@@ -546,6 +546,8 @@ class ReportingTab(QWidget):
                 "k_stats": True, "gradation": True, "methodology": True,
             },
             "appendices": {"raw": False, "interp": False, "quality": False},
+            "single_plots": {"grain_size_curve", "grain_size_histogram", "k_value_bar"},
+            "collection_plots": set(),
         },
         TYPE_COMPARISON: {
             "selection_mode": "multi",
@@ -555,8 +557,10 @@ class ReportingTab(QWidget):
                 "k_stats": True, "gradation": True, "methodology": True,
             },
             "appendices": {"raw": False, "interp": False, "quality": False},
+            "single_plots": set(),
             "collection_plots": {
-                "distribution_overlay", "k_value_comparison", "statistical_boxplots",
+                "distribution_overlay", "grain_size_histogram_comparison",
+                "k_value_comparison", "statistical_boxplots",
             },
         },
         TYPE_FULL: {
@@ -567,12 +571,14 @@ class ReportingTab(QWidget):
                 "k_stats": True, "gradation": True, "methodology": True,
             },
             "appendices": {"raw": True, "interp": True, "quality": True},
-            # Cross-sample plots on by default. Per-sample plots stay OPT-IN even
-            # here: rendering a grain curve + K-bar for every sample is the main
-            # cause of a large (e.g. 20-dataset) report freezing the UI, so the
-            # user enables them deliberately (see the per_sample_* rows).
+            # Full summary is the archive-oriented template: cross-sample plots,
+            # diagnostics, and per-sample figures are enabled by default.
+            "single_plots": set(),
             "collection_plots": {
-                "distribution_overlay", "k_value_comparison", "statistical_boxplots",
+                "distribution_overlay", "grain_size_histogram_comparison",
+                "k_value_comparison", "statistical_boxplots", "k_distribution",
+                "reliability_matrix", "per_sample_grain",
+                "per_sample_histogram", "per_sample_kbar",
             },
         },
         TYPE_KFOCUS: {
@@ -586,8 +592,10 @@ class ReportingTab(QWidget):
             },
             "appendices": {"raw": False, "interp": False, "quality": False},
             # K-focused: drop the grain-size comparison; lead with the K plots.
+            "single_plots": set(),
             "collection_plots": {
                 "k_value_comparison", "statistical_boxplots", "k_distribution",
+                "reliability_matrix",
             },
         },
     }
@@ -918,6 +926,10 @@ class ReportingTab(QWidget):
         hlay.setSpacing(6)
         hlay.addWidget(_make_icon_label("fa6s.circle-info", C.TEXT_MUTED, 11))
         self._samp_hint_lbl = QLabel("Pick two or more samples to compare.")
+        self._samp_hint_lbl.setWordWrap(True)
+        self._samp_hint_lbl.setSizePolicy(
+            QSizePolicy.Policy.Ignored, QSizePolicy.Policy.Preferred
+        )
         self._samp_hint_lbl.setStyleSheet(
             f'color: {C.TEXT_MUTED}; font-family: "{F.UI}"; '
             f'font-size: {F.SZ_XS}pt; background: transparent; border: none;'
@@ -1604,12 +1616,17 @@ class ReportingTab(QWidget):
                 row = self._section_rows.get(key)
                 if row is not None:
                     row.set_checked(val)
-            # Per-type collection-plot defaults (e.g. K-Focus leads with K plots,
-            # not the grain-size comparison). Only the multi-sample types define
-            # these; Individual keeps its own single-sample plot rows.
-            wanted = preset.get("collection_plots")
-            if wanted is not None:
-                for key, row in self._plot_rows.get("collection", {}).items():
+            # Plot defaults are part of the template. All rows stay visible and
+            # editable, but clicking a report type should produce a coherent
+            # report without requiring the user to reason through every plot row.
+            for scope, preset_key in (
+                ("single", "single_plots"),
+                ("collection", "collection_plots"),
+            ):
+                wanted = preset.get(preset_key)
+                if wanted is None:
+                    continue
+                for key, row in self._plot_rows.get(scope, {}).items():
                     row.set_checked(key in wanted)
         finally:
             self._restoring_settings = False
@@ -1697,6 +1714,14 @@ class ReportingTab(QWidget):
             row = self._section_rows.get(key)
             if row is not None and row.is_checked() != expected:
                 return True
+        for scope, preset_key in (
+            ("single", "single_plots"),
+            ("collection", "collection_plots"),
+        ):
+            expected_keys = set(preset.get(preset_key, set()))
+            for key, row in self._plot_rows.get(scope, {}).items():
+                if row.is_checked() != (key in expected_keys):
+                    return True
         return False
 
     def _refresh_meta_pills(self) -> None:
@@ -2829,7 +2854,8 @@ class ReportingTab(QWidget):
         self._pdf_print_layout = QPageLayout(
             QPageSize(QPageSize.PageSizeId.A4),
             QPageLayout.Orientation.Portrait,
-            QMarginsF(0, 0, 0, 0),
+            QMarginsF(20, 20, 20, 25),
+            QPageLayout.Unit.Millimeter,
         )
         self._update_preview_action_buttons()
 
@@ -2912,6 +2938,7 @@ class ReportingTab(QWidget):
 
         html = self.current_report_html
         brand = self.brand
+        metadata = self._collect_metadata()
         appendix_inputs = self._capture_excel_appendix_inputs()
         appendix_path = self._excel_appendix_path(path) if appendix_inputs else None
         externalized_tables = (
@@ -2928,6 +2955,7 @@ class ReportingTab(QWidget):
             docx_bytes = generator.generate_docx_from_html(
                 html,
                 brand=brand,
+                metadata=metadata,
                 externalized_table_ids=set(externalized_tables),
                 externalized_table_titles=externalized_tables,
             )

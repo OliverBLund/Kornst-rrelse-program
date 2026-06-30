@@ -417,8 +417,22 @@ def histogram_units(spec: ComparisonPlotSpec) -> list[dict]:
     """Faceting units for the grain histogram (per dataset or per group)."""
     color_by_name = spec.color_by_name
     palette_fallback = spec.palette[0] if spec.palette else "#1f77b4"
+    dataset_palette = spec.palette or [palette_fallback]
+    dataset_order = spec.known_dataset_order or [
+        ds.sample_name for ds in spec.datasets
+    ]
 
-    def dataset_unit(ds) -> dict:
+    def dataset_bar_color(sample_name: str, index: int) -> str:
+        if spec.use_group_breakdown:
+            return color_by_name.get(sample_name, palette_fallback)
+        stable_index = (
+            dataset_order.index(sample_name)
+            if sample_name in dataset_order
+            else index
+        )
+        return dataset_palette[stable_index % len(dataset_palette)]
+
+    def dataset_unit(ds, index: int) -> dict:
         labels, lower, upper, freq = _calculate_histogram_class_fractions(
             ds.particle_sizes,
             ds.percent_passing,
@@ -426,7 +440,7 @@ def histogram_units(spec: ComparisonPlotSpec) -> list[dict]:
         )
         return {
             "label": ds.sample_name,
-            "color": color_by_name.get(ds.sample_name, palette_fallback),
+            "color": dataset_bar_color(ds.sample_name, index),
             "class_labels": labels,
             "lower": lower,
             "upper": upper,
@@ -435,7 +449,7 @@ def histogram_units(spec: ComparisonPlotSpec) -> list[dict]:
         }
 
     if not spec.use_group_breakdown:
-        return [dataset_unit(ds) for ds in spec.datasets]
+        return [dataset_unit(ds, i) for i, ds in enumerate(spec.datasets)]
 
     units: list[dict] = []
     for group_name in group_order(spec):
@@ -444,7 +458,7 @@ def histogram_units(spec: ComparisonPlotSpec) -> list[dict]:
             if spec.dataset_groups.get(ds.sample_name, UNGROUPED_LABEL) == group_name
         ]
         if group_name == UNGROUPED_LABEL:
-            units.extend(dataset_unit(ds) for ds in members)
+            units.extend(dataset_unit(ds, i) for i, ds in enumerate(members))
             continue
         usizes, mean_passing = _group_mean_passing(
             [(ds.particle_sizes, ds.percent_passing) for ds in members]
@@ -953,11 +967,123 @@ def _plot_combined(figure, spec: ComparisonPlotSpec) -> int:
 # Histogram
 # ═══════════════════════════════════════════════════════════════════
 
+def _histogram_label_order(units: list[dict]) -> list[str]:
+    """Stable class-label union for overlaid/grouped histogram comparisons."""
+    labels: list[str] = []
+    seen: set[str] = set()
+    for unit in units:
+        for label in unit.get("class_labels", []):
+            if label in seen:
+                continue
+            seen.add(label)
+            labels.append(label)
+    return labels
+
+
+def _histogram_freq_for_labels(unit: dict, labels: list[str]) -> list[float]:
+    values = {
+        str(label): float(value)
+        for label, value in zip(unit.get("class_labels", []), unit.get("freq", []))
+    }
+    return [values.get(label, 0.0) for label in labels]
+
+
+def _plot_histogram_comparison(
+    figure,
+    spec: ComparisonPlotSpec,
+    units: list[dict],
+    style: PlotStyle,
+) -> None:
+    """Plot class fractions for all selected samples/groups on one axes."""
+    ax = figure.add_subplot(1, 1, 1)
+    labels = _histogram_label_order(units)
+    if not labels:
+        ax.text(0.5, 0.5, "No class fractions", transform=ax.transAxes,
+                ha="center", va="center", fontsize=style.label_fontsize,
+                fontfamily=style.font_family)
+        ax.set_axis_off()
+        return
+
+    x = np.arange(len(labels), dtype=float)
+    count = max(1, len(units))
+    width = min(0.82 / count, 0.18)
+    offsets = (np.arange(count, dtype=float) - (count - 1) / 2.0) * width
+    edge_color = style.curve_markeredgecolor or "black"
+    edge_width = max(0.5, float(style.curve_markeredgewidth or 0.5))
+
+    for idx, unit in enumerate(units):
+        color = unit.get("color")
+        if not color:
+            color = spec.palette[idx % len(spec.palette)] if spec.palette else style.curve_color
+        ax.bar(
+            x + offsets[idx],
+            _histogram_freq_for_labels(unit, labels),
+            width=width * 0.92,
+            color=color,
+            alpha=0.88,
+            edgecolor=edge_color,
+            linewidth=edge_width,
+            label=unit.get("label", f"Series {idx + 1}"),
+        )
+
+    scope_label = "Group" if spec.use_group_breakdown else "Sample"
+    ax.set_facecolor(style.axes_facecolor)
+    ax.set_axisbelow(True)
+    ax.set_title(
+        f"Class fractions by {scope_label.lower()}",
+        fontsize=style.title_fontsize,
+        fontweight=style.title_fontweight,
+        fontfamily=style.font_family,
+    )
+    ax.set_xlabel(
+        f"Grain-size class ({_scheme_short_name(spec.classification_scheme)})",
+        fontsize=style.label_fontsize,
+        fontfamily=style.font_family,
+    )
+    ax.set_ylabel(
+        "Weight (%)",
+        fontsize=style.label_fontsize,
+        fontfamily=style.font_family,
+    )
+    ax.set_xticks(x)
+    ax.set_xlim(-0.6, len(labels) - 0.4)
+    ax.set_ylim(bottom=0)
+    ax.set_xticklabels(
+        [label.replace(" ", "\n") for label in labels],
+        rotation=0,
+        ha="center",
+        fontsize=max(6, style.tick_fontsize - 1),
+        fontfamily=style.font_family,
+    )
+    ax.tick_params(axis="y", labelsize=style.tick_fontsize)
+    for tick in ax.get_yticklabels():
+        tick.set_fontfamily(style.font_family)
+
+    if spec.show_grid and style.grid_show:
+        ax.grid(
+            True,
+            axis="y",
+            alpha=style.grid_alpha,
+            linestyle=style.grid_linestyle,
+            color=style.grid_color,
+            linewidth=style.grid_linewidth,
+        )
+    else:
+        ax.grid(False)
+
+    if spec.show_legend and len(units) > 1:
+        ax.legend(**build_legend_kwargs(style, len(units)))
+
+
 def _plot_histogram(figure, spec: ComparisonPlotSpec) -> int:
-    """Plot grain histogram, faceted per dataset or per group (class fractions)."""
+    """Plot grain histogram class fractions."""
     units = histogram_units(spec)
-    rows, cols, shown, hidden = facet_dims(spec, len(units))
     style = spec.style or PROFESSIONAL_STYLE
+    if spec.display_mode != "grid" and len(units) > 1:
+        _plot_histogram_comparison(figure, spec, units, style)
+        return 0
+
+    rows, cols, shown, hidden = facet_dims(spec, len(units))
 
     for i, unit in enumerate(units[:shown]):
         ax = figure.add_subplot(rows, cols, i + 1)

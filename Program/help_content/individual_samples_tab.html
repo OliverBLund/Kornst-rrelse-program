@@ -30,7 +30,7 @@
   <ul>
     <li>The <strong>D-lines</strong> toggle shows the D10/D50/D60 reference lines on the curve.</li>
     <li>The <strong>Controls</strong> button opens a sidebar for axes, units, labels, reference lines, and K-value display options.</li>
-    <li>A per-tab style preset, <strong>Curve Color</strong>, and <strong>Legend &amp; Typography</strong> control how this on-screen plot looks. (The single global <strong>Plot Style</strong> in the Reports and Export tabs controls report and export plots instead.)</li>
+    <li>A per-tab style preset, <strong>Sample color</strong> (click the swatch to recolour this sample's curve), and <strong>Legend &amp; Typography</strong> control how this on-screen plot looks. (The single global <strong>Plot Style</strong> in the Reports and Export tabs controls report and export plots instead.)</li>
   </ul>
 
   <h2>Results Subtab</h2>
@@ -51,19 +51,19 @@
   </ul>
 
   <h2>Statistics Subtab</h2>
-  <p>Per-sample numbers grouped into sections:</p>
+  <p>A read-only per-sample summary of everything computed that the Results table does not already list, grouped into sections:</p>
   <ul>
-    <li><strong>Grain Size Percentiles</strong> and <strong>Percentile Usage by Methods</strong> — D-values and which methods rely on each.</li>
-    <li><strong>Gradation Parameters</strong> — uniformity (Cu) and curvature (Cc).</li>
-    <li><strong>Classification Criteria</strong> — the soil classification result for the active scheme.</li>
-    <li><strong>Special Method Diameters</strong> — diameters specific methods require.</li>
-    <li><strong>Environmental Parameters</strong> — temperature and porosity used for this dataset.</li>
-    <li><strong>K-statistics</strong> — summary statistics across the included methods.</li>
+    <li><strong>Summary strip</strong> — sample name and point count, soil class, D50, uniformity coefficient (Cu), and the geometric-mean K with the number of included methods.</li>
+    <li><strong>Key Grain Distribution</strong> — the characteristic diameters (D10/D30/D60/D90), a full percentile grid (D5–D95 by interpolation), and which K methods use each diameter.</li>
+    <li><strong>Classification &amp; Fractions</strong> — the detailed ISO 14688 sub-class breakdown (fine/medium/coarse sand, etc.) for the active scheme, the standard label, a plain-language descriptor, and Cu / Cc / sorting / span.</li>
+    <li><strong>Hydraulic Conductivity Summary</strong> — geometric and arithmetic mean, median, range, and the ln(K) spread of the included methods.</li>
+    <li><strong>Interpretation, Data Support &amp; Calculation Context</strong> — a short factual read of the result, gradation-curve coverage checks, and the temperature, porosity, and permeability class.</li>
+    <li><strong>Calculation Internals</strong> (collapsible) — the intermediate values behind the K methods: water physical constants, effective diameters, φ-unit Folk-Ward sorting, and porosity functions.</li>
   </ul>
 
   <div class="callout note">
     <div class="callout-title">Global settings drive these views</div>
-    <p>Temperature, porosity mode, the classification scheme, and the active K-method set come from the <strong>Analysis</strong> menu and the sidebar, so every dataset tab stays consistent. See <a href="analysis_parameters.html">Analysis Parameters</a>.</p>
+    <p>Temperature, porosity mode, the classification scheme, and the active K-method set come from the <strong>Analysis</strong> menu, so every dataset tab stays consistent. See <a href="analysis_parameters.html">Analysis Parameters</a>.</p>
   </div>
 
   <p class="link-list">

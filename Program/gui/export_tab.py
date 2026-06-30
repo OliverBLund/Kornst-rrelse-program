@@ -66,14 +66,7 @@ class ExportTab(QWidget):
         self._export_dialog = None
 
         # Selected formats (for card-based selection)
-        self.selected_formats = {
-            'csv_long': True,
-            'csv_wide': True,
-            'excel': False,
-            'png': True,
-            'svg': False,
-            'pdf': False
-        }
+        self.selected_formats = self._default_selected_formats()
 
         # Content toggles (legacy - kept for backward compatibility)
         self.content_enabled = {
@@ -123,6 +116,17 @@ class ExportTab(QWidget):
     @staticmethod
     def _set_tree_icon(item: QTreeWidgetItem, icon_name: str, color: str = C.TEXT_MUTED) -> None:
         item.setIcon(0, icon(icon_name, color, 13))
+
+    @staticmethod
+    def _default_selected_formats() -> Dict[str, bool]:
+        return {
+            'csv_long': True,
+            'csv_wide': True,
+            'excel': False,
+            'png': True,
+            'svg': False,
+            'pdf': False,
+        }
 
     def _init_content_selection(self):
         """Initialize granular content selection structure with smart defaults"""
@@ -325,17 +329,20 @@ class ExportTab(QWidget):
                 }}
             """)
 
-    def _toggle_format(self, format_key: str):
-        """Toggle format selection"""
-        self.selected_formats[format_key] = not self.selected_formats.get(format_key, False)
-
-        # Update all cards
+    def _sync_format_cards(self) -> None:
+        if not hasattr(self, "formats_layout"):
+            return
         for i in range(self.formats_layout.count()):
             widget = self.formats_layout.itemAt(i).widget()
             if widget and hasattr(widget, 'property'):
                 key = widget.property("format_key")
                 if key:
                     self._update_card_style(widget, key)
+
+    def _toggle_format(self, format_key: str):
+        """Toggle format selection"""
+        self.selected_formats[format_key] = not self.selected_formats.get(format_key, False)
+        self._sync_format_cards()
 
         # Update preview and file tree
         self.update_file_tree()
@@ -944,10 +951,11 @@ class ExportTab(QWidget):
         preset_row.addWidget(preset_label)
 
         preset_specs = [
-            ("Minimal", "fa6s.list", "Essential data only", lambda: self._apply_preset('minimal')),
-            ("Full", "fa6s.layer-group", "All available data", lambda: self._apply_preset('full')),
-            ("Stats", "fa6s.chart-simple", "Statistical analysis package", lambda: self._apply_preset('statistical')),
-            ("Default", "fa6s.rotate-left", "Restore testing defaults", self._reset_content_defaults),
+            ("Simple", "fa6s.list", "One clean statistics table", lambda: self._apply_preset('minimal')),
+            ("Client", "fa6s.briefcase", "Workbook plus common plots", lambda: self._apply_preset('client')),
+            ("Stats", "fa6s.chart-simple", "Analysis tables without figures", lambda: self._apply_preset('statistical')),
+            ("Archive", "fa6s.layer-group", "All data and plot files", lambda: self._apply_preset('full')),
+            ("Default", "fa6s.rotate-left", "Restore startup defaults", self._reset_content_defaults),
         ]
         for text, icon_name, tooltip, callback in preset_specs:
             btn = QPushButton(text)
@@ -1418,74 +1426,97 @@ class ExportTab(QWidget):
             cb.setChecked(False)
 
     def _reset_content_defaults(self):
-        """Reset content selection to defaults"""
+        """Reset content and output formats to the default export workspace."""
+        self.selected_formats = self._default_selected_formats()
         self._init_content_selection()
+        self._sync_legacy_content_enabled()
+        self._sync_format_cards()
         self._update_all_checkboxes()
         self.update_file_tree()
         self.update_summary_card()
+        self._update_format_section_meta()
         self.update_preview()
 
+    def _set_selected_formats(self, enabled: set[str]) -> None:
+        self.selected_formats = {
+            key: key in enabled
+            for key in self._default_selected_formats().keys()
+        }
+
+    def _set_percentile_defaults(self, enabled: set[str]) -> None:
+        percentiles = self.content_selection['grain_size']['items']['percentiles']
+        percentiles['enabled'] = bool(enabled)
+        for key in percentiles['items'].keys():
+            percentiles['items'][key] = key in enabled
+
+    def _set_plot_type_defaults(self, enabled: set[str]) -> None:
+        plot_items = self.content_selection['plots']['items']
+        for key in export_plot_items().keys():
+            plot_items[key] = key in enabled
+        plot_items['include_legend'] = True
+        plot_items['include_grid'] = True
+        self.content_selection['plots']['enabled'] = bool(enabled)
+
+    def _sync_legacy_content_enabled(self) -> None:
+        self.content_enabled.update({
+            'grain_data': self.content_selection['grain_size']['enabled'],
+            'k_values': self.content_selection['k_values']['enabled'],
+            'statistics': self.content_selection['statistics']['enabled'],
+            'plots': self.content_selection['plots']['enabled'],
+        })
+
     def _apply_preset(self, preset_name: str):
-        """Apply a content selection preset"""
+        """Apply a complete export workflow preset."""
+        self._init_content_selection()
+
         if preset_name == 'minimal':
-            # Essential data only
-            # Percentiles: D10, D50, D60
-            for p_key in ['d5', 'd16', 'd17', 'd20', 'd30', 'd84', 'd95']:
-                self.content_selection['grain_size']['items']['percentiles']['items'][p_key] = False
-            for p_key in ['d10', 'd50', 'd60']:
-                self.content_selection['grain_size']['items']['percentiles']['items'][p_key] = True
+            # One clean table for the common handoff: core grain stats and K values.
+            self._set_selected_formats({'csv_wide'})
+            self._set_percentile_defaults({'d10', 'd30', 'd50', 'd60'})
+            self.content_selection['grain_size']['items']['raw_distribution'] = False
+            self._set_plot_type_defaults(set())
 
-            # Keep all K-values, gradation, classification
-            self.content_selection['grain_size']['items']['raw_distribution'] = True
-            self.content_selection['grain_size']['items']['percentiles']['enabled'] = True
-            self.content_selection['grain_size']['items']['gradation']['enabled'] = True
-            self.content_selection['grain_size']['items']['classification'] = True
-            self.content_selection['k_values']['enabled'] = True
-            self.content_selection['statistics']['enabled'] = True
-            self.content_selection['metadata']['enabled'] = True
-            self.content_selection['plots']['enabled'] = True
-
-        elif preset_name == 'full':
-            # All data
-            for p_key in self.content_selection['grain_size']['items']['percentiles']['items'].keys():
-                self.content_selection['grain_size']['items']['percentiles']['items'][p_key] = True
-
-            self.content_selection['grain_size']['items']['raw_distribution'] = True
-            self.content_selection['grain_size']['items']['percentiles']['enabled'] = True
-            self.content_selection['grain_size']['items']['gradation']['enabled'] = True
-            self.content_selection['grain_size']['items']['classification'] = True
-            self.content_selection['k_values']['enabled'] = True
-            self.content_selection['k_values']['include_formulas'] = True
-            self.content_selection['k_values']['include_validation'] = True
-            self.content_selection['statistics']['enabled'] = True
-            self.content_selection['metadata']['enabled'] = True
-            self.content_selection['metadata']['items']['processing_notes'] = True
-            self.content_selection['metadata']['items']['software_version'] = True
-            self.content_selection['plots']['enabled'] = True
-
-        elif preset_name == 'statistical':
-            # Optimized for statistical analysis (wide CSV format)
-            # Common percentiles for stats
-            for p_key in ['d5', 'd16', 'd17', 'd84', 'd95']:
-                self.content_selection['grain_size']['items']['percentiles']['items'][p_key] = False
-            for p_key in ['d10', 'd20', 'd30', 'd50', 'd60']:
-                self.content_selection['grain_size']['items']['percentiles']['items'][p_key] = True
-
-            self.content_selection['grain_size']['items']['raw_distribution'] = False  # Not needed for stats
-            self.content_selection['grain_size']['items']['percentiles']['enabled'] = True
-            self.content_selection['grain_size']['items']['gradation']['enabled'] = True
-            self.content_selection['grain_size']['items']['classification'] = True
-            self.content_selection['k_values']['enabled'] = True
+        elif preset_name == 'client':
+            # A readable client package: workbook plus presentation plot files.
+            self._set_selected_formats({'excel', 'png', 'pdf'})
+            self._set_percentile_defaults({'d10', 'd20', 'd30', 'd50', 'd60'})
+            self.content_selection['grain_size']['items']['raw_distribution'] = False
             self.content_selection['k_values']['include_formulas'] = False
             self.content_selection['k_values']['include_validation'] = False
-            self.content_selection['statistics']['enabled'] = True
-            self.content_selection['metadata']['enabled'] = True
-            self.content_selection['plots']['enabled'] = False  # No plots for statistical export
+            self._set_plot_type_defaults({
+                'grain_size_curve', 'grain_size_histogram', 'k_value_bar',
+                'distribution_overlay', 'grain_size_histogram_comparison',
+                'k_value_comparison', 'statistical_boxplots',
+            })
 
-        # Update all UI checkboxes to reflect preset
+        elif preset_name == 'full':
+            # Archive package: every data table and every exportable plot type.
+            self._set_selected_formats(set(self._default_selected_formats().keys()))
+            self._set_percentile_defaults(
+                set(self.content_selection['grain_size']['items']['percentiles']['items'].keys())
+            )
+            self.content_selection['grain_size']['items']['raw_distribution'] = True
+            self.content_selection['k_values']['include_formulas'] = True
+            self.content_selection['k_values']['include_validation'] = True
+            self.content_selection['metadata']['items']['processing_notes'] = True
+            self.content_selection['metadata']['items']['software_version'] = True
+            self._set_plot_type_defaults(set(export_plot_items().keys()))
+
+        elif preset_name == 'statistical':
+            # Analysis package: typed wide table/workbook, no figure files.
+            self._set_selected_formats({'csv_wide', 'excel'})
+            self._set_percentile_defaults({'d10', 'd20', 'd30', 'd50', 'd60'})
+            self.content_selection['grain_size']['items']['raw_distribution'] = False
+            self.content_selection['k_values']['include_formulas'] = False
+            self.content_selection['k_values']['include_validation'] = False
+            self._set_plot_type_defaults(set())
+
+        self._sync_legacy_content_enabled()
+        self._sync_format_cards()
         self._update_all_checkboxes()
         self.update_file_tree()
         self.update_summary_card()
+        self._update_format_section_meta()
         self.update_preview()
 
     def _update_all_checkboxes(self):

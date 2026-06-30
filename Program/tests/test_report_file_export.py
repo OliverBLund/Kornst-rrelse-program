@@ -13,6 +13,7 @@ os.environ.setdefault("GSA_DISABLE_WEBENGINE", "1")
 sys.path.insert(0, "Program")
 
 from PyQt6.QtCore import QEventLoop, QTimer
+from PyQt6.QtGui import QPageLayout
 from PyQt6.QtWidgets import QApplication
 
 from gui.report_export_worker import ReportExportCancelled, ReportExportWorker
@@ -225,6 +226,7 @@ class TestReportingTabFileExport(unittest.TestCase):
                 docx_kwargs["externalized_table_titles"],
                 {"large-result-table": "Large Result Table"},
             )
+            self.assertEqual(docx_kwargs["metadata"]["project_name"], "Project")
             fake_worker.start.assert_called_once()
             fake_dialog.exec.assert_called_once()
 
@@ -248,6 +250,12 @@ class TestReportingTabFileExport(unittest.TestCase):
 
             self.assertFalse(dialog_class.call_args.kwargs["cancellable"])
             fake_page.printToPdf.assert_called_once()
+            layout = fake_page.printToPdf.call_args.args[1]
+            margins = layout.margins(QPageLayout.Unit.Millimeter)
+            self.assertAlmostEqual(margins.left(), 20.0, places=1)
+            self.assertAlmostEqual(margins.top(), 20.0, places=1)
+            self.assertAlmostEqual(margins.right(), 20.0, places=1)
+            self.assertAlmostEqual(margins.bottom(), 25.0, places=1)
             fake_dialog.exec.assert_called_once()
             self.assertEqual(self.tab._pdf_export_path, path)
 

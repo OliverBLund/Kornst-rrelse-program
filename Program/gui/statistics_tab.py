@@ -184,9 +184,16 @@ def _make_table(headers: List[str]) -> QTableWidget:
     )
     header = table.horizontalHeader()
     header.setHighlightSections(False)
-    header.setSectionResizeMode(0, QHeaderView.ResizeMode.Stretch)
-    for col in range(1, len(headers)):
-        header.setSectionResizeMode(col, QHeaderView.ResizeMode.ResizeToContents)
+    # Key/label columns size to their (short) content; the LAST column stretches to
+    # fill the container so a long value can never push the table wider than its box.
+    # Over-long values elide instead — the full text is still available as a tooltip.
+    last_col = len(headers) - 1
+    for col in range(len(headers)):
+        mode = (
+            QHeaderView.ResizeMode.Stretch if col == last_col
+            else QHeaderView.ResizeMode.ResizeToContents
+        )
+        header.setSectionResizeMode(col, mode)
     return table
 
 
@@ -202,6 +209,7 @@ def _fit_table_height(table: QTableWidget) -> None:
 def _cell(text: str, *, align_right: bool = False, key: bool = False,
           muted: bool = False) -> QTableWidgetItem:
     item = QTableWidgetItem(text)
+    item.setToolTip(text)
     flag = Qt.AlignmentFlag.AlignVCenter
     flag |= Qt.AlignmentFlag.AlignRight if align_right else Qt.AlignmentFlag.AlignLeft
     item.setTextAlignment(flag)

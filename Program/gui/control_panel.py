@@ -1900,7 +1900,7 @@ class ControlPanel(QFrame):
         self._pill_rev = QPushButton("\u26a0 Review")
         self._pill_rev.setCheckable(True)
         self._pill_rev.setStyleSheet(_PILL)
-        self._manage_samples_btn = QPushButton("Manage")
+        self._manage_samples_btn = QPushButton("Scope & Groups")
         self._manage_samples_btn.setStyleSheet(_PILL)
         self._manage_samples_btn.setCursor(Qt.CursorShape.PointingHandCursor)
         self._manage_samples_btn.setToolTip("Choose included samples and assign groups")
@@ -1915,9 +1915,18 @@ class ControlPanel(QFrame):
         pills_h.addWidget(self._pill_all)
         pills_h.addWidget(self._pill_sel)
         pills_h.addWidget(self._pill_rev)
-        pills_h.addWidget(self._manage_samples_btn)
         pills_h.addStretch()
         body_v.addWidget(pills_w)
+
+        # Scope & Groups is an action (not a view filter like the pills above) and
+        # its label is too wide to share the pill row, so it gets its own line.
+        manage_row = QWidget()
+        manage_h = QHBoxLayout(manage_row)
+        manage_h.setContentsMargins(10, 4, 10, 0)
+        manage_h.setSpacing(4)
+        manage_h.addWidget(self._manage_samples_btn)
+        manage_h.addStretch()
+        body_v.addWidget(manage_row)
 
         # Hidden add_files_btn kept for backward compat
         self.add_files_btn = QPushButton("+ Add Files")

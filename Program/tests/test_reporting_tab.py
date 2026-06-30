@@ -11,7 +11,7 @@ os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 sys.path.insert(0, "Program")
 
 from PyQt6.QtCore import QEventLoop, QTimer
-from PyQt6.QtWidgets import QApplication
+from PyQt6.QtWidgets import QApplication, QSizePolicy
 
 from data_loader import GrainSizeData
 from k_calculations import CalculationStatus, KCalculationResult
@@ -110,6 +110,16 @@ class TestReportingTabTypePresets(unittest.TestCase):
         self.tab._set_type_selection(type_id)
         self.tab._apply_type_preset(type_id)
 
+    def test_sample_hint_wraps_inside_available_width(self):
+        self._apply(ReportingTab.TYPE_COMPARISON)
+
+        self.assertTrue(self.tab._samp_hint_lbl.wordWrap())
+        self.assertEqual(
+            self.tab._samp_hint_lbl.sizePolicy().horizontalPolicy(),
+            QSizePolicy.Policy.Ignored,
+        )
+        self.assertIn("Group/overall", self.tab._samp_hint_lbl.text())
+
     def test_kfocus_enables_plots_section(self):
         # Regression: K-Focus previously forced plots off, so its report had no
         # figures despite the hint promising K-distribution plots.
@@ -121,7 +131,10 @@ class TestReportingTabTypePresets(unittest.TestCase):
         selected = self.tab._collect_selected_plots("collection")
         self.assertEqual(
             selected,
-            {"k_value_comparison", "statistical_boxplots", "k_distribution"},
+            {
+                "k_value_comparison", "statistical_boxplots",
+                "k_distribution", "reliability_matrix",
+            },
         )
         # The grain-size comparison is dropped for the K-focused report.
         self.assertNotIn("distribution_overlay", selected)
@@ -130,18 +143,33 @@ class TestReportingTabTypePresets(unittest.TestCase):
         self._apply(ReportingTab.TYPE_COMPARISON)
         selected = self.tab._collect_selected_plots("collection")
         self.assertIn("distribution_overlay", selected)
+        self.assertIn("grain_size_histogram_comparison", selected)
         self.assertNotIn("k_distribution", selected)
 
-    def test_per_sample_plots_are_opt_in_for_all_multi_sample_types(self):
-        # Per-sample plots are available everywhere but OFF by default, so a
-        # large report never auto-renders a grain curve + K-bar per dataset.
-        for type_id in (ReportingTab.TYPE_FULL, ReportingTab.TYPE_COMPARISON,
-                        ReportingTab.TYPE_KFOCUS):
+    def test_per_sample_plots_are_available_but_template_specific(self):
+        for key in ("per_sample_grain", "per_sample_histogram", "per_sample_kbar"):
+            self.assertIn(key, self.tab._plot_rows["collection"])
+
+        for type_id in (ReportingTab.TYPE_COMPARISON, ReportingTab.TYPE_KFOCUS):
             self._apply(type_id)
             selected = self.tab._collect_selected_plots("collection")
-            self.assertIn("per_sample_grain", self.tab._plot_rows["collection"])
             self.assertNotIn("per_sample_grain", selected)
+            self.assertNotIn("per_sample_histogram", selected)
             self.assertNotIn("per_sample_kbar", selected)
+
+        self._apply(ReportingTab.TYPE_FULL)
+        selected = self.tab._collect_selected_plots("collection")
+        self.assertIn("per_sample_grain", selected)
+        self.assertIn("per_sample_histogram", selected)
+        self.assertIn("per_sample_kbar", selected)
+
+    def test_plot_row_changes_mark_template_modified(self):
+        self._apply(ReportingTab.TYPE_COMPARISON)
+        self.assertFalse(self.tab._is_modified_from_preset())
+
+        self.tab._plot_rows["collection"]["k_distribution"].set_checked(True)
+
+        self.assertTrue(self.tab._is_modified_from_preset())
 
     def test_plot_rows_stay_visible_for_all_report_types(self):
         for type_id in (ReportingTab.TYPE_INDIVIDUAL, ReportingTab.TYPE_FULL,
