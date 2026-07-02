@@ -2,82 +2,154 @@
 
 ## Quick Start
 
-To build a new release of Grain Size Analysis:
+Build a new release from the project root:
 
 ```batch
 BUILD_EXE.bat 1.0.0
 ```
 
-Replace `1.0.0` with your desired version number.
+Replace `1.0.0` with the release version.
 
-## What It Does
+## Recommended Publish Mode
 
-The build script:
+For the best user experience, choose build mode `2` / `Folder`.
+This keeps startup fast, so the program's own PyQt progress splash appears as
+soon as possible and can show the real loading stages.
 
-1. **Checks Requirements**: Verifies Python and PyInstaller are installed
-2. **Creates Versioned Folder**: Makes a new folder `releases/v1.0.0/`
-3. **Builds Executable**: Uses PyInstaller to create the application
-4. **Creates ZIP Archive**: Automatically packages everything for distribution
+Do not add PyInstaller's static `--splash` for the normal release. It would only
+cover the one-file extraction phase, then hand off to the real PyQt splash, which
+feels like two separate startup screens.
 
-## Output Structure
+Use build mode `1` / `Single File` only when a single portable `.exe` is more
+important than immediate startup feedback. In one-file mode, the app cannot show
+its progress dialog until PyInstaller has finished extracting the runtime.
 
-After building version `1.0.0`, you'll have:
+## Long-Path Rule For Folder Builds
 
+Folder mode is still the right startup choice, but users must extract it to a
+short local path.
+
+Recommended locations:
+
+```text
+C:\GSA
+C:\Tools\GSA
 ```
-releases/
-└── v1.0.0/
-    ├── dist/
-    │   └── GrainSizeAnalysis/          ← The runnable application
-    │       ├── GrainSizeAnalysis.exe   ← Main executable
-    │       └── (all dependencies)
-    ├── build/                          ← Build artifacts (can be ignored)
-    ├── GrainSizeAnalysis.spec          ← PyInstaller spec file
-    └── GrainSizeAnalysis_v1.0.0.zip    ← Ready for distribution
+
+Avoid deeply nested OneDrive, SharePoint, Desktop, Downloads subfolders, or
+project folders. Folder-based PyInstaller builds include long internal paths such
+as Qt QML resources, and Windows ZIP tools can fail once the full extracted path
+approaches the classic 260-character limit.
+
+The build script reduces this risk by:
+
+1. Building from a short temporary path.
+2. Writing release output to `C:\gsa_build\<version>`.
+3. Using a short internal runtime folder named `r`.
+4. Adding a `README_FIRST.txt` install note to the release output.
+
+## Output
+
+Folder mode:
+
+```text
+C:\gsa_build\1.0.0\
+    GrainSizeAnalysis\
+        GrainSizeAnalysis.exe
+        README_FIRST.txt
+        r\                       runtime dependencies
 ```
 
-## Distribution
+Single-file mode:
 
-The ZIP file `GrainSizeAnalysis_v1.0.0.zip` contains everything needed to run the application. Simply extract and run `GrainSizeAnalysis.exe`.
+```text
+C:\gsa_build\1.0.0\
+    GrainSizeAnalysis.exe
+    README_FIRST.txt
+```
 
-## Version Management
+For folder mode, distribute the entire `GrainSizeAnalysis` folder. Do not move
+only the `.exe` out of the folder.
 
-- **Each build is isolated**: No conflicts between versions
-- **Old versions are preserved**: Previous builds are never deleted
-- **No permission issues**: Fresh folders avoid locked files
 
-## Rebuilding a Version
+## Installer Experiment
 
-If you need to rebuild an existing version:
+A proper Windows installer can package the folder build without losing the fast
+startup behavior. The installer copies the app to a controlled short path under
+`%LOCALAPPDATA%\Programs\GrainSizeAnalysis`, creates Start Menu shortcuts, and
+keeps users away from deep OneDrive extraction paths.
+The installer and generated shortcuts use the bundled `r/Program/resources/app_icon.ico` icon from the folder build.
+
+Prerequisite: install Inno Setup 6 from https://jrsoftware.org/isinfo.php.
+
+Build flow:
 
 ```batch
 BUILD_EXE.bat 1.0.0
+BUILD_INSTALLER.bat 1.0.0
 ```
 
-You'll be prompted to confirm overwriting the existing build.
+When `BUILD_EXE.bat` asks for build mode, choose `2` / `Folder`. The installer
+helper expects this folder build:
 
-## Requirements
+```text
+C:\gsa_build\1.0.0\GrainSizeAnalysis\GrainSizeAnalysis.exe
+```
 
-- Python 3.8 or newer
-- PyInstaller (auto-installed if missing)
-- Windows 10 or newer (for ZIP creation via PowerShell)
+The installer output will be:
+
+```text
+C:\gsa_build\1.0.0\GrainSizeAnalysis-1.0.0-Setup.exe
+```
+
+This is currently an experiment, but it is the likely best final distribution
+path if we want the immediate PyQt progress splash and fewer path-length support
+issues.
+
+## Licensing Release Checklist
+
+This project currently packages PyQt6 and PyQt6-WebEngine, so public binary releases should use the GPL route unless the project switches toolkit or obtains a commercial PyQt license.
+
+Before publishing an installer:
+
+1. Confirm the copyright holder line in `README.md` with DTU.
+2. Commit the exact source code used for the release.
+3. Tag the commit, for example `v0.96`.
+4. Build the folder package with `BUILD_EXE.bat 0.96`.
+5. Build the installer with `BUILD_INSTALLER.bat 0.96`.
+6. Publish the installer together with the matching source archive or GitHub release/tag.
+
+The folder package and installer include:
+
+```text
+README.md
+COPYING
+LICENSE
+SOURCE_CODE_NOTICE.txt
+THIRD_PARTY_NOTICES.md
+```
+
+Inno Setup displays `SOURCE_CODE_NOTICE.txt` before installation and `COPYING` as the GPL license text.
 
 ## Troubleshooting
 
-### "Python 3 is not installed or not in PATH"
-Install Python from [python.org](https://www.python.org/) and ensure "Add to PATH" is checked during installation.
+### The app does not start after extracting the folder
 
-### "Entry script not found"
-Make sure you're running the script from the project root directory where `Program/main.py` exists.
+Move the entire app folder to a short local path such as `C:\GSA` and try again.
+This is especially important if the user extracted it inside OneDrive or a long
+organization/project directory.
 
-### ZIP creation fails
-The executable is still built successfully in `releases/vX.X.X/dist/GrainSizeAnalysis/`. You can manually zip this folder.
+### The progress splash appears late or not at all in single-file mode
 
-## Previous Build System
+That is expected for one-file builds. PyInstaller must extract the runtime before
+`Program/main.py` starts, so the PyQt splash cannot exist during that phase. Use
+folder mode for the final release if startup feedback matters.
 
-The old `build_system/` folder contained a more complex Python-based build system with multiple layers. The new simplified script replaces this with:
+### Python is not installed or not in PATH
 
-- ✅ Single, easy-to-read batch file
-- ✅ Version management built-in
-- ✅ Automatic archiving
-- ✅ No permission conflicts
-- ✅ All old versions preserved
+Install Python from https://www.python.org/ and enable `Add Python to PATH`.
+
+### The active Qt runtime is rejected
+
+Use build option `2` when prompted for the build environment so the script creates
+a clean temporary virtual environment with the pinned dependency versions.

@@ -109,13 +109,13 @@ PROFESSIONAL_STYLE = PlotStyle(
     grid_linestyle="-",
     grid_linewidth=0.5,
 
-    # Typography - matches theme font stack
+    # Typography - use Matplotlib's stable bundled font family in frozen builds
     title_fontsize=12,
     title_fontweight="600",
     label_fontsize=11,
     tick_fontsize=10,
     legend_fontsize=9,
-    font_family="Source Sans 3",
+    font_family="DejaVu Sans",
 
     # Legend - upper left, standard black frame
     legend_loc="upper left",

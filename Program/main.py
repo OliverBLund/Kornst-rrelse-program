@@ -59,6 +59,21 @@ def _startup_font_base_dir() -> Path:
     return Path(__file__).resolve().parent / "resources" / "fonts"
 
 
+def _startup_resource_file(name: str) -> Path:
+    """Return a bundled startup resource path for dev and frozen builds."""
+    if getattr(sys, "frozen", False):
+        base = Path(sys._MEIPASS)  # type: ignore[attr-defined]
+        candidates = [
+            base / "Program" / "resources" / name,
+            base / "resources" / name,
+        ]
+        for candidate in candidates:
+            if candidate.is_file():
+                return candidate
+        return candidates[0]
+    return Path(__file__).resolve().parent / "resources" / name
+
+
 def _load_startup_fonts() -> None:
     """Register bundled UI fonts without importing matplotlib or theme helpers."""
     base = _startup_font_base_dir()
@@ -89,6 +104,12 @@ def _startup_ui_font(point_size: int = 9) -> QFont:
 
 def _startup_app_icon() -> QIcon:
     """Create a lightweight app icon for startup without qtawesome."""
+    icon_path = _startup_resource_file("app_icon.ico")
+    if icon_path.is_file():
+        icon = QIcon(str(icon_path))
+        if not icon.isNull():
+            return icon
+
     ico = QIcon()
 
     for size in (16, 20, 24, 32, 40, 48, 64, 128, 256):

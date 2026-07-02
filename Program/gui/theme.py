@@ -135,6 +135,15 @@ def default_ui_font_families(platform_name: str | None = None) -> list[str]:
     return families
 
 
+def default_matplotlib_font_families(platform_name: str | None = None) -> list[str]:
+    """Return font fallbacks that Matplotlib can resolve reliably in frozen builds."""
+    platform_name = sys.platform if platform_name is None else platform_name
+    families = ["DejaVu Sans"]
+    if platform_name == "win32":
+        families.append("Segoe UI")
+    return families
+
+
 # ─────────────────────────────────────────────────────────────
 # COLOR TOKENS
 # ─────────────────────────────────────────────────────────────
@@ -282,7 +291,7 @@ MATPLOTLIB_RCPARAMS: dict = {
     "grid.color":           "#000000",
     "grid.linewidth":       0.5,
     "grid.alpha":           0.18,
-    "font.family":          default_ui_font_families(),
+    "font.family":          default_matplotlib_font_families(),
     "font.size":            11,
     "axes.titlesize":       12,
     "axes.titlecolor":      "#000000",

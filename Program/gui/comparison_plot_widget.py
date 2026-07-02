@@ -41,7 +41,7 @@ from .group_styles import (
     set_dataset_line_style,
     set_group_color,
 )
-from .theme import C, SZ, apply_matplotlib_style, icon
+from .theme import C, SZ, apply_matplotlib_style, combo_popup_qss, icon
 from analysis.comparison_snapshot import ComparisonSnapshotOptions, build_comparison_snapshot
 from grain_classification import ISO14688
 from k_aggregation import KAggregationOptions, UNGROUPED_LABEL, dataset_group_name
@@ -407,6 +407,7 @@ class ComparisonPlotWidget(QWidget):
 
         self.plot_selector = QComboBox()
         self.plot_selector.setObjectName("pw-style-sel")
+        self.plot_selector.setStyleSheet(combo_popup_qss())
         self.plot_selector.addItems([
             "Distribution",
             "K-Values",
@@ -507,6 +508,7 @@ class ComparisonPlotWidget(QWidget):
 
         self.grid_selector = QComboBox()
         self.grid_selector.setObjectName("pw-style-sel")
+        self.grid_selector.setStyleSheet(combo_popup_qss())
         self.grid_selector.addItems(["2x2", "3x2", "3x3", "4x3"])
         self.grid_selector.setMaximumWidth(68)
         self.grid_selector.setVisible(False)
@@ -523,6 +525,7 @@ class ComparisonPlotWidget(QWidget):
 
         self.style_selector = QComboBox()
         self.style_selector.setObjectName("pw-style-sel")
+        self.style_selector.setStyleSheet(combo_popup_qss())
         self.style_selector.addItems(get_available_style_names())
         self.style_selector.setCurrentText(self.current_style.name)
         self.style_selector.setMaximumWidth(118)
@@ -856,6 +859,7 @@ class ComparisonPlotWidget(QWidget):
         )
         self._unit_combo = QComboBox()
         self._unit_combo.setObjectName("pw-style-sel")
+        self._unit_combo.setStyleSheet(combo_popup_qss())
         all_units = HydraulicConductivityConverter.get_all_units()
         for unit, symbol in all_units.items():
             self._unit_combo.addItem(symbol, unit)
@@ -1099,6 +1103,7 @@ class ComparisonPlotWidget(QWidget):
 
         combo = QComboBox()
         combo.setObjectName("pw-style-sel")
+        combo.setStyleSheet(combo_popup_qss())
         combo.setToolTip("Line style for this dataset inside its group")
         short_labels = {
             "-": "Solid",

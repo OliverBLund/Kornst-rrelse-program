@@ -11,7 +11,13 @@ sys.path.insert(0, "Program")
 
 from PyQt6.QtWidgets import QApplication
 
-from gui.theme import build_stylesheet, default_ui_font_families, default_ui_font_family, icon
+from gui.theme import (
+    build_stylesheet,
+    default_matplotlib_font_families,
+    default_ui_font_families,
+    default_ui_font_family,
+    icon,
+)
 
 
 APP = QApplication.instance() or QApplication([])
@@ -27,6 +33,13 @@ class TestTheme(unittest.TestCase):
             default_ui_font_families("win32"),
             ["Segoe UI", "Source Sans 3", "DejaVu Sans"],
         )
+
+    def test_default_matplotlib_font_families_avoid_variable_ui_font(self):
+        self.assertEqual(
+            default_matplotlib_font_families("win32"),
+            ["DejaVu Sans", "Segoe UI"],
+        )
+        self.assertEqual(default_matplotlib_font_families("linux"), ["DejaVu Sans"])
 
     def test_icon_helper_renders_requested_small_pixmap(self):
         pixmap = icon("fa6s.chevron-right", "#333333", size=8).pixmap(8, 8)

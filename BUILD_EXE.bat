@@ -33,8 +33,8 @@ if "!USE_CLEAN_ENV!"=="" set USE_CLEAN_ENV=1
 REM Ask for build mode
 echo.
 echo Build Mode:
-echo   1. Single File (slower startup ~10s, one .exe file)
-echo   2. Folder (fast startup ~2s, multiple files in folder)
+echo   1. Single File (one .exe, but startup is silent while it extracts)
+echo   2. Folder (recommended UX; fast startup and immediate progress splash)
 echo.
 set /p BUILD_MODE="Select mode (1 or 2) [default: 2]: "
 if "!BUILD_MODE!"=="" set BUILD_MODE=2
@@ -44,6 +44,7 @@ set BASE_RELEASE_DIR=C:\gsa_build
 if not exist "%BASE_RELEASE_DIR%" mkdir "%BASE_RELEASE_DIR%"
 set RELEASE_DIR=%BASE_RELEASE_DIR%\%VERSION%
 set APP_NAME=GrainSizeAnalysis
+set CONTENTS_DIR=r
 set ENTRY_SCRIPT=Program\main.py
 
 echo Build Configuration:
@@ -218,7 +219,7 @@ if "%BUILD_MODE%"=="1" (
 ) else (
     set BUILD_TYPE=--onedir
     set DIST_SUBDIR=\%APP_NAME%
-    set EXTRA_LAYOUT_FLAGS=--contents-directory runtime
+    set EXTRA_LAYOUT_FLAGS=--contents-directory %CONTENTS_DIR%
 )
 
 %PYTHON_CMD% -m PyInstaller ^
@@ -231,6 +232,7 @@ if "%BUILD_MODE%"=="1" (
     %EXTRA_LAYOUT_FLAGS% ^
     --noconsole ^
     --noconfirm ^
+    --icon "%PROJECT_DIR%\Program\resources\app_icon.ico" ^
     --paths "%PROJECT_DIR%\Program" ^
     --add-data "%PROJECT_DIR%\Program\CHANGELOG.md;Program" ^
     --add-data "%PROJECT_DIR%\Program\help_content;Program\help_content" ^
@@ -276,12 +278,68 @@ if "%BUILD_MODE%"=="1" (
     REM Ensure matplotlib stylelib (seaborn styles) is present
     for /f "usebackq delims=" %%p in (`%PYTHON_CMD% -c "import matplotlib, pathlib; print(pathlib.Path(matplotlib.get_data_path())/'stylelib')"`) do set "MPL_STYLE_SRC=%%p"
     if defined MPL_STYLE_SRC if exist "!MPL_STYLE_SRC!" (
-        robocopy "!MPL_STYLE_SRC!" "%RELEASE_DIR%\%APP_NAME%\runtime\matplotlib\mpl-data\stylelib" /E /R:2 /W:2 >nul
+        robocopy "!MPL_STYLE_SRC!" "%RELEASE_DIR%\%APP_NAME%\%CONTENTS_DIR%\matplotlib\mpl-data\stylelib" /E /R:2 /W:2 >nul
     )
     set PACKAGE_PATH=%RELEASE_DIR%\%APP_NAME%
 )
 
 echo Files copied to release directory.
+echo.
+
+REM Copy release licensing and source-availability documents into the package.
+if "%BUILD_MODE%"=="1" (
+    set "NOTICE_DIR=%RELEASE_DIR%"
+) else (
+    set "NOTICE_DIR=%RELEASE_DIR%\%APP_NAME%"
+)
+for %%f in (README.md COPYING LICENSE THIRD_PARTY_NOTICES.md) do (
+    if exist "%PROJECT_DIR%\%%f" copy "%PROJECT_DIR%\%%f" "!NOTICE_DIR!\%%f" >nul
+)
+(
+    echo Grain Size Analysis source code notice
+    echo.
+    echo This binary release is distributed under the GNU General Public License
+    echo version 3 or later ^(GPL-3.0-or-later^).
+    echo.
+    echo Corresponding source code for this exact installer version must be
+    echo published with the release.
+    echo.
+    echo Repository:
+    echo   https://github.com/OliverBLund/Kornst-rrelse-program
+    echo.
+    echo Expected release/tag for this build:
+    echo   https://github.com/OliverBLund/Kornst-rrelse-program/releases/tag/v%VERSION%
+    echo.
+    echo The full license text is included in COPYING and LICENSE.
+) > "!NOTICE_DIR!\SOURCE_CODE_NOTICE.txt"
+echo Added release license and source notice files to: !NOTICE_DIR!
+echo.
+
+REM Write a short user-facing install note into the release output. Folder-based
+REM PyInstaller builds contain deep Qt/WebEngine runtime paths, so extracting
+REM them under long OneDrive/SharePoint/project folders can exceed Windows path
+REM limits before the app starts.
+if "%BUILD_MODE%"=="1" (
+    set "README_TARGET=%RELEASE_DIR%\README_FIRST.txt"
+) else (
+    set "README_TARGET=%RELEASE_DIR%\%APP_NAME%\README_FIRST.txt"
+)
+(
+    echo Grain Size Analysis - install note
+    echo.
+    echo Recommended location:
+    echo   C:\GSA
+    echo   C:\Tools\GSA
+    echo.
+    echo Avoid extracting or running the app from deeply nested OneDrive,
+    echo SharePoint, Desktop, or project folders. Windows and ZIP tools may
+    echo fail when the full path becomes too long, especially for folder-based
+    echo builds that include Qt runtime files.
+    echo.
+    echo If the app does not start after extraction, move the entire app folder
+    echo or executable to a short local path and run it again.
+) > "!README_TARGET!"
+echo Added install note: !README_TARGET!
 echo.
 
 REM Clean up temporary build directory
@@ -312,10 +370,14 @@ echo Location:    %PACKAGE_PATH%
 echo.
 if "%BUILD_MODE%"=="1" (
     echo Single-file executable created.
-    echo NOTE: First startup may be slower ~10s as files are extracted.
+    echo Use this only when a single portable file is required.
+    echo NOTE: The app progress splash cannot appear until extraction finishes.
 ) else (
     echo Folder-based build created - FAST startup ~2s!
+    echo Recommended release mode for the immediate progress splash.
     echo Distribute the entire %APP_NAME% folder.
+    echo Optional installer experiment: BUILD_INSTALLER.bat %VERSION%
+    echo IMPORTANT: Ask users to extract it to a short local path such as C:\GSA.
 )
 echo.
 pause

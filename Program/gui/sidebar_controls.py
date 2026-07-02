@@ -17,6 +17,7 @@ from PyQt6.QtWidgets import (
     QSizePolicy, QSpinBox, QVBoxLayout, QWidget,
 )
 
+from .theme import combo_popup_qss
 from .toggle_switch import ToggleSwitch
 
 
@@ -217,6 +218,7 @@ def make_combo_row(label: str, items: list[str]):
     lbl.setProperty("pws-lbl", True)
     combo = QComboBox()
     combo.setObjectName("pw-style-sel")
+    combo.setStyleSheet(combo_popup_qss())
     combo.addItems(items)
     combo.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
     lay.addWidget(lbl)

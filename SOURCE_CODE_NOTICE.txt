@@ -1,0 +1,15 @@
+Grain Size Analysis source code notice
+
+This binary installer is distributed under the GNU General Public License version 3 or later (GPL-3.0-or-later).
+
+The corresponding source code for this exact release must be made available with the release. Use the Git tag or source archive matching the installer version.
+
+Repository:
+https://github.com/OliverBLund/Kornst-rrelse-program
+
+Expected release/tag pattern:
+https://github.com/OliverBLund/Kornst-rrelse-program/releases/tag/v<version>
+
+Users may copy, modify, and redistribute the software under the GNU GPL. Modified redistributed versions must also provide the corresponding source code under GPL-compatible terms.
+
+The full license text is included in COPYING and LICENSE.
