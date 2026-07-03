@@ -397,11 +397,11 @@ class StatisticsTab(QWidget):
     def _build_distribution_card(self) -> _Card:
         card = _Card("Key Grain Distribution", "mm")
 
-        # D-facts (D10/D30/D60/D90)
+        # D-facts (D10/D50/D60/D90)
         facts = QHBoxLayout()
         facts.setSpacing(8)
         self._fact_labels: dict[int, QLabel] = {}
-        for p, sub in ((10, "effective size"), (30, "shape control"),
+        for p, sub in ((10, "effective size"), (50, "median size"),
                        (60, "uniformity basis"), (90, "coarse tail")):
             facts.addWidget(self._make_fact(p, sub))
         card.add_layout(facts)

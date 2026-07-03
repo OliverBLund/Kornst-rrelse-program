@@ -46,7 +46,7 @@ class TestHelpDialog(unittest.TestCase):
         self.assertEqual(self.dialog.current_help_page, "changelog.html")
         text = self.dialog.content_browser.toPlainText()
         self.assertIn("Changelog", text)
-        self.assertIn("0.9.2-beta", text)
+        self.assertIn("0.9.6", text)
         self.assertIn("Manual QA Checklist", text)
         self.assertIn("plot data drawers", text)
 

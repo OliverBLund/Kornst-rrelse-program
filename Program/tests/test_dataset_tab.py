@@ -166,6 +166,12 @@ class TestDatasetTabResultsTable(unittest.TestCase):
             self.assertTrue(hasattr(stats, attr), attr)
         self.assertLessEqual(self.tab.statistics_widget.minimumSizeHint().height(), 520)
 
+    def test_statistics_key_distribution_fact_cards_use_d50_not_d30(self):
+        fact_percentiles = set(self.tab.statistics_tab._fact_labels)
+
+        self.assertIn(50, fact_percentiles)
+        self.assertNotIn(30, fact_percentiles)
+
     def test_results_cards_surface_ok_only_geometric_and_arithmetic_means(self):
         self.tab.apply_precomputed_results([
             _k_result("Hazen", 1.0e-4),

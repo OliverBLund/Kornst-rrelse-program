@@ -9,7 +9,7 @@ from PyQt6.QtWidgets import (
     QPushButton, QLabel, QFileDialog, QMessageBox, QLineEdit,
     QSizePolicy, QButtonGroup, QSpinBox, QDoubleSpinBox, QScrollArea,
     QSplitter, QTableWidget, QTableWidgetItem, QHeaderView, QAbstractItemView,
-    QColorDialog,
+    QColorDialog, QMenu,
 )
 from PyQt6.QtGui import QColor
 from PyQt6.QtCore import (
@@ -135,6 +135,7 @@ class PlotWorkspace(QWidget):
         self._drawer_headers: list[str] = []
         self._drawer_rows: list[tuple] = []
         self._drawer_title_text = "Plot data"
+        self._toolbar = None
 
         # Plot settings
         self.current_plot_type = "distribution"
@@ -173,11 +174,12 @@ class PlotWorkspace(QWidget):
     def _build_toolbar(self) -> QWidget:
         bar = QWidget()
         bar.setObjectName("pw-toolbar")
+        self._toolbar = bar
         lay = QHBoxLayout(bar)
         lay.setContentsMargins(8, 0, 8, 0)
         lay.setSpacing(4)
 
-        # ── Segmented control (Dist. Curve / K-Values) ──
+        # Primary plot selector stays visible at every supported width.
         seg_frame = QFrame()
         seg_frame.setObjectName("pw-seg")
         seg_lay = QHBoxLayout(seg_frame)
@@ -188,7 +190,8 @@ class PlotWorkspace(QWidget):
         self._seg_group.setExclusive(True)
 
         self._seg_dist = QPushButton("  Dist. Curve")
-        self._seg_dist.setIcon(icon("fa6s.chart-line", C.TEXT))  # starts active
+        self._seg_dist.setIcon(icon("fa6s.chart-line", C.TEXT))
+        self._seg_dist.setToolTip("Distribution curve")
         self._seg_dist.setProperty("pw-seg", True)
         self._seg_dist.setProperty("active", True)
         self._seg_dist.setCheckable(True)
@@ -198,6 +201,7 @@ class PlotWorkspace(QWidget):
 
         self._seg_kval = QPushButton("  K-Values")
         self._seg_kval.setIcon(icon("fa6s.chart-bar", C.TEXT_MID))
+        self._seg_kval.setToolTip("K-values")
         self._seg_kval.setProperty("pw-seg", True)
         self._seg_kval.setProperty("active", False)
         self._seg_kval.setCheckable(True)
@@ -213,30 +217,29 @@ class PlotWorkspace(QWidget):
         lay.addWidget(seg_frame)
         lay.addWidget(_pw_sep())
 
-        # ── More plot types dropdown ──
         self._more_plots = QComboBox()
         self._more_plots.setObjectName("pw-more-plots-sel")
-        self._more_plots.addItems(["More Plots…", "Combined", "Histogram"])
+        self._more_plots.addItems(["More Plots?", "Combined", "Histogram"])
         self._more_plots.setMaxVisibleItems(6)
+        self._more_plots.setMaximumWidth(118)
         self._more_plots.setToolTip("Additional plot types")
         self._more_plots.currentIndexChanged.connect(self._on_more_plot_changed)
         lay.addWidget(self._more_plots)
 
         lay.addWidget(_pw_sep())
 
-        # ── Style selector ──
         self._style_sel = QComboBox()
         self._style_sel.setObjectName("pw-style-sel")
         from .plot_styles import get_available_style_names
         self._style_sel.addItems(get_available_style_names())
         self._style_sel.setCurrentText("Classic")
+        self._style_sel.setMaximumWidth(118)
         self._style_sel.setToolTip("Plot style")
         self._style_sel.currentTextChanged.connect(self._on_style_changed)
         lay.addWidget(self._style_sel)
 
         lay.addWidget(_pw_sep())
 
-        # ── Shared plot text settings ──
         self._plot_text_btn = _pw_btn("", "Edit title and axis labels", "fa6s.pen-ruler")
         self._plot_text_btn.clicked.connect(self._open_plot_text_dialog)
         lay.addWidget(self._plot_text_btn)
@@ -253,53 +256,227 @@ class PlotWorkspace(QWidget):
 
         lay.addWidget(_pw_sep())
 
-        # ── Sidebar toggle ──
-        self._tb_sidebar_btn = _pw_chk(" Controls", "Toggle controls panel", False, "fa6s.sliders")
+        self._tb_sidebar_btn = _pw_chk(
+            " Controls", "Toggle controls panel", False, "fa6s.sliders"
+        )
         self._tb_sidebar_btn.clicked.connect(self._toggle_sidebar)
         lay.addWidget(self._tb_sidebar_btn)
 
-        self._tb_drawer_btn = _pw_chk(" Table", "Toggle active plot data drawer", False, "fa6s.table")
+        self._tb_drawer_btn = _pw_chk(
+            " Table", "Toggle active plot data drawer", False, "fa6s.table"
+        )
         self._tb_drawer_btn.clicked.connect(self._toggle_drawer)
         lay.addWidget(self._tb_drawer_btn)
 
-        lay.addWidget(_pw_sep())
+        self._display_sep = _pw_sep()
+        lay.addWidget(self._display_sep)
 
-        # ── Toggle checks ──
         self._chk_grid = _pw_chk("Grid", "Toggle grid", True, "fa6s.hashtag")
         self._chk_legend = _pw_chk("Legend", "Toggle legend", True, "fa6s.list")
-        self._chk_zones = _pw_chk("Zones", "Toggle soil zones", False, "fa6s.layer-group")
-        self._chk_dlines = _pw_chk("D-lines", "Show D10 / D50 / D60 lines", True, "fa6s.crosshairs")
+        self._chk_zones = _pw_chk(
+            "Zones", "Toggle soil zones", False, "fa6s.layer-group"
+        )
+        self._chk_dlines = _pw_chk(
+            "D-lines", "Show D10 / D50 / D60 lines", True, "fa6s.crosshairs"
+        )
 
         for chk in (self._chk_grid, self._chk_legend, self._chk_zones, self._chk_dlines):
             chk.toggled.connect(self._update_display_options)
             lay.addWidget(chk)
+        self._display_toolbar_widgets = [
+            self._display_sep,
+            self._chk_grid,
+            self._chk_legend,
+            self._chk_zones,
+            self._chk_dlines,
+        ]
 
-        lay.addWidget(_pw_sep())
+        self._zoom_sep = _pw_sep()
+        lay.addWidget(self._zoom_sep)
 
-        # ── Zoom controls ──
-        btn_zin = _pw_btn("", "Zoom in", "fa6s.magnifying-glass-plus")
-        btn_zout = _pw_btn("", "Zoom out", "fa6s.magnifying-glass-minus")
-        btn_fit = _pw_btn(" Fit", "Reset zoom", "fa6s.arrows-to-circle")
-        btn_zin.clicked.connect(self.zoom_in)
-        btn_zout.clicked.connect(self.zoom_out)
-        btn_fit.clicked.connect(self.reset_view)
-        lay.addWidget(btn_zin)
-        lay.addWidget(btn_zout)
-        lay.addWidget(btn_fit)
+        self._tb_zoom_in_btn = _pw_btn("", "Zoom in", "fa6s.magnifying-glass-plus")
+        self._tb_zoom_out_btn = _pw_btn("", "Zoom out", "fa6s.magnifying-glass-minus")
+        self._tb_fit_btn = _pw_btn(" Fit", "Reset zoom", "fa6s.arrows-to-circle")
+        self._tb_zoom_in_btn.clicked.connect(self.zoom_in)
+        self._tb_zoom_out_btn.clicked.connect(self.zoom_out)
+        self._tb_fit_btn.clicked.connect(self.reset_view)
+        lay.addWidget(self._tb_zoom_in_btn)
+        lay.addWidget(self._tb_zoom_out_btn)
+        lay.addWidget(self._tb_fit_btn)
+        self._zoom_toolbar_widgets = [
+            self._zoom_sep,
+            self._tb_zoom_in_btn,
+            self._tb_zoom_out_btn,
+            self._tb_fit_btn,
+        ]
 
-        lay.addWidget(_pw_sep())
+        self._export_sep = _pw_sep()
+        lay.addWidget(self._export_sep)
 
-        # ── Export ──
-        btn_export = _pw_btn(" Export", "Export plot", "fa6s.download")
-        btn_export.clicked.connect(lambda: self.export_plot("png"))
-        lay.addWidget(btn_export)
+        self._tb_export_btn = _pw_btn(" Export", "Export plot", "fa6s.download")
+        self._tb_export_btn.clicked.connect(lambda: self.export_plot("png"))
+        lay.addWidget(self._tb_export_btn)
+        self._export_toolbar_widgets = [self._export_sep, self._tb_export_btn]
 
-        # ── Spacer ──
+        self._tb_more_btn = _pw_btn(" More", "More plot actions", "fa6s.ellipsis")
+        self._overflow_menu = self._build_toolbar_overflow_menu()
+        self._tb_more_btn.setMenu(self._overflow_menu)
+        self._tb_more_btn.setVisible(False)
+        lay.addWidget(self._tb_more_btn)
+
         lay.addStretch(1)
-
         return bar
 
-    # ── Body (sidebar + chart) ─────────────────────────────────
+    def _build_toolbar_overflow_menu(self) -> QMenu:
+        menu = QMenu(self)
+        menu.aboutToShow.connect(self._sync_toolbar_overflow_menu)
+
+        self._overflow_display_section = menu.addSection("Display")
+        self._overflow_grid_action = menu.addAction("Grid")
+        self._overflow_grid_action.setCheckable(True)
+        self._overflow_grid_action.triggered.connect(
+            lambda checked: self._chk_grid.setChecked(bool(checked))
+        )
+        self._overflow_legend_action = menu.addAction("Legend")
+        self._overflow_legend_action.setCheckable(True)
+        self._overflow_legend_action.triggered.connect(
+            lambda checked: self._chk_legend.setChecked(bool(checked))
+        )
+        self._overflow_zones_action = menu.addAction("Zones")
+        self._overflow_zones_action.setCheckable(True)
+        self._overflow_zones_action.triggered.connect(
+            lambda checked: self._chk_zones.setChecked(bool(checked))
+        )
+        self._overflow_dlines_action = menu.addAction("D-lines")
+        self._overflow_dlines_action.setCheckable(True)
+        self._overflow_dlines_action.triggered.connect(
+            lambda checked: self._chk_dlines.setChecked(bool(checked))
+        )
+
+        self._overflow_view_section = menu.addSection("View")
+        self._overflow_zoom_in_action = menu.addAction("Zoom in")
+        self._overflow_zoom_in_action.triggered.connect(lambda _checked=False: self.zoom_in())
+        self._overflow_zoom_out_action = menu.addAction("Zoom out")
+        self._overflow_zoom_out_action.triggered.connect(lambda _checked=False: self.zoom_out())
+        self._overflow_fit_action = menu.addAction("Fit")
+        self._overflow_fit_action.triggered.connect(lambda _checked=False: self.reset_view())
+
+        self._overflow_export_section = menu.addSection("Export")
+        self._overflow_export_png_action = menu.addAction("Export PNG")
+        self._overflow_export_png_action.triggered.connect(
+            lambda _checked=False: self.export_plot("png")
+        )
+
+        return menu
+
+    @staticmethod
+    def _set_toolbar_widgets_visible(widgets, visible: bool) -> None:
+        for widget in widgets:
+            widget.setVisible(bool(visible))
+
+    def _sync_toolbar_overflow_menu(self) -> None:
+        if not hasattr(self, "_overflow_grid_action"):
+            return
+
+        display_hidden = self._chk_grid.isHidden()
+        zoom_hidden = self._tb_zoom_in_btn.isHidden()
+        export_hidden = self._tb_export_btn.isHidden()
+
+        self._overflow_grid_action.setChecked(self._chk_grid.isChecked())
+        self._overflow_legend_action.setChecked(self._chk_legend.isChecked())
+        self._overflow_zones_action.setChecked(self._chk_zones.isChecked())
+        self._overflow_dlines_action.setChecked(self._chk_dlines.isChecked())
+
+        for action in (
+            self._overflow_display_section,
+            self._overflow_grid_action,
+            self._overflow_legend_action,
+            self._overflow_zones_action,
+            self._overflow_dlines_action,
+        ):
+            action.setVisible(display_hidden)
+
+        for action in (
+            self._overflow_view_section,
+            self._overflow_zoom_in_action,
+            self._overflow_zoom_out_action,
+            self._overflow_fit_action,
+        ):
+            action.setVisible(zoom_hidden)
+
+        for action in (self._overflow_export_section, self._overflow_export_png_action):
+            action.setVisible(export_hidden)
+
+    def _set_toolbar_compact(self, compact: bool) -> None:
+        self._seg_dist.setText("" if compact else "  Dist. Curve")
+        self._seg_kval.setText("" if compact else "  K-Values")
+        self._tb_sidebar_btn.setText("" if compact else " Controls")
+        self._tb_drawer_btn.setText("" if compact else " Table")
+        self._tb_more_btn.setText("" if compact else " More")
+
+    def _apply_toolbar_overflow_state(
+        self,
+        *,
+        display_in_overflow: bool,
+        zoom_in_overflow: bool,
+        export_in_overflow: bool,
+        compact_primary: bool = False,
+    ) -> None:
+        self._set_toolbar_compact(compact_primary)
+        self._set_toolbar_widgets_visible(
+            self._display_toolbar_widgets, not display_in_overflow
+        )
+        self._set_toolbar_widgets_visible(
+            self._zoom_toolbar_widgets, not zoom_in_overflow
+        )
+        self._set_toolbar_widgets_visible(
+            self._export_toolbar_widgets, not export_in_overflow
+        )
+        self._tb_more_btn.setVisible(
+            display_in_overflow or zoom_in_overflow or export_in_overflow
+        )
+
+    def _toolbar_content_fits(self, available_width: int) -> bool:
+        toolbar = getattr(self, "_toolbar", None)
+        if toolbar is None:
+            return True
+        layout = toolbar.layout()
+        if layout is not None:
+            layout.invalidate()
+            layout.activate()
+        return toolbar.sizeHint().width() <= max(0, available_width - 2)
+
+    def _update_responsive_toolbar(self) -> None:
+        if not hasattr(self, "_tb_more_btn"):
+            return
+
+        toolbar = getattr(self, "_toolbar", None)
+        width = toolbar.width() if toolbar is not None else self.width()
+        if width <= 0:
+            return
+
+        # Use actual toolbar content width instead of fixed breakpoints. This
+        # catches font-size changes, translated labels, and Windows scaling.
+        for state in (
+            {"display_in_overflow": False, "zoom_in_overflow": False, "export_in_overflow": False},
+            {"display_in_overflow": True, "zoom_in_overflow": False, "export_in_overflow": False},
+            {"display_in_overflow": True, "zoom_in_overflow": False, "export_in_overflow": True},
+            {"display_in_overflow": True, "zoom_in_overflow": True, "export_in_overflow": True},
+            {
+                "display_in_overflow": True,
+                "zoom_in_overflow": True,
+                "export_in_overflow": True,
+                "compact_primary": True,
+            },
+        ):
+            self._apply_toolbar_overflow_state(**state)
+            if self._toolbar_content_fits(width):
+                self._sync_toolbar_overflow_menu()
+                return
+
+        self._sync_toolbar_overflow_menu()
+
+    # Body (sidebar + chart)
 
     def _build_body(self) -> QWidget:
         body = QWidget()
@@ -364,6 +541,7 @@ class PlotWorkspace(QWidget):
         """Reposition the toggle handle when the chart area resizes."""
         super().resizeEvent(event)
         self._position_toggle_handle()
+        self._update_responsive_toolbar()
         if self.drawer_visible and hasattr(self, "_drawer"):
             self._drawer.setMaximumHeight(self._drawer_open_height())
 

@@ -1404,12 +1404,13 @@ class _FractionsLine(QWidget):
 class ApplicationSettingsDialog(FramelessDialogBase):
     """Small application settings dialog for persisted UI preferences."""
 
-    def __init__(self, show_welcome_on_startup: bool, parent=None):
+    def __init__(self, show_welcome_on_startup: bool, ui_font_bump: int = 1, parent=None):
         super().__init__(parent, default_mode="auto")
         self.setWindowTitle("Settings")
         self.setMinimumWidth(520)
         self.setMaximumWidth(640)
         self._show_welcome_on_startup = bool(show_welcome_on_startup)
+        self._ui_font_bump = max(0, min(1, int(ui_font_bump)))
         self.init_ui()
 
     def init_ui(self):
@@ -1476,6 +1477,54 @@ class ApplicationSettingsDialog(FramelessDialogBase):
         section_lay.addWidget(help_text)
 
         body_lay.addWidget(section_card)
+
+        display_card = QFrame()
+        display_card.setStyleSheet(
+            f"QFrame {{ background: {C.BG_RAISED}; border: 1px solid {C.BORDER}; "
+            f"border-radius: 6px; }}"
+        )
+        display_lay = QVBoxLayout(display_card)
+        display_lay.setContentsMargins(14, 12, 14, 12)
+        display_lay.setSpacing(8)
+
+        display_title = QLabel("Display")
+        display_title.setStyleSheet(
+            f"color: {C.TEXT}; font-size: {F.SZ_LG}pt; font-weight: 600; background: transparent;"
+        )
+        display_lay.addWidget(display_title)
+
+        display_note = QLabel(
+            "Choose the interface text size. Restart the program to apply it consistently across all panels."
+        )
+        display_note.setWordWrap(True)
+        display_note.setStyleSheet(
+            f"color: {C.TEXT_MUTED}; font-size: {F.SZ_SM}pt; background: transparent;"
+        )
+        display_lay.addWidget(display_note)
+
+        size_row = QWidget()
+        size_row.setStyleSheet("background: transparent;")
+        size_lay = QHBoxLayout(size_row)
+        size_lay.setContentsMargins(0, 0, 0, 0)
+        size_lay.setSpacing(10)
+
+        size_label = QLabel("Text size")
+        size_label.setStyleSheet(
+            f"color: {C.TEXT}; font-size: {F.SZ_MD}pt; background: transparent;"
+        )
+        size_lay.addWidget(size_label)
+
+        self.text_size_combo = QComboBox()
+        self.text_size_combo.addItem("Normal", 0)
+        self.text_size_combo.addItem("Large", 1)
+        current_index = self.text_size_combo.findData(self._ui_font_bump)
+        self.text_size_combo.setCurrentIndex(max(0, current_index))
+        self.text_size_combo.setMinimumWidth(160)
+        size_lay.addWidget(self.text_size_combo)
+        size_lay.addStretch(1)
+        display_lay.addWidget(size_row)
+
+        body_lay.addWidget(display_card)
         body_lay.addStretch(1)
 
         root.addWidget(body, 1)
@@ -1493,6 +1542,14 @@ class ApplicationSettingsDialog(FramelessDialogBase):
     def show_welcome_on_startup(self) -> bool:
         """Return the current welcome-screen startup preference."""
         return bool(self.show_welcome_checkbox.isChecked())
+
+    def ui_font_bump(self) -> int:
+        """Return the selected display-size preset."""
+        value = self.text_size_combo.currentData()
+        try:
+            return max(0, min(1, int(value)))
+        except (TypeError, ValueError):
+            return 1
 
 
 class ControlPanel(QFrame):
@@ -1801,7 +1858,7 @@ class ControlPanel(QFrame):
         dz_text = QLabel("Drop files here")
         dz_text.setAlignment(Qt.AlignmentFlag.AlignCenter)
         dz_text.setStyleSheet(
-            f"font-size: 10px; color: {C.SB_MID};"
+            f"font-size: {F.SZ_BASE}pt; color: {C.SB_MID}; font-weight: 600;"
             f"  background: transparent; border: none;")
         dz_text.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents, True)
         dz_v.addWidget(dz_text)
@@ -1809,7 +1866,7 @@ class ControlPanel(QFrame):
         dz_formats = QLabel("Click for processed/raw import")
         dz_formats.setAlignment(Qt.AlignmentFlag.AlignCenter)
         dz_formats.setStyleSheet(
-            f"font-size: 8.5px; color: {C.SB_MUTED};"
+            f"font-size: {max(F.SZ_XS, F.SZ_BASE - 2)}pt; color: {C.SB_MUTED};"
             f"  background: transparent; border: none;")
         dz_formats.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents, True)
         dz_v.addWidget(dz_formats)
@@ -4293,8 +4350,8 @@ class ControlPanel(QFrame):
         """Show about dialog"""
         QMessageBox.about(self, "About Grain Size Analysis Tool",
             """<h3>Grain Size Analysis Tool</h3>
-            <p><b>Version 0.9.0-beta</b></p>
-            <p>Released: January 2025</p>
+            <p><b>Version 0.9.6</b></p>
+            <p>Released: July 2026</p>
 
             <p>A comprehensive tool for grain size distribution analysis
             and hydraulic conductivity calculations.</p>
@@ -4342,13 +4399,45 @@ class ControlPanel(QFrame):
         settings = QSettings("GrainSizeAnalysis", "MainWindow")
         _save_welcome_preference(settings, not bool(enabled))
 
+    def _read_ui_font_bump(self) -> int:
+        """Read the active display-size preset."""
+        host_window = self.window()
+        if host_window is not None and hasattr(host_window, "ui_font_bump"):
+            return int(host_window.ui_font_bump())
+
+        from gui.main_window import _read_ui_font_bump
+
+        settings = QSettings("GrainSizeAnalysis", "MainWindow")
+        return _read_ui_font_bump(settings)
+
+    def _write_ui_font_bump(self, bump) -> bool:
+        """Persist the display-size preset."""
+        host_window = self.window()
+        if host_window is not None and hasattr(host_window, "set_ui_font_bump"):
+            return bool(host_window.set_ui_font_bump(bump))
+
+        from gui.main_window import _save_ui_font_bump
+
+        settings = QSettings("GrainSizeAnalysis", "MainWindow")
+        old_bump = self._read_ui_font_bump()
+        new_bump = _save_ui_font_bump(settings, bump)
+        return new_bump != old_bump
+
     def show_settings(self):
         """Show application settings dialog."""
         host_window = self.window()
         dialog_parent = host_window if isinstance(host_window, QWidget) else self
         dialog = ApplicationSettingsDialog(
             show_welcome_on_startup=self._read_welcome_screen_enabled(),
+            ui_font_bump=self._read_ui_font_bump(),
             parent=dialog_parent,
         )
         if dialog.exec() == QDialog.DialogCode.Accepted:
             self._write_welcome_screen_enabled(dialog.show_welcome_on_startup())
+            ui_size_changed = self._write_ui_font_bump(dialog.ui_font_bump())
+            if ui_size_changed:
+                QMessageBox.information(
+                    dialog_parent,
+                    "Display Size Saved",
+                    "Restart Grain Size Analysis to apply the selected text size across the full interface.",
+                )

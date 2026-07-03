@@ -159,7 +159,7 @@ class C:
     BORDER_DK   = "#c0ae90"   # --border-dk Stronger borders, table header underlines
     TEXT        = "#2f2f2f"   # --text      Primary text
     TEXT_MID    = "#5d4e37"   # --text-mid  Secondary labels
-    TEXT_MUTED  = "#9a8c78"   # --text-muted Placeholders, tertiary
+    TEXT_MUTED  = TEXT_MID    # --text-muted High-contrast tertiary labels
 
     # ── Accent ──
     OLIVE       = "#6b8e23"   # --olive     Primary action, active underline
@@ -237,6 +237,18 @@ class C:
 # FONT TOKENS
 # ─────────────────────────────────────────────────────────────
 
+FONT_BUMP = 1  # 0 = normal/compact, 1 = larger body UI.
+
+
+def _normalise_font_bump(value) -> int:
+    """Clamp the UI font bump to supported display-size presets."""
+    try:
+        bump = int(value)
+    except (TypeError, ValueError):
+        bump = 1
+    return max(0, min(1, bump))
+
+
 class F:
     """Font family names. Must match names registered via QFontDatabase."""
     UI    = default_ui_font_family()
@@ -244,14 +256,33 @@ class F:
     DISP  = "Playfair Display"
 
     # Font size constants (as int, for QFont)
-    SZ_XS   = 8    # Logo subtitle
-    SZ_SM   = 9    # Section headers, meta labels, badge text
-    SZ_BASE = 10   # Default body / sidebar
-    SZ_MD   = 11   # Parameter labels, table body, inputs
-    SZ_LG   = 12   # Menu items, toolbar tabs, cards, nested sub-tabs
-    SZ_XL   = 13   # Toolbar section labels, dialog titles
-    SZ_2XL  = 14   # Logo name, stat card values (small)
-    SZ_3XL  = 18   # Stat card values (large)
+    SZ_XS   = 8                    # Logo subtitle
+    SZ_SM   = 9                    # Section headers, meta labels, badge text
+    SZ_BASE = 10 + FONT_BUMP       # Default body / sidebar
+    SZ_MD   = 11 + FONT_BUMP       # Parameter labels, table body, inputs
+    SZ_LG   = 12 + FONT_BUMP       # Menu items, toolbar tabs, cards, nested sub-tabs
+    SZ_XL   = 13 + FONT_BUMP       # Toolbar section labels, dialog titles
+    SZ_2XL  = 14 + FONT_BUMP       # Logo name, stat card values (small)
+    SZ_3XL  = 18 + FONT_BUMP       # Stat card values (large)
+
+
+def set_font_bump(value) -> int:
+    """Set theme font-size preset before widgets/stylesheets are built."""
+    global FONT_BUMP
+
+    FONT_BUMP = _normalise_font_bump(value)
+    F.SZ_BASE = 10 + FONT_BUMP
+    F.SZ_MD = 11 + FONT_BUMP
+    F.SZ_LG = 12 + FONT_BUMP
+    F.SZ_XL = 13 + FONT_BUMP
+    F.SZ_2XL = 14 + FONT_BUMP
+    F.SZ_3XL = 18 + FONT_BUMP
+    return FONT_BUMP
+
+
+def font_bump() -> int:
+    """Return the active theme font-size preset."""
+    return FONT_BUMP
 
 
 # ─────────────────────────────────────────────────────────────

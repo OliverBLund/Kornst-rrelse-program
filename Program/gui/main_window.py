@@ -39,7 +39,7 @@ from gui.log_overlay import (
 from gui.stack_fade import StackFadeController, TabFadeInController
 from gui.startup_tour import StartupTourOverlay, TourStep
 from gui.welcome_widget import WelcomeWidget
-from gui.theme import C, F, SZ, build_stylesheet, icon, apply_matplotlib_style, apply_tooltip_style
+from gui.theme import C, F, SZ, build_stylesheet, icon, apply_matplotlib_style, apply_tooltip_style, set_font_bump
 from gui.plot_context import build_plot_context_from_tab
 from qt_chrome import FramelessMainWindowMixin
 from data_loader import DataLoader, GrainSizeData, get_test_data_files
@@ -54,6 +54,30 @@ from load_process_worker import run_external_load
 # ─────────────────────────────────────────────────────────────────────
 
 WELCOME_SCREEN_PREF_REVISION = 2
+UI_FONT_BUMP_DEFAULT = 1
+UI_FONT_BUMP_KEY = "display/font_bump"
+
+
+def _normalise_ui_font_bump(value) -> int:
+    try:
+        bump = int(value)
+    except (TypeError, ValueError):
+        bump = UI_FONT_BUMP_DEFAULT
+    return max(0, min(1, bump))
+
+
+def _read_ui_font_bump(settings) -> int:
+    """Read the saved display-size preset."""
+    return _normalise_ui_font_bump(
+        settings.value(UI_FONT_BUMP_KEY, UI_FONT_BUMP_DEFAULT)
+    )
+
+
+def _save_ui_font_bump(settings, bump) -> int:
+    """Persist the display-size preset and return the normalised value."""
+    normalised = _normalise_ui_font_bump(bump)
+    settings.setValue(UI_FONT_BUMP_KEY, normalised)
+    return normalised
 
 
 def _effective_welcome_dont_show(settings) -> bool:
@@ -461,6 +485,11 @@ class MainWindow(FramelessMainWindowMixin, QMainWindow):
     ):
         super().__init__()
         self._startup_progress_callback = startup_progress_callback
+
+        settings = QSettings("GrainSizeAnalysis", "MainWindow")
+        self._ui_font_bump = _read_ui_font_bump(settings)
+        set_font_bump(self._ui_font_bump)
+
         self.setWindowTitle("Grain Size Analysis \u2014 Hydraulic Conductivity Calculator")
         self.init_frameless_window_chrome(
             default_windows="frameless",
@@ -1235,6 +1264,21 @@ class MainWindow(FramelessMainWindowMixin, QMainWindow):
         settings = QSettings("GrainSizeAnalysis", "MainWindow")
         _save_welcome_preference(settings, not bool(enabled))
         self._sync_welcome_preference_state()
+
+    def ui_font_bump(self) -> int:
+        """Return the active display-size preset."""
+        return self._ui_font_bump
+
+    def set_ui_font_bump(self, bump) -> bool:
+        """Persist the display-size preset. Full UI refresh happens on restart."""
+        settings = QSettings("GrainSizeAnalysis", "MainWindow")
+        normalised = _save_ui_font_bump(settings, bump)
+        changed = normalised != self._ui_font_bump
+        self._ui_font_bump = normalised
+        set_font_bump(normalised)
+        if changed:
+            self._show_status_message("Display size saved. Restart Grain Size Analysis to apply it everywhere.")
+        return changed
 
     def on_welcome_dont_show_again(self, dont_show: bool):
         self.set_welcome_screen_enabled(not bool(dont_show))
@@ -2940,7 +2984,7 @@ class MainWindow(FramelessMainWindowMixin, QMainWindow):
                 title="Statistics: grain-size distribution",
                 body=(
                     "The Key Grain Distribution card lists the characteristic diameters "
-                    "(D10/D30/D60/D90), a full percentile grid (D5–D95 by interpolation), "
+                    "(D10/D50/D60/D90), a full percentile grid (D5–D95 by interpolation), "
                     "and a 'used by' column showing which K methods each diameter feeds. "
                     "These are read straight off the loaded gradation curve."
                 ),

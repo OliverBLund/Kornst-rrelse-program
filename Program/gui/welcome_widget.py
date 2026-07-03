@@ -714,7 +714,7 @@ class WelcomeWidget(QWidget):
         lay.addSpacing(10)
 
         # ── Version ────────────────────────────────────────────────
-        ver = QLabel("v0.9.0-beta")
+        ver = QLabel("v0.9.6")
         ver.setAlignment(Qt.AlignmentFlag.AlignCenter)
         ver.setStyleSheet(
             f"color: {C.TEXT_MID}; font-family: '{F.MONO}'; font-size: {F.SZ_XS}pt;"
@@ -754,7 +754,7 @@ class WelcomeWidget(QWidget):
         meta_lay.setSpacing(8)
         meta_lay.addStretch()
 
-        ver = QLabel("v0.9.0-beta")
+        ver = QLabel("v0.9.6")
         ver.setStyleSheet(
             f"color: {C.TEXT_MID}; font-family: '{F.MONO}'; font-size: {F.SZ_XS}pt;"
             " background: rgba(255,255,255,122); border: 1px solid rgba(120,95,60,36);"
@@ -956,7 +956,7 @@ class WelcomeWidget(QWidget):
             self._build_hero_note(
                 "fa6s.book-open",
                 "Latest build",
-                "The current beta tightens Excel loading, shared K summaries, aggregate/group review, plot data drawers, and report/export consistency.",
+                "The current build adds installer packaging, bundled license/source notices, and source-distribution preparation for internal testing and web release.",
                 button_text="View Full Changelog",
                 button_icon="fa6s.book-open",
                 button_handler=self._open_full_changelog,
@@ -1467,7 +1467,17 @@ class WelcomeWidget(QWidget):
     def _welcome_release_notes(self) -> list[dict[str, object]]:
         return [
             {
-                "version": "v0.9.2-beta",
+                "version": "v0.9.6",
+                "date": "2026-07-03",
+                "changes": [
+                    "Windows installer packaging is now available alongside the folder build.",
+                    "License, source-code notice, README, and third-party notices are bundled with release packages.",
+                    "Installer setup now shows license/source information and lets testers choose the installation folder.",
+                    "Build notes now describe the versioned release and source-distribution workflow.",
+                ],
+            },
+            {
+                "version": "v0.9.5",
                 "date": "2026-06-09",
                 "changes": [
                     "Excel loading, sheet selection, activity logging, and remapping paths are simpler while preserving manual review when needed.",
@@ -1492,15 +1502,6 @@ class WelcomeWidget(QWidget):
                     "Wide CSV export added for statistical analysis outside the program.",
                     "Comparison workflows expanded for multi-dataset plotting and review.",
                     "Welcome screen, help links, and export flow received a first beta-ready pass.",
-                ],
-            },
-            {
-                "version": "v0.8.0-alpha",
-                "date": "2024-12-20",
-                "changes": [
-                    "Comparison tab added for side-by-side dataset analysis.",
-                    "Column mapping and validation paths improved for irregular source files.",
-                    "K-value method applicability warnings became easier to interpret.",
                 ],
             },
         ]
@@ -1863,7 +1864,12 @@ class WelcomeWidget(QWidget):
         sc_lay.setSpacing(9)
 
         for index, v in enumerate([
-            {"version": "v0.9.2-beta",  "date": "2026-06-09", "changes": [
+            {"version": "v0.9.6",  "date": "2026-07-03", "changes": [
+                "Installer packaging added for internal testing and web release",
+                "License, source-code notice, README, and third-party notices bundled",
+                "Installer setup now includes license/source screens and destination choice",
+            ]},
+            {"version": "v0.9.5",  "date": "2026-06-09", "changes": [
                 "Excel loading, sheet selection, and remapping paths simplified",
                 "Shared K geometric/arithmetic means across UI, reports, and exports",
                 "Aggregate/group summaries and plot data drawers added",
@@ -1877,16 +1883,6 @@ class WelcomeWidget(QWidget):
                 "Added comparison tab for multiple datasets",
                 "Improved calculation methods validation",
                 "Bug fixes for column mapping",
-            ]},
-            {"version": "v0.7.0-alpha", "date": "2024-11-30", "changes": [
-                "New help system with comprehensive guides",
-                "Enhanced reporting tab with templates",
-                "Performance improvements for large datasets",
-            ]},
-            {"version": "v0.6.0-alpha", "date": "2024-11-10", "changes": [
-                "Added statistics tab with grain analysis",
-                "Improved porosity calculation methods",
-                "New plot customization options",
             ]},
         ]):
             blk = QFrame()

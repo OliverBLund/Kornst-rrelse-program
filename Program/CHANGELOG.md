@@ -6,7 +6,44 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
-## [0.9.2-beta] - 2026-06-09
+## [0.9.7] - Unreleased
+
+### Changed
+- In-progress UI readability work: stronger muted-text contrast, a configurable Normal/Large text-size preference, and first responsive-toolbar experiments.
+- Single-sample plot toolbar now tests priority overflow behavior so secondary plot controls can move into a More menu before labels become clipped.
+
+### Fixed
+- Statistics tab Key Grain Distribution fact cards now show D50 instead of D30 in the prominent top row.
+
+### Notes
+- This section tracks work after 0.9.6 and should be revised before packaging the next release.
+
+
+## [0.9.6] - 2026-07-03
+
+### Added
+- Inno Setup installer workflow for distributing Grain Size Analysis as a Windows installer in addition to the folder build.
+- Bundled license, source-code notice, README, and third-party notices in the packaged application output.
+- Installer license/source information screens so users can see the GPL and source-availability notice during setup.
+- Versioned source-code notice generation in the build workflow for release packages.
+
+### Changed
+- Build instructions now describe the folder package, installer package, version tag, and release-upload workflow together.
+- Installer script now validates required distribution files before compiling, including the application icon, GPL text, and source-code notice.
+- Installer setup now exposes the destination-folder step so testers can see and change where the program is installed.
+
+### Fixed
+- Packaged installer builds now use the bundled application icon from the current build resources.
+- Distribution folders now include the licensing and source-availability files required for web/internal sharing.
+
+### Manual QA Checklist
+- Build the folder package and confirm README, COPYING, LICENSE, THIRD_PARTY_NOTICES, and SOURCE_CODE_NOTICE are present beside the executable.
+- Build the installer and confirm the license/source screens appear and the destination-folder page is available.
+- Install to a clean test folder and confirm the installed folder contains the same license/source/distribution files as the folder package.
+- Launch the installed program and verify the Help > Full Changelog path opens this bundled changelog.
+
+
+## [0.9.5] - 2026-06-09
 
 ### Added
 - Group-aware comparison summaries for K-values and grain-size metrics across selected datasets.
@@ -194,12 +231,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## Notes for Testers
 
-**Current Status:** 0.9.2-beta - Ready for focused beta testing after the data-loading, calculation, aggregate, plotting, report, and export passes.
+**Current Status:** 0.9.6 - Installer/source-distribution candidate for internal testing and web-release preparation. The 0.9.7 section tracks ongoing UI readability and responsive-layout work.
 
 **Known Review Areas:**
 - Irregular Excel layouts may still require manual mapping or remapping.
 - Data-loading logs, warning visibility, and raw-vs-processed pathway feedback should be checked during testing.
 - Plot/export/report wording should be checked carefully wherever units or geometric/arithmetic K means are shown.
+- Installer outputs should be checked for bundled license, source notice, README, and third-party notices before publication.
 
 **Feedback:** Report issues with the file used, selected import path, expected result, and observed result.
 
