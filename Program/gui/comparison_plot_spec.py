@@ -834,13 +834,14 @@ def _plot_k_values_grid(figure, spec: ComparisonPlotSpec) -> int:
             [format_method_label(method, tiny=True) for method in methods],
             rotation=45,
             ha='right',
-            fontsize=6,
+            fontsize=spec.style.tick_fontsize,
+            fontfamily=spec.style.font_family,
         )
         if spec.log_k_y_scale:
             apply_log_bar_limits(ax, values)
         else:
             apply_linear_bar_limits(ax, values)
-        ax.tick_params(labelsize=7)
+        ax.tick_params(labelsize=spec.style.tick_fontsize)
 
         if spec.show_grid:
             ax.grid(True, axis='y', alpha=0.3)

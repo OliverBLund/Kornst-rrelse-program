@@ -26,7 +26,9 @@ from PyQt6.QtWidgets import (
 )
 
 from data_loader import GrainSizeData
+from import_preview import detect_headers, load_preview_rows
 from gui.column_mapper import ColumnMapperDialog
+from gui.dialog_chrome import style_dialog_button
 from gui.theme import C, F, icon
 
 
@@ -63,53 +65,58 @@ class ErrorTab(QWidget):
         self.setObjectName("error-tab")
         self.setAttribute(Qt.WidgetAttribute.WA_StyledBackground, True)
         is_mapping = self.issue_variant == "mapping_required"
-        accent_top = C.OLIVE if is_mapping else "#bf543e"
-        accent_bottom = C.OLIVE_DK if is_mapping else "#8f3525"
+        page_bg = C.BG
+        surface = C.BG_RAISED
+        surface_subtle = C.BG
+        border = C.BORDER
+        text = C.TEXT
+        text_mid = C.TEXT_MID
+        text_muted = C.TEXT_MUTED
+        accent = C.OLIVE if is_mapping else C.LED_ERR
         accent_rgba = "107,142,35" if is_mapping else "192,56,40"
-        accent_text = C.OLIVE if is_mapping else "#8f3525"
+        accent_text = C.OLIVE_DK if is_mapping else "#8f3525"
         self._mark_icon = "fa6s.table-columns" if is_mapping else "fa6s.triangle-exclamation"
-        self._mark_color = C.OLIVE if is_mapping else C.LED_ERR
+        self._mark_color = accent
         self.setStyleSheet(
             f"""
             QWidget#error-tab {{
-                background:
-                    qradialgradient(cx:1.05, cy:-0.15, radius:0.6,
-                                    fx:1.05, fy:-0.15,
-                                    stop:0 rgba({accent_rgba},18),
-                                    stop:1 rgba({accent_rgba},0)),
-                    {C.BG};
+                background: {page_bg};
             }}
             QFrame#ev-strip {{
                 background: {C.BG_LOW};
-                border-bottom: 1px solid {C.BORDER};
+                border-bottom: 1px solid {border};
+            }}
+            QFrame#ev-strip QLabel {{
+                background: transparent;
+                border: none;
             }}
             QLabel#ev-strip-name {{
-                color: {C.TEXT};
+                color: {text};
                 font-family: "{F.MONO}";
                 font-size: {F.SZ_SM}pt;
                 font-weight: 500;
             }}
             QLabel#ev-strip-meta {{
-                color: {C.TEXT_MUTED};
+                color: {text_muted};
                 font-family: "{F.MONO}";
                 font-size: {F.SZ_SM}pt;
+                background: transparent;
+                border: none;
+                padding: 0 4px;
+            }}
+            QLabel#ev-strip-meta[state="true"] {{
+                color: {accent_text};
+                background: transparent;
+                border: none;
+                font-weight: 600;
             }}
             QFrame#ev-hero {{
-                background:
-                    qlineargradient(x1:0, y1:0, x2:1, y2:1,
-                                    stop:0 rgba(255,255,255,115),
-                                    stop:0.52 rgba(255,255,255,0),
-                                    stop:1 rgba(255,255,255,0)),
-                    qlineargradient(x1:0, y1:0, x2:0, y2:1,
-                                    stop:0 rgba(238,232,220,242),
-                                    stop:1 rgba(245,245,240,250));
-                border: 1px solid {C.BORDER};
+                background: {surface};
+                border: 1px solid {border};
                 border-radius: 8px;
             }}
             QFrame#ev-hero-accent {{
-                background: qlineargradient(x1:0, y1:0, x2:0, y2:1,
-                                            stop:0 {accent_top},
-                                            stop:1 {accent_bottom});
+                background: {accent};
                 border: none;
                 border-top-left-radius: 8px;
                 border-bottom-left-radius: 8px;
@@ -120,19 +127,19 @@ class ErrorTab(QWidget):
                 border-radius: 6px;
             }}
             QLabel#ev-eyebrow {{
-                color: {C.TEXT_MUTED};
+                color: {text_muted};
                 font-size: {F.SZ_SM}pt;
                 font-weight: 600;
                 letter-spacing: 0.12em;
                 text-transform: uppercase;
             }}
             QLabel#ev-title {{
-                color: {C.TEXT};
-                font-size: {F.SZ_3XL}pt;
+                color: {text};
+                font-size: {F.SZ_2XL}pt;
                 font-weight: 700;
             }}
             QLabel#ev-subtitle {{
-                color: {C.TEXT_MID};
+                color: {text_mid};
                 font-size: {F.SZ_LG}pt;
             }}
             QLabel#ev-fault {{
@@ -145,97 +152,68 @@ class ErrorTab(QWidget):
                 padding: 5px 9px;
             }}
             QFrame#ev-pane {{
-                background: {C.BG_RAISED};
-                border: 1px solid {C.BORDER};
-                border-radius: 7px;
+                background: transparent;
+                border: none;
+                border-radius: 0;
             }}
             QFrame#ev-pane-header {{
-                background: rgba(255,255,255,0.18);
-                border-bottom: 1px solid {C.BORDER};
-                border-top-left-radius: 7px;
-                border-top-right-radius: 7px;
+                background: {surface_subtle};
+                border-bottom: 1px solid {border};
+                border-radius: 0;
             }}
             QLabel#ev-pane-k {{
-                color: {C.TEXT_MUTED};
+                color: {text_muted};
                 font-size: {F.SZ_XS}pt;
                 font-weight: 600;
                 letter-spacing: 0.1em;
                 text-transform: uppercase;
             }}
             QLabel#ev-pane-title {{
-                color: {C.TEXT};
+                color: {text};
                 font-size: {F.SZ_XL}pt;
                 font-weight: 600;
             }}
             QLabel#ev-pane-subtitle {{
-                color: {C.TEXT_MUTED};
+                color: {text_muted};
                 font-size: {F.SZ_MD}pt;
             }}
             QLabel#ev-note {{
-                color: {C.TEXT_MID};
+                color: {text_mid};
                 font-size: {F.SZ_MD}pt;
             }}
             QFrame#ev-summary-row {{
-                background: rgba(255,255,255,0.32);
-                border: 1px solid rgba(212,196,168,0.9);
-                border-radius: 5px;
+                background: transparent;
+                border: none;
+                border-bottom: 1px solid {border};
+                border-radius: 0;
             }}
             QLabel#ev-summary-label {{
-                color: {C.TEXT_MUTED};
+                color: {text_muted};
                 font-size: {F.SZ_XS}pt;
                 font-weight: 600;
                 letter-spacing: 0.08em;
                 text-transform: uppercase;
             }}
             QLabel#ev-summary-value {{
-                color: {C.TEXT};
+                color: {text};
                 font-size: {F.SZ_LG}pt;
-            }}
-            QPushButton#ev-action {{
-                background: {C.BG};
-                border: 1px solid {C.BORDER_DK};
-                border-radius: 4px;
-                color: {C.TEXT_MID};
-                font-size: {F.SZ_LG}pt;
-                padding: 0 14px;
-                min-height: 31px;
-            }}
-            QPushButton#ev-action:hover {{
-                background: {C.BG_RAISED};
-                color: {C.TEXT};
-            }}
-            QPushButton#ev-action[primary="true"] {{
-                background: {C.OLIVE};
-                border-color: {C.OLIVE_DK};
-                color: white;
-                font-weight: 600;
-            }}
-            QPushButton#ev-action[primary="true"]:hover {{
-                background: {C.OLIVE_H};
-            }}
-            QPushButton#ev-action[danger="true"] {{
-                color: #9d3a2a;
-                border-color: rgba(160,48,32,0.28);
-            }}
-            QPushButton#ev-action[danger="true"]:hover {{
-                background: rgba(160,48,32,0.06);
             }}
             QToolButton#ev-toggle {{
                 border: none;
                 background: transparent;
-                color: {C.TEXT_MUTED};
+                color: {text_muted};
                 font-size: {F.SZ_SM}pt;
                 font-weight: 600;
                 padding: 0;
             }}
             QToolButton#ev-toggle:hover {{
-                color: {C.TEXT};
+                color: {text};
             }}
             QTextEdit#ev-raw {{
-                background: white;
-                border: 1px solid {C.BORDER};
+                background: {surface};
+                border: 1px solid {border};
                 border-radius: 5px;
-                color: {C.TEXT_MID};
+                color: {text_mid};
                 padding: 10px 11px;
             }}
             """
@@ -248,25 +226,34 @@ class ErrorTab(QWidget):
         root.addWidget(self._build_strip())
 
         body = QWidget()
+        body.setStyleSheet("background: transparent;")
         body_layout = QHBoxLayout(body)
-        body_layout.setContentsMargins(20, 20, 20, 20)
-        body_layout.setSpacing(18)
+        body_layout.setContentsMargins(16, 12, 16, 16)
+        body_layout.setSpacing(12)
 
         main_col = QVBoxLayout()
-        main_col.setSpacing(16)
+        main_col.setSpacing(12)
         main_col.addWidget(self._build_hero())
 
         split_row = QHBoxLayout()
-        split_row.setSpacing(16)
+        split_row.setSpacing(12)
         split_row.addWidget(self._build_preview_pane(), 1)
 
-        side_col = QVBoxLayout()
-        side_col.setSpacing(16)
+        side_widget = QWidget()
+        side_widget.setObjectName("ev-side")
+        side_widget.setStyleSheet(
+            f"background: {C.BG_RAISED}; border-left: 1px solid {C.BORDER};"
+        )
+        side_widget.setMinimumWidth(300)
+        side_widget.setMaximumWidth(330)
+        side_col = QVBoxLayout(side_widget)
+        side_col.setContentsMargins(0, 0, 0, 0)
+        side_col.setSpacing(0)
         side_col.addWidget(self._build_status_pane())
         side_col.addWidget(self._build_detail_pane())
         side_col.addStretch()
 
-        split_row.addLayout(side_col, 0)
+        split_row.addWidget(side_widget, 0)
         main_col.addLayout(split_row, 1)
 
         body_layout.addLayout(main_col, 1)
@@ -275,26 +262,31 @@ class ErrorTab(QWidget):
     def _build_strip(self) -> QWidget:
         strip = QFrame()
         strip.setObjectName("ev-strip")
-        strip.setFixedHeight(38)
+        strip.setFixedHeight(44)
 
         layout = QHBoxLayout(strip)
-        layout.setContentsMargins(18, 0, 18, 0)
-        layout.setSpacing(10)
+        layout.setContentsMargins(16, 0, 16, 0)
+        layout.setSpacing(8)
 
         icon_label = QLabel()
-        strip_icon = "fa6s.table-columns" if self.issue_variant == "mapping_required" else "fa6s.file-circle-exclamation"
-        icon_label.setPixmap(icon(strip_icon, C.EARTH, 13).pixmap(16, 16))
+        icon_label.setFixedSize(20, 20)
+        icon_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        icon_label.setPixmap(icon(self._source_icon_name(), C.EARTH, 13).pixmap(16, 16))
         icon_label.setStyleSheet("background: transparent;")
         layout.addWidget(icon_label)
 
         name_label = QLabel(self.file_name)
         name_label.setObjectName("ev-strip-name")
+        name_label.setMinimumWidth(0)
+        name_label.setToolTip(self.file_name)
         name_label.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Preferred)
         layout.addWidget(name_label, 1)
 
-        for chunk in self._source_meta_chunks():
+        chunks = self._source_meta_chunks()
+        for index, chunk in enumerate(chunks):
             meta = QLabel(chunk)
             meta.setObjectName("ev-strip-meta")
+            meta.setProperty("state", index == len(chunks) - 1)
             layout.addWidget(meta)
 
         return strip
@@ -302,6 +294,8 @@ class ErrorTab(QWidget):
     def _build_hero(self) -> QWidget:
         hero = QFrame()
         hero.setObjectName("ev-hero")
+        hero.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Maximum)
+        hero.setMinimumHeight(165)
 
         outer = QHBoxLayout(hero)
         outer.setContentsMargins(0, 0, 0, 0)
@@ -313,15 +307,16 @@ class ErrorTab(QWidget):
         outer.addWidget(accent)
 
         inner = QWidget()
+        inner.setStyleSheet("background: transparent;")
         outer.addWidget(inner, 1)
 
         layout = QHBoxLayout(inner)
-        layout.setContentsMargins(18, 18, 18, 18)
-        layout.setSpacing(14)
+        layout.setContentsMargins(14, 14, 14, 14)
+        layout.setSpacing(12)
 
         mark = QFrame()
         mark.setObjectName("ev-hero-mark")
-        mark.setFixedSize(48, 48)
+        mark.setFixedSize(42, 42)
         mark_layout = QVBoxLayout(mark)
         mark_layout.setContentsMargins(0, 0, 0, 0)
         mark_layout.setSpacing(0)
@@ -335,9 +330,10 @@ class ErrorTab(QWidget):
         layout.addWidget(mark, 0, Qt.AlignmentFlag.AlignTop)
 
         copy = QWidget()
+        copy.setStyleSheet("background: transparent;")
         copy_layout = QVBoxLayout(copy)
         copy_layout.setContentsMargins(0, 0, 0, 0)
-        copy_layout.setSpacing(0)
+        copy_layout.setSpacing(2)
 
         eyebrow = QLabel("Mapping Required" if self.issue_variant == "mapping_required" else "Dataset Issue")
         eyebrow.setObjectName("ev-eyebrow")
@@ -350,7 +346,7 @@ class ErrorTab(QWidget):
         )
         self.title_label.setObjectName("ev-title")
         self.title_label.setWordWrap(True)
-        self.title_label.setContentsMargins(0, 4, 0, 0)
+        self.title_label.setContentsMargins(0, 2, 0, 0)
         copy_layout.addWidget(self.title_label)
 
         subtitle = QLabel(
@@ -360,17 +356,17 @@ class ErrorTab(QWidget):
         )
         subtitle.setObjectName("ev-subtitle")
         subtitle.setWordWrap(True)
-        subtitle.setContentsMargins(0, 8, 0, 0)
+        subtitle.setContentsMargins(0, 4, 0, 0)
         copy_layout.addWidget(subtitle)
 
         self.error_label = QLabel(self._fault_line_text())
         self.error_label.setObjectName("ev-fault")
         self.error_label.setWordWrap(False)
-        self.error_label.setContentsMargins(0, 12, 0, 0)
+        self.error_label.setContentsMargins(0, 8, 0, 0)
         copy_layout.addWidget(self.error_label, 0, Qt.AlignmentFlag.AlignLeft)
 
         actions = QHBoxLayout()
-        actions.setContentsMargins(0, 16, 0, 0)
+        actions.setContentsMargins(0, 10, 0, 0)
         actions.setSpacing(8)
 
         self.fix_button = self._action_button(
@@ -401,16 +397,17 @@ class ErrorTab(QWidget):
             kind="Preview",
             title="Source rows",
             subtitle=(
-                "Use this preview to identify sieve size, empty sieve, and sieve + sample columns."
+                "First 50 source rows for selecting the required raw sieve columns."
                 if self.issue_variant == "mapping_required"
-                else "Enough context to spot the grain-size and percent columns quickly."
+                else "First 50 source rows for confirming grain-size and percentage columns."
             ),
         )
+        pane.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
         body = pane.layout().itemAt(1).widget()
         body_layout = body.layout()
 
         note = QLabel(
-            "Numeric cells are softly marked so likely measurement columns stand out without overwhelming the preview."
+            "Numeric values are highlighted."
         )
         note.setObjectName("ev-note")
         note.setWordWrap(True)
@@ -429,7 +426,7 @@ class ErrorTab(QWidget):
         header = self.preview_table.horizontalHeader()
         header.setSectionResizeMode(QHeaderView.ResizeMode.ResizeToContents)
         header.setStretchLastSection(True)
-        self.preview_table.setMinimumHeight(340)
+        self.preview_table.setMinimumHeight(220)
         self.preview_table.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
         body_layout.addWidget(self.preview_table, 1)
 
@@ -439,33 +436,15 @@ class ErrorTab(QWidget):
         pane = self._pane_shell(
             kind="Status",
             title="Next step",
-            subtitle=(
-                "No import error occurred. This raw pathway always needs column mapping first."
-                if self.issue_variant == "mapping_required"
-                else "Keep the decision surface small and obvious."
-            ),
+            subtitle="Open the mapper to continue.",
         )
+        pane.setSizePolicy(QSizePolicy.Policy.Preferred, QSizePolicy.Policy.Maximum)
         body = pane.layout().itemAt(1).widget()
         layout = body.layout()
 
         layout.addWidget(self._summary_row("fa6s.file-excel", "Source", self._source_kind_label()))
         layout.addWidget(self._summary_row("fa6s.table-cells-large", "Sheet", self.sheet_name or "Single sheet"))
         layout.addWidget(self._summary_row("fa6s.arrow-right", "Next step", "Open the mapper"))
-
-        buttons = QHBoxLayout()
-        buttons.setContentsMargins(0, 12, 0, 0)
-        buttons.setSpacing(7)
-
-        preview_btn = self._mini_button("Keep Preview", "fa6s.eye")
-        preview_btn.setEnabled(False)
-        buttons.addWidget(preview_btn)
-
-        retry_btn = self._mini_button("Retry Later", "fa6s.clock-rotate-left")
-        retry_btn.setEnabled(False)
-        buttons.addWidget(retry_btn)
-        buttons.addStretch()
-
-        layout.addLayout(buttons)
         return pane
 
     def _build_detail_pane(self) -> QWidget:
@@ -473,11 +452,12 @@ class ErrorTab(QWidget):
             kind="Detail",
             title="Import note" if self.issue_variant == "mapping_required" else "Raw loader message",
             subtitle=(
-                "Visible if you need to confirm why mapping is required."
+                "Why mapping is required."
                 if self.issue_variant == "mapping_required"
-                else "Visible on demand, not forced into the first read."
+                else "Loader diagnostic details."
             ),
         )
+        pane.setSizePolicy(QSizePolicy.Policy.Preferred, QSizePolicy.Policy.Maximum)
         body = pane.layout().itemAt(1).widget()
         layout = body.layout()
 
@@ -529,7 +509,7 @@ class ErrorTab(QWidget):
         header = QFrame()
         header.setObjectName("ev-pane-header")
         header_layout = QVBoxLayout(header)
-        header_layout.setContentsMargins(14, 11, 14, 10)
+        header_layout.setContentsMargins(12, 8, 12, 8)
         header_layout.setSpacing(0)
 
         kind_label = QLabel(kind)
@@ -549,8 +529,9 @@ class ErrorTab(QWidget):
         layout.addWidget(header)
 
         body = QWidget()
+        body.setStyleSheet("background: transparent;")
         body_layout = QVBoxLayout(body)
-        body_layout.setContentsMargins(14, 12, 14, 14)
+        body_layout.setContentsMargins(12, 10, 12, 12)
         body_layout.setSpacing(0)
         layout.addWidget(body, 1)
         return pane
@@ -559,8 +540,8 @@ class ErrorTab(QWidget):
         row = QFrame()
         row.setObjectName("ev-summary-row")
         layout = QHBoxLayout(row)
-        layout.setContentsMargins(9, 8, 9, 8)
-        layout.setSpacing(10)
+        layout.setContentsMargins(8, 6, 8, 6)
+        layout.setSpacing(8)
 
         icon_label = QLabel()
         icon_label.setPixmap(icon(icon_name, C.TEXT_MUTED, 11).pixmap(14, 14))
@@ -592,34 +573,12 @@ class ErrorTab(QWidget):
         button.setProperty("danger", danger)
         button.setCursor(Qt.CursorShape.PointingHandCursor)
         button.setIcon(icon(icon_name, color, 11))
+        style_dialog_button(
+            button,
+            "primary" if primary else ("danger" if danger else "secondary"),
+        )
         button.style().unpolish(button)
         button.style().polish(button)
-        return button
-
-    def _mini_button(self, text: str, icon_name: str) -> QPushButton:
-        button = QPushButton(text)
-        button.setCursor(Qt.CursorShape.PointingHandCursor)
-        button.setIcon(icon(icon_name, C.TEXT_MID, 10))
-        button.setMinimumHeight(27)
-        button.setStyleSheet(
-            f"""
-            QPushButton {{
-                background: rgba(255,255,255,0.4);
-                border: 1px solid {C.BORDER};
-                border-radius: 4px;
-                color: {C.TEXT_MID};
-                font-size: {F.SZ_MD}pt;
-                padding: 0 11px;
-            }}
-            QPushButton:hover {{
-                background: rgba(255,255,255,0.7);
-                color: {C.TEXT};
-            }}
-            QPushButton:disabled {{
-                color: {C.TEXT_MUTED};
-            }}
-            """
-        )
         return button
 
     def _source_meta_chunks(self) -> list[str]:
@@ -629,8 +588,22 @@ class ErrorTab(QWidget):
             chunks.append(ext.upper())
         if self.sheet_name:
             chunks.append(self.sheet_name)
-        chunks.append("Mapping required" if self.issue_variant == "mapping_required" else "Load failed")
+        chunks.append("Needs mapping" if self._requires_mapping() else "Load failed")
         return chunks
+
+    def _source_icon_name(self) -> str:
+        ext = os.path.splitext(self.actual_file_path)[1].lower()
+        if ext in (".xlsx", ".xls"):
+            return "fa6s.file-excel"
+        if ext == ".csv":
+            return "fa6s.file-csv"
+        return "fa6s.file-lines"
+
+    def _requires_mapping(self) -> bool:
+        if self.issue_variant == "mapping_required":
+            return True
+        lowered = self.error_message.lower()
+        return any(token in lowered for token in ("column", "header", "percent", "mapping"))
 
     def _source_kind_label(self) -> str:
         ext = os.path.splitext(self.actual_file_path)[1].lower()
@@ -709,11 +682,11 @@ class ErrorTab(QWidget):
     def load_file_preview(self):
         """Load the first few rows of the file for preview."""
         try:
-            rows, _, _ = ColumnMapperDialog.load_preview_rows(
+            rows, _, _ = load_preview_rows(
                 self.actual_file_path,
                 sheet_name=self.sheet_name,
             )
-            headers = ColumnMapperDialog.detect_headers(self, rows)
+            headers, _ = detect_headers(rows)
             ColumnMapperDialog.populate_preview_table(self.preview_table, rows[:50], headers)
 
         except Exception as exc:

@@ -307,6 +307,7 @@ class ComparisonTab(QWidget):
         "Perm. class",
     }
     _K_METHOD_ORDER = list(DEFAULT_METHOD_ORDER)
+    _PLOT_VISIBILITY_NAME_WIDTH = 86
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -550,7 +551,13 @@ class ComparisonTab(QWidget):
         scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
         self._pin_list_widget = QWidget()
         self._pin_list_layout = QVBoxLayout(self._pin_list_widget)
-        self._pin_list_layout.setContentsMargins(8, 4, 8, 0)
+        scrollbar_gutter = scroll.verticalScrollBar().sizeHint().width()
+        self._pin_list_layout.setContentsMargins(
+            8,
+            4,
+            8 + scrollbar_gutter + 4,
+            0,
+        )
         self._pin_list_layout.setSpacing(2)
         self._pin_list_layout.addStretch(1)
         scroll.setWidget(self._pin_list_widget)
@@ -743,7 +750,9 @@ class ComparisonTab(QWidget):
         text_lay.setContentsMargins(0, 2, 0, 2)
         text_lay.setSpacing(0)
         title = "Ungrouped" if group_name == UNGROUPED_LABEL else group_name
-        title_lbl = QLabel(self._short_dataset_name(title, 118))
+        title_lbl = QLabel(
+            self._short_dataset_name(title, self._PLOT_VISIBILITY_NAME_WIDTH)
+        )
         title_lbl.setToolTip(title)
         title_lbl.setStyleSheet(
             f"font-size: {F.SZ_SM}pt; font-weight: 700; color: {C.TEXT}; background: transparent;"
@@ -814,7 +823,9 @@ class ComparisonTab(QWidget):
         text_lay = QVBoxLayout(text_box)
         text_lay.setContentsMargins(0, 2, 0, 2)
         text_lay.setSpacing(0)
-        lbl = QLabel(self._short_dataset_name(name, 146))
+        lbl = QLabel(
+            self._short_dataset_name(name, self._PLOT_VISIBILITY_NAME_WIDTH)
+        )
         lbl.setStyleSheet(
             f"font-size: {F.SZ_SM}pt; color: {C.TEXT if plotted else C.TEXT_MUTED};"
             "background: transparent; border: none;"

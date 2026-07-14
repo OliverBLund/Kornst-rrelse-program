@@ -573,6 +573,35 @@ class HelpDialog(FramelessDialogBase):
                 color: #7c6a56;
                 font-size: 13px;
             }}
+            .example-jump {{
+                margin: 10px 0 18px 0;
+                padding: 10px 12px;
+                background: #f7f2e9;
+                border-top: 1px solid #dccfb9;
+                border-bottom: 1px solid #dccfb9;
+            }}
+            .example-jump a {{
+                display: inline-block;
+                margin: 2px 12px 2px 0;
+            }}
+            .example-meta {{
+                margin: -2px 0 8px 0;
+                color: #7c6a56;
+                font-size: 13px;
+            }}
+            .example-note {{
+                margin: 8px 0 20px 0;
+                padding-left: 11px;
+                border-left: 3px solid {C.OLIVE};
+                color: #5a4b3a;
+            }}
+            .compact-table {{
+                margin-top: 8px;
+            }}
+            .compact-table th,
+            .compact-table td {{
+                padding: 6px 8px;
+            }}
             .link-list a {{
                 display: inline-block;
                 margin: 0 14px 8px 0;

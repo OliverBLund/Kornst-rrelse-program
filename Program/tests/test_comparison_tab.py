@@ -9,7 +9,8 @@ import unittest
 os.environ.setdefault('QT_QPA_PLATFORM', 'offscreen')
 sys.path.insert(0, 'Program')
 
-from PyQt6.QtWidgets import QApplication
+from PyQt6.QtCore import QPoint
+from PyQt6.QtWidgets import QApplication, QPushButton, QScrollArea
 
 import gui.comparison_tab as comparison_tab_module
 from data_loader import GrainSizeData
@@ -249,6 +250,49 @@ class TestComparisonTabSelectionState(unittest.TestCase):
             )
         finally:
             clear_dataset_line_style('B.csv')
+
+    def test_plot_visibility_pin_buttons_clear_scrollbar_gutter(self):
+        long_tabs = [
+            DummyDatasetTab(
+                f'Example_{index + 1}_Case_{(index % 3) + 1}_Vukovic_Long_Sample_Name',
+                f'{index}.csv',
+                1.0 + index,
+                group='Long Group One' if index < 18 else 'Long Group Two',
+            )
+            for index in range(30)
+        ]
+        self.widget.set_dataset_state(long_tabs, selected_tabs=long_tabs)
+        self.widget.resize(1500, 700)
+        self.widget.show()
+        APP.processEvents()
+
+        scroll = next(
+            area
+            for area in self.widget.findChildren(QScrollArea)
+            if area.widget() is self.widget._pin_list_widget
+        )
+        self.assertGreater(scroll.verticalScrollBar().maximum(), 0)
+
+        gutter = scroll.verticalScrollBar().sizeHint().width()
+        pin_buttons = []
+        for index in range(self.widget._pin_list_layout.count() - 1):
+            row = self.widget._pin_list_layout.itemAt(index).widget()
+            if row is None:
+                continue
+            pin_buttons.extend(
+                button
+                for button in row.findChildren(QPushButton)
+                if 'dataset' in button.toolTip().lower()
+                and 'focus' in button.toolTip().lower()
+            )
+        self.assertEqual(len(pin_buttons), len(long_tabs))
+
+        for button in pin_buttons:
+            left = button.mapTo(scroll.viewport(), QPoint(0, 0)).x()
+            self.assertLessEqual(
+                left + button.width() + gutter + 4,
+                scroll.viewport().width(),
+            )
 
     def test_details_defaults_to_grain_core_and_elides_long_headers(self):
         long_tabs = [

@@ -1,87 +1,122 @@
 <div class="page">
-  <p class="eyebrow">Data Input</p>
+  <p class="eyebrow">Data Input Guide</p>
   <h1>Data Format &amp; Files</h1>
-  <p class="lead">The program accepts CSV and Excel workbooks that contain grain-size data in millimeters. It can import either pre-calculated percent-passing data or raw sieve weighings.</p>
+  <p class="lead">Start with one of the four layouts below. Particle size must be in millimeters (mm). Use processed data when percent passing is already calculated, or raw data when you have sieve weights.</p>
 
-  <div class="callout tip">
-    <div class="callout-title">Four ways to load</div>
-    <p>Use the welcome-screen buttons; the <strong>File</strong> menu (<strong>Open Processed Sieve Data…</strong> / <strong>Open Raw Sieve Weighings…</strong>); the sidebar <strong>+ Add</strong> button; or <strong>drag CSV, Excel, or TXT files onto the drop zone</strong> at the top of the sidebar. Click the drop zone to choose processed or raw sieve import.</p>
+  <h2 id="examples">Start With a Valid Layout</h2>
+  <p class="example-jump">
+    <strong>Examples:</strong>
+    <a href="#processed-csv">Processed CSV</a>
+    <a href="#processed-excel">Processed Excel</a>
+    <a href="#raw-csv">Raw CSV</a>
+    <a href="#raw-excel">Raw Excel</a>
+  </p>
+
+  <h3 id="processed-csv">1. Processed CSV</h3>
+  <p class="example-meta">File: <code>Sample_A.csv</code> &middot; Delimiter: comma &middot; One sample</p>
+  <pre><code>Particle Size (mm),Percent Passing (%)
+2.000,100
+0.820,80
+0.550,60
+0.280,20
+0.045,0</code></pre>
+  <p class="example-note"><strong>This works because:</strong> the first column contains positive particle sizes in mm, the second contains cumulative percent passing from 0 to 100, and there are at least three valid rows. With sizes listed from largest to smallest, percent passing normally decreases down the table.</p>
+
+  <h3 id="processed-excel">2. Processed Excel Worksheet</h3>
+  <p class="example-meta">Workbook: <code>Samples.xlsx</code> &middot; Worksheet: <code>Sample_A</code> &middot; Header row: 1 &middot; One sample</p>
+  <table class="compact-table">
+    <tr><th>Row</th><th>Column A</th><th>Column B</th></tr>
+    <tr><td>1</td><td><strong>Particle Size (mm)</strong></td><td><strong>Percent Passing (%)</strong></td></tr>
+    <tr><td>2</td><td>2.000</td><td>100</td></tr>
+    <tr><td>3</td><td>0.820</td><td>80</td></tr>
+    <tr><td>4</td><td>0.550</td><td>60</td></tr>
+    <tr><td>5</td><td>0.280</td><td>20</td></tr>
+    <tr><td>6</td><td>0.045</td><td>0</td></tr>
+  </table>
+  <p class="example-note"><strong>This works because:</strong> the headers are in one row and the two data columns form one curve. The program may load this clean structure automatically; otherwise, the mapper opens so you can confirm the worksheet, header row, size column, and percent-passing column.</p>
+
+  <h3 id="raw-csv">3. Raw Sieve Weighings in CSV</h3>
+  <p class="example-meta">File: <code>Sample_A_raw.csv</code> &middot; Delimiter: comma &middot; Weights: grams (g) &middot; One sample</p>
+  <pre><code>Sieve Size (mm),Weight of Empty Sieve (g),Weight of Sieve + Sample (g)
+2.000,410.2,412.2
+1.000,395.4,405.4
+0.500,382.1,407.1
+0.250,370.8,400.8
+0.063,361.3,379.3</code></pre>
+  <p class="example-note"><strong>This works because:</strong> each row identifies a sieve size and the two measured weights needed to calculate retained mass. Open it as <strong>raw sieve weighings</strong>; the mapper then calculates cumulative percent passing.</p>
+
+  <h3 id="raw-excel">4. Raw Sieve Weighings in Excel</h3>
+  <p class="example-meta">Workbook: <code>Raw_Samples.xlsx</code> &middot; Worksheet: <code>Sample_A_raw</code> &middot; Header row: 1 &middot; Weights: grams (g) &middot; One sample</p>
+  <table class="compact-table">
+    <tr><th>Row</th><th>Column A</th><th>Column B</th><th>Column C</th></tr>
+    <tr><td>1</td><td><strong>Sieve Size (mm)</strong></td><td><strong>Weight of Empty Sieve (g)</strong></td><td><strong>Weight of Sieve + Sample (g)</strong></td></tr>
+    <tr><td>2</td><td>2.000</td><td>410.2</td><td>412.2</td></tr>
+    <tr><td>3</td><td>1.000</td><td>395.4</td><td>405.4</td></tr>
+    <tr><td>4</td><td>0.500</td><td>382.1</td><td>407.1</td></tr>
+    <tr><td>5</td><td>0.250</td><td>370.8</td><td>400.8</td></tr>
+    <tr><td>6</td><td>0.063</td><td>361.3</td><td>379.3</td></tr>
+  </table>
+  <p class="example-note"><strong>This works because:</strong> one header row identifies all three required roles and each following row contains one sieve measurement. Open it as <strong>raw sieve weighings</strong> and confirm the three roles in the mapper.</p>
+
+  <h3 id="irregular-excel">5. Irregular Excel: Automatic or Mapper</h3>
+  <p class="example-meta">Example: simplified excerpt from <code>NBAL-01.xls</code> &middot; Worksheet: <code>English</code> &middot; Metadata above the data &middot; Two-row header &middot; Several possible data groups</p>
+  <table class="compact-table">
+    <tr><th>Row</th><th>Column A</th><th>Column B</th><th>Column C</th><th>Column F</th><th>Column G</th></tr>
+    <tr><td>1</td><td>Particle-size analysis</td><td></td><td></td><td></td><td></td></tr>
+    <tr><td>3</td><td>Sample</td><td>1</td><td></td><td></td><td></td></tr>
+    <tr><td>7</td><td><strong>Mash size</strong></td><td><strong>sieve+fraction</strong></td><td><strong>sieve</strong></td><td></td><td>Cumulative mass</td></tr>
+    <tr><td>8</td><td><strong>d mmm</strong></td><td>(g)</td><td>(g)</td><td>on curve</td><td>procentages</td></tr>
+    <tr><td>12</td><td>2</td><td>135.98</td><td>135.98</td><td></td><td>100</td></tr>
+    <tr><td>13</td><td>1</td><td>118.91</td><td>118.71</td><td>2</td><td>100</td></tr>
+    <tr><td>14</td><td>0.6</td><td>119.33</td><td>117.21</td><td>1</td><td>99.65</td></tr>
+  </table>
+  <p class="example-note"><strong>Why this can load automatically:</strong> the detector scans the first rows and combines clues from adjacent header rows. In the current <code>NBAL-01.xls</code> English sheet, it identifies columns A-C as raw sieve size, sieve-plus-sample weight, and empty-sieve weight, then verifies that enough rows contain plausible weights. Columns F-G are not needed for that raw import.</p>
+  <div class="callout note">
+    <div class="callout-title">Why a gibberish header may still load</div>
+    <p>Detection does not depend on one exact header cell. Another header row, the remaining column roles, and the numeric pattern may still provide enough evidence. Changing an unrelated result column also has no effect on the detected raw columns. The mapper opens when the sheet no longer provides enough evidence for any plausible processed or raw candidate.</p>
   </div>
-
-  <h2>Supported File Types</h2>
-  <table>
-    <tr>
-      <th>Type</th>
-      <th>Extensions</th>
-      <th>Notes</th>
-    </tr>
-    <tr>
-      <td>CSV</td>
-      <td><code>.csv</code></td>
-      <td>Best for simple two-column or clean multi-column tables.</td>
-    </tr>
-    <tr>
-      <td>Excel workbook</td>
-      <td><code>.xlsx</code>, <code>.xls</code></td>
-      <td>Useful when data is split across sheets or needs manual mapping.</td>
-    </tr>
-  </table>
-
-  <h2>Accepted Input Styles</h2>
-  <table>
-    <tr>
-      <th>Style</th>
-      <th>Required columns</th>
-      <th>Used when</th>
-    </tr>
-    <tr>
-      <td>Calculated data</td>
-      <td>Particle size in mm and cumulative percent passing</td>
-      <td>Your spreadsheet already contains the sieve curve values you want to analyse.</td>
-    </tr>
-    <tr>
-      <td>Raw sieve weighings</td>
-      <td>Sieve size, empty sieve weight, and sieve plus sample weight</td>
-      <td>You want the app to calculate cumulative percent passing from measured sieve weights.</td>
-    </tr>
-  </table>
 
   <div class="callout warning">
-    <div class="callout-title">Important</div>
-    <p>The main analysis expects <strong>percent passing</strong>, not <strong>percent retained</strong>. If your file contains retained values, convert them before analysis or remap the correct column.</p>
+    <div class="callout-title">Percent passing is not percent retained</div>
+    <p>Processed analysis expects <strong>cumulative percent passing</strong>: the percentage of the sample finer than each particle size. Do not map percent-retained values as percent passing. If retained values are present, choose the retained role where available and verify the interpreted curve in the mapper preview.</p>
   </div>
 
-  <h2>Expected Values</h2>
-  <ul>
-    <li>Particle sizes must be numeric and positive.</li>
-    <li>Units should be <strong>millimeters</strong>.</li>
-    <li>Percent passing should stay between <strong>0 and 100</strong>.</li>
-    <li>You need at least <strong>3 valid rows</strong> to create a dataset.</li>
-    <li>The app sorts particle sizes automatically, so the source rows do not need to be pre-sorted.</li>
-  </ul>
-
-  <h2>Column Names The App Can Recognize</h2>
+  <h2>Choose the Correct Import</h2>
   <table>
-    <tr>
-      <th>Target</th>
-      <th>Common header words</th>
-    </tr>
-    <tr>
-      <td>Particle size</td>
-      <td><code>size</code>, <code>sieve</code>, <code>diameter</code>, <code>grain</code>, <code>particle</code>, <code>mm</code></td>
-    </tr>
-    <tr>
-      <td>Percent passing</td>
-      <td><code>passing</code>, <code>finer</code>, <code>cumulative</code>, <code>percent</code>, <code>%</code></td>
-    </tr>
-    <tr>
-      <td>Raw sieve weights</td>
-      <td><code>empty</code>, <code>sieve</code>, <code>sample</code>, <code>weight</code>, <code>mass</code></td>
-    </tr>
+    <tr><th>Your file contains</th><th>Open as</th><th>What happens</th></tr>
+    <tr><td>Particle size and cumulative percent passing</td><td><strong>Processed Sieve Data</strong></td><td>A clean two-column CSV may load directly. Excel and uncertain layouts open the mapper for confirmation.</td></tr>
+    <tr><td>Sieve size, empty-sieve weight, and sieve-plus-sample weight</td><td><strong>Raw Sieve Weighings</strong></td><td>The mapper confirms the weight columns, then calculates retained mass and cumulative percent passing.</td></tr>
   </table>
 
-  <h2>When To Use The Mapper</h2>
-  <p>Open the mapper when the correct columns are present but the loader cannot safely detect them. This is common for Excel workbooks, irregular lab sheets, and files that include several unrelated columns.</p>
+  <h2>CSV and Excel Rules</h2>
+  <table>
+    <tr><th>Format</th><th>Supported files</th><th>Reliable structure</th></tr>
+    <tr><td>CSV</td><td><code>.csv</code></td><td>Plain tabular data with one delimiter, one header row, and one sample per file. Comma-separated examples are shown above.</td></tr>
+    <tr><td>Excel</td><td><code>.xlsx</code>, <code>.xls</code></td><td>Use one clearly named worksheet per sample when possible. Clean and recognizable irregular sheets may load automatically; uncertain sheets open the mapper.</td></tr>
+  </table>
+  <p class="muted">Workbooks containing several samples in one worksheet are not imported automatically as separate datasets. Map one sample at a time until multi-sample worksheet import is added.</p>
+
+  <h2>Validation Checklist</h2>
+  <ul>
+    <li>Particle sizes are numeric, positive, and expressed in <strong>mm</strong>.</li>
+    <li>Processed values are cumulative <strong>percent passing</strong> between 0 and 100.</li>
+    <li>Raw weights are numeric and expressed in <strong>g</strong>.</li>
+    <li>Every dataset contains at least <strong>3 valid rows</strong>.</li>
+    <li>Headers identify the values and units; title or note rows are excluded by selecting the correct header row in the mapper.</li>
+    <li>The mapper preview shows a plausible curve before the dataset is accepted.</li>
+  </ul>
+
+  <h2>Recognized Header Words</h2>
+  <table>
+    <tr><th>Column role</th><th>Common header words</th></tr>
+    <tr><td>Particle or sieve size</td><td><code>size</code>, <code>sieve</code>, <code>diameter</code>, <code>grain</code>, <code>particle</code>, <code>mesh</code>, <code>mm</code></td></tr>
+    <tr><td>Percent passing</td><td><code>passing</code>, <code>finer</code>, <code>cumulative</code>, <code>percent</code>, <code>%</code></td></tr>
+    <tr><td>Empty sieve weight</td><td><code>empty</code>, <code>tare</code>, <code>blank</code>, <code>empty sieve</code></td></tr>
+    <tr><td>Sieve plus sample weight</td><td><code>sample</code>, <code>total</code>, <code>full</code>, <code>gross</code>, <code>sieve + sample</code></td></tr>
+  </table>
+
+  <h2>When the Mapper Opens</h2>
+  <p>The mapper is a confirmation step, not a failure. It opens when the program cannot find a plausible processed curve or raw-sieve table. This can happen when key header clues are missing, too few valid rows are present, or the required columns cannot be related safely. Confirm the worksheet and header row first, then assign the required column roles and inspect the preview before continuing.</p>
 
   <p class="link-list">
     <a href="excel_workbooks.html">Excel Workbooks</a>

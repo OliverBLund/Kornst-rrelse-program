@@ -66,6 +66,34 @@ class TestHelpDialog(unittest.TestCase):
             "start_here.html",
         )
 
+    def test_data_files_puts_examples_before_reference_material(self):
+        self.dialog.show_help_page("data_files.html")
+        APP.processEvents()
+
+        text = self.dialog.content_browser.toPlainText()
+        example_headings = (
+            "1. Processed CSV",
+            "2. Processed Excel Worksheet",
+            "3. Raw Sieve Weighings in CSV",
+            "4. Raw Sieve Weighings in Excel",
+        )
+
+        positions = [text.index(heading) for heading in example_headings]
+        self.assertEqual(positions, sorted(positions))
+        self.assertLess(positions[-1], text.index("Choose the Correct Import"))
+        self.assertIn("Particle Size (mm),Percent Passing (%)", text)
+        self.assertIn(
+            "Sieve Size (mm),Weight of Empty Sieve (g),"
+            "Weight of Sieve + Sample (g)",
+            text,
+        )
+        self.assertEqual(text.count("This works because:"), 4)
+        irregular_position = text.index("5. Irregular Excel: Automatic or Mapper")
+        self.assertGreater(irregular_position, positions[-1])
+        self.assertLess(irregular_position, text.index("Choose the Correct Import"))
+        self.assertIn("Why a gibberish header may still load", text)
+        self.assertIn("uncertain sheets open the mapper", text)
+
 
 if __name__ == "__main__":
     unittest.main(verbosity=2)

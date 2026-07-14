@@ -816,6 +816,28 @@ class TestComparisonPlotWidget(unittest.TestCase):
         sizes = [t.get_fontsize() for t in ax.get_xticklabels()]
         self.assertTrue(any(abs(size - 18) < 0.5 for size in sizes))
 
+    def test_tick_size_applies_to_k_value_x_axis_in_both_layouts(self):
+        self.widget.on_plot_type_changed('K-Values')
+        self.widget.set_display_mode('overlay')
+        self.widget._update_style_field('tick_fontsize', 18)
+
+        overlay_ax = self.widget.figure.axes[0]
+        self.assertTrue(overlay_ax.get_xticklabels())
+        self.assertTrue(all(
+            abs(tick.get_fontsize() - 18) < 0.5
+            for tick in overlay_ax.get_xticklabels()
+        ))
+
+        self.widget.set_display_mode('grid')
+
+        self.assertTrue(self.widget.figure.axes)
+        for ax in self.widget.figure.axes:
+            self.assertTrue(ax.get_xticklabels())
+            self.assertTrue(all(
+                abs(tick.get_fontsize() - 18) < 0.5
+                for tick in ax.get_xticklabels()
+            ))
+
     def test_sidebar_can_toggle_open_and_closed(self):
         self.widget.resize(1000, 600)
         self.widget.show()

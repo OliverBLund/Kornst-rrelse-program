@@ -460,7 +460,10 @@ def render_k_overlay(
     ax.set_xticks(np.arange(n_methods) + bar_width * (n_datasets - 1) / 2)
     ax.set_xticklabels(
         [format_method_label(m, compact=True) for m in methods],
-        rotation=45, ha="right", fontsize=8,
+        rotation=45,
+        ha="right",
+        fontsize=style.tick_fontsize,
+        fontfamily=style.font_family,
     )
     ax.tick_params(axis="y", labelsize=style.tick_fontsize)
     max_label_level = max(label_levels, default=0)

@@ -38,8 +38,13 @@ class DummyDatasetTab:
 
 
 class DummyMouseEvent:
-    def __init__(self, x: float):
+    def __init__(
+        self,
+        x: float,
+        modifiers: Qt.KeyboardModifier = Qt.KeyboardModifier.NoModifier,
+    ):
         self._x = x
+        self._modifiers = modifiers
         self.accepted = False
 
     def button(self):
@@ -47,6 +52,9 @@ class DummyMouseEvent:
 
     def position(self):
         return SimpleNamespace(x=lambda: self._x)
+
+    def modifiers(self):
+        return self._modifiers
 
     def accept(self):
         self.accepted = True
@@ -148,6 +156,70 @@ class TestDatasetSelectionDialog(unittest.TestCase):
             self.assertFalse(row.is_checked())
             self.assertTrue(row.is_selected())
             self.assertEqual(dialog._sel_count_badge.text(), "0 included")
+        finally:
+            dialog.deleteLater()
+
+    def test_shift_select_uses_grouped_visible_row_order_without_changing_scope(self):
+        tabs = [
+            DummyDatasetTab("Sample A", "A.csv", "Layer 1"),
+            DummyDatasetTab("Sample B", "B.csv", "Layer 2"),
+            DummyDatasetTab("Sample C", "C.csv", "Layer 1"),
+            DummyDatasetTab("Sample D", "D.csv", "Layer 2"),
+        ]
+        dialog = DatasetSelectionDialog(
+            tabs,
+            currently_selected=tabs,
+            minimum_selection=1,
+            allow_grouping=True,
+        )
+        try:
+            dialog._rows[0].mousePressEvent(DummyMouseEvent(80))
+            dialog._rows[1].mousePressEvent(
+                DummyMouseEvent(80, Qt.KeyboardModifier.ShiftModifier)
+            )
+
+            self.assertEqual(
+                [row.tab.get_dataset_name() for row in dialog._rows if row.is_selected()],
+                ["Sample A", "Sample B", "Sample C"],
+            )
+            self.assertTrue(all(row.is_checked() for row in dialog._rows))
+            self.assertIn("3 rows selected", dialog._sel_hint.text())
+        finally:
+            dialog.deleteLater()
+
+    def test_ctrl_and_ctrl_shift_add_to_row_selection(self):
+        tabs = [
+            DummyDatasetTab(f"Sample {letter}", f"{letter}.csv")
+            for letter in "ABCDE"
+        ]
+        dialog = DatasetSelectionDialog(
+            tabs,
+            currently_selected=tabs,
+            minimum_selection=1,
+            allow_grouping=True,
+        )
+        try:
+            dialog._rows[1].mousePressEvent(DummyMouseEvent(80))
+            dialog._rows[3].mousePressEvent(
+                DummyMouseEvent(80, Qt.KeyboardModifier.ControlModifier)
+            )
+            self.assertEqual(
+                [index for index, row in enumerate(dialog._rows) if row.is_selected()],
+                [1, 3],
+            )
+
+            dialog._rows[4].mousePressEvent(
+                DummyMouseEvent(
+                    80,
+                    Qt.KeyboardModifier.ControlModifier
+                    | Qt.KeyboardModifier.ShiftModifier,
+                )
+            )
+            self.assertEqual(
+                [index for index, row in enumerate(dialog._rows) if row.is_selected()],
+                [1, 3, 4],
+            )
+            self.assertTrue(all(row.is_checked() for row in dialog._rows))
         finally:
             dialog.deleteLater()
 

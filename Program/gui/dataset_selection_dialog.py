@@ -58,6 +58,7 @@ class DatasetSelectionDialog(FramelessDialogBase):
         self._allow_grouping = bool(allow_grouping)
         self._active_filter = ""
         self._group_headers: list[QWidget] = []
+        self._selection_anchor: Optional[_DatasetRow] = None
         self._rebuilding_rows = False
         self._suppress_group_changed = False
 
@@ -244,6 +245,7 @@ class DatasetSelectionDialog(FramelessDialogBase):
             if self._allow_grouping:
                 row.group_changed.connect(self._on_group_changed)
                 row.selection_changed.connect(self._on_selection_changed)
+                row.selection_requested.connect(self._on_row_selection_requested)
             self._rows.append(row)
         self._rebuild_rows_layout()
         self._on_selection_changed()
@@ -276,6 +278,8 @@ class DatasetSelectionDialog(FramelessDialogBase):
         try:
             self._clear_rows_layout()
             visible_rows = self._visible_rows()
+            if self._selection_anchor not in visible_rows:
+                self._selection_anchor = None
 
             if not self._allow_grouping:
                 for row in visible_rows:
@@ -389,8 +393,50 @@ class DatasetSelectionDialog(FramelessDialogBase):
     def _clear_row_selection(self) -> None:
         for row in self._rows:
             row.set_selected(False, emit_signal=False)
+        self._selection_anchor = None
         self._on_selection_changed()
         self._rebuild_rows_layout()
+
+    def _displayed_rows(self) -> list[_DatasetRow]:
+        rows: list[_DatasetRow] = []
+        for index in range(self._rows_layout.count()):
+            widget = self._rows_layout.itemAt(index).widget()
+            if isinstance(widget, _DatasetRow):
+                rows.append(widget)
+        return rows
+
+    def _on_row_selection_requested(
+        self,
+        row: _DatasetRow,
+        modifiers: Qt.KeyboardModifier,
+    ) -> None:
+        displayed_rows = self._displayed_rows()
+        if row not in displayed_rows:
+            return
+
+        shift = bool(modifiers & Qt.KeyboardModifier.ShiftModifier)
+        control = bool(modifiers & Qt.KeyboardModifier.ControlModifier)
+        anchor_is_visible = self._selection_anchor in displayed_rows
+
+        if shift and anchor_is_visible:
+            anchor_index = displayed_rows.index(self._selection_anchor)
+            row_index = displayed_rows.index(row)
+            start, end = sorted((anchor_index, row_index))
+            range_rows = set(displayed_rows[start:end + 1])
+            if not control:
+                for candidate in self._rows:
+                    candidate.set_selected(False, emit_signal=False)
+            for candidate in range_rows:
+                candidate.set_selected(True, emit_signal=False)
+        elif control:
+            row.set_selected(not row.is_selected(), emit_signal=False)
+            self._selection_anchor = row
+        else:
+            for candidate in self._rows:
+                candidate.set_selected(candidate is row, emit_signal=False)
+            self._selection_anchor = row
+
+        self._on_selection_changed()
 
     def _assign_group_to_selected(self) -> None:
         if not self._allow_grouping:
@@ -406,6 +452,7 @@ class DatasetSelectionDialog(FramelessDialogBase):
                 row.set_selected(False, emit_signal=False)
         finally:
             self._suppress_group_changed = False
+        self._selection_anchor = None
         self._rebuild_rows_layout()
         self._on_selection_changed()
 
@@ -480,6 +527,7 @@ class _DatasetRow(QFrame):
     toggled = pyqtSignal()
     group_changed = pyqtSignal()
     selection_changed = pyqtSignal()
+    selection_requested = pyqtSignal(object, object)
 
     def __init__(self, tab, checked: bool = False, *, allow_grouping: bool = False, parent=None):
         super().__init__(parent)
@@ -632,7 +680,7 @@ class _DatasetRow(QFrame):
     def mousePressEvent(self, event):
         if event.button() == Qt.MouseButton.LeftButton:
             if self._allow_grouping and event.position().x() > 34:
-                self._toggle_selected()
+                self.selection_requested.emit(self, event.modifiers())
             else:
                 self.set_checked(not self._checked)
             event.accept()

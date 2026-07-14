@@ -21,6 +21,12 @@ from excel_import_detection import (
     find_best_import_candidate,
 )
 from import_resolver import resolve_excel_import
+from import_preview import (
+    detect_headers as detect_preview_headers,
+    headers_from_row as preview_headers_from_row,
+    is_numeric as is_preview_numeric,
+    load_preview_rows as load_shared_preview_rows,
+)
 from gui.dialog_chrome import make_dialog_header, make_dialog_footer
 from gui.theme import C, F, SZ, icon as _icon
 from qt_chrome.frameless_dialog_base import FramelessDialogBase
@@ -166,101 +172,27 @@ class ColumnMapperDialog(FramelessDialogBase):
         excel_sheets: Optional[List[str]] = None,
     ) -> tuple[List[List[str]], List[str], Optional[str]]:
         """Load raw preview rows using the same strategy across preview surfaces."""
-        file_ext = os.path.splitext(file_path)[1].lower()
-        rows: List[List[str]] = []
-        discovered_sheets = list(excel_sheets or [])
-        resolved_sheet = sheet_name
-
-        if file_ext == '.csv':
-            with open(file_path, 'r', encoding='utf-8') as file:
-                reader = csv.reader(file)
-                for i, row in enumerate(reader):
-                    if i >= 50:
-                        break
-                    rows.append(row)
-        elif file_ext in ['.xlsx', '.xls']:
-            import pandas as pd
-
-            if not discovered_sheets:
-                excel_file = pd.ExcelFile(file_path)
-                try:
-                    discovered_sheets = list(excel_file.sheet_names)
-                finally:
-                    excel_file.close()
-
-            if not resolved_sheet or resolved_sheet not in discovered_sheets:
-                resolved_sheet = discovered_sheets[0] if discovered_sheets else None
-
-            df = pd.read_excel(file_path, sheet_name=resolved_sheet, header=None)
-            rows = df.values.tolist()
-            rows = [[str(cell) if pd.notna(cell) else '' for cell in row] for row in rows]
-
-        if not rows:
-            raise ValueError("CSV file is empty")
-
-        return rows, discovered_sheets, resolved_sheet
+        return load_shared_preview_rows(
+            file_path,
+            sheet_name=sheet_name,
+            excel_sheets=excel_sheets,
+        )
 
     @staticmethod
     def headers_from_row(rows: List[List[str]], row_index: int) -> List[str]:
-        max_cols = max((len(row) for row in rows), default=2)
-        source_row = rows[row_index] if 0 <= row_index < len(rows) else []
-        headers: List[str] = []
-        for i in range(max_cols):
-            header = str(source_row[i]).strip() if i < len(source_row) else ""
-            if not header or header.lower() in ['unnamed', 'nan']:
-                header = f"Column {i+1}"
-            headers.append(header)
-        return headers
+        return preview_headers_from_row(rows, row_index)
 
     def detect_headers(self, rows: List[List[str]]) -> List[str]:
         """Try to detect which row contains headers"""
-        best_row = 0
-        best_score = 0
-
-        for i, row in enumerate(rows[:8]):  # Check first 8 rows for Excel files
-            if len(row) >= 2:
-                # Score this row based on header-like characteristics
-                score = 0
-                non_empty_cells = [cell.strip() for cell in row if cell.strip()]
-
-                if len(non_empty_cells) >= 2:
-                    # Check if this row looks like headers
-                    text_count = sum(1 for cell in non_empty_cells if not ColumnMapperDialog.is_numeric(cell))
-
-                    # Bonus for having text in most cells
-                    if text_count >= len(non_empty_cells) * 0.6:
-                        score += 10
-
-                    # Bonus for keywords - enhanced for sieve analysis
-                    header_keywords = ['size', 'diameter', 'grain', 'particle', 'sieve', 'mm', 'd mm', 'mesh',
-                                     'passing', 'pass', 'finer', 'cumulative', 'retained', '%', 'procentages',
-                                     'percentages', 'mass', 'weight', 'curve']
-                    keyword_count = sum(1 for cell in non_empty_cells
-                                       for keyword in header_keywords
-                                       if keyword in cell.lower())
-                    score += keyword_count * 5
-
-                    # Penalty for rows with mostly numbers
-                    numeric_count = sum(1 for cell in non_empty_cells if ColumnMapperDialog.is_numeric(cell))
-                    if numeric_count > len(non_empty_cells) * 0.7:
-                        score -= 5
-
-                    if score > best_score:
-                        best_score = score
-                        best_row = i
-
-        self.header_row = best_row
-        return self.headers_from_row(rows, best_row)
+        headers, header_row = detect_preview_headers(rows)
+        self.header_row = header_row
+        return headers
 
     @staticmethod
     def is_numeric(value_or_self, value: Optional[str] = None) -> bool:
         """Check if a string represents a number"""
         raw_value = value_or_self if value is None else value
-        try:
-            float(raw_value)
-            return True
-        except ValueError:
-            return False
+        return is_preview_numeric(raw_value)
 
     def _style_mode_button(self, button: QPushButton, fa_name: str) -> None:
         button.setCheckable(True)

@@ -26,25 +26,24 @@ These are not dead files, but they are the main long-term maintainability pressu
 - `Program/gui/welcome_widget.py` - 104 KB
 - `Program/gui/comparison_plot_widget.py` - 100 KB
 
-## Likely Dead Or Prototype Files
+## Removed Dead Or Prototype Files
 
-These files had no active references from the app or tests during the first-pass scan:
+These files had no active references from the app or tests during the first-pass scan and were removed on 2026-07-03:
 
 - `Program/gui/test_export_debug.py`
-  - Strongest deletion candidate.
   - It is a debug/prototype script inside the production GUI folder.
-  - It currently contains a syntax error, so it should not stay in runtime source.
+  - It contained a syntax error, so it should not stay in runtime source.
 
 - `Program/gui/comparison_tab_enhanced.py`
-  - Likely an old comparison-tab prototype.
+  - Old comparison-tab prototype.
   - Current app uses `Program/gui/comparison_tab.py`.
 
 - `Program/gui/data_inspector_dialog.py`
-  - Likely an older duplicate of `Program/gui/dataset_inspector_dialog.py`.
+  - Older duplicate of `Program/gui/dataset_inspector_dialog.py`.
   - Current app and tests import `gui.dataset_inspector_dialog.DataInspectorDialog`.
 
 - `Program/Splash/welcome_screen_v2.py`
-  - Likely an old splash/welcome prototype.
+  - Old splash/welcome prototype.
   - Current app uses `Splash.simple_splash.SimpleSplash` and `gui.welcome_widget.WelcomeWidget`.
 
 ## Generated Or Non-Runtime Candidates

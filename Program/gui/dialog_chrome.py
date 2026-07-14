@@ -43,6 +43,40 @@ from PyQt6.QtWidgets import QHBoxLayout, QLabel, QPushButton, QVBoxLayout, QWidg
 from gui.theme import C, F, SZ, icon as _icon
 
 
+def style_dialog_button(button: QPushButton, style: str = "secondary") -> None:
+    """Apply the standard dialog action treatment to an existing button."""
+    button.setFixedHeight(28)
+    if style == "primary":
+        button.setStyleSheet(
+            f"QPushButton {{ background: {C.OLIVE}; border: 1px solid {C.OLIVE_DK}; "
+            f"border-radius: {SZ.BORDER_RADIUS}px; color: white; font-weight: 600; "
+            f"padding: 0 14px; font-size: {F.SZ_LG}pt; }}"
+            f"QPushButton:hover {{ background: {C.OLIVE_H}; }}"
+            f"QPushButton:pressed {{ background: {C.OLIVE_DK}; border-color: {C.OLIVE_DK}; }}"
+            f"QPushButton:disabled {{ background: {C.BORDER}; border-color: {C.BORDER_DK}; "
+            f"color: {C.TEXT_MUTED}; }}"
+        )
+    elif style == "danger":
+        button.setStyleSheet(
+            f"QPushButton {{ border: 1px solid rgba(160,48,32,.35); "
+            f"border-radius: {SZ.BORDER_RADIUS}px; color: #a03020; "
+            f"background: transparent; padding: 0 14px; font-size: {F.SZ_LG}pt; }}"
+            f"QPushButton:hover {{ background: rgba(160,48,32,.06); }}"
+            f"QPushButton:pressed {{ background: rgba(160,48,32,.12); "
+            f"border-color: rgba(160,48,32,.50); }}"
+        )
+    else:
+        button.setStyleSheet(
+            f"QPushButton {{ border: 1px solid {C.BORDER}; "
+            f"border-radius: {SZ.BORDER_RADIUS}px; background: {C.BG}; "
+            f"color: {C.TEXT_MID}; padding: 0 14px; font-size: {F.SZ_LG}pt; }}"
+            f"QPushButton:hover {{ background: {C.BG_RAISED}; "
+            f"border-color: {C.BORDER_DK}; color: {C.TEXT}; }}"
+            f"QPushButton:pressed {{ background: {C.BG_LOW}; "
+            f"border-color: {C.EARTH}; color: {C.TEXT}; }}"
+        )
+
+
 # ─────────────────────────────────────────────────────────────────────────────
 # HEADER
 # ─────────────────────────────────────────────────────────────────────────────
@@ -165,34 +199,7 @@ def make_dialog_footer(
 
     for label, callback, style in buttons:
         btn = QPushButton(label)
-        btn.setFixedHeight(28)
-        if style == "primary":
-            btn.setStyleSheet(
-                f"QPushButton {{ background: {C.OLIVE}; border: 1px solid {C.OLIVE_DK}; "
-                f"border-radius: {SZ.BORDER_RADIUS}px; color: white; font-weight: 600; "
-                f"padding: 0 14px; font-size: {F.SZ_LG}pt; }}"
-                f"QPushButton:hover {{ background: {C.OLIVE_H}; }}"
-                f"QPushButton:pressed {{ background: {C.OLIVE_DK}; border-color: {C.OLIVE_DK}; }}"
-                f"QPushButton:disabled {{ background: {C.BORDER}; border-color: {C.BORDER_DK}; "
-                f"color: {C.TEXT_MUTED}; }}"
-            )
-        elif style == "danger":
-            btn.setStyleSheet(
-                f"QPushButton {{ border: 1px solid rgba(160,48,32,.35); "
-                f"border-radius: {SZ.BORDER_RADIUS}px; color: #a03020; "
-                f"background: transparent; padding: 0 14px; font-size: {F.SZ_LG}pt; }}"
-                f"QPushButton:hover {{ background: rgba(160,48,32,.06); }}"
-                f"QPushButton:pressed {{ background: rgba(160,48,32,.12); border-color: rgba(160,48,32,.50); }}"
-            )
-        else:  # secondary (default)
-            btn.setStyleSheet(
-                f"QPushButton {{ border: 1px solid {C.BORDER}; "
-                f"border-radius: {SZ.BORDER_RADIUS}px; background: {C.BG}; "
-                f"color: {C.TEXT_MID}; padding: 0 14px; font-size: {F.SZ_LG}pt; }}"
-                f"QPushButton:hover {{ background: {C.BG_RAISED}; "
-                f"border-color: {C.BORDER_DK}; color: {C.TEXT}; }}"
-                f"QPushButton:pressed {{ background: {C.BG_LOW}; border-color: {C.EARTH}; color: {C.TEXT}; }}"
-            )
+        style_dialog_button(btn, style)
         btn.clicked.connect(callback)
         lay.addWidget(btn)
 
