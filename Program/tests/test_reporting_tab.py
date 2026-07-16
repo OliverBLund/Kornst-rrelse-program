@@ -98,6 +98,15 @@ class TestReportingTabValidation(unittest.TestCase):
         self.assertNotIn("preview-page-sep", injected)
         self.assertNotIn("Page ' +", injected)
 
+    def test_landscape_preview_gap_covers_the_portrait_sheet_beneath_it(self):
+        html = "<html><head></head><body><h1>Report</h1></body></html>"
+
+        injected = ReportingTab._inject_preview_css(html)
+
+        self.assertIn(".landscape-plot-page::before", injected)
+        self.assertIn(".landscape-plot-page::after", injected)
+        self.assertIn("background: #c8c4be", injected)
+
 
 class TestReportingTabTypePresets(unittest.TestCase):
     def setUp(self):
@@ -215,6 +224,61 @@ class TestReportingTabTypePresets(unittest.TestCase):
         self.tab._preview_load_ready = True
         self.tab._update_preview_action_buttons()
         self.assertEqual(self.tab.btn_save.isEnabled(), reporting_tab.HAS_WEBENGINE)
+
+    def test_excel_appendix_checkbox_externalizes_large_tables_in_preview_only(self):
+        from unittest.mock import patch
+
+        table_rows = "".join(
+            f"<tr><td>Sample {index}</td><td>{index}</td></tr>"
+            for index in range(60)
+        )
+        report_html = (
+            "<html><body><h3>Large Result Table</h3>"
+            "<table data-report-table='large-result-table'>"
+            "<thead><tr><th>Sample</th><th>Value</th></tr></thead>"
+            f"<tbody>{table_rows}</tbody></table></body></html>"
+        )
+
+        with patch.object(self.tab, "_set_preview_html") as render_preview:
+            self.tab._set_report_output(report_html)
+            self.assertIn("Sample 59", render_preview.call_args.args[0])
+
+            self.tab._excel_appendix_check.setChecked(True)
+            appendix_preview = render_preview.call_args.args[0]
+            self.assertIn(
+                "Large table moved to companion Excel appendix",
+                appendix_preview,
+            )
+            self.assertNotIn("Sample 59", appendix_preview)
+            self.assertIn("Sample 59", self.tab.current_report_html)
+
+            self.tab._excel_appendix_check.setChecked(False)
+            self.assertIn("Sample 59", render_preview.call_args.args[0])
+
+    def test_report_style_change_waits_for_explicit_generate(self):
+        from unittest.mock import patch
+
+        self.tab.current_report_html = "<html><body>Existing report</body></html>"
+        self.tab.dataset_tabs = [object()]
+
+        with patch.object(self.tab, "_on_generate") as regenerate:
+            self.tab._style_controls.changed.emit()
+
+        regenerate.assert_not_called()
+
+    def test_selecting_a_preset_clears_previous_customize_overrides(self):
+        from unittest.mock import patch
+
+        controls = self.tab._style_controls
+        with patch(
+            'gui.report_style_controls.set_report_style_preset'
+        ) as set_preset, patch(
+            'gui.report_style_controls.clear_report_style_overrides'
+        ) as clear_overrides:
+            controls._on_preset_changed('Presentation')
+
+        set_preset.assert_called_once_with('Presentation')
+        clear_overrides.assert_called_once_with()
 
 
 class TestReportGenerationThreading(unittest.TestCase):

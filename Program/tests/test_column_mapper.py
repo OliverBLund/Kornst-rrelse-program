@@ -151,6 +151,18 @@ class TestColumnMapperDialog(unittest.TestCase):
             QFormLayout.RowWrapPolicy.WrapAllRows,
         )
 
+    def test_processed_mapping_requires_cumulative_passing_and_hides_retained_role(self):
+        mapping_form = self.dialog.mapping_group.layout()
+        passing_label = mapping_form.labelForField(self.dialog.passing_combo)
+
+        self.assertEqual(
+            passing_label.text(),
+            "Cumulative Percent Passing (0-100): *",
+        )
+        self.assertIsNone(mapping_form.labelForField(self.dialog.retained_combo))
+        self.assertTrue(self.dialog.retained_combo.isHidden())
+        self.assertEqual(self.dialog.retained_combo.currentIndex(), 0)
+
     def test_range_mode_can_mark_selected_size_and_passing_cells(self):
         self.dialog.switch_to_range_mode()
         APP.processEvents()

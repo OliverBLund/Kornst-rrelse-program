@@ -77,6 +77,10 @@ class PlotStyle:
     k_mean_arith_color: str = "#b83232"
     k_mean_geo_color: str = "#5c3d8f"
 
+    # None preserves normal plot behavior. Report customization can explicitly
+    # show or hide markers without rewriting the preset definitions.
+    curve_markers_visible: Optional[bool] = None
+
 
 # Preset style templates
 

@@ -15,7 +15,14 @@ from PyQt6.QtWidgets import (
     QApplication, QPushButton, QScrollArea, QVBoxLayout, QWidget,
 )
 
-from gui.main_window import MainWindow
+from gui.main_window import (
+    COMPARISON_TAB,
+    EXPORT_TAB,
+    HOME_TAB,
+    INDIVIDUAL_TAB,
+    REPORTS_TAB,
+    MainWindow,
+)
 from gui.startup_tour import StartupTourOverlay, TourStep
 
 
@@ -269,12 +276,29 @@ class TestStartupTourOverlay(unittest.TestCase):
         show_source = inspect.getsource(MainWindow.show_startup_guide)
         launcher_source = inspect.getsource(MainWindow._start_tour_overlay)
 
-        self.assertIn("Startup Guide", setup_menus_source)
+        self.assertIn('QMenu("Tutorials"', setup_menus_source)
+        self.assertIn("Getting &Started", setup_menus_source)
+        self.assertIn("Written Guides", setup_menus_source)
         self.assertIn("show_startup_guide", setup_menus_source)
         self.assertIn("Analysis Settings", setup_menus_source)
         self.assertIn("open_analysis_settings_dialog", setup_menus_source)
         self.assertIn("StartupTourOverlay", launcher_source)
         self.assertIn("_global_tour_steps", show_source)
+
+    def test_home_tutorial_signal_dispatches_to_existing_tutorials(self):
+        connect_source = inspect.getsource(MainWindow._connect_welcome_signals)
+        dispatch_source = inspect.getsource(MainWindow.on_welcome_start_tutorial)
+
+        self.assertIn("tutorial_requested.connect", connect_source)
+        for tutorial_id, handler in (
+            ("getting_started", "show_startup_guide"),
+            ("individual", "show_individual_samples_guide"),
+            ("comparison", "show_comparison_guide"),
+            ("reports", "show_reports_guide"),
+            ("export", "show_export_guide"),
+        ):
+            self.assertIn(f'"{tutorial_id}"', dispatch_source)
+            self.assertIn(handler, dispatch_source)
 
     def test_global_tour_uses_sidebar_import_and_main_tabs(self):
         steps_source = inspect.getsource(MainWindow._global_tour_steps)
@@ -285,10 +309,11 @@ class TestStartupTourOverlay(unittest.TestCase):
         self.assertIn("_analysis_menu_btn", steps_source)
         self.assertIn("Classification Scheme", steps_source)
         self.assertIn("global calculation settings", steps_source)
-        self.assertIn("_nav_btns[0]", steps_source)
-        self.assertIn("_nav_btns[1]", steps_source)
-        self.assertIn("_nav_btns[2]", steps_source)
-        self.assertIn("_nav_btns[3]", steps_source)
+        self.assertIn("_nav_btns[HOME_TAB]", steps_source)
+        self.assertIn("_nav_btns[INDIVIDUAL_TAB]", steps_source)
+        self.assertIn("_nav_btns[COMPARISON_TAB]", steps_source)
+        self.assertIn("_nav_btns[REPORTS_TAB]", steps_source)
+        self.assertIn("_nav_btns[EXPORT_TAB]", steps_source)
         self.assertNotIn("_add_btn", steps_source)
         self.assertNotIn("_calc_btn", steps_source)
 
@@ -297,7 +322,7 @@ class TestStartupTourOverlay(unittest.TestCase):
         show_source = inspect.getsource(MainWindow.show_individual_samples_guide)
         steps_source = inspect.getsource(MainWindow._individual_samples_tour_steps)
 
-        self.assertIn("Guide &Individual Samples", setup_menus_source)
+        self.assertIn('"&Individual Samples"', setup_menus_source)
         self.assertIn("show_individual_samples_guide", setup_menus_source)
         self.assertIn("show_startup_checkbox=False", show_source)
         self.assertIn("before_step=plot_step", steps_source)
@@ -326,9 +351,9 @@ class TestStartupTourOverlay(unittest.TestCase):
         show_source = inspect.getsource(MainWindow.show_comparison_guide)
         steps_source = inspect.getsource(MainWindow._comparison_tour_steps)
 
-        self.assertIn("Guide &Comparison", setup_menus_source)
+        self.assertIn('"&Comparison"', setup_menus_source)
         self.assertIn("show_comparison_guide", setup_menus_source)
-        self.assertIn("_switch_to_tab(1)", show_source)
+        self.assertIn("_switch_to_tab(COMPARISON_TAB)", show_source)
         self.assertIn("show_startup_checkbox=False", show_source)
         self.assertIn("_comparison_tour_steps", show_source)
         # Walks all three comparison subtabs with the right targets.
@@ -346,9 +371,9 @@ class TestStartupTourOverlay(unittest.TestCase):
         steps_source = inspect.getsource(MainWindow._reports_tour_steps)
         plot_target_source = inspect.getsource(MainWindow._report_plot_tour_target)
 
-        self.assertIn("Guide &Reports", setup_menus_source)
+        self.assertIn('"&Reports"', setup_menus_source)
         self.assertIn("show_reports_guide", setup_menus_source)
-        self.assertIn("_switch_to_tab(2)", show_source)
+        self.assertIn("_switch_to_tab(REPORTS_TAB)", show_source)
         self.assertIn("show_startup_checkbox=False", show_source)
         self.assertIn("_reports_tour_steps", show_source)
         self.assertIn("PDF is fixed and static", steps_source)
@@ -370,9 +395,9 @@ class TestStartupTourOverlay(unittest.TestCase):
         prep_source = inspect.getsource(MainWindow._prepare_export_tour_step)
         format_card_source = inspect.getsource(MainWindow._export_format_card)
 
-        self.assertIn("Guide &Export", setup_menus_source)
+        self.assertIn('"&Export"', setup_menus_source)
         self.assertIn("show_export_guide", setup_menus_source)
-        self.assertIn("_switch_to_tab(3)", show_source)
+        self.assertIn("_switch_to_tab(EXPORT_TAB)", show_source)
         self.assertIn("show_startup_checkbox=False", show_source)
         self.assertIn("_export_tour_steps", show_source)
         self.assertIn("CSV Long is tidy", steps_source)

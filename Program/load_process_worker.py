@@ -220,10 +220,13 @@ def _extract_columns_from_rows(rows: list[list[str]], mapping_state: Mapping[str
 
     if size_idx < 0:
         raise ValueError("Mapped source is missing a particle-size column")
-    if passing_idx < 0 and retained_idx < 0:
-        raise ValueError("Mapped source is missing a percent passing/retained column")
-    if passing_idx >= 0 and retained_idx >= 0:
-        retained_idx = -1
+    if passing_idx < 0:
+        if retained_idx >= 0:
+            raise ValueError(
+                "Saved retained-column mappings are not imported automatically. "
+                "Processed data must provide cumulative percent passing."
+            )
+        raise ValueError("Mapped source is missing a cumulative percent-passing column")
 
     header_row = int(mapping_state.get("header_row", 0) or 0)
     data_rows = rows[header_row + 1:] if len(rows) > header_row + 1 else rows
@@ -238,16 +241,10 @@ def _extract_columns_from_rows(rows: list[list[str]], mapping_state: Mapping[str
             size_text = row[size_idx]
             if not _is_numeric(size_text):
                 continue
-            if passing_idx >= 0:
-                percent_text = row[passing_idx]
-                if not _is_numeric(percent_text):
-                    continue
-                percent = _coerce_float(percent_text)
-            else:
-                retained_text = row[retained_idx]
-                if not _is_numeric(retained_text):
-                    continue
-                percent = 100.0 - _coerce_float(retained_text)
+            percent_text = row[passing_idx]
+            if not _is_numeric(percent_text):
+                continue
+            percent = _coerce_float(percent_text)
             particle_sizes.append(_coerce_float(size_text))
             percent_passing.append(percent)
         except (IndexError, ValueError):
@@ -534,7 +531,7 @@ def run_batch_import(file_entries: Sequence[object], result_queue, *, temperatur
                             file_key,
                             dataset,
                             sample_name,
-                            "Data loaded but has validation errors",
+                            dataset.get_detailed_validation_report(),
                         )
                     )
                 else:

@@ -10,15 +10,17 @@ from __future__ import annotations
 
 from typing import Optional
 
-from PyQt6.QtCore import QPointF, QRectF, QSize, Qt
+from PyQt6.QtCore import QPointF, QRectF, QSize, Qt, pyqtSignal
 from PyQt6.QtGui import QColor, QPainter, QPen, QPolygonF
 from PyQt6.QtWidgets import (
-    QComboBox, QDoubleSpinBox, QHBoxLayout, QLabel, QLineEdit,
+    QComboBox, QDoubleSpinBox, QHBoxLayout, QLabel, QLineEdit, QPushButton,
     QSizePolicy, QSpinBox, QVBoxLayout, QWidget,
 )
 
 from .theme import combo_popup_qss
 from .toggle_switch import ToggleSwitch
+from .collapsible_section import CollapsibleSection
+from .plot_styles import PlotStyle
 
 
 # Legend placement options shared by both sidebars.
@@ -50,9 +52,17 @@ LEGEND_LOCATIONS: list[tuple[str, Optional[tuple[float, float]], str]] = [
 
 
 LEGEND_LAYOUTS: list[tuple[int, str]] = [
-    (1, "Vertical (1 column)"),
-    (2, "Two columns"),
-    (0, "Horizontal (fit)"),
+    (0, "Auto (fit and wrap)"),
+    (1, "1 column"),
+    (2, "2 columns"),
+    (3, "3 columns"),
+    (4, "4 columns"),
+]
+
+MARKER_MODES: list[tuple[str, Optional[bool]]] = [
+    ("Preset behavior", None),
+    ("Show", True),
+    ("Hide", False),
 ]
 
 
@@ -257,6 +267,235 @@ def make_dspin_row(label: str, minimum: float, maximum: float,
     lay.addWidget(lbl, 1)
     lay.addWidget(spin, 0)
     return row, spin
+
+
+class PlotStyleControlSections(QWidget):
+    """Shared typography, line/marker, and legend accordion controls."""
+
+    style_changed = pyqtSignal(dict)
+    reset_requested = pyqtSignal()
+
+    def __init__(
+        self,
+        style: PlotStyle,
+        *,
+        include_reset: bool = False,
+        parent: Optional[QWidget] = None,
+    ) -> None:
+        super().__init__(parent)
+        root = QVBoxLayout(self)
+        root.setContentsMargins(0, 0, 0, 0)
+        root.setSpacing(6)
+
+        self.typography_section = CollapsibleSection(
+            "Typography", "fa6s.text-height",
+            CollapsibleSection.AMBER, expanded=False,
+        )
+        self.row_title_size, self.title_size_spin = make_spin_row(
+            "Title size", 6, 36
+        )
+        self.row_label_size, self.label_size_spin = make_spin_row(
+            "Axis label size", 6, 36
+        )
+        self.row_tick_size, self.tick_size_spin = make_spin_row(
+            "Tick size", 5, 24
+        )
+        for row in (
+            self.row_title_size,
+            self.row_label_size,
+            self.row_tick_size,
+        ):
+            self.typography_section.add_widget(row)
+        root.addWidget(self.typography_section)
+
+        self.lines_markers_section = CollapsibleSection(
+            "Lines & Markers", "fa6s.chart-line",
+            CollapsibleSection.BLUE, expanded=True,
+        )
+        self.row_curve_width, self.curve_width_spin = make_dspin_row(
+            "Curve width", 0.5, 6.0, 0.25, 2
+        )
+        self.lines_markers_section.add_widget(self.row_curve_width)
+        self.row_marker_mode, self.marker_mode_combo = make_combo_row(
+            "Markers", [label for label, _value in MARKER_MODES]
+        )
+        self.lines_markers_section.add_widget(self.row_marker_mode)
+        self.row_marker_size, self.marker_size_spin = make_dspin_row(
+            "Marker size", 0.0, 14.0, 0.5, 1
+        )
+        self.lines_markers_section.add_widget(self.row_marker_size)
+        root.addWidget(self.lines_markers_section)
+
+        self.legend_section = CollapsibleSection(
+            "Legend", "fa6s.list",
+            CollapsibleSection.EARTH, expanded=False,
+        )
+        self.row_legend_loc, self.legend_loc_combo = make_combo_row(
+            "Legend position", [label for _loc, _bbox, label in LEGEND_LOCATIONS]
+        )
+        self.legend_section.add_widget(self.row_legend_loc)
+        self.row_legend_layout, self.legend_layout_combo = make_combo_row(
+            "Legend columns", [label for _ncol, label in LEGEND_LAYOUTS]
+        )
+        self.legend_section.add_widget(self.row_legend_layout)
+        self.row_legend_alpha, self.legend_alpha_spin = make_dspin_row(
+            "Legend opacity", 0.0, 1.0, 0.05, 2
+        )
+        self.legend_section.add_widget(self.row_legend_alpha)
+        self.row_legend_size, self.legend_size_spin = make_spin_row(
+            "Legend size", 5, 24
+        )
+        self.legend_section.add_widget(self.row_legend_size)
+        root.addWidget(self.legend_section)
+
+        self.reset_button = None
+        if include_reset:
+            reset_row = QWidget()
+            reset_layout = QHBoxLayout(reset_row)
+            reset_layout.setContentsMargins(10, 6, 10, 6)
+            self.reset_button = QPushButton("Reset to preset")
+            self.reset_button.setProperty("pw-btn", True)
+            self.reset_button.setEnabled(False)
+            self.reset_button.setToolTip(
+                "Discard presentation overrides and revert to the selected preset"
+            )
+            self.reset_button.clicked.connect(self.reset_requested.emit)
+            reset_layout.addWidget(self.reset_button)
+            root.addWidget(reset_row)
+
+        self.sync_style(style)
+        self.title_size_spin.valueChanged.connect(
+            lambda value: self.style_changed.emit({"title_fontsize": int(value)})
+        )
+        self.label_size_spin.valueChanged.connect(
+            lambda value: self.style_changed.emit({"label_fontsize": int(value)})
+        )
+        self.tick_size_spin.valueChanged.connect(
+            lambda value: self.style_changed.emit({"tick_fontsize": int(value)})
+        )
+        self.curve_width_spin.valueChanged.connect(
+            lambda value: self.style_changed.emit({"curve_linewidth": float(value)})
+        )
+        self.marker_mode_combo.currentIndexChanged.connect(
+            self._on_marker_mode_changed
+        )
+        self.marker_size_spin.valueChanged.connect(
+            lambda value: self.style_changed.emit({"curve_markersize": float(value)})
+        )
+        self.legend_loc_combo.currentIndexChanged.connect(
+            self._on_legend_location_changed
+        )
+        self.legend_layout_combo.currentIndexChanged.connect(
+            self._on_legend_layout_changed
+        )
+        self.legend_alpha_spin.valueChanged.connect(
+            lambda value: self.style_changed.emit({"legend_framealpha": float(value)})
+        )
+        self.legend_size_spin.valueChanged.connect(
+            lambda value: self.style_changed.emit({"legend_fontsize": int(value)})
+        )
+
+    def _on_marker_mode_changed(self, index: int) -> None:
+        marker_mode = MARKER_MODES[index][1]
+        self.marker_size_spin.setEnabled(marker_mode is not False)
+        if marker_mode is True and self.marker_size_spin.value() <= 0:
+            self.marker_size_spin.setValue(4.0)
+        self.style_changed.emit({"curve_markers_visible": marker_mode})
+
+    def set_lines_markers_visible(self, visible: bool) -> None:
+        """Show the curve controls only when the active chart draws curves."""
+        self.lines_markers_section.setVisible(visible)
+
+    def _on_legend_location_changed(self, index: int) -> None:
+        loc, bbox, _label = LEGEND_LOCATIONS[index]
+        self.style_changed.emit({
+            "legend_loc": loc,
+            "legend_bbox_to_anchor": bbox,
+        })
+
+    def _on_legend_layout_changed(self, index: int) -> None:
+        ncol, _label = LEGEND_LAYOUTS[index]
+        self.style_changed.emit({"legend_ncol": ncol})
+
+    def values(self) -> dict:
+        loc, bbox, _label = LEGEND_LOCATIONS[self.legend_loc_combo.currentIndex()]
+        ncol, _label = LEGEND_LAYOUTS[self.legend_layout_combo.currentIndex()]
+        marker_mode = MARKER_MODES[self.marker_mode_combo.currentIndex()][1]
+        return {
+            "title_fontsize": self.title_size_spin.value(),
+            "label_fontsize": self.label_size_spin.value(),
+            "tick_fontsize": self.tick_size_spin.value(),
+            "curve_linewidth": self.curve_width_spin.value(),
+            "curve_markers_visible": marker_mode,
+            "curve_markersize": self.marker_size_spin.value(),
+            "legend_loc": loc,
+            "legend_bbox_to_anchor": bbox,
+            "legend_ncol": ncol,
+            "legend_framealpha": self.legend_alpha_spin.value(),
+            "legend_fontsize": self.legend_size_spin.value(),
+        }
+
+    def sync_style(self, style: PlotStyle) -> None:
+        widgets = [
+            self.title_size_spin,
+            self.label_size_spin,
+            self.tick_size_spin,
+            self.curve_width_spin,
+            self.marker_mode_combo,
+            self.marker_size_spin,
+            self.legend_loc_combo,
+            self.legend_layout_combo,
+            self.legend_alpha_spin,
+            self.legend_size_spin,
+        ]
+        for widget in widgets:
+            widget.blockSignals(True)
+
+        self.title_size_spin.setValue(int(style.title_fontsize))
+        self.label_size_spin.setValue(int(style.label_fontsize))
+        self.tick_size_spin.setValue(int(style.tick_fontsize))
+        self.curve_width_spin.setValue(float(style.curve_linewidth))
+        marker_mode = getattr(style, "curve_markers_visible", None)
+        marker_index = next(
+            (
+                index
+                for index, (_label, value) in enumerate(MARKER_MODES)
+                if value is marker_mode
+            ),
+            0,
+        )
+        self.marker_mode_combo.setCurrentIndex(marker_index)
+        self.marker_size_spin.setValue(float(style.curve_markersize))
+        self.marker_size_spin.setEnabled(marker_mode is not False)
+
+        loc_index = next(
+            (
+                index
+                for index, (loc, bbox, _label) in enumerate(LEGEND_LOCATIONS)
+                if loc == style.legend_loc
+                and bbox == style.legend_bbox_to_anchor
+            ),
+            0,
+        )
+        self.legend_loc_combo.setCurrentIndex(loc_index)
+        layout_index = next(
+            (
+                index
+                for index, (ncol, _label) in enumerate(LEGEND_LAYOUTS)
+                if ncol == getattr(style, "legend_ncol", 1)
+            ),
+            0,
+        )
+        self.legend_layout_combo.setCurrentIndex(layout_index)
+        self.legend_alpha_spin.setValue(float(style.legend_framealpha))
+        self.legend_size_spin.setValue(int(style.legend_fontsize))
+
+        for widget in widgets:
+            widget.blockSignals(False)
+
+    def set_reset_enabled(self, enabled: bool) -> None:
+        if self.reset_button is not None:
+            self.reset_button.setEnabled(enabled)
 
 
 def make_color_row(name: str, color: str):

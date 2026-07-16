@@ -28,6 +28,7 @@ from gui.theme import C, F, SZ, icon
 from qt_chrome.frameless_dialog_base import FramelessDialogBase
 from load_process_worker import run_batch_import
 from import_resolver import manual_mapping_provenance
+from k_aggregation import build_k_result_summary
 from grain_classification import (
     ISO14688, GrainClassificationScheme, ClassificationResult,
 )
@@ -154,12 +155,12 @@ class _SectionHeader(QWidget):
 class _SampleCard(QWidget):
     """Expandable sample card — matches _shared.css .s-item.
 
-    Two states: collapsed (main row only) / expanded (row + detail section).
+    Two disclosure states: collapsed (main row only) / expanded (with details).
     Row: icon container + name/meta + status LED + included toggle + expand chevron.
-    Active card: sb-act background + 3px olive left accent bar.
+    Active uses an olive accent; independent batch selection uses a blue outline.
     """
 
-    sig_clicked = pyqtSignal(str)          # file_path
+    sig_clicked = pyqtSignal(str, object)  # file_path, keyboard modifiers
     sig_ctx = pyqtSignal(str, object)      # file_path, QPoint (global)
     sig_selected = pyqtSignal(str, bool)   # file_path, is_included
     sig_inspect = pyqtSignal(str)          # file_path
@@ -186,6 +187,7 @@ class _SampleCard(QWidget):
         self._status = status
         self._active = False
         self._selected = False
+        self._batch_selected = False
         self._expanded = False
         self._d50 = d50
         self._k_val = k_val
@@ -193,6 +195,7 @@ class _SampleCard(QWidget):
 
         self.setAttribute(Qt.WidgetAttribute.WA_StyledBackground)
         self.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.setToolTip("Click to open; use Ctrl or Shift to batch-select samples")
         self.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
         self.customContextMenuRequested.connect(
             lambda pos: self.sig_ctx.emit(self.file_path, self.mapToGlobal(pos)))
@@ -371,6 +374,17 @@ class _SampleCard(QWidget):
         self._selected = selected
         self._refresh_sel_btn()
 
+    @property
+    def is_batch_selected(self) -> bool:
+        return self._batch_selected
+
+    def set_batch_selected(self, selected: bool):
+        selected = bool(selected)
+        if self._batch_selected == selected:
+            return
+        self._batch_selected = selected
+        self._refresh()
+
     def set_meta(self, d50: str = "", k_val: str = ""):
         self._d50 = d50
         self._k_val = k_val
@@ -433,9 +447,14 @@ class _SampleCard(QWidget):
 
         # Card background and border
         if self._active:
+            border = (
+                "rgba(58,126,160,0.72)"
+                if self._batch_selected
+                else C.SB_BDR
+            )
             self.setStyleSheet(
                 f"_SampleCard {{ background: {C.SB_ACT}; "
-                f"border: 1px solid {C.SB_BDR}; "
+                f"border: 1px solid {border}; "
                 f"border-radius: {SZ.BORDER_RADIUS}px; }}")
             self._icon_box.setStyleSheet(
                 f"background: rgba(107,142,35,0.15); "
@@ -443,6 +462,19 @@ class _SampleCard(QWidget):
             try:
                 self._icon_lbl.setPixmap(
                     icon('fa6s.vial', C.OLIVE).pixmap(11, 11))
+            except Exception:
+                pass
+        elif self._batch_selected:
+            self.setStyleSheet(
+                f"_SampleCard {{ background: rgba(58,126,160,0.12); "
+                f"border: 1px solid rgba(58,126,160,0.62); "
+                f"border-radius: {SZ.BORDER_RADIUS}px; }}")
+            self._icon_box.setStyleSheet(
+                f"background: rgba(58,126,160,0.13); "
+                f"border: 1px solid rgba(58,126,160,0.34); border-radius: 3px;")
+            try:
+                self._icon_lbl.setPixmap(
+                    icon('fa6s.vial', C.K_BLUE).pixmap(11, 11))
             except Exception:
                 pass
         else:
@@ -483,7 +515,7 @@ class _SampleCard(QWidget):
 
     def mousePressEvent(self, event):
         if event.button() == Qt.MouseButton.LeftButton:
-            self.sig_clicked.emit(self.file_path)
+            self.sig_clicked.emit(self.file_path, event.modifiers())
         super().mousePressEvent(event)
 
     def paintEvent(self, event):
@@ -507,6 +539,7 @@ class _FileListWidget(QScrollArea):
     card_clicked = pyqtSignal(str)         # file_path
     card_ctx = pyqtSignal(str, object)     # file_path, QPoint (global)
     selection_changed = pyqtSignal()       # emitted when any card's selected state changes
+    batch_selection_changed = pyqtSignal()
     card_inspect = pyqtSignal(str)         # file_path
     card_remap = pyqtSignal(str)           # file_path
     card_log = pyqtSignal(str)             # file_path
@@ -517,6 +550,8 @@ class _FileListWidget(QScrollArea):
         super().__init__(parent)
         self._cards: dict[str, _SampleCard] = {}
         self._active_path: str | None = None
+        self._batch_paths: set[str] = set()
+        self._selection_anchor: str | None = None
 
         self.setWidgetResizable(True)
         self.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
@@ -569,19 +604,30 @@ class _FileListWidget(QScrollArea):
             self._cards[file_path].set_group(group_name)
 
     def remove_card(self, file_path: str):
+        batch_changed = file_path in self._batch_paths
         if file_path in self._cards:
             card = self._cards.pop(file_path)
             card.setParent(None)
             card.deleteLater()
+        self._batch_paths.discard(file_path)
+        if self._selection_anchor == file_path:
+            self._selection_anchor = None
         if self._active_path == file_path:
             self._active_path = None
+        if batch_changed:
+            self.batch_selection_changed.emit()
 
     def clear_cards(self):
+        had_batch_selection = bool(self._batch_paths)
         for card in list(self._cards.values()):
             card.setParent(None)
             card.deleteLater()
         self._cards.clear()
         self._active_path = None
+        self._batch_paths.clear()
+        self._selection_anchor = None
+        if had_batch_selection:
+            self.batch_selection_changed.emit()
 
     def set_active(self, file_path: str | None):
         if self._active_path and self._active_path in self._cards:
@@ -597,6 +643,44 @@ class _FileListWidget(QScrollArea):
     def get_selected_paths(self) -> list[str]:
         """Return file paths of all included cards."""
         return [fp for fp, card in self._cards.items() if card.is_selected]
+
+    def get_batch_selected_paths(self) -> list[str]:
+        """Return batch-selected paths in visible card order."""
+        return [fp for fp in self._cards if fp in self._batch_paths]
+
+    def get_batch_selected_count(self) -> int:
+        return len(self._batch_paths)
+
+    def get_visible_paths(self) -> list[str]:
+        return [
+            file_path
+            for file_path, card in self._cards.items()
+            if not card.isHidden()
+        ]
+
+    def set_batch_selected_paths(
+        self,
+        file_paths,
+        *,
+        emit_signal: bool = True,
+    ) -> None:
+        path_set = {path for path in file_paths if path in self._cards}
+        if path_set == self._batch_paths:
+            return
+        self._batch_paths = path_set
+        for file_path, card in self._cards.items():
+            card.set_batch_selected(file_path in path_set)
+        if emit_signal:
+            self.batch_selection_changed.emit()
+
+    def select_all_visible(self) -> None:
+        visible_paths = self.get_visible_paths()
+        self.set_batch_selected_paths(visible_paths)
+        self._selection_anchor = visible_paths[0] if visible_paths else None
+
+    def clear_batch_selection(self) -> None:
+        self.set_batch_selected_paths([])
+        self._selection_anchor = None
 
     def set_selected_paths(self, file_paths: list[str], *, emit_signal: bool = True):
         """Apply a sidebar selection state programmatically."""
@@ -629,8 +713,39 @@ class _FileListWidget(QScrollArea):
                 card.setVisible(card.is_selected)
             elif filter_type == 'warnings':
                 card.setVisible(card._status in ('mapping', 'review', 'failed'))
+        if (
+            self._selection_anchor
+            and self._selection_anchor not in self.get_visible_paths()
+        ):
+            self._selection_anchor = None
 
-    def _on_card_clicked(self, file_path: str):
+    def _on_card_clicked(self, file_path: str, modifiers):
+        visible_paths = self.get_visible_paths()
+        ctrl = bool(modifiers & Qt.KeyboardModifier.ControlModifier)
+        shift = bool(modifiers & Qt.KeyboardModifier.ShiftModifier)
+
+        if shift and file_path in visible_paths:
+            anchor = self._selection_anchor
+            if anchor not in visible_paths:
+                anchor = file_path
+            start = visible_paths.index(anchor)
+            end = visible_paths.index(file_path)
+            range_paths = set(visible_paths[min(start, end):max(start, end) + 1])
+            if ctrl:
+                range_paths.update(self._batch_paths)
+            self.set_batch_selected_paths(range_paths)
+        elif ctrl:
+            selected = set(self._batch_paths)
+            if file_path in selected:
+                selected.remove(file_path)
+            else:
+                selected.add(file_path)
+            self.set_batch_selected_paths(selected)
+            self._selection_anchor = file_path
+        else:
+            self.set_batch_selected_paths([file_path])
+            self._selection_anchor = file_path
+
         self.set_active(file_path)
         self.card_clicked.emit(file_path)
 
@@ -1791,7 +1906,12 @@ class ControlPanel(QFrame):
         """Setup the control panel layout — new themed sidebar design."""
         import sys
 
-        self.setStyleSheet(f"QFrame {{ background: {C.SB}; border: none; }}")
+        self.setStyleSheet(
+            f"QFrame {{ background: {C.SB}; border: none; }}"
+            f"QToolTip {{ background: #fffdf7; background-color: #fffdf7;"
+            f"border: 1px solid {C.OLIVE}; border-radius: {SZ.BORDER_RADIUS}px;"
+            f"color: {C.TEXT}; font-size: {F.SZ_BASE}pt; padding: 6px 9px; }}"
+        )
 
         root = QVBoxLayout(self)
         root.setContentsMargins(0, 0, 0, 0)
@@ -1886,7 +2006,7 @@ class ControlPanel(QFrame):
         body_v.addWidget(drop_wrap)
 
         # ── 2a. SAMPLES section header ────────────────────────────────
-        body_v.addWidget(_SectionHeader("SAMPLES", btn_text="+ Add",
+        body_v.addWidget(_SectionHeader("SAMPLES", btn_text="Add",
                                         btn_icon="fa6s.plus"))
 
         # Connect the "+ Add" button in section header to add_files
@@ -1934,11 +2054,16 @@ class ControlPanel(QFrame):
         pills_w.setFixedHeight(30)
         pills_w.setStyleSheet(f"background: {C.SB};")
         pills_h = QHBoxLayout(pills_w)
-        pills_h.setContentsMargins(10, 4, 10, 0)
+        pills_h.setContentsMargins(6, 4, 6, 0)
         pills_h.setSpacing(4)
 
+        _LOCAL_TOOLTIP_QSS = (
+            f"QToolTip {{ background: #fffdf7; background-color: #fffdf7;"
+            f"border: 1px solid {C.OLIVE}; border-radius: {SZ.BORDER_RADIUS}px;"
+            f"color: {C.TEXT}; font-size: {F.SZ_BASE}pt; padding: 6px 9px; }}"
+        )
         _PILL = (
-            f"QPushButton {{ height: 22px; padding: 0 9px;"
+            f"QPushButton {{ height: 22px; padding: 0 5px;"
             f"  border: 1px solid {C.SB_BDR}; border-radius: 99px;"
             f"  background: rgba(255,255,255,0.32);"
             f"  font-family: '{F.UI}'; font-size: 10px; color: {C.SB_MID}; }}"
@@ -1946,18 +2071,23 @@ class ControlPanel(QFrame):
             f"  border-color: {C.BORDER_DK}; color: {C.SB_TEXT}; }}"
             f"QPushButton:checked {{ background: {C.SB_ACT}; border-color: {C.SB_BDR};"
             f"  color: {C.SB_TEXT}; font-weight: 600; }}"
+            + _LOCAL_TOOLTIP_QSS
         )
         self._pill_all = QPushButton("All")
+        self._pill_all.setFixedWidth(34)
         self._pill_all.setCheckable(True)
         self._pill_all.setChecked(True)
         self._pill_all.setStyleSheet(_PILL)
         self._pill_sel = QPushButton("Included")
+        self._pill_sel.setFixedWidth(62)
         self._pill_sel.setCheckable(True)
         self._pill_sel.setStyleSheet(_PILL)
         self._pill_rev = QPushButton("\u26a0 Review")
+        self._pill_rev.setFixedWidth(68)
         self._pill_rev.setCheckable(True)
         self._pill_rev.setStyleSheet(_PILL)
-        self._manage_samples_btn = QPushButton("Scope & Groups")
+        self._manage_samples_btn = QPushButton("Scope && Groups")
+        self._manage_samples_btn.setFixedWidth(112)
         self._manage_samples_btn.setStyleSheet(_PILL)
         self._manage_samples_btn.setCursor(Qt.CursorShape.PointingHandCursor)
         self._manage_samples_btn.setToolTip("Choose included samples and assign groups")
@@ -1972,21 +2102,105 @@ class ControlPanel(QFrame):
         pills_h.addWidget(self._pill_all)
         pills_h.addWidget(self._pill_sel)
         pills_h.addWidget(self._pill_rev)
+        pills_h.addWidget(self._manage_samples_btn)
         pills_h.addStretch()
         body_v.addWidget(pills_w)
 
-        # Scope & Groups is an action (not a view filter like the pills above) and
-        # its label is too wide to share the pill row, so it gets its own line.
-        manage_row = QWidget()
-        manage_h = QHBoxLayout(manage_row)
-        manage_h.setContentsMargins(10, 4, 10, 0)
-        manage_h.setSpacing(4)
-        manage_h.addWidget(self._manage_samples_btn)
-        manage_h.addStretch()
-        body_v.addWidget(manage_row)
+        # Batch selection is distinct from both the active sample and included scope.
+        batch_actions_w = QWidget()
+        batch_actions_w.setFixedHeight(34)
+        batch_actions_w.setStyleSheet(
+            f"background: rgba(255,255,255,0.16);"
+            f"border-top: 1px solid rgba(192,174,144,0.58);"
+            f"border-bottom: 1px solid rgba(192,174,144,0.58);"
+        )
+        batch_actions_h = QHBoxLayout(batch_actions_w)
+        batch_actions_h.setContentsMargins(10, 4, 10, 4)
+        batch_actions_h.setSpacing(4)
+
+        self._batch_selected_label = QLabel("0 selected")
+        self._batch_selected_label.setMinimumWidth(58)
+        self._batch_selected_label.setStyleSheet(
+            f"color: {C.K_BLUE}; background: transparent; border: none;"
+            f"font-family: '{F.MONO}'; font-size: 8.5px; font-weight: 600;"
+        )
+        batch_actions_h.addWidget(self._batch_selected_label)
+        batch_actions_h.addStretch(1)
+
+        _BATCH_ICON_BTN = (
+            f"QPushButton {{ width: 24px; height: 24px; padding: 0;"
+            f"border: 1px solid {C.SB_BDR}; border-radius: 4px;"
+            f"background: rgba(255,255,255,0.38); color: {C.SB_MID}; }}"
+            f"QPushButton:hover {{ background: rgba(255,255,255,0.72);"
+            f"border-color: {C.K_BLUE}; color: {C.K_BLUE}; }}"
+            f"QPushButton:disabled {{ background: transparent;"
+            f"border-color: transparent; color: {C.SB_MUTED}; }}"
+            + _LOCAL_TOOLTIP_QSS
+        )
+        _BATCH_TEXT_BTN = (
+            f"QPushButton {{ height: 24px; padding: 0 6px;"
+            f"border: 1px solid {C.SB_BDR}; border-radius: 4px;"
+            f"background: rgba(255,255,255,0.38);"
+            f"font-size: 9px; color: {C.SB_MID}; }}"
+            f"QPushButton:hover {{ background: rgba(255,255,255,0.72);"
+            f"border-color: rgba(192,56,40,0.48); color: {C.LED_ERR}; }}"
+            f"QPushButton:disabled {{ background: transparent;"
+            f"border-color: transparent; color: {C.SB_MUTED}; }}"
+            + _LOCAL_TOOLTIP_QSS
+        )
+        _BATCH_SELECT_BTN = (
+            f"QPushButton {{ height: 24px; padding: 0 6px;"
+            f"border: 1px solid {C.SB_BDR}; border-radius: 4px;"
+            f"background: rgba(255,255,255,0.38);"
+            f"font-size: 9px; color: {C.SB_MID}; }}"
+            f"QPushButton:hover {{ background: rgba(255,255,255,0.72);"
+            f"border-color: {C.K_BLUE}; color: {C.K_BLUE}; }}"
+            f"QPushButton:disabled {{ background: transparent;"
+            f"border-color: transparent; color: {C.SB_MUTED}; }}"
+            + _LOCAL_TOOLTIP_QSS
+        )
+
+        self._select_visible_btn = QPushButton("Select all")
+        self._select_visible_btn.setFixedHeight(24)
+        self._select_visible_btn.setStyleSheet(_BATCH_SELECT_BTN)
+        self._select_visible_btn.setToolTip("Select all visible samples")
+        self._select_visible_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+
+        self._clear_batch_selection_btn = QPushButton()
+        self._clear_batch_selection_btn.setFixedSize(24, 24)
+        self._clear_batch_selection_btn.setStyleSheet(_BATCH_ICON_BTN)
+        self._clear_batch_selection_btn.setToolTip(
+            "Clear batch selection without removing samples"
+        )
+        self._clear_batch_selection_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        try:
+            self._clear_batch_selection_btn.setIcon(icon("fa6s.xmark", C.SB_MID))
+            self._clear_batch_selection_btn.setIconSize(QSize(11, 11))
+        except Exception:
+            self._clear_batch_selection_btn.setText("x")
+
+        self._remove_selected_btn = QPushButton("Remove")
+        self._remove_selected_btn.setStyleSheet(_BATCH_TEXT_BTN)
+        self._remove_selected_btn.setToolTip(
+            "Remove selected samples and close their workspace tabs"
+        )
+        self._remove_selected_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+
+        self._clear_all_samples_btn = QPushButton("Clear all")
+        self._clear_all_samples_btn.setStyleSheet(_BATCH_TEXT_BTN)
+        self._clear_all_samples_btn.setToolTip(
+            "Remove every sample and close all dataset tabs"
+        )
+        self._clear_all_samples_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+
+        batch_actions_h.addWidget(self._select_visible_btn)
+        batch_actions_h.addWidget(self._clear_batch_selection_btn)
+        batch_actions_h.addWidget(self._remove_selected_btn)
+        batch_actions_h.addWidget(self._clear_all_samples_btn)
+        body_v.addWidget(batch_actions_w)
 
         # Hidden add_files_btn kept for backward compat
-        self.add_files_btn = QPushButton("+ Add Files")
+        self.add_files_btn = QPushButton("+ Add Files", self)
         self.add_files_btn.setVisible(False)
         self.add_files_btn.clicked.connect(self.add_files)
 
@@ -1997,99 +2211,33 @@ class ControlPanel(QFrame):
         self._file_list.card_ctx.connect(self._on_card_context_menu)
         self._file_list.selection_changed.connect(self._update_inventory_bar)
         self._file_list.selection_changed.connect(self.selection_changed)
+        self._file_list.batch_selection_changed.connect(
+            self._update_batch_actions
+        )
         self._file_list.card_inspect.connect(self.show_file_info)
         self._file_list.card_remap.connect(self.edit_file_mapping)
         self._file_list.card_log.connect(self.show_file_log)
         self._file_list.card_props.connect(self.show_file_props)
         self._file_list.card_remove.connect(self._remove_card_by_path)
+        self._select_visible_btn.clicked.connect(
+            self._file_list.select_all_visible
+        )
+        self._clear_batch_selection_btn.clicked.connect(
+            self._file_list.clear_batch_selection
+        )
+        self._remove_selected_btn.clicked.connect(
+            self.remove_batch_selected_files
+        )
+        self._clear_all_samples_btn.clicked.connect(self.clear_all_files)
         body_v.addWidget(self._file_list, 1)
 
-        # ── 2c. Batch box — matches .sb-batch in CSS ─────────────────
-        batch_box = QWidget()
-        batch_box.setStyleSheet(
-            f"background: rgba(255,255,255,0.32);"
-            f"border: 1px solid {C.SB_BDR}; border-radius: 5px;")
-        batch_box.setContentsMargins(0, 0, 0, 0)
-        batch_v = QVBoxLayout(batch_box)
-        batch_v.setContentsMargins(8, 8, 8, 8)
-        batch_v.setSpacing(7)
-
-        # Stat chips row — .sb-batch-stats
-        stats_row = QHBoxLayout()
-        stats_row.setSpacing(4)
-
-        _CHIP = (
-            f"QLabel {{ padding: 2px 7px; border-radius: 99px;"
-            f"  border: 1px solid {C.BORDER}; background: rgba(255,255,255,0.42);"
-            f"  font-family: '{F.MONO}'; font-size: 9px; color: {C.SB_MID}; }}"
-        )
-        _CHIP_WARN = (
-            f"QLabel {{ padding: 2px 7px; border-radius: 99px;"
-            f"  border: 1px solid rgba(208,128,32,0.28); background: rgba(208,128,32,0.08);"
-            f"  font-family: '{F.MONO}'; font-size: 9px; color: #7a5010; }}"
-        )
-        _CHIP_SEL = (
-            f"QLabel {{ padding: 2px 7px; border-radius: 99px;"
-            f"  border: 1px solid rgba(107,142,35,0.26); background: rgba(107,142,35,0.08);"
-            f"  font-family: '{F.MONO}'; font-size: 9px; color: {C.OLIVE}; }}"
-        )
-
-        batch_chip_loaded = QLabel("0 loaded")
-        batch_chip_loaded.setStyleSheet(_CHIP)
-        batch_chip_selected = QLabel("0 included")
-        batch_chip_selected.setStyleSheet(_CHIP_SEL)
-        batch_chip_warnings = QLabel("")
-        batch_chip_warnings.setStyleSheet(_CHIP_WARN)
-        batch_chip_warnings.setVisible(False)
-
-        stats_row.addWidget(batch_chip_loaded)
-        stats_row.addWidget(batch_chip_selected)
-        stats_row.addWidget(batch_chip_warnings)
-        stats_row.addStretch()
-        batch_v.addLayout(stats_row)
-
-        # Mini action buttons row — .sb-mini-actions
-        _MINI_BTN = (
-            f"QPushButton {{ height: 24px; padding: 0 8px;"
-            f"  border: 1px solid {C.SB_BDR}; border-radius: 4px;"
-            f"  background: rgba(255,255,255,0.48);"
-            f"  font-size: 10.5px; color: {C.SB_MID}; }}"
-            f"QPushButton:hover {{ background: rgba(255,255,255,0.75);"
-            f"  border-color: {C.BORDER_DK}; color: {C.SB_TEXT}; }}"
-            f"QPushButton:disabled {{ color: {C.SB_MUTED}; border-color: transparent;"
-            f"  background: rgba(255,255,255,0.2); }}"
-        )
-
-        mini_btns = QHBoxLayout()
-        mini_btns.setSpacing(5)
-
-        self.review_failed_btn = QPushButton("\u26a0 Review")
+        # Hidden compatibility action used by the existing review workflow.
+        self.review_failed_btn = QPushButton(self)
         self.review_failed_btn.clicked.connect(self.review_failed_files)
         self.review_failed_btn.setEnabled(False)
-        self.review_failed_btn.setToolTip("Open files waiting for mapping or manual review")
-        self.review_failed_btn.setStyleSheet(_MINI_BTN)
-
-        self.clear_all_btn = QPushButton("Clear All")
-        self.clear_all_btn.clicked.connect(self.clear_all_files)
-        self.clear_all_btn.setStyleSheet(
-            f"QPushButton {{ background: transparent; border: none;"
-            f"  color: {C.SB_MUTED}; font-size: 9px;"
-            f"  font-family: '{F.UI}'; padding: 2px 4px; }}"
-            f"QPushButton:hover {{ color: {C.LED_ERR}; }}"
-        )
-
-        mini_btns.addWidget(self.review_failed_btn, 1)
-        mini_btns.addStretch()
-        mini_btns.addWidget(self.clear_all_btn)
-        batch_v.addLayout(mini_btns)
-
-        batch_outer = QWidget()
-        batch_outer.setStyleSheet(f"background: {C.SB};")
-        batch_outer_v = QHBoxLayout(batch_outer)
-        batch_outer_v.setContentsMargins(10, 6, 10, 2)
-        batch_outer_v.addWidget(batch_box)
-        batch_outer.setVisible(False)
-        body_v.addWidget(batch_outer)
+        self.review_failed_btn.setVisible(False)
+        self.clear_all_btn = self._clear_all_samples_btn
+        self._update_batch_actions()
 
         # ── 2d. PARAMETERS section ────────────────────────────────────
         div1 = QFrame()
@@ -2381,6 +2529,21 @@ class ControlPanel(QFrame):
         for key, pill in pills.items():
             pill.setChecked(key == filter_type)
         self._file_list.apply_filter(filter_type)
+        self._update_batch_actions()
+
+    def _update_batch_actions(self) -> None:
+        """Refresh the independent batch-selection controls."""
+        if not hasattr(self, "_file_list"):
+            return
+        selected_count = self._file_list.get_batch_selected_count()
+        total_count = self._file_list.get_loaded_count()
+        visible_count = len(self._file_list.get_visible_paths())
+
+        self._batch_selected_label.setText(f"{selected_count} selected")
+        self._select_visible_btn.setEnabled(visible_count > 0)
+        self._clear_batch_selection_btn.setEnabled(selected_count > 0)
+        self._remove_selected_btn.setEnabled(selected_count > 0)
+        self._clear_all_samples_btn.setEnabled(total_count > 0)
 
     def _update_inventory_bar(self):
         """Refresh stat chips from current file_statuses and card state."""
@@ -2399,6 +2562,7 @@ class ControlPanel(QFrame):
             self._chip_warnings.setVisible(True)
         else:
             self._chip_warnings.setVisible(False)
+        self._update_batch_actions()
 
     def _push_card_meta(self, file_path: str):
         """Extract D50/K from loaded dataset and update the card."""
@@ -2425,12 +2589,19 @@ class ControlPanel(QFrame):
                     tab = self.main_window.dataset_tabs_widget.widget(i)
                     if (hasattr(tab, 'dataset') and tab.dataset is dataset
                             and hasattr(tab, 'current_results') and tab.current_results):
-                        k_vals = [v for v in tab.current_results.values()
-                                  if v is not None and isinstance(v, (int, float)) and v > 0]
-                        if k_vals:
-                            from statistics import geometric_mean
-                            k_mean = geometric_mean(k_vals)
-                            k_str = f"{k_mean:.1f} m/d" if k_mean >= 0.1 else f"{k_mean:.2e} m/d"
+                        results = tab.current_results
+                        if isinstance(results, Mapping):
+                            values = [
+                                value for value in results.values()
+                                if isinstance(value, (int, float)) and value > 0
+                            ]
+                            if values:
+                                from statistics import geometric_mean
+                                k_str = f"{geometric_mean(values):.2e} m/s"
+                        else:
+                            summary = build_k_result_summary(results)
+                            if summary.geometric_mean_m_s is not None:
+                                k_str = f"{summary.geometric_mean_m_s:.2e} m/s"
                         break
         except Exception:
             pass
@@ -3459,6 +3630,33 @@ class ControlPanel(QFrame):
         else:
             self.remove_file_btn.setEnabled(False)
 
+    def remove_batch_selected_files(self):
+        """Confirm and remove the independently batch-selected samples."""
+        file_paths = self._file_list.get_batch_selected_paths()
+        if not file_paths:
+            return
+
+        count = len(file_paths)
+        reply = QMessageBox.question(
+            self,
+            "Remove selected samples",
+            (
+                f"Remove {count} selected sample{'s' if count != 1 else ''}?\n\n"
+                "Their dataset tabs will also be closed."
+            ),
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+        )
+        if reply != QMessageBox.StandardButton.Yes:
+            return
+
+        removed_count = self._remove_files_in_batch(file_paths)
+
+        self.sample_info_label.setText(
+            f"Removed {removed_count} selected sample"
+            f"{'s' if removed_count != 1 else ''}"
+        )
+        self._update_batch_actions()
+
     def _find_table_row_for_file(self, file_path: str) -> int:
         for row in range(self.samples_table.rowCount()):
             item = self.samples_table.item(row, 0)
@@ -3472,6 +3670,7 @@ class ControlPanel(QFrame):
         *,
         sync_workspace: bool = True,
         announce: bool = True,
+        refresh_ui: bool = True,
     ) -> bool:
         """Remove a file from the sidebar inventory and optionally its open tabs."""
         if not file_path:
@@ -3496,30 +3695,85 @@ class ControlPanel(QFrame):
 
         removed = row >= 0 or had_tracking or had_mapping or bool(removed_entries)
         if removed:
-            self.update_ui_state()
+            if refresh_ui:
+                self.update_ui_state()
             if announce:
                 self.sample_info_label.setText(f"Removed: {self._format_file_display_name(file_path)}")
 
         return removed
 
-    def clear_all_files(self):
-        """Clear all loaded files"""
-        total_files = len(self.file_statuses)
-        if total_files > 0:
-            reply = QMessageBox.question(
-                self, "Clear All",
-                f"Remove all {total_files} files?",
-                QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No
-            )
+    def _remove_files_in_batch(self, file_paths) -> int:
+        """Remove several sidebar entries with one workspace and UI refresh."""
+        paths = list(dict.fromkeys(path for path in file_paths if path))
+        if not paths:
+            return 0
 
-            if reply == QMessageBox.StandardButton.Yes:
-                self.loaded_samples.clear()
-                self.file_mapping_states.clear()
-                self.file_statuses.clear()
-                self.samples_table.setRowCount(0)
-                self._file_list.clear_cards()
-                self.update_ui_state()
-                self.sample_info_label.setText("All files cleared")
+        host_window = self.window()
+        workspace_pre_synced = bool(
+            host_window
+            and host_window is not self
+            and (
+                hasattr(host_window, "_remove_tabs_for_files")
+                or hasattr(host_window, "_remove_tabs_for_file")
+            )
+        )
+        if workspace_pre_synced:
+            if hasattr(host_window, "_remove_tabs_for_files"):
+                host_window._remove_tabs_for_files(paths)
+            else:
+                for file_path in paths:
+                    host_window._remove_tabs_for_file(file_path)
+
+        self._file_list.set_batch_selected_paths([], emit_signal=False)
+        file_list_updates = self._file_list.updatesEnabled()
+        table_updates = self.samples_table.updatesEnabled()
+        self._file_list.setUpdatesEnabled(False)
+        self.samples_table.setUpdatesEnabled(False)
+        removed_count = 0
+        try:
+            for file_path in paths:
+                if self.remove_file_by_path(
+                    file_path,
+                    sync_workspace=not workspace_pre_synced,
+                    announce=False,
+                    refresh_ui=False,
+                ):
+                    removed_count += 1
+        finally:
+            self._file_list.setUpdatesEnabled(file_list_updates)
+            self.samples_table.setUpdatesEnabled(table_updates)
+
+        self.update_ui_state()
+        self._file_list.update()
+        self.samples_table.update()
+        return removed_count
+
+    def clear_all_files(self):
+        """Confirm and remove every sample through the workspace sync path."""
+        file_paths = list(self.file_statuses)
+        total_files = len(file_paths)
+        if total_files == 0:
+            return
+
+        reply = QMessageBox.question(
+            self,
+            "Clear all samples",
+            (
+                f"Remove all {total_files} samples?\n\n"
+                "All dataset tabs will be closed."
+            ),
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+        )
+        if reply != QMessageBox.StandardButton.Yes:
+            return
+
+        removed_count = self._remove_files_in_batch(file_paths)
+
+        self.sample_info_label.setText(
+            f"Cleared {removed_count} sample"
+            f"{'s' if removed_count != 1 else ''}"
+        )
+        self._update_batch_actions()
 
     def on_sample_selection_changed(self):
         """Handle sample selection change"""
@@ -3651,6 +3905,8 @@ class ControlPanel(QFrame):
                 percent_passing=mapping['percent_passing'],
                 file_path=file_path
             )
+            if dataset.has_errors():
+                raise ValueError(dataset.get_detailed_validation_report())
             source_mapping_state = dict(mapping_state or {})
             if source_mapping_state and not source_mapping_state.get("import_provenance"):
                 source_mapping_state["import_provenance"] = manual_mapping_provenance(source_mapping_state)

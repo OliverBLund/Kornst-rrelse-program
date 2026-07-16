@@ -78,7 +78,7 @@
 
   <div class="callout warning">
     <div class="callout-title">Percent passing is not percent retained</div>
-    <p>Processed analysis expects <strong>cumulative percent passing</strong>: the percentage of the sample finer than each particle size. Do not map percent-retained values as percent passing. If retained values are present, choose the retained role where available and verify the interpreted curve in the mapper preview.</p>
+    <p>Processed analysis expects <strong>cumulative percent passing</strong>: the percentage of the sample finer than each particle size. Retained columns are not converted automatically because cumulative retained and per-sieve retained require different calculations. Convert cumulative retained in the source with <code>passing = 100 - retained</code>, or import the original sieve weights as <strong>Raw Sieve Weighings</strong>.</p>
   </div>
 
   <h2>Choose the Correct Import</h2>

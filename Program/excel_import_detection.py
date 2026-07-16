@@ -114,6 +114,15 @@ def _curve_pair_is_plausible(rows: Rows, pairs: Sequence[Tuple[Cell, Cell]]) -> 
         return False
     if max(passing) - min(passing) < 1.0:
         return False
+    sorted_curve = sorted(zip(sizes, passing), reverse=True)
+    violations = sum(
+        1
+        for previous, current in zip(sorted_curve, sorted_curve[1:])
+        if current[1] > previous[1]
+    )
+    transitions = max(1, len(sorted_curve) - 1)
+    if violations / transitions > 0.5:
+        return False
     return True
 
 
@@ -149,6 +158,7 @@ def detect_processed_curve_candidate(
         "procent",
         "%",
     )
+    retained_keywords = ("retained", "retain", "tilbageholdt")
 
     best: Optional[Tuple[int, int, int, Tuple[Tuple[Cell, Cell], ...], int]] = None
     max_cols = _max_cols(rows)
@@ -162,6 +172,8 @@ def detect_processed_curve_candidate(
             for header_row in search_rows:
                 size_text = _header_text(rows, header_row, size_col)
                 passing_text = _header_text(rows, header_row, passing_col)
+                if _contains_any(passing_text, retained_keywords):
+                    continue
 
                 header_score = 0
                 has_strong_size_header = _contains_any(size_text, strong_size_keywords)

@@ -14,7 +14,15 @@ import pandas as pd
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 sys.path.insert(0, "Program")
 
-from PyQt6.QtWidgets import QApplication, QDialog, QPushButton, QStackedWidget, QTabWidget, QWidget
+from PyQt6.QtWidgets import (
+    QApplication,
+    QDialog,
+    QPushButton,
+    QStackedWidget,
+    QTabWidget,
+    QVBoxLayout,
+    QWidget,
+)
 
 from gui import column_mapper as column_mapper_module
 from gui import control_panel as control_panel_module
@@ -340,14 +348,19 @@ class _WelcomeRefreshHarness:
 
     def __init__(self):
         self.dataset_tabs = [object()]
-        self.control_panel = SimpleNamespace(isVisible=lambda: True, setVisible=lambda visible: setattr(self, "sidebar_visible", visible))
-        self._samples_stack = QStackedWidget()
+        self.content_stack = QStackedWidget()
+        self.home_page = QWidget()
+        self._home_layout = QVBoxLayout(self.home_page)
         self.welcome_widget = QWidget()
         self.dataset_widget = QWidget()
-        self._samples_stack.addWidget(self.welcome_widget)
-        self._samples_stack.addWidget(self.dataset_widget)
-        self._samples_stack.setCurrentIndex(0)
-        self.sidebar_visible = True
+        self._home_layout.addWidget(self.welcome_widget)
+        self.content_stack.addWidget(self.home_page)
+        self.content_stack.addWidget(self.dataset_widget)
+        self.content_stack.setCurrentIndex(1)
+        self.activated_tab = None
+        self.app_toolbar = SimpleNamespace(
+            activate_tab=lambda index: setattr(self, "activated_tab", index)
+        )
         self.signals_connected = 0
         self.show_welcome_called = False
 
@@ -362,6 +375,9 @@ class _WelcomeRefreshHarness:
 
     def _show_welcome(self):
         self.show_welcome_called = True
+
+    def _sync_welcome_preference_state(self):
+        pass
 
     def _refresh_dataset_tab_icons(self):
         self.icons_refreshed = True
@@ -890,15 +906,15 @@ class TestRemapReplacement(unittest.TestCase):
         self.assertEqual(descriptor["selection_method"], "range")
         self.assertEqual(descriptor["mapping_state"]["selected_size_range"], [[1, 0]])
 
-    def test_refresh_welcome_widget_keeps_dataset_view_visible_when_tabs_exist(self):
+    def test_refresh_welcome_widget_preserves_the_current_top_level_page(self):
         harness = _WelcomeRefreshHarness()
 
         old_welcome = harness.welcome_widget
         harness._refresh_welcome_widget(preserve_visibility=True)
         APP.processEvents()
 
-        self.assertEqual(harness._samples_stack.currentIndex(), 1)
-        self.assertTrue(harness.sidebar_visible)
+        self.assertEqual(harness.content_stack.currentIndex(), 1)
+        self.assertEqual(harness.activated_tab, 1)
         self.assertEqual(harness.signals_connected, 1)
         self.assertIsNot(harness.welcome_widget, old_welcome)
         self.assertFalse(harness.show_welcome_called)

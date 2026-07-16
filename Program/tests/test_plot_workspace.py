@@ -153,7 +153,7 @@ class TestPlotWorkspaceWiring(unittest.TestCase):
 
     def test_legend_outside_bottom_reserves_margin(self):
         loc_idx = self.workspace._legend_loc_combo.findText('Outside bottom - center')
-        layout_idx = self.workspace._legend_layout_combo.findText('Vertical (1 column)')
+        layout_idx = self.workspace._legend_layout_combo.findText('1 column')
 
         self.workspace._legend_loc_combo.setCurrentIndex(loc_idx)
         self.workspace._legend_layout_combo.setCurrentIndex(layout_idx)
@@ -168,6 +168,40 @@ class TestPlotWorkspaceWiring(unittest.TestCase):
         )
         self.assertEqual(getattr(legend, '_ncols', None), 1)
         self.assertGreaterEqual(self.workspace.plot_widget.figure.subplotpars.bottom, 0.24)
+
+    def test_shared_lines_and_markers_controls_update_individual_curve(self):
+        self.workspace.current_plot_type = 'distribution'
+        self.workspace._curve_width_spin.setValue(3.25)
+        marker_index = self.workspace._marker_mode_combo.findText('Show')
+        self.workspace._marker_mode_combo.setCurrentIndex(marker_index)
+        self.workspace.refresh_plot()
+
+        ax = self.workspace.plot_widget.current_ax
+        curve = next(
+            line
+            for line in ax.lines
+            if line.get_label() == self.workspace.dataset.sample_name
+        )
+
+        self.assertEqual(curve.get_linewidth(), 3.25)
+        self.assertEqual(curve.get_marker(), 'o')
+        self.assertEqual(
+            self.workspace._effective_style().curve_markers_visible,
+            True,
+        )
+
+    def test_lines_and_markers_section_only_shows_for_curve_plots(self):
+        section = self.workspace._style_control_sections.lines_markers_section
+
+        for plot_type in ("distribution", "combined"):
+            self.workspace.current_plot_type = plot_type
+            self.workspace._update_contextual_controls()
+            self.assertFalse(section.isHidden(), plot_type)
+
+        for plot_type in ("k-values", "histogram"):
+            self.workspace.current_plot_type = plot_type
+            self.workspace._update_contextual_controls()
+            self.assertTrue(section.isHidden(), plot_type)
 
     def test_more_plots_dropdown_uses_dedicated_toolbar_style(self):
         self.assertEqual(self.workspace._more_plots.objectName(), 'pw-more-plots-sel')
@@ -291,7 +325,9 @@ class TestPlotWorkspaceWiring(unittest.TestCase):
         self.assertTrue(self.workspace._row_zones.isHidden())
         self.assertTrue(self.workspace._row_dlines.isHidden())
         self.assertTrue(self.workspace._row_fill.isHidden())
-        self.assertTrue(self.workspace._row_markers.isHidden())
+        self.assertFalse(
+            self.workspace._style_control_sections.lines_markers_section.isHidden()
+        )
         self.assertEqual(self.workspace._lbl_ymin.text(), 'Y min (m/s)')
         self.assertEqual(self.workspace._lbl_ymax.text(), 'Y max (m/s)')
 
@@ -306,7 +342,9 @@ class TestPlotWorkspaceWiring(unittest.TestCase):
         self.assertFalse(self.workspace._row_zones.isHidden())
         self.assertFalse(self.workspace._row_dlines.isHidden())
         self.assertFalse(self.workspace._row_fill.isHidden())
-        self.assertFalse(self.workspace._row_markers.isHidden())
+        self.assertFalse(
+            self.workspace._style_control_sections.lines_markers_section.isHidden()
+        )
         self.assertEqual(self.workspace._lbl_xmin.text(), 'X min (mm)')
         self.assertEqual(self.workspace._lbl_ymax.text(), 'Y max (%)')
 

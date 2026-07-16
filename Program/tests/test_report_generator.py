@@ -8,6 +8,8 @@ import io
 import zipfile
 from unittest.mock import patch
 
+from matplotlib.figure import Figure
+
 sys.path.insert(0, 'Program')
 
 from data_loader import GrainSizeData
@@ -95,6 +97,293 @@ class TestReportGeneratorAppendices(unittest.TestCase):
         )
         self.assertIn('Grain Size Distribution Comparison', html)
         self.assertNotIn('Reliability Matrix', html)
+
+    def test_report_class_fractions_switch_to_heatmap_for_large_scopes(self):
+        cases = ((1, 'bars'), (7, 'bars'), (15, 'heatmap'), (51, 'heatmap'))
+        for count, expected_layout in cases:
+            details = [
+                {'dataset': build_dataset(f'Sample {index + 1}'), 'k_results': []}
+                for index in range(count)
+            ]
+            with self.subTest(count=count), patch(
+                'plot_export.export_comparison_spec',
+                return_value='data:image/png;base64,test',
+            ) as renderer:
+                self.generator._create_comparison_grain_size_histogram(details, None)
+
+            spec = renderer.call_args.args[0]
+            figsize = renderer.call_args.kwargs['figsize']
+            self.assertEqual(spec.histogram_layout, expected_layout)
+            self.assertEqual(spec.show_legend, expected_layout == 'bars')
+            self.assertEqual(spec.dense_report_layout, count >= 12)
+            self.assertEqual(figsize, (13, 7.4) if count >= 12 else (12, 7.0))
+
+    def test_large_grouped_scope_keeps_bars_when_only_four_groups_are_plotted(self):
+        details = []
+        for index in range(51):
+            dataset = build_dataset(f'Sample {index + 1}')
+            group_name = f'Layer {(index % 4) + 1}'
+            dataset.group_name = group_name
+            details.append({
+                'dataset': dataset,
+                'group_name': group_name,
+                'k_results': [],
+            })
+
+        with patch(
+            'plot_export.export_comparison_spec',
+            return_value='data:image/png;base64,test',
+        ) as renderer:
+            self.generator._create_comparison_grain_size_histogram(
+                details,
+                None,
+                breakdown='group',
+            )
+
+        spec = renderer.call_args.args[0]
+        self.assertEqual(spec.histogram_layout, 'bars')
+        self.assertTrue(spec.show_legend)
+        self.assertTrue(spec.dense_report_layout)
+        self.assertEqual(renderer.call_args.kwargs['figsize'], (13, 7.4))
+
+    def test_large_report_explains_the_automatic_class_fraction_heatmap(self):
+        details = [
+            {
+                'label': f'Sample {index + 1}',
+                'dataset': build_dataset(f'Sample {index + 1}'),
+                'k_results': [],
+            }
+            for index in range(15)
+        ]
+        sections = {
+            'cover_page': False,
+            'executive_summary': False,
+            'methodology': False,
+            'results': False,
+            'plots': True,
+            'interpretation': False,
+            'grain_comparison': False,
+            'k_statistics': False,
+        }
+
+        with patch(
+            'plot_export.export_comparison_spec',
+            return_value='data:image/png;base64,test',
+        ):
+            html = self.generator.generate_comparison_report(
+                [item['dataset'] for item in details],
+                sections=sections,
+                sample_details=details,
+                selected_plots={'grain_size_histogram_comparison'},
+                plot_breakdowns={'grain_size_histogram_comparison': 'dataset'},
+            )
+
+        self.assertIn('Large-batch layout:', html)
+        self.assertIn('Heatmap shown for 15 samples', html)
+        self.assertIn('color shows weight percent (0-100)', html)
+
+    def test_large_report_class_fraction_heatmap_has_one_row_per_sample(self):
+        details = [
+            {'dataset': build_dataset(f'Sample {index + 1}'), 'k_results': []}
+            for index in range(15)
+        ]
+        with patch(
+            'gui.report_plot_style.get_report_style_overrides',
+            return_value={},
+        ):
+            spec = self.generator._build_comparison_spec(
+                details,
+                None,
+                plot_type='histogram',
+                display_mode='overlay',
+                breakdown='dataset',
+            )
+        spec.histogram_layout = 'heatmap'
+        spec.show_legend = False
+
+        from gui.comparison_plot_spec import render_comparison
+
+        figure = Figure(figsize=(12, 7))
+        try:
+            render_comparison(figure, spec)
+            heatmap_ax = figure.axes[0]
+            self.assertEqual(len(figure.axes), 2)  # heatmap + quantitative colorbar
+            self.assertEqual(len(heatmap_ax.images), 1)
+            self.assertEqual(heatmap_ax.images[0].get_array().shape[0], 15)
+            self.assertIsNone(heatmap_ax.get_legend())
+            self.assertIn('heatmap, n=15', heatmap_ax.get_title())
+            self.assertEqual(
+                {label.get_fontsize() for label in heatmap_ax.get_yticklabels()},
+                {float(spec.style.tick_fontsize)},
+            )
+            self.assertEqual(
+                {label.get_rotation() for label in heatmap_ax.get_xticklabels()},
+                {30.0},
+            )
+        finally:
+            figure.clear()
+
+    def test_large_report_uses_landscape_plot_pages_and_dense_legend(self):
+        details = [
+            {
+                'label': f'Sample {index + 1}',
+                'dataset': build_dataset(f'Sample {index + 1}'),
+                'k_results': [],
+            }
+            for index in range(25)
+        ]
+        sections = {
+            'cover_page': False,
+            'executive_summary': False,
+            'methodology': False,
+            'results': False,
+            'plots': True,
+            'interpretation': False,
+            'grain_comparison': False,
+            'k_statistics': False,
+        }
+        captured = []
+
+        def fake_spec(spec, **kwargs):
+            captured.append((spec, kwargs))
+            return 'data:image/png;base64,test'
+
+        from gui.plot_styles import PRESENTATION_STYLE
+
+        with patch(
+            'gui.report_plot_style.get_report_style_overrides',
+            return_value={},
+        ), patch('plot_export.export_comparison_spec', side_effect=fake_spec):
+            html = self.generator.generate_comparison_report(
+                [item['dataset'] for item in details],
+                sections=sections,
+                sample_details=details,
+                selected_plots={'distribution_overlay'},
+                plot_breakdowns={'distribution_overlay': 'dataset'},
+                plot_style=PRESENTATION_STYLE,
+            )
+
+        spec, kwargs = captured[0]
+        self.assertTrue(spec.dense_report_layout)
+        self.assertEqual(kwargs['figsize'], (13, 7.4))
+        self.assertEqual(spec.style.title_fontsize, PRESENTATION_STYLE.title_fontsize)
+        self.assertEqual(spec.style.label_fontsize, PRESENTATION_STYLE.label_fontsize)
+        self.assertEqual(spec.style.tick_fontsize, PRESENTATION_STYLE.tick_fontsize)
+        self.assertEqual(spec.style.legend_fontsize, PRESENTATION_STYLE.legend_fontsize)
+        self.assertEqual(spec.style.curve_linewidth, PRESENTATION_STYLE.curve_linewidth)
+        self.assertEqual(spec.style.legend_loc, 'upper center')
+        self.assertEqual(spec.style.legend_bbox_to_anchor, (0.5, -0.18))
+        self.assertEqual(spec.style.legend_ncol, 0)
+        self.assertTrue(spec.automatic_report_legend_layout)
+        self.assertIn('class="comparison-plot-page landscape-plot-page"', html)
+
+    def test_large_report_preserves_explicit_customize_values(self):
+        import dataclasses
+        from gui.plot_styles import PRESENTATION_STYLE
+
+        details = [
+            {'dataset': build_dataset(f'Sample {index + 1}'), 'k_results': []}
+            for index in range(25)
+        ]
+        custom = dataclasses.replace(
+            PRESENTATION_STYLE,
+            title_fontsize=23,
+            label_fontsize=17,
+            tick_fontsize=13,
+            legend_fontsize=12,
+            legend_loc='lower center',
+            legend_bbox_to_anchor=(0.5, 1.12),
+            legend_ncol=2,
+            curve_linewidth=3.25,
+            curve_markers_visible=False,
+            curve_markersize=6.5,
+        )
+        overrides = {
+            'title_fontsize': 23,
+            'label_fontsize': 17,
+            'tick_fontsize': 13,
+            'legend_fontsize': 12,
+            'legend_loc': 'lower center',
+            'legend_bbox_to_anchor': (0.5, 1.12),
+            'legend_ncol': 2,
+            'curve_linewidth': 3.25,
+            'curve_markers_visible': False,
+            'curve_markersize': 6.5,
+        }
+
+        with patch(
+            'gui.report_plot_style.get_report_style_overrides',
+            return_value=overrides,
+        ):
+            spec = self.generator._build_comparison_spec(
+                details,
+                None,
+                plot_type='distribution',
+                breakdown='dataset',
+                plot_style=custom,
+            )
+
+        self.assertEqual(spec.style, custom)
+        self.assertFalse(spec.automatic_report_legend_layout)
+
+    def test_dense_report_legend_stays_below_the_x_axis_title(self):
+        from matplotlib.backends.backend_agg import FigureCanvasAgg
+        from gui.comparison_plot_spec import render_comparison
+        from plot_export import _apply_comparison_spec_layout
+
+        details = []
+        for index in range(25):
+            dataset = build_dataset(f'Sample {index + 1}')
+            dataset.group_name = f'Group {(index // 7) + 1}'
+            details.append({
+                'dataset': dataset,
+                'group_name': dataset.group_name,
+                'k_results': [],
+            })
+        with patch(
+            'gui.report_plot_style.get_report_style_overrides',
+            return_value={},
+        ):
+            spec = self.generator._build_comparison_spec(
+                details,
+                None,
+                plot_type='distribution',
+                breakdown='dataset',
+            )
+        figure = Figure(figsize=(13, 7.4))
+        FigureCanvasAgg(figure)
+        try:
+            render_comparison(figure, spec)
+            _apply_comparison_spec_layout(figure, spec)
+            figure.canvas.draw()
+            axes = figure.axes[0]
+            renderer = figure.canvas.get_renderer()
+            legend_bounds = axes.get_legend().get_window_extent(renderer)
+            label_bounds = axes.xaxis.label.get_window_extent(renderer)
+            self.assertLess(legend_bounds.y1, label_bounds.y0)
+        finally:
+            figure.clear()
+
+    def test_small_report_keeps_portrait_plot_page_and_original_style(self):
+        details = [
+            {'dataset': build_dataset(f'Sample {index + 1}'), 'k_results': []}
+            for index in range(7)
+        ]
+        with patch(
+            'plot_export.export_comparison_spec',
+            return_value='data:image/png;base64,test',
+        ) as renderer:
+            html = self.generator.generate_comparison_report(
+                [item['dataset'] for item in details],
+                sections={'plots': True, 'results': False, 'interpretation': False},
+                sample_details=details,
+                selected_plots={'distribution_overlay'},
+            )
+
+        spec = renderer.call_args.args[0]
+        self.assertFalse(spec.dense_report_layout)
+        self.assertIn('class="comparison-plot-page"', html)
+        self.assertNotIn('class="comparison-plot-page landscape-plot-page"', html)
 
     def test_comparison_report_renders_plots_via_shared_spec(self):
         sample_b = build_dataset('Sample B')
@@ -641,6 +930,55 @@ class TestReportGeneratorAppendices(unittest.TestCase):
 
         self.assertIn('Grain Size Analysis Report', document_xml)
         self.assertIn('Detailed Percentile Data', document_xml)
+
+    def test_docx_export_switches_large_plot_pages_to_landscape(self):
+        from docx import Document
+
+        pixel_png = (
+            'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+'
+            'A8AAQUBAScY42YAAAAASUVORK5CYII='
+        )
+        html = f'''<html><body>
+        <p>Portrait before</p>
+        <div class="comparison-plot-page landscape-plot-page">
+          <h2>Landscape plot</h2>
+          <div class="plot-container">
+            <img src="data:image/png;base64,{pixel_png}" alt="Comparison plot">
+          </div>
+        </div>
+        <p>Portrait after</p>
+        </body></html>'''
+
+        document = Document(io.BytesIO(self.generator.generate_docx_from_html(html)))
+
+        self.assertEqual(len(document.sections), 3)
+        page_shapes = [
+            (round(section.page_width.inches, 1), round(section.page_height.inches, 1))
+            for section in document.sections
+        ]
+        self.assertEqual(page_shapes, [(8.3, 11.7), (11.7, 8.3), (8.3, 11.7)])
+        self.assertAlmostEqual(document.inline_shapes[0].width.inches, 10.2, places=1)
+
+    def test_print_css_removes_portrait_body_width_from_landscape_pages(self):
+        html = self.generator.generate_grain_size_report(
+            self.dataset,
+            sections={
+                'cover_page': False,
+                'executive_summary': False,
+                'methodology': False,
+                'results': False,
+                'plots': False,
+                'raw_data': False,
+                'interpretation': False,
+                'percentiles': False,
+                'gradation': False,
+                'data_quality': False,
+            },
+        )
+
+        self.assertIn('width: auto !important;', html)
+        self.assertIn('max-width: none !important;', html)
+        self.assertIn('padding: 0 !important;', html)
 
     def test_grain_size_report_plot_uses_live_plot_context(self):
         calls = []

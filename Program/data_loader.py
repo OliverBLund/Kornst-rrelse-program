@@ -45,6 +45,17 @@ class ValidationMessage:
         }
         return icons.get(self.severity, "UNKNOWN")
 
+
+def percentage_header_role(value: object) -> Optional[str]:
+    """Return an explicit percentage meaning without guessing from numeric data."""
+    text = str(value or "").strip().casefold()
+    if any(token in text for token in ("retained", "retain", "tilbageholdt")):
+        return "retained"
+    if any(token in text for token in ("passing", "finer", "gennemfald")):
+        return "passing"
+    return None
+
+
 @dataclass
 class GrainSizeData:
     """Data class for grain size distribution data"""
@@ -102,19 +113,26 @@ class GrainSizeData:
                 if len(problem_sizes) < 3:  # Collect first few examples
                     problem_sizes.append(f"{sorted_data[i][0]:.3f}mm")
 
-        # Only flag as error if there are many violations (> 30% of data points)
-        # Some variation is normal in real-world data
+        # Small deviations can occur in real data, but a predominantly reversed
+        # curve does not satisfy the declared cumulative-passing contract.
         if non_monotonic_count > 0:
-            violation_ratio = non_monotonic_count / len(sorted_data)
+            transition_count = max(1, len(sorted_data) - 1)
+            violation_ratio = non_monotonic_count / transition_count
 
             if violation_ratio > 0.5:
-                # Majority of data is non-monotonic - might be "retained" instead of "passing"
                 self.validation_messages.append(ValidationMessage(
-                    severity=ValidationSeverity.WARNING,
-                    title="Data may be 'percent retained' instead of 'percent passing'",
-                    message=f"Found {non_monotonic_count} data points where values increase with smaller grain sizes",
-                    suggestion="Check if your data represents 'percent retained' rather than 'percent passing'. If so, convert using: % passing = 100 - % retained",
-                    impact="Analysis assumes percent passing values; retained values will produce incorrect results"
+                    severity=ValidationSeverity.ERROR,
+                    title="Values do not satisfy cumulative percent passing",
+                    message=(
+                        f"After sorting by grain size, {non_monotonic_count} of "
+                        f"{transition_count} transitions move in the opposite direction."
+                    ),
+                    suggestion=(
+                        "Confirm that the selected column is cumulative percent passing. "
+                        "Do not import per-sieve retained percentages as passing. Cumulative "
+                        "retained can be converted in the source as passing = 100 - retained."
+                    ),
+                    impact="Analysis is blocked because the curve interpretation is unreliable."
                 ))
             elif violation_ratio > 0.3:
                 # Significant violations - quality warning
@@ -812,6 +830,7 @@ class DataLoader:
             # First detect the best delimiter
             delimiter, confidence = self._detect_delimiter(file_path)
             logger.info(f"Detected delimiter '{delimiter}' with confidence {confidence:.2f} for {os.path.basename(file_path)}")
+            self._validate_processed_csv_headers(file_path, delimiter)
 
             # Try different approaches to parse the CSV with detected delimiter
             dataset = None
@@ -843,6 +862,32 @@ class DataLoader:
 
         except Exception as e:
             raise ValueError(f"Error reading CSV file {file_path}: {str(e)}")
+
+    def _validate_processed_csv_headers(self, file_path: str, delimiter: str) -> None:
+        """Reject an explicitly retained-only processed CSV before numeric parsing."""
+        passing_headers = []
+        retained_headers = []
+        with open(file_path, "r", encoding="utf-8") as file:
+            reader = csv.reader(file, delimiter=delimiter)
+            for row_index, row in enumerate(reader):
+                if row_index >= 20:
+                    break
+                for cell in row:
+                    role = percentage_header_role(cell)
+                    if role == "passing":
+                        passing_headers.append(str(cell).strip())
+                    elif role == "retained":
+                        retained_headers.append(str(cell).strip())
+
+        if retained_headers and not passing_headers:
+            header = retained_headers[0]
+            raise ValueError(
+                "Processed curve input requires cumulative percent passing. "
+                f"Found retained-data header '{header}'. Retained data is not converted "
+                "automatically because cumulative retained and per-sieve retained require "
+                "different calculations. Convert the source to cumulative percent passing "
+                "or import the original sieve weights as Raw Sieve Weighings."
+            )
 
     def _load_csv_with_metadata(self, file_path: str, delimiter: str = ',') -> GrainSizeData:
         """Load CSV with metadata section (our format)"""

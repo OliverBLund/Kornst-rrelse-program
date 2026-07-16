@@ -92,7 +92,13 @@ def render_grain_size_distribution(
 
     # Curve ───────────────────────────────────────────────────────
     effective_curve_color = curve_color or style.curve_color
-    marker = style.curve_marker if show_markers else None
+    marker_override = getattr(style, "curve_markers_visible", None)
+    if marker_override is None:
+        marker = style.curve_marker if show_markers else None
+    elif marker_override:
+        marker = style.curve_marker or "o"
+    else:
+        marker = None
     ax.semilogx(
         particle_sizes,
         percent_passing,
@@ -273,6 +279,13 @@ def render_distribution_overlay(
         ls = _linestyles[i % len(_linestyles)]
         configured_marker = _markers[i % len(_markers)] if _markers else None
         use_marker = len(dataset.particle_sizes) < 20
+        marker_override = getattr(style, "curve_markers_visible", None)
+        if marker_override is False:
+            marker = None
+        elif marker_override is True:
+            marker = configured_marker or style.curve_marker or "o"
+        else:
+            marker = configured_marker or ("o" if use_marker else None)
         ax.semilogx(
             dataset.particle_sizes,
             dataset.percent_passing,
@@ -280,7 +293,7 @@ def render_distribution_overlay(
             linestyle=ls,
             label=_labels[i],
             color=c,
-            marker=configured_marker or ("o" if use_marker else None),
+            marker=marker,
             markersize=style.curve_markersize,
             markeredgecolor="white",
             markeredgewidth=style.curve_markeredgewidth,
@@ -532,8 +545,17 @@ def render_k_distribution_function(
         n = len(values)
         probabilities = ((np.arange(1, n + 1, dtype=float) - 0.5) / n) * 100.0
         color = scope.get("color") or "#2b5797"
-        linewidth = 2.4 if scope.get("is_overall") else 1.8
+        linewidth = style.curve_linewidth + (
+            0.6 if scope.get("is_overall") else 0.0
+        )
         alpha = 0.95 if scope.get("is_overall") else 0.78
+        marker_mode = getattr(style, "curve_markers_visible", None)
+        if marker_mode is False:
+            marker = None
+        elif marker_mode is True:
+            marker = style.curve_marker or "o"
+        else:
+            marker = "o" if n <= 12 else None
 
         ax.plot(
             values,
@@ -542,8 +564,8 @@ def render_k_distribution_function(
             linestyle=scope.get("linestyle", "-"),
             linewidth=linewidth,
             alpha=alpha,
-            marker="o" if n <= 12 else None,
-            markersize=3.2,
+            marker=marker,
+            markersize=style.curve_markersize,
             label=scope.get("label", "Scope"),
         )
 
@@ -564,7 +586,7 @@ def render_k_distribution_function(
                 y_fit,
                 color="#6a6254",
                 linestyle="--",
-                linewidth=1.2,
+                linewidth=max(0.6, style.curve_linewidth * 0.65),
                 alpha=0.62,
                 label="Overall lognormal fit",
             )
@@ -1307,27 +1329,85 @@ def _apply_grid(ax: Axes, style: PlotStyle, show: bool,
                 linewidth=style.grid_linewidth * 0.5)
 
 
-def legend_column_count(style: PlotStyle, label_count: Optional[int] = None) -> int:
-    """Return the Matplotlib legend column count requested by *style*."""
+def _estimated_legend_width_points(
+    labels: Sequence[str],
+    ncol: int,
+    fontsize: float,
+) -> float:
+    """Estimate the rendered width of a column-major Matplotlib legend."""
+    rows = max(1, math.ceil(len(labels) / ncol))
+    column_widths = []
+    for column in range(ncol):
+        column_labels = labels[column * rows:(column + 1) * rows]
+        longest = max((len(str(label)) for label in column_labels), default=0)
+        column_widths.append((longest * fontsize * 0.56) + (fontsize * 3.1))
+    return sum(column_widths) + max(0, ncol - 1) * fontsize * 2.0
+
+
+def legend_column_count(
+    style: PlotStyle,
+    label_count: Optional[int] = None,
+    *,
+    labels: Optional[Sequence[str]] = None,
+    available_width_points: Optional[float] = None,
+) -> int:
+    """Resolve explicit columns or a width-aware automatic legend layout."""
     configured = int(getattr(style, "legend_ncol", 1) or 0)
-    if configured <= 0:
-        return max(1, label_count or 1)
-    if label_count:
-        return max(1, min(configured, label_count))
-    return max(1, configured)
+    resolved_labels = [str(label) for label in (labels or ())]
+    count = len(resolved_labels) if resolved_labels else max(0, label_count or 0)
+    if configured > 0:
+        return max(1, min(configured, count)) if count else max(1, configured)
+    if count <= 1:
+        return 1
+
+    side = legend_outside_side(style)
+    if side in {"left", "right"}:
+        return 1
+    max_columns = min(4 if side in {"top", "bottom"} else 2, count)
+    if not resolved_labels:
+        resolved_labels = ["Sample"] * count
+    if available_width_points is None:
+        available_width_points = 620.0 if side in {"top", "bottom"} else 480.0
+
+    for ncol in range(max_columns, 0, -1):
+        estimated = _estimated_legend_width_points(
+            resolved_labels,
+            ncol,
+            float(style.legend_fontsize),
+        )
+        if estimated <= available_width_points:
+            return ncol
+    return 1
 
 
 def build_legend_kwargs(
     style: PlotStyle,
     label_count: Optional[int] = None,
+    *,
+    labels: Optional[Sequence[str]] = None,
+    ax: Optional[Axes] = None,
 ) -> dict:
     """Build common Matplotlib legend kwargs from a PlotStyle."""
+    if labels is not None:
+        label_count = len(labels)
+    available_width_points = None
+    if ax is not None:
+        available_width_points = (
+            float(ax.figure.get_figwidth())
+            * float(ax.get_position().width)
+            * 72.0
+        )
     kwargs = dict(
         loc=style.legend_loc,
         fontsize=style.legend_fontsize,
         framealpha=style.legend_framealpha,
         edgecolor=style.legend_edgecolor,
-        ncol=legend_column_count(style, label_count),
+        ncol=legend_column_count(
+            style,
+            label_count,
+            labels=labels,
+            available_width_points=available_width_points,
+        ),
     )
     if style.legend_bbox_to_anchor is not None:
         kwargs["bbox_to_anchor"] = style.legend_bbox_to_anchor
@@ -1379,7 +1459,15 @@ def apply_legend_aware_layout(
     right = pars.right
     top = pars.top
     bottom = pars.bottom
-    vertical = legend_column_count(style) == 1
+    legends = [
+        ax.get_legend()
+        for ax in figure.axes
+        if ax.get_legend() is not None
+    ]
+    vertical = all(
+        max(1, int(getattr(legend, "_ncols", 1))) == 1
+        for legend in legends
+    )
 
     if side == "top":
         top = min(top, 0.72 if vertical else 0.80)
@@ -1464,5 +1552,5 @@ def _add_flagged_legend_handle(ax: Axes, style: PlotStyle = PROFESSIONAL_STYLE) 
 def _apply_styled_legend_with_handles(ax: Axes, style: PlotStyle,
                                       handles, labels) -> None:
     """Draw a legend with explicit handles/labels but honour style fields."""
-    kwargs = build_legend_kwargs(style, len(labels))
+    kwargs = build_legend_kwargs(style, labels=labels, ax=ax)
     ax.legend(handles, labels, **kwargs)

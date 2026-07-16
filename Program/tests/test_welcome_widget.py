@@ -9,8 +9,9 @@ import unittest
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 sys.path.insert(0, "Program")
 
+from PyQt6.QtCore import QEvent, QPoint
 from PyQt6.QtGui import QPalette
-from PyQt6.QtWidgets import QApplication, QPushButton
+from PyQt6.QtWidgets import QApplication, QLabel, QPushButton
 
 from gui.welcome_widget import WelcomeWidget
 
@@ -99,6 +100,45 @@ class TestWelcomeWidget(unittest.TestCase):
         self.assertEqual(emitted, ["excel_workbooks.html"])
         widget.deleteLater()
 
+    def test_home_separates_interactive_tutorials_from_written_guides(self):
+        widget = WelcomeWidget(recent_files=[], recent_sessions=[])
+        labels = [label.text() for label in widget.findChildren(QLabel)]
+
+        self.assertIn("Interactive Tutorials", labels)
+        self.assertIn("Written Guides", labels)
+        self.assertIn(
+            "Follow step-by-step highlights directly in the workspace.",
+            labels,
+        )
+        self.assertIn(
+            "Read reference pages for data formats, workbooks, mapping, and troubleshooting.",
+            labels,
+        )
+        widget.deleteLater()
+
+    def test_home_tutorial_buttons_emit_tutorial_ids(self):
+        widget = WelcomeWidget(recent_files=[], recent_sessions=[])
+        emitted = []
+        widget.tutorial_requested.connect(emitted.append)
+        expected = {
+            "Getting Started": "getting_started",
+            "Individual Samples": "individual",
+            "Comparison": "comparison",
+            "Reports": "reports",
+            "Export": "export",
+        }
+
+        for button_text, tutorial_id in expected.items():
+            button = next(
+                btn for btn in widget._tutorial_widgets
+                if btn.text() == button_text
+            )
+            button.click()
+            APP.processEvents()
+            self.assertEqual(emitted[-1], tutorial_id)
+
+        widget.deleteLater()
+
     def test_full_changelog_button_opens_help_topic(self):
         widget = WelcomeWidget(recent_files=[], recent_sessions=[])
         emitted = []
@@ -140,6 +180,26 @@ class TestWelcomeWidget(unittest.TestCase):
             widget._custom_tooltip_label.text(),
             load_btn.property("welcomeTooltipText"),
         )
+        widget.deleteLater()
+
+    def test_welcome_tooltip_ignores_startup_enter_and_waits_for_hover(self):
+        widget = WelcomeWidget(recent_files=[], recent_sessions=[])
+        load_btn = next(
+            btn for btn in widget.findChildren(QPushButton)
+            if btn.text() == "Processed Sieve Data"
+        )
+        text = load_btn.property("welcomeTooltipText")
+
+        widget.eventFilter(load_btn, QEvent(QEvent.Type.Enter))
+        self.assertTrue(widget._custom_tooltip_label.isHidden())
+        self.assertFalse(widget._custom_tooltip_timer.isActive())
+
+        widget._schedule_custom_tooltip(text, QPoint(20, 20))
+        self.assertTrue(widget._custom_tooltip_label.isHidden())
+        self.assertTrue(widget._custom_tooltip_timer.isActive())
+
+        widget._show_pending_custom_tooltip()
+        self.assertFalse(widget._custom_tooltip_label.isHidden())
         widget.deleteLater()
 
     def test_welcome_screen_fits_720p_without_outer_scroll(self):
@@ -184,6 +244,7 @@ class TestWelcomeWidget(unittest.TestCase):
                 ).y()
                 self.assertLessEqual(footer_bottom, widget.height() - 1)
                 self.assertFalse(widget._guides_strip.isVisible())
+                self.assertTrue(widget._tutorials_strip.isVisible())
                 self.assertLessEqual(widget._recent_scroll.maximumHeight(), 92)
                 if width <= 720:
                     self.assertFalse(widget._whats_new_section.isVisible())
@@ -211,6 +272,7 @@ class TestWelcomeWidget(unittest.TestCase):
             ).y()
             self.assertLessEqual(footer_bottom, widget.height() - 1)
             self.assertFalse(widget._guides_strip.isVisible())
+            self.assertTrue(widget._tutorials_strip.isVisible())
             self.assertFalse(widget._title_desc.isVisible())
             self.assertLessEqual(widget._title_card.sizeHint().height(), 120)
             self.assertLessEqual(widget._main_card.sizeHint().height(), 320)

@@ -28,11 +28,14 @@ _INT_FIELDS = {
     "title_fontsize", "label_fontsize", "tick_fontsize", "legend_fontsize",
     "legend_ncol",
 }
-_FLOAT_FIELDS = {"legend_framealpha"}
+_FLOAT_FIELDS = {
+    "legend_framealpha", "curve_linewidth", "curve_markersize",
+}
+_BOOL_FIELDS = {"curve_markers_visible"}
 _STR_FIELDS = {"legend_loc"}
 _TUPLE_FIELDS = {"legend_bbox_to_anchor"}  # (x, y) or None
 ALLOWED_OVERRIDE_FIELDS = (
-    _INT_FIELDS | _FLOAT_FIELDS | _STR_FIELDS | _TUPLE_FIELDS
+    _INT_FIELDS | _FLOAT_FIELDS | _BOOL_FIELDS | _STR_FIELDS | _TUPLE_FIELDS
 )
 
 _PRESET_KEY = "report_plot_style_preset"
@@ -82,6 +85,15 @@ def _coerce_override(field: str, value: Any) -> Any | None:
             return int(value)
         if field in _FLOAT_FIELDS:
             return float(value)
+        if field in _BOOL_FIELDS:
+            if isinstance(value, bool):
+                return value
+            text = str(value).strip().lower()
+            if text in {"true", "1", "yes"}:
+                return True
+            if text in {"false", "0", "no"}:
+                return False
+            return None
         if field in _STR_FIELDS:
             text = str(value).strip()
             return text or None

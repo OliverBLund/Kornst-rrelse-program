@@ -44,6 +44,7 @@ from gui.plot_context import build_plot_context_from_tab
 from qt_chrome import FramelessMainWindowMixin
 from data_loader import DataLoader, GrainSizeData, get_test_data_files
 from k_calculations import KCalculator
+from k_aggregation import build_k_result_summary
 from method_registry import normalize_method_selection
 from grain_classification import ISO14688
 from load_process_worker import run_external_load
@@ -56,6 +57,12 @@ from load_process_worker import run_external_load
 WELCOME_SCREEN_PREF_REVISION = 2
 UI_FONT_BUMP_DEFAULT = 1
 UI_FONT_BUMP_KEY = "display/font_bump"
+
+HOME_TAB = 0
+INDIVIDUAL_TAB = 1
+COMPARISON_TAB = 2
+REPORTS_TAB = 3
+EXPORT_TAB = 4
 
 
 def _normalise_ui_font_bump(value) -> int:
@@ -97,11 +104,12 @@ class _AppToolbar(QWidget):
     Global toolbar: navigation tabs (left) + log/help actions (right).
     Styled entirely via QSS properties defined in theme.build_stylesheet().
     """
-    tab_changed = pyqtSignal(int)   # emits 0=Individual, 1=Comparison, 2=Reports, 3=Export
+    tab_changed = pyqtSignal(int)
     log_clicked = pyqtSignal()
     help_clicked = pyqtSignal()
 
     _TABS = [
+        ("fa6s.house",         "Home"),
         ("fa6s.chart-area",    "Individual Samples"),
         ("fa6s.code-compare",  "Comparison"),
         ("fa6s.file-contract", "Reports"),
@@ -647,7 +655,24 @@ class MainWindow(FramelessMainWindowMixin, QMainWindow):
         )
         main_layout.addWidget(self.content_stack)
 
-        # Page 0 — Individual Samples
+        recent_files = self._load_recent_files()
+        recent_sessions = self._load_recent_sessions()
+        self.welcome_widget = WelcomeWidget(
+            recent_files=recent_files,
+            recent_sessions=recent_sessions,
+        )
+        self._connect_welcome_signals()
+
+        # Page 0 — Home
+        self.home_page = QWidget()
+        self.home_page.setObjectName("home-page")
+        self._home_layout = QVBoxLayout(self.home_page)
+        self._home_layout.setContentsMargins(0, 0, 0, 0)
+        self._home_layout.setSpacing(0)
+        self._home_layout.addWidget(self.welcome_widget)
+        self.content_stack.addWidget(self.home_page)
+
+        # Page 1 — Individual Samples
         samples_container = QWidget()
         sc_layout = QVBoxLayout(samples_container)
         sc_layout.setContentsMargins(0, 0, 0, 0)
@@ -666,39 +691,12 @@ class MainWindow(FramelessMainWindowMixin, QMainWindow):
         self._configure_dataset_tab_bar()
         # Tab styling handled by global QSS in theme.build_stylesheet()
 
-        recent_files = self._load_recent_files()
-        recent_sessions = self._load_recent_sessions()
-        self.welcome_widget = WelcomeWidget(
-            recent_files=recent_files,
-            recent_sessions=recent_sessions,
-        )
-        self._connect_welcome_signals()
-
-        # Inner stack: index 0 = welcome (full-area, no tab chrome),
-        #              index 1 = dataset_tabs_widget
-        self._samples_stack = QStackedWidget()
-        self._samples_stack_fader = StackFadeController(
-            self._samples_stack,
-            self,
-            fade_out_ms=80,
-            fade_in_ms=110,
-        )
-        self._samples_stack.addWidget(self.welcome_widget)
-        self._samples_stack.addWidget(self.dataset_tabs_widget)
-
-        settings_tmp = QSettings("GrainSizeAnalysis", "MainWindow")
-        dont_show = _effective_welcome_dont_show(settings_tmp)
-        self._samples_stack.setCurrentIndex(0 if not dont_show else 1)
-        # Sidebar is only visible when datasets are shown
-        self.control_panel.setVisible(dont_show)
-        self._sync_welcome_preference_state()
-
         self.dataset_tabs_widget.currentChanged.connect(self._on_dataset_tab_changed)
         self._refresh_dataset_tab_icons()
-        sc_layout.addWidget(self._samples_stack)
+        sc_layout.addWidget(self.dataset_tabs_widget)
         self.content_stack.addWidget(samples_container)
 
-        # Page 1 — Comparison
+        # Page 2 — Comparison
         self.comparison_tab = ComparisonTab()
         self.comparison_tab.dataset_selection_requested.connect(
             self._on_comparison_selection_requested
@@ -706,15 +704,25 @@ class MainWindow(FramelessMainWindowMixin, QMainWindow):
         self.comparison_tab.method_selection_requested.connect(self.choose_k_methods)
         self.content_stack.addWidget(self.comparison_tab)
 
-        # Page 2 — Reports
+        # Page 3 — Reports
         self.reporting_tab = ReportingTab()
         self.content_stack.addWidget(self.reporting_tab)
 
-        # Page 3 — Export
+        # Page 4 — Export
         self.export_tab = ExportTab()
         self.export_tab.jump_to_dataset_requested.connect(self._on_export_dataset_requested)
         self.export_tab.dataset_selection_requested.connect(self._on_export_selection_requested)
         self.content_stack.addWidget(self.export_tab)
+
+        settings_tmp = QSettings("GrainSizeAnalysis", "MainWindow")
+        initial_tab = (
+            INDIVIDUAL_TAB
+            if _effective_welcome_dont_show(settings_tmp)
+            else HOME_TAB
+        )
+        self.content_stack.setCurrentIndex(initial_tab)
+        self.app_toolbar.activate_tab(initial_tab)
+        self._sync_welcome_preference_state()
 
         shell_splitter = QSplitter(Qt.Orientation.Horizontal)
         shell_splitter.setObjectName("shell-splitter")
@@ -726,6 +734,7 @@ class MainWindow(FramelessMainWindowMixin, QMainWindow):
         shell_splitter.setStretchFactor(1, 1)
         shell_splitter.setSizes([max(SZ.SIDEBAR_W, 330), 1200])
         self._shell_splitter = shell_splitter
+        self.control_panel.setVisible(True)
 
         root.addWidget(shell_splitter)
 
@@ -826,31 +835,40 @@ class MainWindow(FramelessMainWindowMixin, QMainWindow):
         # View
         view_menu = QMenu("View", self)
 
+        home_action = QAction("Home", self)
+        home_action.setShortcut("Ctrl+0")
+        home_action.setIcon(icon("fa6s.house", C.TEXT_MUTED))
+        home_action.triggered.connect(lambda: self._switch_to_tab(HOME_TAB))
+        view_menu.addAction(home_action)
+        self.addAction(home_action)
+
+        view_menu.addSeparator()
+
         ind_action = QAction("Individual Samples", self)
         ind_action.setShortcut("Ctrl+1")
         ind_action.setIcon(icon("fa6s.chart-area", C.TEXT_MUTED))
-        ind_action.triggered.connect(lambda: self._switch_to_tab(0))
+        ind_action.triggered.connect(lambda: self._switch_to_tab(INDIVIDUAL_TAB))
         view_menu.addAction(ind_action)
         self.addAction(ind_action)
 
         cmp_action = QAction("Comparison", self)
         cmp_action.setShortcut("Ctrl+2")
         cmp_action.setIcon(icon("fa6s.code-compare", C.TEXT_MUTED))
-        cmp_action.triggered.connect(lambda: self._switch_to_tab(1))
+        cmp_action.triggered.connect(lambda: self._switch_to_tab(COMPARISON_TAB))
         view_menu.addAction(cmp_action)
         self.addAction(cmp_action)
 
         rep_action = QAction("Reports", self)
         rep_action.setShortcut("Ctrl+3")
         rep_action.setIcon(icon("fa6s.file-contract", C.TEXT_MUTED))
-        rep_action.triggered.connect(lambda: self._switch_to_tab(2))
+        rep_action.triggered.connect(lambda: self._switch_to_tab(REPORTS_TAB))
         view_menu.addAction(rep_action)
         self.addAction(rep_action)
 
         exp_action = QAction("Export", self)
         exp_action.setShortcut("Ctrl+4")
         exp_action.setIcon(icon("fa6s.file-export", C.TEXT_MUTED))
-        exp_action.triggered.connect(lambda: self._switch_to_tab(3))
+        exp_action.triggered.connect(lambda: self._switch_to_tab(EXPORT_TAB))
         view_menu.addAction(exp_action)
         self.addAction(exp_action)
         menu_layout.addWidget(self._make_menu_button("View", view_menu))
@@ -858,34 +876,38 @@ class MainWindow(FramelessMainWindowMixin, QMainWindow):
         # Help
         help_menu = QMenu("Help", self)
 
-        startup_guide_action = QAction("&Startup Guide", self)
+        tutorials_menu = QMenu("Tutorials", help_menu)
+        tutorials_menu.setIcon(icon("fa6s.circle-play", C.TEXT_MUTED))
+
+        startup_guide_action = QAction("Getting &Started", self)
         startup_guide_action.setIcon(icon("fa6s.route", C.TEXT_MUTED))
         startup_guide_action.triggered.connect(self.show_startup_guide)
-        help_menu.addAction(startup_guide_action)
+        tutorials_menu.addAction(startup_guide_action)
 
-        individual_guide_action = QAction("Guide &Individual Samples", self)
+        individual_guide_action = QAction("&Individual Samples", self)
         individual_guide_action.setIcon(icon("fa6s.chart-area", C.TEXT_MUTED))
         individual_guide_action.triggered.connect(self.show_individual_samples_guide)
-        help_menu.addAction(individual_guide_action)
+        tutorials_menu.addAction(individual_guide_action)
 
-        comparison_guide_action = QAction("Guide &Comparison", self)
+        comparison_guide_action = QAction("&Comparison", self)
         comparison_guide_action.setIcon(icon("fa6s.code-compare", C.TEXT_MUTED))
         comparison_guide_action.triggered.connect(self.show_comparison_guide)
-        help_menu.addAction(comparison_guide_action)
+        tutorials_menu.addAction(comparison_guide_action)
 
-        reports_guide_action = QAction("Guide &Reports", self)
+        reports_guide_action = QAction("&Reports", self)
         reports_guide_action.setIcon(icon("fa6s.file-contract", C.TEXT_MUTED))
         reports_guide_action.triggered.connect(self.show_reports_guide)
-        help_menu.addAction(reports_guide_action)
+        tutorials_menu.addAction(reports_guide_action)
 
-        export_guide_action = QAction("Guide &Export", self)
+        export_guide_action = QAction("&Export", self)
         export_guide_action.setIcon(icon("fa6s.file-export", C.TEXT_MUTED))
         export_guide_action.triggered.connect(self.show_export_guide)
-        help_menu.addAction(export_guide_action)
+        tutorials_menu.addAction(export_guide_action)
+        help_menu.addMenu(tutorials_menu)
 
         help_menu.addSeparator()
 
-        help_action = QAction("&Help Topics", self)
+        help_action = QAction("&Written Guides...", self)
         help_action.setShortcut("F1")
         help_action.setIcon(icon("fa6s.book", C.TEXT_MUTED))
         help_action.triggered.connect(self.show_help)
@@ -996,14 +1018,14 @@ class MainWindow(FramelessMainWindowMixin, QMainWindow):
         tab_bar.hide()
 
     def _show_welcome(self) -> None:
-        """Show the welcome panel (hide dataset tabs and sidebar)."""
-        self._samples_stack.setCurrentIndex(0)
-        self.control_panel.setVisible(False)
+        """Open Home without changing the current workspace or sidebar."""
+        if self.content_stack.currentIndex() != HOME_TAB:
+            self._switch_to_tab(HOME_TAB)
 
     def _hide_welcome(self) -> None:
-        """Show the dataset tabs (restore sidebar)."""
-        self._samples_stack.setCurrentIndex(1)
-        self.control_panel.setVisible(True)
+        """Open the Individual Samples workspace."""
+        if self.content_stack.currentIndex() != INDIVIDUAL_TAB:
+            self._switch_to_tab(INDIVIDUAL_TAB)
 
     def _dataset_tab_icon(self, widget: QWidget, active: bool):
         """Return the appropriate qtawesome icon for each dataset sub-tab."""
@@ -1053,18 +1075,16 @@ class MainWindow(FramelessMainWindowMixin, QMainWindow):
 
     def _post_nav_tab_switch(self, index: int) -> None:
         """Run lightweight page-entry sync after the top-level view changes."""
-        if index == 1 and len(self.dataset_tabs) >= 2:
+        if index == COMPARISON_TAB and len(self.dataset_tabs) >= 2:
             self.comparison_tab.update_comparison()
-        elif index == 2:
+        elif index == REPORTS_TAB:
             self.reporting_tab.set_dataset_tabs(self.dataset_tabs)
-        elif index == 3:
+        elif index == EXPORT_TAB:
             self._update_export_tab()
 
     def _on_sidebar_sample_selected(self, sample_name: str) -> None:
         """When a sidebar card is clicked, switch to that dataset's tab."""
         # Also make sure we're on the Individual Samples page
-        if self.content_stack.currentIndex() != 0:
-            self._switch_to_tab(0)
         self._hide_welcome()
         for i in range(self.dataset_tabs_widget.count()):
             tab = self.dataset_tabs_widget.widget(i)
@@ -1109,8 +1129,21 @@ class MainWindow(FramelessMainWindowMixin, QMainWindow):
         self.welcome_widget.open_recent_file_requested.connect(self.on_welcome_open_recent)
         self.welcome_widget.open_recent_session_requested.connect(self.on_welcome_open_session)
         self.welcome_widget.open_help_topic_requested.connect(self.on_welcome_open_help)
+        self.welcome_widget.tutorial_requested.connect(self.on_welcome_start_tutorial)
         self.welcome_widget.dont_show_again_changed.connect(self.on_welcome_dont_show_again)
         self.welcome_widget.clear_sessions_requested.connect(self.on_clear_sessions)
+
+    def on_welcome_start_tutorial(self, tutorial_id: str) -> None:
+        tutorials = {
+            "getting_started": self.show_startup_guide,
+            "individual": self.show_individual_samples_guide,
+            "comparison": self.show_comparison_guide,
+            "reports": self.show_reports_guide,
+            "export": self.show_export_guide,
+        }
+        handler = tutorials.get(tutorial_id)
+        if handler is not None:
+            handler()
 
     def on_welcome_load_files(self, data_mode: str = "processed"):
         self.control_panel.add_files(data_mode)
@@ -1129,7 +1162,6 @@ class MainWindow(FramelessMainWindowMixin, QMainWindow):
                 for file_path in demo_files:
                     self._save_recent_file(file_path)
                 self._update_welcome_recents()
-                self._switch_to_tab(0)
                 self._hide_welcome()
                 self._show_status_message("Bundled demo datasets are already open")
                 return
@@ -1226,7 +1258,6 @@ class MainWindow(FramelessMainWindowMixin, QMainWindow):
             self._upsert_recent_session(cleaned_session)
             self._update_welcome_recents()
             if skipped_count:
-                self._switch_to_tab(0)
                 self._hide_welcome()
                 self._show_status_message(
                     f"Session already open ({skipped_count} file{'s' if skipped_count != 1 else ''})"
@@ -1902,7 +1933,6 @@ class MainWindow(FramelessMainWindowMixin, QMainWindow):
         self._update_welcome_recents()
 
         if loaded or skipped_count:
-            self._switch_to_tab(0)
             self._hide_welcome()
 
         if mode == "session":
@@ -1985,26 +2015,21 @@ class MainWindow(FramelessMainWindowMixin, QMainWindow):
             checkbox.blockSignals(False)
 
     def _refresh_welcome_widget(self, preserve_visibility: bool = True):
-        current_index = self._samples_stack.currentIndex()
-        if preserve_visibility and self.dataset_tabs:
-            # Keep the dataset workspace visible even if a fade-to-tabs request is
-            # still in flight when the welcome widget gets rebuilt.
-            current_index = 1
-        sidebar_visible = self.control_panel.isVisible()
+        current_page = self.content_stack.currentIndex()
         recent_files = self._load_recent_files()
         recent_sessions = self._load_recent_sessions()
         old_widget = self.welcome_widget
-        self._samples_stack.removeWidget(self.welcome_widget)
+        self._home_layout.removeWidget(old_widget)
         self.welcome_widget = WelcomeWidget(
             recent_files=recent_files,
             recent_sessions=recent_sessions,
         )
         self._connect_welcome_signals()
-        self._samples_stack.insertWidget(0, self.welcome_widget)
+        self._home_layout.addWidget(self.welcome_widget)
         self._sync_welcome_preference_state()
         if preserve_visibility:
-            self._samples_stack.setCurrentIndex(current_index)
-            self.control_panel.setVisible(sidebar_visible)
+            self.content_stack.setCurrentIndex(current_page)
+            self.app_toolbar.activate_tab(current_page)
         else:
             self._show_welcome()
         self._refresh_dataset_tab_icons()
@@ -2205,7 +2230,7 @@ class MainWindow(FramelessMainWindowMixin, QMainWindow):
             "METHODS",
             f"{len(self.active_method_names)} / {len(self.available_method_names)}",
         )
-        self.app_toolbar.set_badge(0, n)
+        self.app_toolbar.set_badge(INDIVIDUAL_TAB, n)
 
     def add_dataset_tab(self, dataset: GrainSizeData):
         bulk_mode = self._bulk_dataset_add_depth > 0
@@ -2299,23 +2324,39 @@ class MainWindow(FramelessMainWindowMixin, QMainWindow):
 
     def _remove_tabs_for_file(self, file_path: str) -> int:
         """Remove stale error/dataset tabs for a file before adding corrected data."""
+        return self._remove_tabs_for_files([file_path])
+
+    def _remove_tabs_for_files(self, file_paths) -> int:
+        """Remove tabs for several files and synchronize dependent views once."""
+        path_set = {file_path for file_path in file_paths if file_path}
+        if not path_set:
+            return 0
+
         removed = 0
-        for i in range(self.dataset_tabs_widget.count() - 1, -1, -1):
-            widget = self.dataset_tabs_widget.widget(i)
-            tab_file_path = getattr(widget, "file_path", None)
-            dataset = getattr(widget, "dataset", None)
-            if dataset is not None:
-                tab_file_path = getattr(dataset, "file_path", tab_file_path)
+        removed_widget_ids = set()
+        updates_enabled = self.dataset_tabs_widget.updatesEnabled()
+        signals_blocked = self.dataset_tabs_widget.blockSignals(True)
+        self.dataset_tabs_widget.setUpdatesEnabled(False)
+        try:
+            for i in range(self.dataset_tabs_widget.count() - 1, -1, -1):
+                widget = self.dataset_tabs_widget.widget(i)
+                if self._tab_file_path(widget) not in path_set:
+                    continue
 
-            if tab_file_path != file_path:
-                continue
+                removed_widget_ids.add(id(widget))
+                self.dataset_tabs_widget.removeTab(i)
+                if hasattr(widget, "deleteLater"):
+                    widget.deleteLater()
+                removed += 1
+        finally:
+            self.dataset_tabs_widget.blockSignals(signals_blocked)
+            self.dataset_tabs_widget.setUpdatesEnabled(updates_enabled)
 
-            if widget in self.dataset_tabs:
-                self.dataset_tabs.remove(widget)
-            self.dataset_tabs_widget.removeTab(i)
-            if hasattr(widget, "deleteLater"):
-                widget.deleteLater()
-            removed += 1
+        if removed_widget_ids:
+            self.dataset_tabs[:] = [
+                tab for tab in self.dataset_tabs
+                if id(tab) not in removed_widget_ids
+            ]
 
         if removed:
             self._refresh_dataset_tab_icons()
@@ -2325,6 +2366,7 @@ class MainWindow(FramelessMainWindowMixin, QMainWindow):
             self._refresh_dataset_status_segments()
             if self.dataset_tabs_widget.count() == 0:
                 self._show_welcome()
+            self.dataset_tabs_widget.update()
 
         return removed
 
@@ -2490,7 +2532,7 @@ class MainWindow(FramelessMainWindowMixin, QMainWindow):
             self._show_status_message(
                 f"K values recalculated for {len(self.dataset_tabs)} dataset(s)"
             )
-            if self.content_stack.currentIndex() == 1:
+            if self.content_stack.currentIndex() == COMPARISON_TAB:
                 self.comparison_tab.update_comparison()
 
         except Exception as e:
@@ -2505,7 +2547,7 @@ class MainWindow(FramelessMainWindowMixin, QMainWindow):
             QMessageBox.information(self, "Insufficient Data",
                                     "Load at least 2 datasets to compare.")
             return
-        self._switch_to_tab(1)
+        self._switch_to_tab(COMPARISON_TAB)
         self.comparison_tab.update_comparison()
 
     # ──────────────────────────────────────────────────────────────────
@@ -2528,7 +2570,7 @@ class MainWindow(FramelessMainWindowMixin, QMainWindow):
 
     def export_current(self):
         current = self.content_stack.currentIndex()
-        if current == 0:
+        if current in (HOME_TAB, INDIVIDUAL_TAB):
             dataset_tab = self._current_dataset_tab()
             if dataset_tab is not None:
                 try:
@@ -2540,7 +2582,7 @@ class MainWindow(FramelessMainWindowMixin, QMainWindow):
 
     def export_results(self):
         current = self.content_stack.currentIndex()
-        if current == 0:
+        if current in (HOME_TAB, INDIVIDUAL_TAB):
             dataset_tab = self._current_dataset_tab()
             if dataset_tab is not None:
                 dataset_tab.export_results()
@@ -2549,7 +2591,7 @@ class MainWindow(FramelessMainWindowMixin, QMainWindow):
 
     def export_plot(self):
         current = self.content_stack.currentIndex()
-        if current == 0:
+        if current in (HOME_TAB, INDIVIDUAL_TAB):
             dataset_tab = self._current_dataset_tab()
             if dataset_tab is not None:
                 dataset_tab.plot_workspace.export_plot("png")
@@ -2564,7 +2606,9 @@ class MainWindow(FramelessMainWindowMixin, QMainWindow):
         self.open_help_dialog()
 
     def show_startup_guide(self):
-        """Open the guided startup tour proof of concept."""
+        """Open the interactive Getting Started tutorial."""
+        self._show_welcome()
+        QApplication.processEvents()
         self._start_tour_overlay(
             self._global_tour_steps(),
             reveal_sidebar=True,
@@ -2578,7 +2622,7 @@ class MainWindow(FramelessMainWindowMixin, QMainWindow):
         reveal_sidebar: bool = False,
         show_startup_checkbox: bool = True,
     ) -> None:
-        """Open a guided tour overlay with consistent cleanup."""
+        """Open an interactive tutorial overlay with consistent cleanup."""
         if self._log_overlay is not None and self._log_overlay.isVisible():
             self._log_overlay.hide()
             self.app_toolbar.set_log_active(False)
@@ -2605,7 +2649,7 @@ class MainWindow(FramelessMainWindowMixin, QMainWindow):
             tour.deleteLater()
 
     def _global_tour_steps(self) -> list[TourStep]:
-        """Return the shell-level tour used by the startup guide overlay."""
+        """Return the shell-level steps used by the Getting Started tutorial."""
         return [
             TourStep(
                 title="Start in the sidebar",
@@ -2676,12 +2720,22 @@ class MainWindow(FramelessMainWindowMixin, QMainWindow):
                 ),
             ),
             TourStep(
+                title="Home",
+                body=(
+                    "Home is the starting point for opening data, sample files, recent files, "
+                    "saved sessions, documentation, and tutorials. Returning here does not "
+                    "close datasets or reset the current workspace."
+                ),
+                target=lambda: self.app_toolbar._nav_btns[HOME_TAB],
+                tips=("The Samples sidebar remains available on Home.",),
+            ),
+            TourStep(
                 title="Individual Samples",
                 body=(
                     "Use Individual Samples for one dataset at a time: distribution plots, "
                     "histograms, method results, warnings, and detailed per-sample tables."
                 ),
-                target=lambda: self.app_toolbar._nav_btns[0],
+                target=lambda: self.app_toolbar._nav_btns[INDIVIDUAL_TAB],
                 tips=("The Samples sidebar is the dataset switcher for this workspace.",),
             ),
             TourStep(
@@ -2690,7 +2744,7 @@ class MainWindow(FramelessMainWindowMixin, QMainWindow):
                     "Use Comparison to work across datasets. This is where groups, aggregate "
                     "statistics, group-aware plots, and method inclusion choices matter most."
                 ),
-                target=lambda: self.app_toolbar._nav_btns[1],
+                target=lambda: self.app_toolbar._nav_btns[COMPARISON_TAB],
                 tips=(
                     "The plot sidebar controls visible samples and groups.",
                     "Details and Statistics summarize individual and aggregate results.",
@@ -2702,7 +2756,7 @@ class MainWindow(FramelessMainWindowMixin, QMainWindow):
                     "Use Reports for generated documents and report tables. The goal is that "
                     "reported tables use the same calculation backend as the live results."
                 ),
-                target=lambda: self.app_toolbar._nav_btns[2],
+                target=lambda: self.app_toolbar._nav_btns[REPORTS_TAB],
                 tips=("Report layout and plot parity remain part of final QA.",),
             ),
             TourStep(
@@ -2711,7 +2765,7 @@ class MainWindow(FramelessMainWindowMixin, QMainWindow):
                     "Use Export for full data dumps and visible plot/table data. This is the "
                     "place for reproducible CSV, Excel, and figure outputs."
                 ),
-                target=lambda: self.app_toolbar._nav_btns[3],
+                target=lambda: self.app_toolbar._nav_btns[EXPORT_TAB],
                 tips=("Drawer tables should export the same data they display.",),
             ),
             TourStep(
@@ -2736,18 +2790,19 @@ class MainWindow(FramelessMainWindowMixin, QMainWindow):
                 tips=("This stays visible while moving between tabs.",),
             ),
             TourStep(
-                title="Help and guides",
+                title="Tutorials and written guides",
                 body=(
-                    "The Help button opens the guide library. The startup guide is for "
-                    "orientation; detailed explanations belong in the help pages."
+                    "The Help menu separates interactive Tutorials from Written Guides. "
+                    "Use Tutorials for highlighted step-by-step orientation and Written "
+                    "Guides for detailed reference material."
                 ),
                 target=lambda: self.app_toolbar._help_btn,
-                tips=("The same overlay can later be reused for tab-specific tours.",),
+                tips=("All Tutorials are also available directly from Home.",),
             ),
         ]
 
     def show_individual_samples_guide(self):
-        """Open a guided tour for the active Individual Samples dataset."""
+        """Open the interactive tutorial for the active Individual Samples dataset."""
         dataset_tab = self._current_dataset_tab()
         if dataset_tab is None and self.dataset_tabs:
             dataset_tab = self.dataset_tabs[0]
@@ -2759,11 +2814,11 @@ class MainWindow(FramelessMainWindowMixin, QMainWindow):
             QMessageBox.information(
                 self,
                 "No Dataset Loaded",
-                "Load at least one dataset before starting the Individual Samples guide.",
+                "Load at least one dataset before starting the Individual Samples tutorial.",
             )
             return
 
-        self._switch_to_tab(0)
+        self._switch_to_tab(INDIVIDUAL_TAB)
         QApplication.processEvents()
         self._start_tour_overlay(
             self._individual_samples_tour_steps(dataset_tab),
@@ -2772,7 +2827,7 @@ class MainWindow(FramelessMainWindowMixin, QMainWindow):
 
     def _show_individual_tour_subtab(self, dataset_tab: DatasetTab, subtab_index: int) -> None:
         """Switch to a dataset subtab before a focused tour step is positioned."""
-        self._switch_to_tab(0)
+        self._switch_to_tab(INDIVIDUAL_TAB)
         tab_index = self.dataset_tabs_widget.indexOf(dataset_tab)
         if tab_index >= 0:
             self.dataset_tabs_widget.setCurrentIndex(tab_index)
@@ -2819,7 +2874,7 @@ class MainWindow(FramelessMainWindowMixin, QMainWindow):
             TourStep(
                 title="Individual Samples workspace",
                 body=(
-                    "This workspace follows one loaded dataset at a time. The guide will "
+                    "This workspace follows one loaded dataset at a time. The tutorial will "
                     "switch through Plot, Results, and Statistics so the full per-sample "
                     "workflow is visible in one pass."
                 ),
@@ -2944,7 +2999,8 @@ class MainWindow(FramelessMainWindowMixin, QMainWindow):
                 title="Results: summary cards & export",
                 body=(
                     "The cards across the top summarize the sample: geometric and arithmetic "
-                    "K means (m/d, from the included OK methods), the included-method count, "
+                    "K means (m/s primary and m/d secondary, from the included OK methods), "
+                    "the included-method count, "
                     "D50, and the temperature used. The Export and Copy buttons send the "
                     "table to a file or the clipboard. These per-sample values are what feed "
                     "the Comparison, Reports and Export views."
@@ -3065,15 +3121,15 @@ class MainWindow(FramelessMainWindowMixin, QMainWindow):
         ]
 
     def show_comparison_guide(self):
-        """Open a guided tour for the Comparison tab."""
+        """Open the interactive tutorial for the Comparison tab."""
         if len(self.dataset_tabs) < 2:
             QMessageBox.information(
                 self,
                 "Need Two Samples",
-                "Load at least two datasets before starting the Comparison guide.",
+                "Load at least two datasets before starting the Comparison tutorial.",
             )
             return
-        self._switch_to_tab(1)
+        self._switch_to_tab(COMPARISON_TAB)
         QApplication.processEvents()
         self._start_tour_overlay(
             self._comparison_tour_steps(),
@@ -3082,7 +3138,7 @@ class MainWindow(FramelessMainWindowMixin, QMainWindow):
 
     def _show_comparison_subtab(self, index: int) -> None:
         """Switch to the Comparison tab and a given subtab before a tour step."""
-        self._switch_to_tab(1)
+        self._switch_to_tab(COMPARISON_TAB)
         tabs = getattr(self.comparison_tab, "_tabs", None)
         if tabs is not None and 0 <= index < tabs.count():
             tabs.setCurrentIndex(index)
@@ -3122,7 +3178,7 @@ class MainWindow(FramelessMainWindowMixin, QMainWindow):
                 body=(
                     "The subtabs give three angles on the same selection: Plot (a visual "
                     "overlay of the curves or K bars), Details (cross-sample data tables), "
-                    "and Statistics (aggregated K across scopes and methods). The guide "
+                    "and Statistics (aggregated K across scopes and methods). The tutorial "
                     "walks each in turn."
                 ),
                 target=lambda: self._first_tour_target(
@@ -3243,8 +3299,8 @@ class MainWindow(FramelessMainWindowMixin, QMainWindow):
 
 
     def show_reports_guide(self):
-        """Open a guided tour for the Reports tab."""
-        self._switch_to_tab(2)
+        """Open the interactive tutorial for the Reports tab."""
+        self._switch_to_tab(REPORTS_TAB)
         QApplication.processEvents()
         self._start_tour_overlay(
             self._reports_tour_steps(),
@@ -3252,8 +3308,8 @@ class MainWindow(FramelessMainWindowMixin, QMainWindow):
         )
 
     def show_export_guide(self):
-        """Open a guided tour for the Export tab."""
-        self._switch_to_tab(3)
+        """Open the interactive tutorial for the Export tab."""
+        self._switch_to_tab(EXPORT_TAB)
         QApplication.processEvents()
         self._start_tour_overlay(
             self._export_tour_steps(),
@@ -3283,7 +3339,7 @@ class MainWindow(FramelessMainWindowMixin, QMainWindow):
         target: Callable[[], QWidget | None] | None = None,
     ) -> None:
         """Switch to Reports, open the relevant accordion, and reveal a target."""
-        self._switch_to_tab(2)
+        self._switch_to_tab(REPORTS_TAB)
         tab = self.reporting_tab
         sections = {
             "_acc_type": getattr(tab, "_acc_type", None),
@@ -3309,7 +3365,7 @@ class MainWindow(FramelessMainWindowMixin, QMainWindow):
         target: Callable[[], QWidget | None] | None = None,
     ) -> None:
         """Switch to Export and put the inspector in the state a tour step needs."""
-        self._switch_to_tab(3)
+        self._switch_to_tab(EXPORT_TAB)
         tab = self.export_tab
 
         inspector_tabs = getattr(tab, "export_inspector_tabs", None)
@@ -3374,7 +3430,7 @@ class MainWindow(FramelessMainWindowMixin, QMainWindow):
                     "tables, figures, project metadata, and a controlled preview."
                 ),
                 target=lambda: self._first_tour_target(
-                    self.app_toolbar._nav_btns[2],
+                    self.app_toolbar._nav_btns[REPORTS_TAB],
                     self.reporting_tab,
                 ),
                 tips=(
@@ -3598,7 +3654,7 @@ class MainWindow(FramelessMainWindowMixin, QMainWindow):
                     "rather than a formatted narrative report."
                 ),
                 target=lambda: self._first_tour_target(
-                    self.app_toolbar._nav_btns[3],
+                    self.app_toolbar._nav_btns[EXPORT_TAB],
                     self.export_tab,
                 ),
                 tips=(
@@ -3923,15 +3979,11 @@ class MainWindow(FramelessMainWindowMixin, QMainWindow):
         # Update K̄ segment with current tab's result
         if results:
             try:
-                vals = [
-                    result.k_value
-                    for result in results
-                    if getattr(result, "k_value", None) is not None and result.k_value > 0
-                ]
-                if vals:
-                    import math
-                    gmean = math.exp(sum(math.log(v) for v in vals) / len(vals))
-                    self.rich_status_bar.set_segment("K\u0304", f"{gmean:.2f} m/d")
+                summary = build_k_result_summary(results)
+                if summary.geometric_mean_m_s is not None:
+                    self.rich_status_bar.set_segment(
+                        "K\u0304", f"{summary.geometric_mean_m_s:.2e} m/s"
+                    )
             except Exception:
                 pass
 

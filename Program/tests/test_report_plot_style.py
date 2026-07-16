@@ -11,6 +11,7 @@ from PyQt6.QtCore import QSettings
 from PyQt6.QtWidgets import QApplication
 
 import gui.report_plot_style as rps
+from gui.report_style_controls import _custom_overrides_for_preset
 
 APP = QApplication.instance() or QApplication([])
 
@@ -45,6 +46,9 @@ class TestReportPlotStyle(unittest.TestCase):
             "legend_loc": "upper left",
             "legend_bbox_to_anchor": [1.02, 1.0],  # JSON list → tuple on resolve
             "legend_ncol": 2,
+            "curve_linewidth": 3.25,
+            "curve_markers_visible": False,
+            "curve_markersize": 6.5,
         })
         rps._reset_cache_for_tests()
         style = rps.resolve_report_style()
@@ -52,6 +56,9 @@ class TestReportPlotStyle(unittest.TestCase):
         self.assertEqual(style.legend_loc, "upper left")
         self.assertEqual(style.legend_bbox_to_anchor, (1.02, 1.0))
         self.assertEqual(style.legend_ncol, 2)
+        self.assertEqual(style.curve_linewidth, 3.25)
+        self.assertFalse(style.curve_markers_visible)
+        self.assertEqual(style.curve_markersize, 6.5)
 
     def test_unknown_override_fields_are_dropped(self):
         rps.set_report_style_overrides({"not_a_field": 5, "title_fontsize": 18})
@@ -67,8 +74,112 @@ class TestReportPlotStyle(unittest.TestCase):
         rps._reset_cache_for_tests()
         self.assertEqual(rps.resolve_report_style().title_fontsize, base)
 
+    def test_customize_persists_only_values_different_from_preset(self):
+        from gui.plot_styles import PROFESSIONAL_STYLE
+
+        rps.set_report_style_preset('Professional')
+        chosen = {
+            'title_fontsize': PROFESSIONAL_STYLE.title_fontsize + 3,
+            'tick_fontsize': PROFESSIONAL_STYLE.tick_fontsize,
+            'legend_loc': PROFESSIONAL_STYLE.legend_loc,
+            'legend_bbox_to_anchor': PROFESSIONAL_STYLE.legend_bbox_to_anchor,
+        }
+
+        self.assertEqual(
+            _custom_overrides_for_preset(chosen),
+            {'title_fontsize': PROFESSIONAL_STYLE.title_fontsize + 3},
+        )
+
     def test_palette_defaults_to_categorical(self):
         self.assertEqual(rps.get_report_palette(), "Categorical")
+
+    def test_marker_preset_behavior_does_not_create_an_override(self):
+        from gui.plot_styles import PROFESSIONAL_STYLE
+
+        rps.set_report_style_preset("Professional")
+        chosen = {
+            "curve_linewidth": PROFESSIONAL_STYLE.curve_linewidth,
+            "curve_markersize": PROFESSIONAL_STYLE.curve_markersize,
+            "curve_markers_visible": None,
+        }
+
+        self.assertEqual(_custom_overrides_for_preset(chosen), {})
+
+    def test_line_and_marker_overrides_apply_without_settings_reload(self):
+        rps.set_report_style_preset("Professional")
+        rps.set_report_style_overrides({
+            "curve_linewidth": 3.25,
+            "curve_markers_visible": False,
+            "curve_markersize": 6.5,
+        })
+
+        style = rps.resolve_report_style()
+
+        self.assertEqual(style.curve_linewidth, 3.25)
+        self.assertFalse(style.curve_markers_visible)
+        self.assertEqual(style.curve_markersize, 6.5)
+
+    def test_customize_dialog_uses_shared_accordion_sections(self):
+        from unittest.mock import patch
+        from PyQt6.QtWidgets import QDialog
+        from gui.collapsible_section import CollapsibleSection
+        from gui.report_style_controls import open_report_style_dialog
+
+        captured = {}
+
+        def capture_dialog(dialog):
+            captured["dialog"] = dialog
+            return 0
+
+        with patch.object(QDialog, "exec", capture_dialog):
+            self.assertFalse(open_report_style_dialog())
+
+        sections = captured["dialog"].findChildren(CollapsibleSection)
+        titles = [section._title.text() for section in sections]
+        self.assertEqual(titles, ["Typography", "Lines & Markers", "Legend"])
+        self.assertFalse(sections[0].is_expanded())
+        self.assertTrue(sections[1].is_expanded())
+        self.assertFalse(sections[2].is_expanded())
+
+    def test_explicit_marker_visibility_controls_single_and_overlay_curves(self):
+        import dataclasses
+        from types import SimpleNamespace
+        from matplotlib.figure import Figure
+        from gui.plot_renderers import (
+            render_distribution_overlay,
+            render_grain_size_distribution,
+        )
+        from gui.plot_styles import PROFESSIONAL_STYLE
+
+        dataset = SimpleNamespace(
+            sample_name="Sample",
+            particle_sizes=[0.1, 0.2, 0.5],
+            percent_passing=[10.0, 50.0, 100.0],
+        )
+        hidden = dataclasses.replace(
+            PROFESSIONAL_STYLE,
+            curve_markers_visible=False,
+        )
+        shown = dataclasses.replace(
+            PROFESSIONAL_STYLE,
+            curve_marker="",
+            curve_markers_visible=True,
+        )
+
+        single_ax = Figure().subplots()
+        render_grain_size_distribution(
+            single_ax,
+            dataset.particle_sizes,
+            dataset.percent_passing,
+            sample_name=dataset.sample_name,
+            style=shown,
+            show_markers=False,
+        )
+        self.assertEqual(single_ax.lines[0].get_marker(), "o")
+
+        overlay_ax = Figure().subplots()
+        render_distribution_overlay(overlay_ax, [dataset], style=hidden)
+        self.assertEqual(overlay_ax.lines[0].get_marker(), "None")
 
     def test_palette_persists_and_resolves_colors(self):
         from gui.plot_constants import DATASET_COLORS

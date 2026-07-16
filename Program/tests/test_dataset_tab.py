@@ -181,9 +181,23 @@ class TestDatasetTabResultsTable(unittest.TestCase):
 
         self.assertFalse(self.tab.res_bar.isHidden())
         self.assertFalse(hasattr(self.tab, "_mean_summary_bar"))
-        self.assertEqual(self.tab._stat_k_geo_md.text(), "17.28")
-        self.assertEqual(self.tab._stat_k_arith_md.text(), "21.60")
+        self.assertEqual(self.tab._stat_k_geo_ms.text(), "2.00e-04")
+        self.assertEqual(
+            self.tab._stat_k_geo_ms._sub_label.text(),
+            "m/s · 17.28 m/d · OK methods",
+        )
+        self.assertEqual(self.tab._stat_k_arith_ms.text(), "2.50e-04")
+        self.assertEqual(
+            self.tab._stat_k_arith_ms._sub_label.text(),
+            "m/s · 21.60 m/d · OK methods",
+        )
         self.assertEqual(self.tab._stat_valid.text(), "2 / 3")
+
+        headers = [
+            self.tab.results_table.horizontalHeaderItem(column).text()
+            for column in range(self.tab.results_table.columnCount())
+        ]
+        self.assertEqual(headers[2:5], ["K (m/s)", "K (m/d)", "K (cm/s)"])
 
     def test_active_methods_filter_public_results_without_dropping_full_cache(self):
         self.tab.set_active_methods(["Sauerbrei", "Hazen"], refresh=False)

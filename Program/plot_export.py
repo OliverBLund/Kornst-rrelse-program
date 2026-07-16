@@ -43,6 +43,7 @@ render_k_scope_boxplot         = _renderers.render_k_scope_boxplot
 render_applicability_heatmap   = _renderers.render_applicability_heatmap
 render_reliability_matrix      = _renderers.render_reliability_matrix
 apply_legend_aware_layout      = _renderers.apply_legend_aware_layout
+legend_outside_side            = _renderers.legend_outside_side
 render_comparison              = _cmp_spec.render_comparison
 apply_axis_limits_from_context = _plot_ctx.apply_axis_limits_from_context
 grain_size_renderer_kwargs_from_context = _plot_ctx.grain_size_renderer_kwargs_from_context
@@ -69,7 +70,43 @@ def _new_fig(figsize) -> Figure:
 
 
 def _apply_comparison_spec_layout(fig: Figure, spec) -> None:
-    apply_legend_aware_layout(fig, spec.style)
+    dense_layout = getattr(spec, "dense_report_layout", False)
+    automatic_legend = getattr(spec, "automatic_report_legend_layout", False)
+    legends = [ax.get_legend() for ax in fig.axes if ax.get_legend() is not None]
+    custom_bottom_legend = (
+        dense_layout
+        and bool(legends)
+        and legend_outside_side(spec.style) == "bottom"
+    )
+    if dense_layout and (automatic_legend or custom_bottom_legend):
+        if legends:
+            row_counts = []
+            for legend in legends:
+                label_count = len(legend.get_texts())
+                column_count = max(1, int(getattr(legend, "_ncols", 1)))
+                row_counts.append((label_count + column_count - 1) // column_count)
+            rows = max(row_counts, default=1)
+            bottom = min(0.52, 0.18 + rows * 0.0275)
+            if automatic_legend:
+                legend_anchor_y = -0.16 if rows <= 2 else -0.22
+                for legend in legends:
+                    legend.set_bbox_to_anchor(
+                        (0.5, legend_anchor_y),
+                        transform=legend.axes.transAxes,
+                    )
+            fig.subplots_adjust(
+                left=0.07,
+                right=0.98,
+                top=0.92,
+                bottom=bottom,
+            )
+            return
+        fig.tight_layout(pad=0.8)
+        return
+    if legends:
+        apply_legend_aware_layout(fig, spec.style)
+        return
+    fig.tight_layout(pad=0.9)
 
 
 def _new_fig_ax(figsize):

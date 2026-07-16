@@ -32,6 +32,7 @@ from .collapsible_section import CollapsibleSection
 from .sidebar_controls import (
     LEGEND_LOCATIONS as _LEGEND_LOCATIONS,
     LEGEND_LAYOUTS as _LEGEND_LAYOUTS,
+    PlotStyleControlSections,
     make_axis_row, make_color_row, make_combo_row, make_dspin_row,
     make_spin_row, make_toggle_row, set_swatch_color,
 )
@@ -748,9 +749,6 @@ class PlotWorkspace(QWidget):
             f"border-bottom: 1px solid rgba(212,196,168,0.4); background: rgba(0,0,0,0.02);")
         self._sect_display.add_widget(self._row_fill_labels)
 
-        self._row_markers, self._sw_markers = self._toggle_row("Markers on curve", False)
-        self._sect_display.add_widget(self._row_markers)
-
         self._row_k_labels, self._sw_k_labels = self._toggle_row("K value labels", True)
         self._sect_display.add_widget(self._row_k_labels)
 
@@ -773,70 +771,48 @@ class PlotWorkspace(QWidget):
         lay.addWidget(self._sect_curve_color)
 
         # ── Legend & Typography ──
-        self._sect_advanced = CollapsibleSection(
-            "Legend & Typography", "fa6s.text-height",
-            CollapsibleSection.AMBER, expanded=False,
+        initial_style = get_style(self._style_sel.currentText())
+        self._style_control_sections = PlotStyleControlSections(
+            initial_style,
+            include_reset=True,
         )
+        self._style_control_sections.style_changed.connect(
+            lambda changes: self._update_style_fields(**changes)
+        )
+        self._style_control_sections.reset_requested.connect(
+            self._on_reset_custom_style
+        )
+        self._sect_advanced = self._style_control_sections
 
-        self._row_legend_loc, self._legend_loc_combo = self._combo_row(
-            "Legend position", [label for _, _, label in _LEGEND_LOCATIONS])
-        self._legend_loc_combo.currentIndexChanged.connect(
-            self._on_legend_location_changed)
-        self._sect_advanced.add_widget(self._row_legend_loc)
-
-        self._row_legend_layout, self._legend_layout_combo = self._combo_row(
-            "Legend layout", [label for _, label in _LEGEND_LAYOUTS])
-        self._legend_layout_combo.currentIndexChanged.connect(
-            self._on_legend_layout_changed)
-        self._sect_advanced.add_widget(self._row_legend_layout)
-
-        self._row_legend_alpha, self._legend_alpha_spin = self._dspin_row(
-            "Legend opacity", 0.0, 1.0, 0.05, 2)
-        self._legend_alpha_spin.valueChanged.connect(
-            lambda v: self._update_style_field("legend_framealpha", float(v)))
-        self._sect_advanced.add_widget(self._row_legend_alpha)
-
-        self._row_title_size, self._title_size_spin = self._spin_row(
-            "Title size", 6, 36)
-        self._title_size_spin.valueChanged.connect(
-            lambda v: self._update_style_field("title_fontsize", int(v)))
-        self._sect_advanced.add_widget(self._row_title_size)
-
-        self._row_label_size, self._label_size_spin = self._spin_row(
-            "Axis label size", 6, 36)
-        self._label_size_spin.valueChanged.connect(
-            lambda v: self._update_style_field("label_fontsize", int(v)))
-        self._sect_advanced.add_widget(self._row_label_size)
-
-        self._row_tick_size, self._tick_size_spin = self._spin_row(
-            "Tick size", 5, 24)
-        self._tick_size_spin.valueChanged.connect(
-            lambda v: self._update_style_field("tick_fontsize", int(v)))
-        self._sect_advanced.add_widget(self._row_tick_size)
-
-        self._row_legend_size, self._legend_size_spin = self._spin_row(
-            "Legend size", 5, 24)
-        self._legend_size_spin.valueChanged.connect(
-            lambda v: self._update_style_field("legend_fontsize", int(v)))
-        self._sect_advanced.add_widget(self._row_legend_size)
+        self._row_legend_loc = self._style_control_sections.row_legend_loc
+        self._legend_loc_combo = self._style_control_sections.legend_loc_combo
+        self._row_legend_layout = self._style_control_sections.row_legend_layout
+        self._legend_layout_combo = self._style_control_sections.legend_layout_combo
+        self._row_legend_alpha = self._style_control_sections.row_legend_alpha
+        self._legend_alpha_spin = self._style_control_sections.legend_alpha_spin
+        self._row_title_size = self._style_control_sections.row_title_size
+        self._title_size_spin = self._style_control_sections.title_size_spin
+        self._row_label_size = self._style_control_sections.row_label_size
+        self._label_size_spin = self._style_control_sections.label_size_spin
+        self._row_tick_size = self._style_control_sections.row_tick_size
+        self._tick_size_spin = self._style_control_sections.tick_size_spin
+        self._row_legend_size = self._style_control_sections.row_legend_size
+        self._legend_size_spin = self._style_control_sections.legend_size_spin
+        self._row_curve_width = self._style_control_sections.row_curve_width
+        self._curve_width_spin = self._style_control_sections.curve_width_spin
+        self._row_marker_mode = self._style_control_sections.row_marker_mode
+        self._marker_mode_combo = self._style_control_sections.marker_mode_combo
+        self._row_marker_size = self._style_control_sections.row_marker_size
+        self._marker_size_spin = self._style_control_sections.marker_size_spin
 
         self._row_k_label_size, self._k_label_size_spin = self._spin_row(
             "K value label size", 5, 14)
         self._k_label_size_spin.setValue(self.k_value_label_fontsize)
         self._k_label_size_spin.valueChanged.connect(self._on_k_label_size_changed)
-        self._sect_advanced.add_widget(self._row_k_label_size)
-
-        reset_row = QWidget()
-        reset_lay = QHBoxLayout(reset_row)
-        reset_lay.setContentsMargins(10, 6, 10, 6)
-        self._style_reset_btn = QPushButton("Reset to preset")
-        self._style_reset_btn.setProperty("pw-btn", True)
-        self._style_reset_btn.setEnabled(False)
-        self._style_reset_btn.setToolTip(
-            "Discard legend/typography overrides and revert to the selected preset")
-        self._style_reset_btn.clicked.connect(self._on_reset_custom_style)
-        reset_lay.addWidget(self._style_reset_btn)
-        self._sect_advanced.add_widget(reset_row)
+        self._style_control_sections.typography_section.add_widget(
+            self._row_k_label_size
+        )
+        self._style_reset_btn = self._style_control_sections.reset_button
         lay.addWidget(self._sect_advanced)
 
         # Seed advanced widgets with the initial preset's values.
@@ -1113,6 +1089,10 @@ class PlotWorkspace(QWidget):
 
     def _sync_advanced_style_widgets(self, style: PlotStyle) -> None:
         """Push preset values into the advanced-style widgets without firing signals."""
+        shared = getattr(self, "_style_control_sections", None)
+        if shared is not None:
+            shared.sync_style(style)
+            return
         widgets = [
             getattr(self, '_legend_loc_combo', None),
             getattr(self, '_legend_layout_combo', None),
@@ -1187,7 +1167,6 @@ class PlotWorkspace(QWidget):
         self.show_dlines = self._sw_dlines.isChecked()
         self.fill_curve = self._sw_fill.isChecked()
         self.fill_zone_labels = self._sw_fill_labels.isChecked()
-        self.show_markers = self._sw_markers.isChecked()
         self.show_k_value_labels = self._sw_k_labels.isChecked()
         self.log_k_y_scale = self._sw_k_log.isChecked()
 
@@ -1259,7 +1238,7 @@ class PlotWorkspace(QWidget):
         supports_zones = plot_type in {"distribution", "combined"}
         supports_dlines = plot_type in {"distribution", "combined"}
         supports_fill = plot_type in {"distribution", "combined"}
-        supports_markers = plot_type in {"distribution", "combined"}
+        supports_curve_style = plot_type in {"distribution", "combined"}
 
         # Toolbar checks
         self._chk_zones.setHidden(not supports_zones)
@@ -1289,10 +1268,12 @@ class PlotWorkspace(QWidget):
         self._set_context_visibility(self._row_dlines, supports_dlines)
         self._set_context_visibility(self._row_fill, supports_fill)
         self._set_context_visibility(self._row_fill_labels, supports_fill)
-        self._set_context_visibility(self._row_markers, supports_markers)
         self._set_context_visibility(self._row_k_labels, supports_k_units)
         self._set_context_visibility(self._row_k_log, supports_k_units)
         self._set_context_visibility(self._row_k_label_size, supports_k_units)
+        self._style_control_sections.set_lines_markers_visible(
+            supports_curve_style
+        )
 
         # Sample colour applies to the curve/series (distribution + combined);
         # histograms use classification-zone bar colours, K plots use bar colours.
@@ -1310,7 +1291,6 @@ class PlotWorkspace(QWidget):
                 self._row_dlines,
                 self._row_fill,
                 self._row_fill_labels,
-                self._row_markers,
                 self._row_k_labels,
                 self._row_k_log,
             )

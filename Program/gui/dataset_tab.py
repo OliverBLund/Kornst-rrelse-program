@@ -315,8 +315,12 @@ class DatasetTab(QWidget):
         bar_layout.setContentsMargins(0, 0, 0, 0)
         bar_layout.setSpacing(0)
 
-        self._stat_k_geo_md = self._make_stat_cell(bar_layout, "—", "K geo. mean",   C.OLIVE, sub="m/d · OK methods")
-        self._stat_k_arith_md = self._make_stat_cell(bar_layout, "—", "K arith. mean", C.K_BLUE, sub="m/d · OK methods")
+        self._stat_k_geo_ms = self._make_stat_cell(
+            bar_layout, "—", "K geo. mean", C.OLIVE, sub="m/s · m/d secondary · OK methods"
+        )
+        self._stat_k_arith_ms = self._make_stat_cell(
+            bar_layout, "—", "K arith. mean", C.K_BLUE, sub="m/s · m/d secondary · OK methods"
+        )
         self._stat_valid  = self._make_stat_cell(bar_layout, "—", "Included methods", C.TEXT)
         self._stat_d50    = self._make_stat_cell(bar_layout, "—", "D₅₀",             C.TEXT)
         self._stat_temp   = self._make_stat_cell(bar_layout, f"{self.temperature:.1f} °C", "Temperature", C.TEXT)
@@ -374,7 +378,7 @@ class DatasetTab(QWidget):
 
         self.results_table = QTableWidget(0, 6)
         self.results_table.setHorizontalHeaderLabels(
-            ["Method", "Category", "K (cm/s)", "K (m/s)", "K (m/d)", "Status"]
+            ["Method", "Category", "K (m/s)", "K (m/d)", "K (cm/s)", "Status"]
         )
         self.results_table.setSortingEnabled(True)
         self.results_table.setAlternatingRowColors(False)
@@ -476,6 +480,7 @@ class DatasetTab(QWidget):
                 f"font-family: '{F.MONO}'; font-size: {F.SZ_XS}pt; color: {C.TEXT_MUTED}; border: none;"
             )
             vbox.addWidget(sub_lbl)
+            val_lbl._sub_label = sub_lbl
 
         parent_layout.addWidget(cell)
         return val_lbl
@@ -855,7 +860,7 @@ class DatasetTab(QWidget):
         """Copy results table to clipboard as tab-separated text."""
         if not self.current_results:
             return
-        rows = ["Method\tCategory\tK (cm/s)\tK (m/s)\tK (m/d)\tStatus"]
+        rows = ["Method\tCategory\tK (m/s)\tK (m/d)\tK (cm/s)\tStatus"]
         for result in self.current_results:
             meta = _METHOD_META.get(result.method_name, {})
             cat = meta.get("category", "—")
@@ -866,7 +871,7 @@ class DatasetTab(QWidget):
                 k_m_d = f"{result.k_value * 86400:.1f}"
             else:
                 k_cm_s = k_m_s = k_m_d = "N/A"
-            rows.append(f"{result.method_name}\t{cat}\t{k_cm_s}\t{k_m_s}\t{k_m_d}\t{status}")
+            rows.append(f"{result.method_name}\t{cat}\t{k_m_s}\t{k_m_d}\t{k_cm_s}\t{status}")
         QApplication.clipboard().setText("\n".join(rows))
 
     # NOTE: Grain analysis panels (percentiles, gradation, special diameters, environmental params)
@@ -1109,7 +1114,11 @@ class DatasetTab(QWidget):
                     k_cm_s = k_m_s * 100.0
                     k_m_d = k_m_s * 86400.0
 
-                    for col, val, fmt in [(2, k_cm_s, f"{k_cm_s:.3e}"), (3, k_m_s, f"{k_m_s:.2e}"), (4, k_m_d, f"{k_m_d:.1f}")]:
+                    for col, val, fmt in [
+                        (2, k_m_s, f"{k_m_s:.2e}"),
+                        (3, k_m_d, f"{k_m_d:.1f}"),
+                        (4, k_cm_s, f"{k_cm_s:.3e}"),
+                    ]:
                         item = QTableWidgetItem(fmt)
                         item.setTextAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
                         item.setData(Qt.ItemDataRole.UserRole, val)
@@ -1183,14 +1192,24 @@ class DatasetTab(QWidget):
         valid_count = summary.included_count
 
         if summary.geometric_mean_m_s is not None:
-            self._stat_k_geo_md.setText(f"{summary.geometric_mean_m_s * 86400.0:.2f}")
+            value = summary.geometric_mean_m_s
+            self._stat_k_geo_ms.setText(f"{value:.2e}")
+            self._stat_k_geo_ms._sub_label.setText(
+                f"m/s · {value * 86400.0:.2f} m/d · OK methods"
+            )
         else:
-            self._stat_k_geo_md.setText("—")
+            self._stat_k_geo_ms.setText("—")
+            self._stat_k_geo_ms._sub_label.setText("m/s · m/d secondary · OK methods")
 
         if summary.arithmetic_mean_m_s is not None:
-            self._stat_k_arith_md.setText(f"{summary.arithmetic_mean_m_s * 86400.0:.2f}")
+            value = summary.arithmetic_mean_m_s
+            self._stat_k_arith_ms.setText(f"{value:.2e}")
+            self._stat_k_arith_ms._sub_label.setText(
+                f"m/s · {value * 86400.0:.2f} m/d · OK methods"
+            )
         else:
-            self._stat_k_arith_md.setText("—")
+            self._stat_k_arith_ms.setText("—")
+            self._stat_k_arith_ms._sub_label.setText("m/s · m/d secondary · OK methods")
 
         # Methods valid
         self._stat_valid.setText(f"{valid_count} / {total}")

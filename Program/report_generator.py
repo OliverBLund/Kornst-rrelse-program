@@ -64,6 +64,9 @@ from report_model import (
 
 
 DOCX_AVAILABLE = importlib.util.find_spec("docx") is not None
+REPORT_CLASS_FRACTION_HEATMAP_MIN_UNITS = 12
+REPORT_LARGE_BATCH_MIN_SAMPLES = 12
+REPORT_LANDSCAPE_FIGSIZE = (13, 7.4)
 
 
 class ReportCancelled(Exception):
@@ -133,8 +136,18 @@ class ReportGenerator:
                 margin: 20mm 20mm 25mm 20mm;
             }
 
+            @page comparison-landscape {
+                size: A4 landscape;
+                margin: 14mm 16mm 18mm 16mm;
+            }
+
             @media print {
-                body { margin: 0; padding: 0; max-width: none; }
+                body {
+                    width: auto !important;
+                    max-width: none !important;
+                    margin: 0 !important;
+                    padding: 0 !important;
+                }
                 .page-break { page-break-before: always; }
                 .no-break   { page-break-inside: avoid; }
                 h1, h2, h3  { page-break-after: avoid; }
@@ -144,6 +157,31 @@ class ReportGenerator:
                 tr          { page-break-inside: avoid; break-inside: avoid; }
                 .page-header { display: flex !important; }
                 .report-top-bar { display: none; }
+                .plot-container {
+                    margin: 10px 0 !important;
+                    padding: 8px !important;
+                }
+                .landscape-plot-page {
+                    page: comparison-landscape;
+                    break-before: page;
+                    break-after: page;
+                    width: auto;
+                    margin: 0;
+                    padding: 0;
+                }
+                .landscape-plot-page h2 {
+                    margin-top: 0;
+                    font-size: 12pt;
+                }
+                .landscape-plot-page .plot-container img {
+                    width: 100%;
+                    max-height: 150mm;
+                    object-fit: contain;
+                }
+                .footer {
+                    margin-top: 0 !important;
+                    padding-top: 6px !important;
+                }
             }
 
             body {
@@ -410,6 +448,8 @@ class ReportGenerator:
             }
 
             .plot-container img { max-width: 100%; height: auto; }
+
+            .comparison-plot-page { break-inside: avoid; }
 
             .figure-caption {
                 font-size: 9pt;
@@ -1047,7 +1087,8 @@ class ReportGenerator:
         paragraph.alignment = ctx["WD_ALIGN_PARAGRAPH"].CENTER
         run = paragraph.add_run()
         alt_text = (node.attrs.get("alt", "") or "").lower()
-        width = ctx["Inches"](2.0 if "logo" in alt_text else 6.0)
+        image_width = 2.0 if "logo" in alt_text else (10.2 if ctx.get("landscape") else 6.0)
+        width = ctx["Inches"](image_width)
         run.add_picture(io.BytesIO(image_bytes), width=width)
 
     def _render_docx_node(self, container, node: _HtmlNode,
@@ -1187,6 +1228,7 @@ class ReportGenerator:
             raise RuntimeError("python-docx is not installed.")
 
         from docx import Document
+        from docx.enum.section import WD_ORIENT, WD_SECTION
         from docx.enum.table import WD_TABLE_ALIGNMENT
         from docx.enum.text import WD_ALIGN_PARAGRAPH
         from docx.oxml import parse_xml
@@ -1194,11 +1236,16 @@ class ReportGenerator:
         from docx.shared import Inches, Mm, Pt, RGBColor
 
         document = Document()
-        section = document.sections[0]
-        section.top_margin = Mm(20)
-        section.right_margin = Mm(20)
-        section.bottom_margin = Mm(20)
-        section.left_margin = Mm(20)
+        def configure_section(section, *, landscape: bool) -> None:
+            section.orientation = WD_ORIENT.LANDSCAPE if landscape else WD_ORIENT.PORTRAIT
+            section.page_width = Mm(297 if landscape else 210)
+            section.page_height = Mm(210 if landscape else 297)
+            section.top_margin = Mm(14 if landscape else 20)
+            section.right_margin = Mm(16 if landscape else 20)
+            section.bottom_margin = Mm(18 if landscape else 20)
+            section.left_margin = Mm(16 if landscape else 20)
+
+        configure_section(document.sections[0], landscape=False)
 
         normal_style = document.styles["Normal"]
         normal_style.font.name = "Calibri"
@@ -1219,10 +1266,37 @@ class ReportGenerator:
             "nsdecls": nsdecls,
             "externalized_table_ids": set(externalized_table_ids or ()),
             "externalized_table_titles": dict(externalized_table_titles or {}),
+            "landscape": False,
         }
         self._apply_docx_header_footer(document, dict(metadata or {}), brand, brand_rgb, ctx)
         state = {"started_content": False}
+        landscape_active = False
+        landscape_page_started = False
         for child in self._child_nodes(body):
+            classes = self._node_classes(child)
+            if "report-top-bar" in classes or "footer" in classes:
+                continue
+            wants_landscape = "landscape-plot-page" in classes
+            if wants_landscape:
+                if not landscape_active:
+                    section = document.add_section(WD_SECTION.NEW_PAGE)
+                    configure_section(section, landscape=True)
+                    landscape_active = True
+                    landscape_page_started = False
+                elif landscape_page_started:
+                    document.add_page_break()
+                ctx["landscape"] = True
+                self._render_docx_node(document, child, ctx, brand_rgb, state)
+                landscape_page_started = True
+                continue
+            if landscape_active and "page-break" in classes:
+                continue
+            if landscape_active:
+                section = document.add_section(WD_SECTION.NEW_PAGE)
+                configure_section(section, landscape=False)
+                landscape_active = False
+                landscape_page_started = False
+                ctx["landscape"] = False
             self._render_docx_node(document, child, ctx, brand_rgb, state)
 
         buffer = io.BytesIO()
@@ -1593,6 +1667,31 @@ class ReportGenerator:
             k_results, style=self._global_report_style()
         )
 
+    @staticmethod
+    def _comparison_report_style(plot_style, sample_count: int):
+        from gui.plot_styles import PROFESSIONAL_STYLE
+        from gui.report_plot_style import get_report_style_overrides
+
+        resolved_style = plot_style or PROFESSIONAL_STYLE
+        if sample_count < REPORT_LARGE_BATCH_MIN_SAMPLES:
+            return resolved_style, False
+        overrides = get_report_style_overrides()
+        updates = {}
+        automatic_position = not (
+            {"legend_loc", "legend_bbox_to_anchor"} & set(overrides)
+        )
+        if automatic_position:
+            updates.update(
+                legend_loc="upper center",
+                legend_bbox_to_anchor=(0.5, -0.18),
+            )
+        if "legend_ncol" not in overrides:
+            updates["legend_ncol"] = 0
+        if updates:
+            import dataclasses
+            resolved_style = dataclasses.replace(resolved_style, **updates)
+        return resolved_style, automatic_position
+
     def _build_comparison_spec(self, sample_details, comparison_snapshot, *,
                                plot_type: str, display_mode: str = "overlay",
                                breakdown: Optional[str] = None,
@@ -1622,7 +1721,11 @@ class ReportGenerator:
             )
             for item in sample_details
         }
-        return build_comparison_spec(
+        dense_layout = len(datasets) >= REPORT_LARGE_BATCH_MIN_SAMPLES
+        resolved_style, automatic_legend_layout = self._comparison_report_style(
+            plot_style, len(datasets)
+        )
+        spec = build_comparison_spec(
             datasets,
             results_by_name,
             comparison_snapshot=comparison_snapshot,
@@ -1630,7 +1733,7 @@ class ReportGenerator:
             current_plot_type=plot_type,
             display_mode=display_mode,
             breakdown=breakdown,
-            style=plot_style or PROFESSIONAL_STYLE,
+            style=resolved_style,
             display_unit=REPORT_EXPORT_PLOT_K_UNIT,
             classification_scheme=self._scheme,
             # Dataset/group colours follow the global report palette so every
@@ -1641,6 +1744,9 @@ class ReportGenerator:
             palette_name=get_report_palette(),
             group_palette_authoritative=get_report_palette() != CATEGORICAL_PALETTE,
         )
+        spec.dense_report_layout = dense_layout
+        spec.automatic_report_legend_layout = automatic_legend_layout
+        return spec
 
     def _create_comparison_grain_size_plot(self, sample_details, comparison_snapshot,
                                            breakdown: Optional[str] = None,
@@ -1650,18 +1756,76 @@ class ReportGenerator:
             sample_details, comparison_snapshot,
             plot_type="distribution", breakdown=breakdown, plot_style=plot_style,
         )
-        return _get_plot_export().export_comparison_spec(spec)
+        return _get_plot_export().export_comparison_spec(
+            spec,
+            figsize=REPORT_LANDSCAPE_FIGSIZE if spec.dense_report_layout else (12, 7),
+        )
 
-    def _create_comparison_grain_size_histogram(self, sample_details, comparison_snapshot,
-                                                breakdown: Optional[str] = None,
-                                                plot_style=None) -> str:
-        """Grain-size class histogram comparison, matching the Comparison tab."""
+    def _build_report_class_fraction_spec(
+        self,
+        sample_details,
+        comparison_snapshot,
+        *,
+        breakdown: Optional[str] = None,
+        plot_style=None,
+    ):
+        """Resolve the report layout from the number of plotted units."""
         spec = self._build_comparison_spec(
             sample_details, comparison_snapshot,
             plot_type="histogram", display_mode="overlay",
             breakdown=breakdown, plot_style=plot_style,
         )
-        return _get_plot_export().export_comparison_spec(spec)
+        from gui.comparison_plot_spec import histogram_units
+
+        unit_count = len(histogram_units(spec))
+        use_heatmap = unit_count >= REPORT_CLASS_FRACTION_HEATMAP_MIN_UNITS
+        spec.histogram_layout = "heatmap" if use_heatmap else "bars"
+        if use_heatmap:
+            spec.show_legend = False
+        return spec, unit_count
+
+    def _class_fraction_layout_note(
+        self,
+        sample_details,
+        comparison_snapshot,
+        *,
+        breakdown: Optional[str] = None,
+        plot_style=None,
+    ) -> str:
+        """Explain an automatic heatmap switch in the report preview/output."""
+        spec, unit_count = self._build_report_class_fraction_spec(
+            sample_details,
+            comparison_snapshot,
+            breakdown=breakdown,
+            plot_style=plot_style,
+        )
+        if spec.histogram_layout != "heatmap":
+            return ""
+        scope = "groups" if spec.use_group_breakdown else "samples"
+        return (
+            f"Large-batch layout: Heatmap shown for {unit_count} {scope}; "
+            f"rows are {scope}, and color shows weight percent (0-100)."
+        )
+
+    def _create_comparison_grain_size_histogram(self, sample_details, comparison_snapshot,
+                                                breakdown: Optional[str] = None,
+                                                plot_style=None) -> str:
+        """Render class fractions with an A4-friendly large-scope layout."""
+        spec, unit_count = self._build_report_class_fraction_spec(
+            sample_details,
+            comparison_snapshot,
+            breakdown=breakdown,
+            plot_style=plot_style,
+        )
+        use_heatmap = spec.histogram_layout == "heatmap"
+        figure_height = 7.4 if spec.dense_report_layout else (
+            min(10.5, max(7.0, 2.8 + unit_count * 0.15))
+            if use_heatmap else 7.0
+        )
+        return _get_plot_export().export_comparison_spec(
+            spec,
+            figsize=(13 if spec.dense_report_layout else 12, figure_height),
+        )
 
     def _create_comparison_k_value_bar(self, sample_details, comparison_snapshot,
                                        breakdown: Optional[str] = None,
@@ -1673,7 +1837,10 @@ class ReportGenerator:
         )
         if not spec.k_results_dict:
             return ""
-        return _get_plot_export().export_comparison_spec(spec)
+        return _get_plot_export().export_comparison_spec(
+            spec,
+            figsize=REPORT_LANDSCAPE_FIGSIZE if spec.dense_report_layout else (12, 7),
+        )
 
     def _create_per_sample_plots_section(self, sample_details, *,
                                          include_grain: bool, include_histogram: bool, include_kbar: bool,
@@ -1764,7 +1931,10 @@ class ReportGenerator:
             sample_details, comparison_snapshot,
             plot_type="k-distribution", breakdown=breakdown, plot_style=plot_style,
         )
-        return _get_plot_export().export_comparison_spec(spec)
+        return _get_plot_export().export_comparison_spec(
+            spec,
+            figsize=REPORT_LANDSCAPE_FIGSIZE if spec.dense_report_layout else (12, 7),
+        )
 
     def _create_k_value_boxplot(self, k_results_dict: Dict[str, List[KCalculationResult]]) -> str:
         """Create box plots for K-value comparison across samples."""
@@ -1790,7 +1960,13 @@ class ReportGenerator:
             if grouped
             else "Hydraulic Conductivity Distribution by Dataset"
         )
-        kwargs = {"style": plot_style} if plot_style is not None else {}
+        sample_count = comparison_snapshot.dataset_count
+        style, _automatic_legend = self._comparison_report_style(
+            plot_style, sample_count
+        )
+        kwargs = {"style": style}
+        if sample_count >= REPORT_LARGE_BATCH_MIN_SAMPLES:
+            kwargs["figsize"] = REPORT_LANDSCAPE_FIGSIZE
         return _get_plot_export().export_k_scope_boxplot(
             series,
             colors=self._k_scope_plot_colors(comparison_snapshot, series),
@@ -1803,10 +1979,14 @@ class ReportGenerator:
         """Create method reliability matrix for comparison report."""
         if not k_results_dict:
             return ""
-        pe = _get_plot_export()
-        if plot_style is not None:
-            return pe.export_reliability_matrix(k_results_dict, style=plot_style)
-        return pe.export_reliability_matrix(k_results_dict)
+        sample_count = len(k_results_dict)
+        style, _automatic_legend = self._comparison_report_style(
+            plot_style, sample_count
+        )
+        kwargs = {"style": style}
+        if sample_count >= REPORT_LARGE_BATCH_MIN_SAMPLES:
+            kwargs["figsize"] = REPORT_LANDSCAPE_FIGSIZE
+        return _get_plot_export().export_reliability_matrix(k_results_dict, **kwargs)
 
     def _format_metadata_section(self, metadata: Dict[str, str]) -> str:
         """Format project metadata section with modern grid layout"""
@@ -2806,10 +2986,10 @@ class ReportGenerator:
 
             _advance("Rendering comparison plots")
 
-            def _plot_variants(create_fn, key):
+            def _plot_variants(create_fn, key, note_fn=None):
                 """Render a breakdown-capable plot, expanding "both" to two images.
 
-                Returns a list of ``(caption_suffix, data_uri)``. A "both"
+                Returns ``(caption_suffix, data_uri, note)`` entries. A "both"
                 breakdown emits the per-group and per-dataset variants as two
                 entries; any other value yields a single entry.
                 """
@@ -2825,15 +3005,31 @@ class ReportGenerator:
                 for suffix, bd in wanted:
                     uri = create_fn(bd)
                     if uri:
-                        variants.append((suffix, uri))
+                        note = note_fn(bd) if note_fn is not None else ""
+                        variants.append((suffix, uri, note))
                 return variants
+
+            large_batch_layout = len(sample_details) >= REPORT_LARGE_BATCH_MIN_SAMPLES
 
             def _plot_block(title, alt, variants, page_break='auto'):
                 block = ""
-                for suffix, uri in variants:
+                for variant in variants:
+                    suffix, uri = variant[:2]
+                    note = variant[2] if len(variant) > 2 else ""
+                    note_html = (
+                        f'<p class="figure-caption">{self._esc(note)}</p>'
+                        if note
+                        else ""
+                    )
+                    classes = "comparison-plot-page"
+                    effective_break = page_break
+                    if large_batch_layout:
+                        classes += " landscape-plot-page"
+                        effective_break = "always"
                     block += f"""
-                <div style="page-break-before: {page_break};">
+                <div class="{classes}" style="page-break-before: {effective_break};">
                 <h2>{title}{suffix}</h2>
+                {note_html}
                 <div class="plot-container">
                     <img src="{uri}" alt="{alt}" style="max-width: 100%; height: auto;">
                 </div>
@@ -2850,12 +3046,18 @@ class ReportGenerator:
                     'distribution_overlay'),
             )
             html += _plot_block(
-                "Grain-size Class Histogram", "Grain-size Class Histogram",
+                "Grain-size Class Fractions", "Grain-size Class Fractions",
                 _plot_variants(
                     lambda bd: self._create_comparison_grain_size_histogram(
                         sample_details, comparison_snapshot,
                         breakdown=bd, plot_style=plot_style),
-                    'grain_size_histogram_comparison'),
+                    'grain_size_histogram_comparison',
+                    note_fn=lambda bd: self._class_fraction_layout_note(
+                        sample_details,
+                        comparison_snapshot,
+                        breakdown=bd,
+                        plot_style=plot_style,
+                    )),
             )
             html += _plot_block(
                 "Hydraulic Conductivity by Method", "K-Value Comparison",

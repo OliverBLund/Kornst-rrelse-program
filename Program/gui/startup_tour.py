@@ -38,7 +38,7 @@ class TourStep:
     body: str
     target: TargetResolver
     tips: tuple[str, ...] = field(default_factory=tuple)
-    kicker: str = "Startup guide"
+    kicker: str = "Getting Started Tutorial"
     before_step: StepCallback | None = None
 
 
@@ -190,7 +190,7 @@ class StartupTourOverlay(QWidget):
 
         top_row = QHBoxLayout()
         top_row.setContentsMargins(0, 0, 0, 0)
-        self._kicker_lbl = QLabel("Startup guide")
+        self._kicker_lbl = QLabel("Getting Started Tutorial")
         self._kicker_lbl.setStyleSheet(
             f"color: {C.TEXT_MUTED}; font-family: '{F.MONO}'; "
             f"font-size: {F.SZ_XS}pt; font-weight: 700; letter-spacing: 1px;"

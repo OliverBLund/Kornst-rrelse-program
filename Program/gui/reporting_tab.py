@@ -820,6 +820,9 @@ class ReportingTab(QWidget):
         self._excel_appendix_check.setStyleSheet(
             f'color: {C.TEXT}; font-size: {F.SZ_SM}pt;'
         )
+        self._excel_appendix_check.toggled.connect(
+            self._refresh_preview_for_excel_appendix
+        )
         excel_lay.addWidget(self._excel_appendix_status)
         excel_lay.addWidget(self._excel_appendix_check)
         self._excel_appendix_panel.setVisible(False)
@@ -2314,9 +2317,26 @@ class ReportingTab(QWidget):
             )
             if not analysis.excel_recommended:
                 self._excel_appendix_check.setChecked(False)
-        self._set_preview_html(self._inject_preview_css(report_html))
+        self._refresh_preview_for_excel_appendix()
         self.btn_refresh.setEnabled(True)
         self._update_preview_action_buttons()
+
+    def _preview_report_html(self) -> str:
+        """Apply output-dependent table externalization to the live preview."""
+        html = self.current_report_html
+        if not html or not self._excel_appendix_requested():
+            return html
+        large_tables = self._large_table_titles_for_appendix(html)
+        if not large_tables:
+            return html
+        return self.report_generator.externalize_report_tables(html, large_tables)
+
+    def _refresh_preview_for_excel_appendix(self, _checked: bool = False) -> None:
+        if not self.current_report_html or not hasattr(self, "web_view"):
+            return
+        self._set_preview_html(
+            self._inject_preview_css(self._preview_report_html())
+        )
 
     def _clear_report_output(self, message: Optional[str] = None) -> None:
         self.current_report_html = ""
@@ -3011,6 +3031,36 @@ class ReportingTab(QWidget):
     }
     .report-top-bar {
         margin: 0 -20mm 40px -20mm !important;
+    }
+    .landscape-plot-page {
+        width: 297mm;
+        min-height: 210mm;
+        max-width: none !important;
+        margin: 32px 0 32px -63.5mm !important;
+        padding: 14mm 16mm 18mm 16mm !important;
+        background: white !important;
+        box-shadow: 0 4px 28px rgba(0,0,0,0.22), 0 1.5px 6px rgba(0,0,0,0.10);
+        box-sizing: border-box !important;
+        position: relative;
+        z-index: 1;
+    }
+    .landscape-plot-page::before,
+    .landscape-plot-page::after {
+        content: "";
+        position: absolute;
+        left: 0;
+        width: 100%;
+        height: 32px;
+        background: #c8c4be;
+        pointer-events: none;
+    }
+    .landscape-plot-page::before { top: -32px; }
+    .landscape-plot-page::after { bottom: -32px; }
+    .landscape-plot-page h2 { margin-top: 0 !important; }
+    .landscape-plot-page .plot-container img {
+        width: 100%;
+        max-height: 150mm;
+        object-fit: contain;
     }
 }
 </style>"""

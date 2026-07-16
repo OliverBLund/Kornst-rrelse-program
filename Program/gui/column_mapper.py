@@ -554,8 +554,7 @@ class ColumnMapperDialog(FramelessDialogBase):
 
         for color, label_text in [
             ("#6884ab", "Particle size"),
-            (C.OLIVE, "Percent passing"),
-            ("#9a6322", "Percent retained"),
+            (C.OLIVE, "Cumulative percent passing"),
             ("#a88452", "Header row"),
         ]:
             dot = QLabel()
@@ -654,7 +653,10 @@ class ColumnMapperDialog(FramelessDialogBase):
         # Create combo boxes for mapping
         self.size_combo = QComboBox()
         self.passing_combo = QComboBox()
-        self.retained_combo = QComboBox()
+        # Kept as a hidden compatibility field so old mapping-state dictionaries
+        # can be opened and rejected with a clear message.
+        self.retained_combo = QComboBox(self.mapping_group)
+        self.retained_combo.hide()
 
         # Store style strings for validation updates
         self.required_empty_style = "border: 1px solid rgba(192,56,40,.45); background-color: rgba(192,56,40,.05);"
@@ -683,8 +685,7 @@ class ColumnMapperDialog(FramelessDialogBase):
         self.validate_required_fields()
 
         mapping_form.addRow("Particle Size (mm): *", self.size_combo)
-        mapping_form.addRow("Percent Passing (%): *", self.passing_combo)
-        mapping_form.addRow("Percent Retained (%) - Optional:", self.retained_combo)
+        mapping_form.addRow("Cumulative Percent Passing (0-100): *", self.passing_combo)
 
         # Add header row selector for Excel files
         if os.path.splitext(self.file_path)[1].lower() in ['.xlsx', '.xls']:
@@ -696,13 +697,13 @@ class ColumnMapperDialog(FramelessDialogBase):
 
         # Compact guidance; detailed behavior is handled by validation and preview highlights.
         help_text = QLabel(
-            "Required: particle size and percent passing. Percent retained is optional."
+            "Processed data must provide cumulative percent passing."
         )
         help_text.setWordWrap(True)
         help_text.setStyleSheet("color: #666; font-style: italic; margin: 10px;")
         mapping_form.addRow(help_text)
         help_text.setText(
-            "Percent retained is optional and unused while passing values are mapped."
+            "Retained values are not converted here. Convert the source first, or import original weights as Raw Sieve Weighings."
         )
         help_text.setStyleSheet(f"color: {C.TEXT_MUTED}; font-size: {F.SZ_SM}pt; margin: 4px 6px 2px 6px;")
 
@@ -1154,11 +1155,8 @@ class ColumnMapperDialog(FramelessDialogBase):
             passing_mapped = (
                 getattr(self, "passing_combo", None) is not None and self.passing_combo.currentIndex() > 0
             )
-            retained_mapped = (
-                getattr(self, "retained_combo", None) is not None and self.retained_combo.currentIndex() > 0
-            )
             required_total = 2
-            mapped_count = int(size_mapped) + int(passing_mapped or retained_mapped)
+            mapped_count = int(size_mapped) + int(passing_mapped)
 
         if mapped_count >= required_total:
             self._file_mapping_status_label.setText(f"{required_total} required mapped")
@@ -1233,7 +1231,6 @@ class ColumnMapperDialog(FramelessDialogBase):
             combos = [
                 (getattr(self, 'size_combo', None), "size"),
                 (getattr(self, 'passing_combo', None), "passing"),
-                (getattr(self, 'retained_combo', None), "retained"),
             ]
         else:
             combos = []
@@ -1260,7 +1257,7 @@ class ColumnMapperDialog(FramelessDialogBase):
             return set()
         if self.raw_sieve_mode and (passing_col is None or retained_col is None):
             return set()
-        if not self.raw_sieve_mode and passing_col is None and retained_col is None:
+        if not self.raw_sieve_mode and passing_col is None:
             return set()
 
         def _numeric_at(row: int, col: Optional[int]) -> bool:
@@ -1278,7 +1275,7 @@ class ColumnMapperDialog(FramelessDialogBase):
             if self.raw_sieve_mode:
                 if _numeric_at(row, retained_col) and _numeric_at(row, passing_col):
                     used_rows.add(row)
-            elif _numeric_at(row, passing_col) or _numeric_at(row, retained_col):
+            elif _numeric_at(row, passing_col):
                 used_rows.add(row)
         return used_rows
 
@@ -1475,13 +1472,13 @@ class ColumnMapperDialog(FramelessDialogBase):
                 else:
                     combo.setStyleSheet(f"QComboBox {{ {self.required_empty_style} padding: 5px; border-radius: 3px; }}")
         else:
-            # Calculated mode: sieve size + percent passing (or retained)
+            # Processed mode: sieve size + cumulative percent passing.
             if self.size_combo.currentIndex() > 0:
                 self.size_combo.setStyleSheet(f"QComboBox {{ {self.required_filled_style} padding: 5px; border-radius: 3px; }}")
             else:
                 self.size_combo.setStyleSheet(f"QComboBox {{ {self.required_empty_style} padding: 5px; border-radius: 3px; }}")
 
-            if self.passing_combo.currentIndex() > 0 or self.retained_combo.currentIndex() > 0:
+            if self.passing_combo.currentIndex() > 0:
                 self.passing_combo.setStyleSheet(f"QComboBox {{ {self.required_filled_style} padding: 5px; border-radius: 3px; }}")
             else:
                 self.passing_combo.setStyleSheet(f"QComboBox {{ {self.required_empty_style} padding: 5px; border-radius: 3px; }}")
@@ -1585,7 +1582,7 @@ class ColumnMapperDialog(FramelessDialogBase):
 
         size_keywords = ['size', 'diameter', 'grain', 'particle', 'sieve', 'mesh', 'mm', 'd mm', 'd mmm']
         passing_keywords = ['passing', 'pass', 'finer', 'cumulative', 'procentages', 'percentages']
-        retained_keywords = ['retained', 'retain', 'on curve']
+        retained_keywords = ['retained', 'retain', 'tilbageholdt']
 
         # Track what we've found to prioritize properly
         size_found = False
@@ -1593,6 +1590,8 @@ class ColumnMapperDialog(FramelessDialogBase):
 
         for i, header in enumerate(self.headers):
             header_lower = header.lower()
+            if any(keyword in header_lower for keyword in retained_keywords):
+                continue
 
             # Check for size column (highest priority)
             if any(keyword in header_lower for keyword in size_keywords) and not size_found:
@@ -1603,10 +1602,6 @@ class ColumnMapperDialog(FramelessDialogBase):
             elif any(keyword in header_lower for keyword in passing_keywords) and not passing_found:
                 self.passing_combo.setCurrentIndex(i + 1)
                 passing_found = True
-
-            # Check for retained column (only if no passing column found)
-            elif any(keyword in header_lower for keyword in retained_keywords) and not passing_found:
-                self.retained_combo.setCurrentIndex(i + 1)
 
     def _auto_detect_raw_sieve_columns(self):
         """Try to automatically detect the three raw sieve weighing columns."""
@@ -1716,12 +1711,13 @@ class ColumnMapperDialog(FramelessDialogBase):
         if size_idx < 0:
             raise ValueError("Please select a Particle Size column (required)")
 
-        if passing_idx < 0 and retained_idx < 0:
-            raise ValueError("Please select a Percent Passing column (or Percent Retained if you don't have Passing data)")
-
-        # Prefer passing over retained if both are selected
-        if passing_idx >= 0 and retained_idx >= 0:
-            retained_idx = -1  # Ignore retained if both are selected
+        if passing_idx < 0:
+            if retained_idx >= 0:
+                raise ValueError(
+                    "Retained-column mappings are no longer converted automatically. "
+                    "Select a cumulative percent-passing column."
+                )
+            raise ValueError("Please select a Cumulative Percent Passing column (required)")
 
         particle_sizes = []
         percent_passing = []
@@ -1734,7 +1730,7 @@ class ColumnMapperDialog(FramelessDialogBase):
         data_rows = rows[header_row_idx + 1:] if len(rows) > header_row_idx + 1 else rows
 
         for row in data_rows:
-            if len(row) <= max(size_idx, passing_idx, retained_idx):
+            if len(row) <= max(size_idx, passing_idx):
                 continue
 
             try:
@@ -1745,18 +1741,10 @@ class ColumnMapperDialog(FramelessDialogBase):
                 size = float(size_str)
 
                 # Extract percentage
-                passing = None
-                if passing_idx >= 0:
-                    passing_str = row[passing_idx].strip()
-                    if not passing_str or not self.is_numeric(passing_str):
-                        continue
-                    passing = float(passing_str)
-                elif retained_idx >= 0:
-                    retained_str = row[retained_idx].strip()
-                    if not retained_str or not self.is_numeric(retained_str):
-                        continue
-                    retained = float(retained_str)
-                    passing = 100.0 - retained  # Convert retained to passing
+                passing_str = row[passing_idx].strip()
+                if not passing_str or not self.is_numeric(passing_str):
+                    continue
+                passing = float(passing_str)
 
                 if passing is not None:
                     particle_sizes.append(size)
@@ -1939,7 +1927,6 @@ class ColumnMapperDialog(FramelessDialogBase):
         combo_map = {
             'size': self.size_combo,
             'passing': self.passing_combo,
-            'retained': self.retained_combo,
             'raw_size': self.raw_size_combo,
             'empty_sieve': self.empty_sieve_combo,
             'sieve_sample': self.sieve_sample_combo,
@@ -1948,6 +1935,7 @@ class ColumnMapperDialog(FramelessDialogBase):
             index = combo_indices.get(key)
             if isinstance(index, int) and 0 <= index < combo.count():
                 combo.setCurrentIndex(index)
+        self.retained_combo.setCurrentIndex(0)
 
         if self.cell_range_mode and not self.raw_sieve_mode:
             self.selected_size_range = [tuple(pos) for pos in state.get('selected_size_range', [])]

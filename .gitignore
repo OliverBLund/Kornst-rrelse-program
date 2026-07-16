@@ -217,4 +217,6 @@ __marimo__/
 # Data files
 *.csv
 *.xls
+!test_data/validation_examples/
+!test_data/validation_examples/*.csv
 Grainsize K/HydrogeoSieveXL2-3-2.xlsm

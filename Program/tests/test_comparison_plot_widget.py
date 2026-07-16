@@ -260,6 +260,22 @@ class TestComparisonPlotWidget(unittest.TestCase):
         # N labels are on by default — the count annotation appears atop a bar.
         self.assertTrue(any(t.get_text().isdigit() for t in ax.texts))
 
+    def test_lines_and_markers_section_tracks_comparison_chart_content(self):
+        section = self.widget._style_control_sections.lines_markers_section
+
+        for plot_name in ("Distribution", "Combined"):
+            self.widget.on_plot_type_changed(plot_name)
+            self.assertFalse(section.isHidden(), plot_name)
+
+        for plot_name in ("K-Values", "Histogram"):
+            self.widget.on_plot_type_changed(plot_name)
+            self.assertTrue(section.isHidden(), plot_name)
+
+        self.widget.on_plot_type_changed("K Distribution")
+        self.assertTrue(section.isHidden())
+        self.widget._on_kdist_view_changed("cdf")
+        self.assertFalse(section.isHidden())
+
     def test_k_distribution_histogram_density_toggle_changes_axis(self):
         self.widget.on_plot_type_changed('K Distribution')
         self.widget._on_kdist_ymode_changed('density')
@@ -729,15 +745,20 @@ class TestComparisonPlotWidget(unittest.TestCase):
             0,
         )
         self.assertGreaterEqual(
-            self.widget._legend_layout_combo.findText('Vertical (1 column)'),
+            self.widget._legend_layout_combo.findText('1 column'),
             0,
         )
+        self.assertGreaterEqual(
+            self.widget._legend_layout_combo.findText('Auto (fit and wrap)'),
+            0,
+        )
+        self.assertGreaterEqual(self.widget._legend_layout_combo.findText('4 columns'), 0)
 
         toolbar.deleteLater()
 
     def test_outside_top_right_legend_can_be_vertical_and_gets_margin(self):
         loc_idx = self.widget._legend_loc_combo.findText('Outside top - right')
-        layout_idx = self.widget._legend_layout_combo.findText('Vertical (1 column)')
+        layout_idx = self.widget._legend_layout_combo.findText('1 column')
 
         self.widget._legend_loc_combo.setCurrentIndex(loc_idx)
         self.widget._legend_layout_combo.setCurrentIndex(layout_idx)
@@ -752,8 +773,8 @@ class TestComparisonPlotWidget(unittest.TestCase):
         self.assertEqual(getattr(legend, '_ncols', None), 1)
         self.assertLessEqual(self.widget.figure.subplotpars.top, 0.72)
 
-    def test_legend_layout_can_be_horizontal_when_requested(self):
-        layout_idx = self.widget._legend_layout_combo.findText('Horizontal (fit)')
+    def test_legend_layout_can_wrap_automatically_when_requested(self):
+        layout_idx = self.widget._legend_layout_combo.findText('Auto (fit and wrap)')
 
         self.widget._legend_layout_combo.setCurrentIndex(layout_idx)
         self.widget.on_plot_type_changed('Distribution')
@@ -764,6 +785,25 @@ class TestComparisonPlotWidget(unittest.TestCase):
 
         self.assertEqual(self.widget.current_style.legend_ncol, 0)
         self.assertEqual(getattr(legend, '_ncols', None), 2)
+
+    def test_shared_lines_and_markers_controls_update_comparison_curves(self):
+        self.widget._curve_width_spin.setValue(3.25)
+        marker_index = self.widget._marker_mode_combo.findText('Hide')
+        self.widget._marker_mode_combo.setCurrentIndex(marker_index)
+        self.widget.on_plot_type_changed('Distribution')
+        self.widget.set_display_mode('overlay')
+        self.widget.refresh_plot()
+
+        curves = [
+            line
+            for line in self.widget.figure.axes[0].lines
+            if not line.get_label().startswith('_')
+        ]
+
+        self.assertTrue(curves)
+        self.assertTrue(all(line.get_linewidth() == 3.25 for line in curves))
+        self.assertTrue(all(line.get_marker() == 'None' for line in curves))
+        self.assertFalse(self.widget.current_style.curve_markers_visible)
 
     def test_distribution_overlay_legend_is_group_structured(self):
         self.widget.set_datasets([

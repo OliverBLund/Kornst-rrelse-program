@@ -29,6 +29,7 @@ from .sidebar_controls import (
     LEGEND_LOCATIONS as _CMP_LEGEND_LOCATIONS,
     LEGEND_LAYOUTS as _CMP_LEGEND_LAYOUTS,
     LineStylePreview,
+    PlotStyleControlSections,
     make_color_row, make_combo_row, make_dspin_row,
     make_spin_row, make_toggle_row, set_swatch_color,
 )
@@ -794,63 +795,39 @@ class ComparisonPlotWidget(QWidget):
         lay.addWidget(self._sect_dataset_colors)
 
         # ── Legend & Typography ──
-        self._sect_advanced = CollapsibleSection(
-            "Legend & Typography", "fa6s.text-height",
-            CollapsibleSection.AMBER, expanded=False,
+        self._style_control_sections = PlotStyleControlSections(
+            self.current_style,
+            include_reset=True,
         )
+        self._style_control_sections.style_changed.connect(
+            lambda changes: self._update_style_fields(**changes)
+        )
+        self._style_control_sections.reset_requested.connect(
+            self._on_reset_custom_style
+        )
+        self._sect_advanced = self._style_control_sections
 
-        self._row_legend_loc, self._legend_loc_combo = make_combo_row(
-            "Legend position", [label for _, _, label in _CMP_LEGEND_LOCATIONS])
-        self._legend_loc_combo.currentIndexChanged.connect(self._on_legend_loc_changed)
-        self._sect_advanced.add_widget(self._row_legend_loc)
-
-        self._row_legend_layout, self._legend_layout_combo = make_combo_row(
-            "Legend layout", [label for _, label in _CMP_LEGEND_LAYOUTS])
-        self._legend_layout_combo.currentIndexChanged.connect(
-            self._on_legend_layout_changed)
-        self._sect_advanced.add_widget(self._row_legend_layout)
-
-        self._row_legend_alpha, self._legend_alpha_spin = make_dspin_row(
-            "Legend opacity", 0.0, 1.0, 0.05, 2)
-        self._legend_alpha_spin.valueChanged.connect(
-            lambda v: self._update_style_field("legend_framealpha", float(v)))
-        self._sect_advanced.add_widget(self._row_legend_alpha)
-
-        self._row_title_size, self._title_size_spin = make_spin_row(
-            "Title size", 6, 36)
-        self._title_size_spin.valueChanged.connect(
-            lambda v: self._update_style_field("title_fontsize", int(v)))
-        self._sect_advanced.add_widget(self._row_title_size)
-
-        self._row_label_size, self._label_size_spin = make_spin_row(
-            "Axis label size", 6, 36)
-        self._label_size_spin.valueChanged.connect(
-            lambda v: self._update_style_field("label_fontsize", int(v)))
-        self._sect_advanced.add_widget(self._row_label_size)
-
-        self._row_tick_size, self._tick_size_spin = make_spin_row(
-            "Tick size", 5, 24)
-        self._tick_size_spin.valueChanged.connect(
-            lambda v: self._update_style_field("tick_fontsize", int(v)))
-        self._sect_advanced.add_widget(self._row_tick_size)
-
-        self._row_legend_size, self._legend_size_spin = make_spin_row(
-            "Legend size", 5, 24)
-        self._legend_size_spin.valueChanged.connect(
-            lambda v: self._update_style_field("legend_fontsize", int(v)))
-        self._sect_advanced.add_widget(self._row_legend_size)
-
-        reset_row = QWidget()
-        reset_lay = QHBoxLayout(reset_row)
-        reset_lay.setContentsMargins(10, 6, 10, 6)
-        self._style_reset_btn = QPushButton("Reset to preset")
-        self._style_reset_btn.setProperty("pw-btn", True)
-        self._style_reset_btn.setEnabled(False)
-        self._style_reset_btn.setToolTip(
-            "Discard legend/typography overrides and revert to the selected preset")
-        self._style_reset_btn.clicked.connect(self._on_reset_custom_style)
-        reset_lay.addWidget(self._style_reset_btn)
-        self._sect_advanced.add_widget(reset_row)
+        self._row_legend_loc = self._style_control_sections.row_legend_loc
+        self._legend_loc_combo = self._style_control_sections.legend_loc_combo
+        self._row_legend_layout = self._style_control_sections.row_legend_layout
+        self._legend_layout_combo = self._style_control_sections.legend_layout_combo
+        self._row_legend_alpha = self._style_control_sections.row_legend_alpha
+        self._legend_alpha_spin = self._style_control_sections.legend_alpha_spin
+        self._row_title_size = self._style_control_sections.row_title_size
+        self._title_size_spin = self._style_control_sections.title_size_spin
+        self._row_label_size = self._style_control_sections.row_label_size
+        self._label_size_spin = self._style_control_sections.label_size_spin
+        self._row_tick_size = self._style_control_sections.row_tick_size
+        self._tick_size_spin = self._style_control_sections.tick_size_spin
+        self._row_legend_size = self._style_control_sections.row_legend_size
+        self._legend_size_spin = self._style_control_sections.legend_size_spin
+        self._row_curve_width = self._style_control_sections.row_curve_width
+        self._curve_width_spin = self._style_control_sections.curve_width_spin
+        self._row_marker_mode = self._style_control_sections.row_marker_mode
+        self._marker_mode_combo = self._style_control_sections.marker_mode_combo
+        self._row_marker_size = self._style_control_sections.row_marker_size
+        self._marker_size_spin = self._style_control_sections.marker_size_spin
+        self._style_reset_btn = self._style_control_sections.reset_button
         lay.addWidget(self._sect_advanced)
 
         self._sect_units = CollapsibleSection(
@@ -938,6 +915,10 @@ class ComparisonPlotWidget(QWidget):
 
     def _sync_sidebar_style_widgets(self, style: PlotStyle) -> None:
         """Push the given style into the sidebar spinboxes/combos without firing."""
+        shared = getattr(self, "_style_control_sections", None)
+        if shared is not None:
+            shared.sync_style(style)
+            return
         widgets = [
             getattr(self, '_legend_loc_combo', None),
             getattr(self, '_legend_layout_combo', None),
@@ -1277,6 +1258,7 @@ class ComparisonPlotWidget(QWidget):
             return
         self.k_dist_view = view
         self._sync_kdist_controls()
+        self._sync_contextual_sidebar_sections()
         self.refresh_plot()
 
     def _on_kdist_axis_changed(self, axis: str) -> None:
@@ -1494,6 +1476,17 @@ class ComparisonPlotWidget(QWidget):
             self._sect_k_group_agg.setVisible(show_group_agg)
         if hasattr(self, "_row_k_group_agg"):
             self._row_k_group_agg.setVisible(show_group_agg)
+        supports_curve_style = (
+            self.current_plot_type in {"distribution", "combined"}
+            or (
+                self.current_plot_type == "k-distribution"
+                and self.k_dist_view == "cdf"
+            )
+        )
+        if hasattr(self, "_style_control_sections"):
+            self._style_control_sections.set_lines_markers_visible(
+                supports_curve_style
+            )
 
     def _sync_mode_radios(self):
         """Reflect the active layout mode in the radio buttons without re-entering."""

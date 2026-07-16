@@ -744,6 +744,8 @@ class ErrorTab(QWidget):
                         percent_passing=mapping["percent_passing"],
                         file_path=self.file_path,
                     )
+                    if dataset.has_errors():
+                        raise ValueError(dataset.get_detailed_validation_report())
                     datasets.append(dataset)
 
                 payload = datasets[0] if len(datasets) == 1 else datasets

@@ -21,15 +21,17 @@ from PyQt6.QtWidgets import (
     QComboBox,
     QDialog,
     QDialogButtonBox,
+    QFrame,
     QHBoxLayout,
     QLabel,
     QPushButton,
+    QScrollArea,
     QVBoxLayout,
     QWidget,
 )
 
 from .plot_constants import PALETTE_NAMES
-from .plot_styles import get_available_style_names
+from .plot_styles import get_available_style_names, get_style
 from .report_plot_style import (
     clear_report_style_overrides,
     get_report_palette,
@@ -43,6 +45,16 @@ from .report_plot_style import (
 from .theme import C, F, opaque_combo_qss
 
 
+def _custom_overrides_for_preset(chosen: dict) -> dict:
+    """Keep only values that differ from the currently selected preset."""
+    preset = get_style(get_report_style_preset())
+    return {
+        field: value
+        for field, value in chosen.items()
+        if value != getattr(preset, field)
+    }
+
+
 def open_report_style_dialog(parent: Optional[QWidget] = None) -> bool:
     """Compact typography/legend override panel for the global report style.
 
@@ -50,17 +62,14 @@ def open_report_style_dialog(parent: Optional[QWidget] = None) -> bool:
     have changed), ``False`` on cancel.
     """
     from .sidebar_controls import (
-        LEGEND_LOCATIONS as _LOCS,
-        LEGEND_LAYOUTS as _LAYOUTS,
-        make_combo_row,
-        make_dspin_row,
-        make_spin_row,
+        PlotStyleControlSections,
     )
 
     style = resolve_report_style()
     dlg = QDialog(parent.window() if parent is not None else None)
     dlg.setWindowTitle("Report Plot Style")
-    dlg.setMinimumWidth(320)
+    dlg.resize(420, 560)
+    dlg.setMinimumWidth(380)
     root = QVBoxLayout(dlg)
     root.setContentsMargins(12, 12, 12, 12)
     root.setSpacing(4)
@@ -73,37 +82,21 @@ def open_report_style_dialog(parent: Optional[QWidget] = None) -> bool:
     intro.setStyleSheet(f"color: {C.TEXT_MUTED}; font-size: {F.SZ_XS}pt;")
     root.addWidget(intro)
 
-    row_loc, loc_combo = make_combo_row("Legend position", [lbl for _, _, lbl in _LOCS])
-    loc_idx = next((i for i, (loc, bbox, _l) in enumerate(_LOCS)
-                    if loc == style.legend_loc and bbox == style.legend_bbox_to_anchor), 0)
-    loc_combo.setCurrentIndex(loc_idx)
-    root.addWidget(row_loc)
+    scroll = QScrollArea()
+    scroll.setWidgetResizable(True)
+    scroll.setFrameShape(QFrame.Shape.NoFrame)
+    scroll.setStyleSheet("QScrollArea { background: transparent; border: none; }")
+    section_host = QWidget()
+    section_host.setStyleSheet("background: transparent;")
+    section_layout = QVBoxLayout(section_host)
+    section_layout.setContentsMargins(0, 4, 0, 4)
+    section_layout.setSpacing(6)
+    scroll.setWidget(section_host)
+    root.addWidget(scroll, 1)
 
-    row_layout, layout_combo = make_combo_row("Legend layout", [lbl for _, lbl in _LAYOUTS])
-    layout_idx = next((i for i, (ncol, _l) in enumerate(_LAYOUTS)
-                       if ncol == getattr(style, "legend_ncol", 1)), 0)
-    layout_combo.setCurrentIndex(layout_idx)
-    root.addWidget(row_layout)
-
-    row_alpha, alpha_spin = make_dspin_row("Legend opacity", 0.0, 1.0, 0.05, 2)
-    alpha_spin.setValue(float(style.legend_framealpha))
-    root.addWidget(row_alpha)
-
-    row_title, title_spin = make_spin_row("Title size", 6, 36)
-    title_spin.setValue(int(style.title_fontsize))
-    root.addWidget(row_title)
-
-    row_label, label_spin = make_spin_row("Axis label size", 6, 36)
-    label_spin.setValue(int(style.label_fontsize))
-    root.addWidget(row_label)
-
-    row_tick, tick_spin = make_spin_row("Tick size", 5, 24)
-    tick_spin.setValue(int(style.tick_fontsize))
-    root.addWidget(row_tick)
-
-    row_legend, legend_spin = make_spin_row("Legend size", 5, 24)
-    legend_spin.setValue(int(style.legend_fontsize))
-    root.addWidget(row_legend)
+    style_sections = PlotStyleControlSections(style)
+    section_layout.addWidget(style_sections)
+    section_layout.addStretch(1)
 
     buttons = QDialogButtonBox()
     reset_btn = buttons.addButton("Reset to preset", QDialogButtonBox.ButtonRole.ResetRole)
@@ -119,18 +112,8 @@ def open_report_style_dialog(parent: Optional[QWidget] = None) -> bool:
         dlg.reject()
 
     def on_save():
-        loc, bbox, _l = _LOCS[loc_combo.currentIndex()]
-        ncol, _l2 = _LAYOUTS[layout_combo.currentIndex()]
-        set_report_style_overrides({
-            "legend_loc": loc,
-            "legend_bbox_to_anchor": bbox,
-            "legend_ncol": ncol,
-            "legend_framealpha": alpha_spin.value(),
-            "title_fontsize": title_spin.value(),
-            "label_fontsize": label_spin.value(),
-            "tick_fontsize": tick_spin.value(),
-            "legend_fontsize": legend_spin.value(),
-        })
+        chosen = style_sections.values()
+        set_report_style_overrides(_custom_overrides_for_preset(chosen))
         result["changed"] = True
         dlg.accept()
 
@@ -219,6 +202,7 @@ class ReportStyleControls(QWidget):
 
     def _on_preset_changed(self, name: str) -> None:
         set_report_style_preset(name)
+        clear_report_style_overrides()
         self.changed.emit()
 
     def _on_palette_changed(self, name: str) -> None:

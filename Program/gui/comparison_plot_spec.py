@@ -72,6 +72,9 @@ class ComparisonPlotSpec:
     # ── Plot selection / layout ─────────────────────────────────────
     current_plot_type: str = "distribution"
     display_mode: str = "overlay"  # overlay | grid
+    histogram_layout: str = "bars"  # bars | heatmap
+    dense_report_layout: bool = False
+    automatic_report_legend_layout: bool = False
     use_group_breakdown: bool = False
     grid_cols: int = 2
     max_facet_panels: int = 16
@@ -596,9 +599,13 @@ def _draw_facet_overflow_note(figure, hidden: int) -> None:
 # Legend / bar styling helpers
 # ═══════════════════════════════════════════════════════════════════
 
-def _legend_kwargs(spec: ComparisonPlotSpec, label_count: Optional[int] = None) -> dict:
+def _legend_kwargs(
+    spec: ComparisonPlotSpec,
+    labels: Optional[List[str]] = None,
+    ax=None,
+) -> dict:
     """Build legend kwargs from the active PlotStyle (loc/bbox/fontsize honoured)."""
-    return build_legend_kwargs(spec.style, label_count)
+    return build_legend_kwargs(spec.style, labels=labels, ax=ax)
 
 
 def _style_k_bar(bar, color: str, flagged: bool) -> None:
@@ -656,7 +663,7 @@ def _apply_group_structured_legend(spec: ComparisonPlotSpec, ax) -> None:
         new_handles.append(handle)
         new_labels.append(label)
 
-    legend_kwargs = _legend_kwargs(spec, len(new_labels))
+    legend_kwargs = _legend_kwargs(spec, new_labels, ax)
     legend_kwargs["alignment"] = "left"
     legend = ax.legend(new_handles, new_labels, **legend_kwargs)
     for row in header_rows:
@@ -1073,13 +1080,118 @@ def _plot_histogram_comparison(
         ax.grid(False)
 
     if spec.show_legend and len(units) > 1:
-        ax.legend(**build_legend_kwargs(style, len(units)))
+        _handles, legend_labels = ax.get_legend_handles_labels()
+        ax.legend(**build_legend_kwargs(style, labels=legend_labels, ax=ax))
+
+
+def _plot_histogram_heatmap(
+    figure,
+    spec: ComparisonPlotSpec,
+    units: list[dict],
+    style: PlotStyle,
+) -> None:
+    """Plot a compact sample-by-class matrix for large report scopes."""
+    ax = figure.add_subplot(1, 1, 1)
+    labels = _histogram_label_order(units)
+    if not labels:
+        ax.text(
+            0.5,
+            0.5,
+            "No class fractions",
+            transform=ax.transAxes,
+            ha="center",
+            va="center",
+            fontsize=style.label_fontsize,
+            fontfamily=style.font_family,
+        )
+        ax.set_axis_off()
+        return
+
+    matrix = np.asarray(
+        [_histogram_freq_for_labels(unit, labels) for unit in units],
+        dtype=float,
+    )
+    image = ax.imshow(
+        matrix,
+        aspect="auto",
+        interpolation="nearest",
+        cmap="YlGnBu",
+        vmin=0.0,
+        vmax=100.0,
+    )
+
+    scope_label = "Group" if spec.use_group_breakdown else "Sample"
+    row_tick_size = style.tick_fontsize
+    ax.set_facecolor(style.axes_facecolor)
+    ax.set_title(
+        f"Class fractions by {scope_label.lower()} "
+        f"(heatmap, n={len(units)})",
+        fontsize=style.title_fontsize,
+        fontweight=style.title_fontweight,
+        fontfamily=style.font_family,
+    )
+    ax.set_xlabel(
+        f"Grain-size class ({_scheme_short_name(spec.classification_scheme)})",
+        fontsize=style.label_fontsize,
+        fontfamily=style.font_family,
+    )
+    ax.set_ylabel(
+        scope_label,
+        fontsize=style.label_fontsize,
+        fontfamily=style.font_family,
+    )
+    ax.set_xticks(np.arange(len(labels)))
+    if spec.dense_report_layout:
+        ax.set_xticklabels(
+            labels,
+            rotation=30,
+            ha="right",
+            fontsize=style.tick_fontsize,
+            fontfamily=style.font_family,
+        )
+    else:
+        ax.set_xticklabels(
+            [label.replace(" ", "\n") for label in labels],
+            fontsize=max(6, style.tick_fontsize - 1),
+            fontfamily=style.font_family,
+        )
+    ax.set_yticks(np.arange(len(units)))
+    ax.set_yticklabels(
+        [unit.get("label", f"Series {idx + 1}") for idx, unit in enumerate(units)],
+        fontsize=row_tick_size,
+        fontfamily=style.font_family,
+    )
+    ax.tick_params(axis="both", which="major", length=0)
+
+    if spec.show_grid and style.grid_show:
+        ax.set_xticks(np.arange(-0.5, len(labels), 1.0), minor=True)
+        ax.set_yticks(np.arange(-0.5, len(units), 1.0), minor=True)
+        ax.grid(
+            which="minor",
+            color=style.figure_facecolor,
+            linewidth=max(0.4, style.grid_linewidth),
+            alpha=0.9,
+        )
+        ax.tick_params(which="minor", bottom=False, left=False)
+
+    colorbar = figure.colorbar(image, ax=ax, fraction=0.035, pad=0.025)
+    colorbar.set_label(
+        "Weight (%)",
+        fontsize=style.label_fontsize,
+        fontfamily=style.font_family,
+    )
+    colorbar.ax.tick_params(labelsize=style.tick_fontsize)
+    for tick in colorbar.ax.get_yticklabels():
+        tick.set_fontfamily(style.font_family)
 
 
 def _plot_histogram(figure, spec: ComparisonPlotSpec) -> int:
     """Plot grain histogram class fractions."""
     units = histogram_units(spec)
     style = spec.style or PROFESSIONAL_STYLE
+    if spec.histogram_layout == "heatmap" and len(units) > 1:
+        _plot_histogram_heatmap(figure, spec, units, style)
+        return 0
     if spec.display_mode != "grid" and len(units) > 1:
         _plot_histogram_comparison(figure, spec, units, style)
         return 0

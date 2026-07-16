@@ -108,6 +108,7 @@ class WelcomeWidget(QWidget):
     open_recent_file_requested = pyqtSignal(str)
     open_recent_session_requested = pyqtSignal(dict)
     open_help_topic_requested  = pyqtSignal(str)
+    tutorial_requested         = pyqtSignal(str)
     dont_show_again_changed    = pyqtSignal(bool)
     clear_sessions_requested   = pyqtSignal()
 
@@ -152,19 +153,29 @@ class WelcomeWidget(QWidget):
         self._main_body_host = None
         self._actions_grid = None
         self._actions_version_chip = None
+        self._tutorial_grid = None
         self._guide_grid = None
         self._content_layout = None
         self._actions_strip = None
+        self._tutorials_strip = None
         self._guides_strip = None
         self._recent_section = None
         self._whats_new_section = None
         self._recent_scroll = None
         self._welcome_whats_new_scroll = None
         self._action_widgets: list[QWidget] = []
+        self._tutorial_widgets: list[QWidget] = []
         self._guide_widgets: list[QWidget] = []
         self._resume_btn = None
         self._resume_hint = None
         self._custom_tooltip_label = None
+        self._pending_custom_tooltip: tuple[str, QPoint] | None = None
+        self._custom_tooltip_timer = QTimer(self)
+        self._custom_tooltip_timer.setSingleShot(True)
+        self._custom_tooltip_timer.setInterval(450)
+        self._custom_tooltip_timer.timeout.connect(
+            self._show_pending_custom_tooltip
+        )
         self._background_timer = QTimer(self)
         self._background_timer.setInterval(40)
         self._background_timer.timeout.connect(self._advance_background)
@@ -462,7 +473,7 @@ class WelcomeWidget(QWidget):
     def resizeEvent(self, event):
         super().resizeEvent(event)
         self._sync_card_widths_v2()
-        self._hide_custom_tooltip()
+        self._cancel_custom_tooltip()
         self.update()
 
     def _setup_custom_tooltips(self) -> None:
@@ -498,16 +509,27 @@ class WelcomeWidget(QWidget):
         text = watched.property("welcomeTooltipText") if hasattr(watched, "property") else None
         if text:
             event_type = event.type()
-            if event_type in (QEvent.Type.Enter, QEvent.Type.MouseMove):
-                self._show_custom_tooltip(str(text), QCursor.pos())
+            if event_type == QEvent.Type.MouseMove:
+                self._schedule_custom_tooltip(str(text), QCursor.pos())
             elif event_type in (
                 QEvent.Type.Leave,
                 QEvent.Type.Hide,
                 QEvent.Type.MouseButtonPress,
                 QEvent.Type.FocusOut,
             ):
-                self._hide_custom_tooltip()
+                self._cancel_custom_tooltip()
         return super().eventFilter(watched, event)
+
+    def _schedule_custom_tooltip(self, text: str, global_pos: QPoint) -> None:
+        """Show hover help only after the pointer has settled."""
+        self._pending_custom_tooltip = (text, QPoint(global_pos))
+        self._custom_tooltip_timer.start()
+
+    def _show_pending_custom_tooltip(self) -> None:
+        pending = self._pending_custom_tooltip
+        self._pending_custom_tooltip = None
+        if pending is not None:
+            self._show_custom_tooltip(*pending)
 
     def _show_custom_tooltip(self, text: str, global_pos=None) -> None:
         label = self._custom_tooltip_label
@@ -536,6 +558,11 @@ class WelcomeWidget(QWidget):
     def _hide_custom_tooltip(self) -> None:
         if self._custom_tooltip_label is not None:
             self._custom_tooltip_label.hide()
+
+    def _cancel_custom_tooltip(self) -> None:
+        self._custom_tooltip_timer.stop()
+        self._pending_custom_tooltip = None
+        self._hide_custom_tooltip()
 
     def paintEvent(self, event: QPaintEvent):
         painter = QPainter(self)
@@ -988,8 +1015,10 @@ class WelcomeWidget(QWidget):
         lay.setContentsMargins(12, 12, 12, 12)
         lay.setSpacing(10)
         self._actions_strip = self._build_actions_strip()
+        self._tutorials_strip = self._build_tutorials_strip()
         self._guides_strip = self._build_guides_strip()
         lay.addWidget(self._actions_strip)
+        lay.addWidget(self._tutorials_strip)
         lay.addWidget(self._guides_strip)
 
         body = QWidget()
@@ -1288,6 +1317,125 @@ class WelcomeWidget(QWidget):
         outer.addWidget(note)
         return wrap
 
+    def _build_tutorials_strip(self) -> QFrame:
+        wrap = QFrame()
+        wrap.setStyleSheet(
+            "background: rgba(107,142,35,14);"
+            " border: 1px solid rgba(107,142,35,72);"
+            " border-radius: 10px;"
+        )
+        wrap.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
+
+        outer = QVBoxLayout(wrap)
+        outer.setContentsMargins(10, 9, 10, 9)
+        outer.setSpacing(8)
+
+        head = QWidget()
+        head.setStyleSheet("background: transparent; border: none;")
+        head_lay = QHBoxLayout(head)
+        head_lay.setContentsMargins(0, 0, 0, 0)
+        head_lay.setSpacing(8)
+
+        ico = QLabel()
+        ico.setPixmap(icon("fa6s.circle-play", C.OLIVE).pixmap(QSize(12, 12)))
+        ico.setStyleSheet("background: transparent; border: none;")
+        head_lay.addWidget(ico)
+
+        lbl = QLabel("Interactive Tutorials")
+        lbl.setStyleSheet(
+            f"color: {C.TEXT}; font-size: {F.SZ_SM}pt; font-weight: 700;"
+            " background: transparent; border: none;"
+        )
+        head_lay.addWidget(lbl)
+
+        desc = QLabel("Follow step-by-step highlights directly in the workspace.")
+        desc.setWordWrap(True)
+        desc.setStyleSheet(
+            f"color: {C.TEXT_MUTED}; font-size: {F.SZ_XS + 1}pt;"
+            " background: transparent; border: none;"
+        )
+        head_lay.addWidget(desc, 1)
+        outer.addWidget(head)
+
+        grid_host = QWidget()
+        grid_host.setStyleSheet("background: transparent; border: none;")
+        grid = QGridLayout(grid_host)
+        grid.setContentsMargins(0, 0, 0, 0)
+        grid.setHorizontalSpacing(8)
+        grid.setVerticalSpacing(8)
+        self._tutorial_grid = grid
+        self._tutorial_widgets = []
+
+        for name, tutorial_id, ico_name, tooltip in [
+            (
+                "Getting Started",
+                "getting_started",
+                "fa6s.route",
+                "Tour the main navigation, Samples sidebar, settings, and activity log.",
+            ),
+            (
+                "Individual Samples",
+                "individual",
+                "fa6s.chart-area",
+                "Tour plots, K-value results, and statistics for one loaded sample.",
+            ),
+            (
+                "Comparison",
+                "comparison",
+                "fa6s.code-compare",
+                "Tour comparison plots, details, and statistics for two or more samples.",
+            ),
+            (
+                "Reports",
+                "reports",
+                "fa6s.file-contract",
+                "Tour report content, formats, plot options, generation, and saving.",
+            ),
+            (
+                "Export",
+                "export",
+                "fa6s.file-export",
+                "Tour export scope, formats, preview, and output settings.",
+            ),
+        ]:
+            btn = QPushButton(name)
+            btn.setIcon(icon(ico_name, C.OLIVE_DK))
+            btn.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
+            btn.setFixedHeight(30)
+            btn.setCursor(QCursor(Qt.CursorShape.PointingHandCursor))
+            btn.setToolTip(tooltip)
+            btn.setStyleSheet(f"""
+                QPushButton {{
+                    background: rgba(255,255,255,190);
+                    border: 1px solid rgba(107,142,35,92);
+                    border-radius: 8px;
+                    color: {C.TEXT_MID};
+                    font-size: {F.SZ_SM}pt;
+                    font-weight: 600;
+                    padding: 6px 10px;
+                    text-align: left;
+                }}
+                QPushButton:hover {{
+                    background: rgba(107,142,35,24);
+                    border-color: rgba(107,142,35,150);
+                    color: {C.OLIVE_DK};
+                }}
+                QPushButton:pressed {{
+                    background: rgba(107,142,35,38);
+                }}
+            """)
+            btn.clicked.connect(
+                lambda _checked=False, key=tutorial_id: self.tutorial_requested.emit(key)
+            )
+            self._tutorial_widgets.append(btn)
+
+        for col, widget in enumerate(self._tutorial_widgets):
+            grid.addWidget(widget, 0, col)
+            grid.setColumnStretch(col, 1)
+
+        outer.addWidget(grid_host)
+        return wrap
+
     def _build_guides_strip(self) -> QFrame:
         wrap = QFrame()
         wrap.setStyleSheet(
@@ -1307,14 +1455,14 @@ class WelcomeWidget(QWidget):
         head_lay.setContentsMargins(0, 0, 0, 0)
         head_lay.setSpacing(8)
 
-        lbl = QLabel("Guides")
+        lbl = QLabel("Written Guides")
         lbl.setStyleSheet(
             f"color: {C.TEXT_MUTED}; font-family: '{F.MONO}'; font-size: {F.SZ_XS}pt;"
             " font-weight: 700; letter-spacing: 0.06em; background: transparent; border: none;"
         )
         head_lay.addWidget(lbl)
 
-        desc = QLabel("Use the quick references if you are testing import, workbook handling, or mapping recovery.")
+        desc = QLabel("Read reference pages for data formats, workbooks, mapping, and troubleshooting.")
         desc.setWordWrap(True)
         desc.setStyleSheet(
             f"color: {C.TEXT_MUTED}; font-size: {F.SZ_XS + 1}pt;"
@@ -1333,7 +1481,7 @@ class WelcomeWidget(QWidget):
         self._guide_widgets = []
 
         for name, file, ico_name in [
-            ("Getting Started", "start_here.html", "fa6s.circle-play"),
+            ("Start Here", "start_here.html", "fa6s.book-open"),
             ("Data Format", "data_files.html", "fa6s.file-lines"),
             ("Excel Workbooks", "excel_workbooks.html", "fa6s.file-excel"),
             ("Mapping & Recovery", "mapping_recovery.html", "fa6s.table-columns"),
@@ -2201,7 +2349,7 @@ class WelcomeWidget(QWidget):
             return
 
         short_height = self.height() < 820
-        dense_height = self.height() <= 720
+        dense_height = self.height() <= 768
         tiny_height = self.height() <= 540
         side_margin = 34 if short_height else 44
         target = min(_CARD_W, max(280, self.width() - side_margin))
@@ -2209,8 +2357,11 @@ class WelcomeWidget(QWidget):
         narrow = target < (780 if short_height else 860)
         stacked_actions = target < 520
         compact_guides = target < 760
+        wrap_tutorials = target < 620
         hide_guides = short_height
-        hide_whats_new = tiny_height and target < 860
+        hide_whats_new = (
+            tiny_height or (dense_height and narrow)
+        ) and target < 860
 
         if self._content_layout is not None:
             margin = 3 if dense_height else 6 if short_height else 10
@@ -2258,6 +2409,17 @@ class WelcomeWidget(QWidget):
 
         if self._guides_strip is not None:
             self._guides_strip.setVisible(not hide_guides)
+
+        if self._tutorials_strip is not None and self._tutorials_strip.layout() is not None:
+            tutorial_margin_h = 6 if dense_height else 8 if short_height else 10
+            tutorial_margin_v = 4 if dense_height else 6 if short_height else 9
+            self._tutorials_strip.layout().setContentsMargins(
+                tutorial_margin_h,
+                tutorial_margin_v,
+                tutorial_margin_h,
+                tutorial_margin_v,
+            )
+            self._tutorials_strip.layout().setSpacing(3 if dense_height else 5 if short_height else 8)
 
         if self._hero_grid is not None and self._hero_primary is not None and self._hero_secondary is not None:
             self._hero_grid.removeWidget(self._hero_primary)
@@ -2311,6 +2473,22 @@ class WelcomeWidget(QWidget):
                 for col, widget in enumerate(self._guide_widgets):
                     self._guide_grid.addWidget(widget, 0, col)
                     self._guide_grid.setColumnStretch(col, 1)
+
+        if self._tutorial_grid is not None and self._tutorial_widgets:
+            for widget in self._tutorial_widgets:
+                self._tutorial_grid.removeWidget(widget)
+            self._tutorial_grid.setHorizontalSpacing(5 if dense_height else 8)
+            self._tutorial_grid.setVerticalSpacing(4 if dense_height else 8)
+            if wrap_tutorials:
+                positions = [(0, 0), (0, 1), (1, 0), (1, 1), (2, 0)]
+                for widget, (row, col) in zip(self._tutorial_widgets, positions):
+                    self._tutorial_grid.addWidget(widget, row, col)
+                self._tutorial_grid.setColumnStretch(0, 1)
+                self._tutorial_grid.setColumnStretch(1, 1)
+            else:
+                for col, widget in enumerate(self._tutorial_widgets):
+                    self._tutorial_grid.addWidget(widget, 0, col)
+                    self._tutorial_grid.setColumnStretch(col, 1)
 
         if self._main_body_grid is not None and self._recent_section is not None and self._whats_new_section is not None:
             self._main_body_grid.removeWidget(self._recent_section)
@@ -2369,6 +2547,8 @@ class WelcomeWidget(QWidget):
         for index, widget in enumerate(self._action_widgets):
             widget.setMinimumHeight(30 if dense_height else 36 if index == 0 else 34)
         for widget in self._guide_widgets:
+            widget.setFixedHeight(26 if dense_height else 30)
+        for widget in self._tutorial_widgets:
             widget.setFixedHeight(26 if dense_height else 30)
 
         if self._title_desc is not None:
