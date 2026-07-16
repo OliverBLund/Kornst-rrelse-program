@@ -64,6 +64,9 @@ class _FileList:
     def remove_card(self, file_path):
         self.removed.append(file_path)
 
+    def add_card(self, file_path, display_name, status):
+        self.meta.setdefault(file_path, (display_name, status))
+
 
 class _FakeTableItem:
     def __init__(self, value):
@@ -98,7 +101,11 @@ class _FakeTable:
 
 
 class _ControlPanelHarness:
+    _file_entry_parts = ControlPanel._file_entry_parts
+    _file_entry_key = ControlPanel._file_entry_key
+    _file_entry_display_name = ControlPanel._file_entry_display_name
     _find_loaded_entry_by_file = ControlPanel._find_loaded_entry_by_file
+    _find_loaded_entry_by_card = ControlPanel._find_loaded_entry_by_card
     _find_dataset_tab_for_dataset = ControlPanel._find_dataset_tab_for_dataset
     _remove_loaded_entries_for_file = ControlPanel._remove_loaded_entries_for_file
     _split_sheet_key = ControlPanel._split_sheet_key
@@ -113,6 +120,8 @@ class _ControlPanelHarness:
         self.loaded_samples = {}
         self.file_statuses = {}
         self.file_mapping_states = {}
+        self._card_sources = {}
+        self._card_samples = {}
         self.dataset_loaded_successfully = _SignalRecorder()
         self.error_dataset = _SignalRecorder()
         self.mapping_required = _SignalRecorder()
@@ -178,6 +187,18 @@ class _FakeTabWidget:
         elif self.current >= len(self.widgets):
             self.current = len(self.widgets) - 1
 
+    def updatesEnabled(self):
+        return True
+
+    def setUpdatesEnabled(self, _enabled):
+        pass
+
+    def blockSignals(self, _blocked):
+        return False
+
+    def update(self):
+        pass
+
 
 class _MainWindowHarness:
     _remove_tabs_for_file = MainWindow._remove_tabs_for_file
@@ -216,6 +237,7 @@ class _ExternalIssueRecorder:
 class _ErrorTabHost(QWidget):
     add_error_tab = MainWindow.add_error_tab
     add_mapping_required_tab = MainWindow.add_mapping_required_tab
+    add_multi_sample_confirmation_tab = MainWindow.add_multi_sample_confirmation_tab
     update_error_tab_message = MainWindow.update_error_tab_message
     _on_external_load_file_failed = MainWindow._on_external_load_file_failed
 
@@ -556,14 +578,34 @@ class TestRemapReplacement(unittest.TestCase):
 
         self.assertNotIn("old sample name", panel.loaded_samples)
         self.assertIn("other sample", panel.loaded_samples)
-        fixed_entry = panel.loaded_samples["Fixed sample A [A]"]
-        self.assertEqual(len(fixed_entry["datasets"]), 2)
+        first_entry = panel.loaded_samples["Fixed sample A [A]"]
+        second_entry = panel.loaded_samples["Fixed sample B [B]"]
+        self.assertEqual(len(first_entry["datasets"]), 1)
+        self.assertEqual(len(second_entry["datasets"]), 1)
+        self.assertEqual(len(panel._card_sources), 2)
+        self.assertNotEqual(
+            first_entry["data"]._workspace_key,
+            second_entry["data"]._workspace_key,
+        )
         self.assertTrue(panel.file_mapping_states[file_path]["raw_sieve_mode"])
         self.assertEqual(panel.file_statuses[file_path], "loaded")
         self.assertEqual(len(panel.dataset_loaded_successfully.calls), 1)
         emitted_datasets, emitted_path = panel.dataset_loaded_successfully.calls[0]
         self.assertEqual(emitted_path, file_path)
         self.assertEqual(len(emitted_datasets), 2)
+
+        first_card = first_entry["data"]._workspace_key
+        second_card = second_entry["data"]._workspace_key
+        removed = panel.remove_file_by_path(
+            first_card,
+            sync_workspace=False,
+            announce=False,
+        )
+        self.assertTrue(removed)
+        self.assertNotIn("Fixed sample A [A]", panel.loaded_samples)
+        self.assertIn("Fixed sample B [B]", panel.loaded_samples)
+        self.assertIn(second_card, panel._card_sources)
+        self.assertEqual(panel.file_statuses[file_path], "loaded")
 
     def test_raw_sieve_path_queues_files_for_mapping_with_raw_mode_state(self):
         panel = _ControlPanelHarness()
@@ -596,6 +638,126 @@ class TestRemapReplacement(unittest.TestCase):
         finally:
             host.close()
             host.deleteLater()
+            APP.processEvents()
+
+    def test_multi_sample_confirmation_is_not_presented_as_manual_mapping(self):
+        host = _ErrorTabHost()
+        try:
+            file_path = os.path.normpath(r"C:\temp\multi_sample.xlsx")
+            host.add_multi_sample_confirmation_tab(
+                file_path,
+                "3 sample candidates require confirmation",
+            )
+            APP.processEvents()
+
+            tab = host.dataset_tabs_widget.widget(0)
+            self.assertIsInstance(tab, ErrorTab)
+            self.assertEqual(tab.issue_variant, "multi_sample_confirmation")
+            self.assertEqual(tab.title_label.text(), "Review detected samples")
+            self.assertEqual(tab.fix_button.text(), "Review Samples")
+            self.assertIn(("Review detected samples: multi_sample.xlsx", True), host.messages)
+        finally:
+            host.close()
+            host.deleteLater()
+            APP.processEvents()
+
+    def test_multi_sample_worker_result_uses_confirmation_status(self):
+        panel = _ControlPanelHarness()
+        panel._multi_sample_confirmation_count = 0
+        panel.multi_sample_confirmation = _SignalRecorder()
+        file_path = os.path.normpath(r"C:\temp\multi_sample.xlsx")
+
+        ControlPanel._on_import_worker_failed(
+            panel,
+            file_path,
+            "3 sample candidates require confirmation",
+        )
+
+        self.assertEqual(panel.file_statuses[file_path], "confirmation")
+        self.assertEqual(panel._multi_sample_confirmation_count, 1)
+        self.assertEqual(
+            panel.multi_sample_confirmation.calls,
+            [(file_path, "3 sample candidates require confirmation")],
+        )
+
+    def test_experimental_multi_sample_import_requires_explicit_command(self):
+        panel = ControlPanel()
+        panel.show()
+        APP.processEvents()
+
+        with tempfile.TemporaryDirectory() as tempdir:
+            file_path = os.path.join(tempdir, "multi.csv")
+            with open(file_path, "w", encoding="utf-8") as handle:
+                handle.write("placeholder")
+
+            class _FakeMultiMapper:
+                created = None
+
+                def __init__(self, *args, **kwargs):
+                    self.args = args
+                    self.kwargs = kwargs
+                    _FakeMultiMapper.created = self
+
+                def _is_multi_sample_mode(self):
+                    return True
+
+                def exec(self):
+                    return QDialog.DialogCode.Accepted
+
+                def get_mapping_results(self):
+                    return [
+                        {
+                            "sample_name": sample_name,
+                            "temperature": 20.0,
+                            "porosity": 0.35,
+                            "particle_sizes": [2.0, 1.0, 0.5],
+                            "percent_passing": passing,
+                            "mapping_state": {
+                                "multi_sample_mode": True,
+                                "multi_sample_candidate_key": candidate_key,
+                            },
+                        }
+                        for sample_name, passing, candidate_key in (
+                            ("Sample A", [100.0, 60.0, 20.0], "wide:0:1"),
+                            ("Sample B", [100.0, 55.0, 15.0], "wide:0:2"),
+                        )
+                    ]
+
+                def get_mapping_state(self):
+                    return {
+                        "multi_sample_mode": True,
+                        "selected_multi_sample_keys": ["wide:0:1", "wide:0:2"],
+                    }
+
+            original_picker = control_panel_module.QFileDialog.getOpenFileName
+            original_mapper = control_panel_module.ColumnMapperDialog
+            control_panel_module.QFileDialog.getOpenFileName = staticmethod(
+                lambda *args, **kwargs: (file_path, "CSV files (*.csv)")
+            )
+            control_panel_module.ColumnMapperDialog = _FakeMultiMapper
+            try:
+                panel.add_multi_sample_file()
+                APP.processEvents()
+            finally:
+                control_panel_module.QFileDialog.getOpenFileName = original_picker
+                control_panel_module.ColumnMapperDialog = original_mapper
+
+        try:
+            self.assertTrue(_FakeMultiMapper.created.kwargs["multi_sample_mode"])
+            self.assertEqual(panel.file_statuses[file_path], "loaded")
+            self.assertEqual(
+                [entry["data"].sample_name for entry in panel.loaded_samples.values()],
+                ["Sample A", "Sample B"],
+            )
+            self.assertEqual(len(panel._card_sources), 2)
+            menu_labels = [action.text() for action in panel._build_add_data_menu().actions()]
+            self.assertIn(
+                "Multiple Samples in One File (Experimental)...",
+                menu_labels,
+            )
+        finally:
+            panel.close()
+            panel.deleteLater()
             APP.processEvents()
 
     def test_register_external_file_formats_sheet_keys_for_display(self):
@@ -880,6 +1042,63 @@ class TestRemapReplacement(unittest.TestCase):
         self.assertEqual(session["sources"][0]["file_path"], xlsx_path)
         self.assertEqual(session["sources"][0]["sheet_name"], "English")
         self.assertEqual(session["sources"][0]["file_key"], file_key)
+
+    def test_session_normalization_preserves_candidates_from_one_source(self):
+        harness = _SessionHarness()
+        file_key = os.path.normpath("multi_sample.xlsx")
+        sources = []
+        for sample_name, candidate_key in (("BH-01", "wide:1"), ("BH-02", "wide:2")):
+            sources.append({
+                "file_key": file_key,
+                "file_path": file_key,
+                "sample_name": sample_name,
+                "mapping_state": {
+                    "multi_sample_mode": True,
+                    "multi_sample_candidate_key": candidate_key,
+                    "selected_size_range": [[1, 0]],
+                    "selected_percent_range": [[1, 1]],
+                },
+            })
+
+        session = MainWindow._normalize_session_entry(
+            harness,
+            {"name": "Multi-sample", "sources": sources},
+        )
+
+        self.assertEqual(session["files"], [file_key])
+        self.assertEqual(len(session["sources"]), 2)
+        self.assertEqual(
+            [
+                source["mapping_state"]["multi_sample_candidate_key"]
+                for source in session["sources"]
+            ],
+            ["wide:1", "wide:2"],
+        )
+
+    def test_sidebar_scope_uses_per_sample_workspace_keys(self):
+        source_path = os.path.normpath("multi_sample.xlsx")
+        first = _Tab(dataset=SimpleNamespace(
+            file_path=source_path,
+            _workspace_key=f"{source_path}::sample::wide:0:1",
+        ))
+        second = _Tab(dataset=SimpleNamespace(
+            file_path=source_path,
+            _workspace_key=f"{source_path}::sample::wide:0:2",
+        ))
+        control_panel = SimpleNamespace(
+            get_selected_paths=lambda: [second.dataset._workspace_key],
+            get_scope_card_count=lambda: 2,
+        )
+        harness = SimpleNamespace(
+            control_panel=control_panel,
+            dataset_tabs=[first, second],
+        )
+
+        selected = MainWindow._get_selected_dataset_tabs(harness)
+        selected_paths = MainWindow._dataset_paths_for_tabs(harness, selected)
+
+        self.assertEqual(selected, [second])
+        self.assertEqual(selected_paths, [second.dataset._workspace_key])
 
     def test_session_descriptor_includes_mapping_state_for_fixed_dataset(self):
         harness = _SessionHarness()

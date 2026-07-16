@@ -5,19 +5,21 @@ Column mapping dialog for CSV files with unknown formats
 from PyQt6.QtWidgets import (QDialog, QVBoxLayout, QHBoxLayout, QLabel,
                             QComboBox, QPushButton, QTableWidget, QTableWidgetItem,
                             QDialogButtonBox, QGroupBox, QFormLayout, QSpinBox,
-                            QDoubleSpinBox, QTextEdit, QTabWidget, QWidget,
+                            QDoubleSpinBox, QTextEdit, QWidget,
                             QMessageBox, QCheckBox, QListWidget, QListWidgetItem,
                             QScrollArea, QSplitter, QFrame, QSizePolicy,
                             QAbstractScrollArea, QGridLayout, QHeaderView,
-                            QStyledItemDelegate)
+                            QStyledItemDelegate, QApplication)
 from PyQt6.QtCore import Qt, QSize
-from PyQt6.QtGui import QFont, QColor, QBrush
+from PyQt6.QtGui import QFont, QColor, QBrush, QPainter, QPen, QPainterPath
 import csv
 from typing import Dict, List, Optional, Tuple
 import os
 from data_loader import GrainSizeData
 from excel_import_detection import (
     ImportCandidate,
+    detect_multi_sample_candidates,
+    extract_candidate_curve,
     find_best_import_candidate,
 )
 from import_resolver import resolve_excel_import
@@ -43,14 +45,85 @@ class _PreviewColorDelegate(QStyledItemDelegate):
             painter.restore()
         super().paint(painter, option, index)
 
+
+class _CurvePreviewWidget(QWidget):
+    """Small dependency-free preview of the interpreted cumulative curve."""
+
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self._sizes: List[float] = []
+        self._passing: List[float] = []
+        self.setMinimumHeight(150)
+        self.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
+
+    def set_curve(self, sizes: List[float], passing: List[float]) -> None:
+        pairs = sorted(
+            (float(size), float(value))
+            for size, value in zip(sizes, passing)
+            if float(size) > 0
+        )
+        self._sizes = [pair[0] for pair in pairs]
+        self._passing = [pair[1] for pair in pairs]
+        self.update()
+
+    def clear_curve(self) -> None:
+        self._sizes = []
+        self._passing = []
+        self.update()
+
+    def paintEvent(self, event):
+        painter = QPainter(self)
+        try:
+            painter.setRenderHint(QPainter.RenderHint.Antialiasing)
+            bounds = self.rect().adjusted(34, 12, -12, -24)
+            painter.fillRect(self.rect(), QColor("#fbfaf6"))
+
+            grid_pen = QPen(QColor("#e1dacd"), 1)
+            painter.setPen(grid_pen)
+            for step in range(5):
+                y = bounds.bottom() - (bounds.height() * step / 4)
+                painter.drawLine(bounds.left(), int(y), bounds.right(), int(y))
+            for step in range(4):
+                x = bounds.left() + (bounds.width() * step / 3)
+                painter.drawLine(int(x), bounds.top(), int(x), bounds.bottom())
+
+            painter.setPen(QPen(QColor(C.TEXT_MUTED), 1))
+            painter.drawLine(bounds.bottomLeft(), bounds.bottomRight())
+            painter.drawLine(bounds.bottomLeft(), bounds.topLeft())
+
+            if len(self._sizes) < 2:
+                painter.setPen(QColor(C.TEXT_MUTED))
+                painter.drawText(bounds, Qt.AlignmentFlag.AlignCenter, "Confirm the mapping to preview the curve")
+                return
+
+            import math
+            logs = [math.log10(value) for value in self._sizes]
+            lo, hi = min(logs), max(logs)
+            if hi == lo:
+                hi = lo + 1.0
+
+            path = QPainterPath()
+            for index, (log_size, passing) in enumerate(zip(logs, self._passing)):
+                x = bounds.left() + (log_size - lo) / (hi - lo) * bounds.width()
+                y = bounds.bottom() - max(0.0, min(100.0, passing)) / 100.0 * bounds.height()
+                if index == 0:
+                    path.moveTo(x, y)
+                else:
+                    path.lineTo(x, y)
+            painter.setPen(QPen(QColor(C.OLIVE), 2.2))
+            painter.drawPath(path)
+        finally:
+            painter.end()
+
+
 class ColumnMapperDialog(FramelessDialogBase):
     """Dialog for mapping CSV columns to grain size data"""
 
     def sizeHint(self):
-        return QSize(1120, 740)
+        return QSize(1380, 820)
 
     def minimumSizeHint(self):
-        return QSize(900, 620)
+        return QSize(980, 660)
 
     def __init__(
         self,
@@ -59,32 +132,38 @@ class ColumnMapperDialog(FramelessDialogBase):
         main_window=None,
         sheet_name: str = None,
         initial_state: Optional[Dict] = None,
+        multi_sample_mode: bool = False,
     ):
         super().__init__(parent, default_mode="auto")
         self.file_path = file_path
         self.main_window = main_window  # Direct reference to main window
         self.forced_sheet_name = sheet_name  # If provided, only work with this specific sheet
         self._initial_state = initial_state or {}
+        self._multi_sample_requested = bool(
+            multi_sample_mode or self._initial_state.get("multi_sample_mode")
+        )
         self.column_mapping = {}
         self.sample_data = []
         self.headers = []
         self.detected_import_candidate: Optional[ImportCandidate] = None
+        self.multi_sample_candidates: Tuple[ImportCandidate, ...] = ()
+        self.multi_sample_list = None
+        self._multi_sample_section = None
         self.excel_sheets = []  # Available Excel sheets
         self.sheet_list = None  # Multi-sheet selection widget
         self._excel_file = None  # Cached ExcelFile reference
         self.current_sheet = None
         self.header_row = 0  # Detected header row
         self.cell_range_mode = False  # False = column mapping, True = cell range selection
-        self.smart_selection_mode = False  # Smart selection with automatic analysis
         self.raw_sieve_mode = False  # True = user provides raw sieve weighings instead of pre-calculated % passing
         self.calculated_selection_mode = "column"
         self.selected_size_range = []  # List of (row, col) tuples for size data
         self.selected_percent_range = []  # List of (row, col) tuples for percent data
-        self.selected_headers = []  # List of (row, col) tuples for header cells
+        self.selected_empty_range = []  # Raw sieve: empty-sieve weights
+        self.selected_full_range = []  # Raw sieve: sieve + sample weights
+        self.selected_headers = []  # Compatibility state used by batch range reuse
         self.learned_pattern = None  # Stores pattern for batch processing
         self._batch_apply_committed = False
-        self.selection_mode_group = None
-        self.selection_mode_help_label = None
         self.pathway_summary_label = None
         self.sheet_info_label = None
         self.preview_hint_label = None
@@ -96,13 +175,22 @@ class ColumnMapperDialog(FramelessDialogBase):
         self._mapping_splitter = None
         self._sheet_group = None
         self._import_section = None
+        self._header_section = None
         self._method_section = None
         self._mapping_section = None
         self._range_section = None
         self._raw_section = None
         self._sheet_section = None
         self.input_format_group = None
-        self.selecting_mode = None
+        self.range_step = 0
+        self.result_curve = None
+        self.result_status_label = None
+        self.result_metrics_label = None
+        self.batch_status_label = None
+        self.batch_review_btn = None
+        self.import_button = None
+        self.active_range_label = None
+        self._footer_status_icon = None
 
         # Update window title to show sheet if provided
         if sheet_name:
@@ -110,8 +198,12 @@ class ColumnMapperDialog(FramelessDialogBase):
         else:
             self.setWindowTitle(f"Map Columns - {os.path.basename(file_path)}")
         self.setModal(True)
-        self.resize(1120, 740)
-        self.setMinimumSize(900, 620)
+        screen = QApplication.primaryScreen()
+        available = screen.availableGeometry().size() if screen is not None else QSize(1440, 900)
+        initial_width = max(980, min(1380, int(available.width() * 0.94)))
+        initial_height = max(660, min(820, int(available.height() * 0.90)))
+        self.resize(initial_width, initial_height)
+        self.setMinimumSize(980, 660)
 
         # Styling — body inherits global QSS; patch specifics here
         self.setStyleSheet(
@@ -158,6 +250,15 @@ class ColumnMapperDialog(FramelessDialogBase):
         self.headers = self.detect_headers(rows)
         self.sample_data = rows
         self.detected_import_candidate = None
+        self.multi_sample_candidates = ()
+        if (
+            self._multi_sample_requested
+            and not self._initial_state.get("raw_sieve_mode")
+        ):
+            self.multi_sample_candidates = detect_multi_sample_candidates(
+                self.sample_data,
+                sheet_name=self.current_sheet,
+            )
         if os.path.splitext(self.file_path)[1].lower() in ['.xlsx', '.xls']:
             self.detected_import_candidate = find_best_import_candidate(
                 self.sample_data,
@@ -317,7 +418,7 @@ class ColumnMapperDialog(FramelessDialogBase):
         import os as _os
         fname = _os.path.basename(self.file_path)
         sheet_part = f" [{self.current_sheet}]" if self.current_sheet else ""
-        subtitle = f"{fname}{sheet_part} - map columns to grain-size data"
+        subtitle = f"{fname}{sheet_part} - review the interpreted data before import"
 
         # Root layout — header / body / footer, no margins
         root = QVBoxLayout(self)
@@ -325,7 +426,7 @@ class ColumnMapperDialog(FramelessDialogBase):
         root.setSpacing(0)
 
         self._header_widget = make_dialog_header(
-            "Column Mapper",
+            "Confirm imported data",
             subtitle,
             fa_icon="fa6s.table-columns",
             close_fn=self.reject,
@@ -340,18 +441,6 @@ class ColumnMapperDialog(FramelessDialogBase):
         layout.setSpacing(0)
         root.addWidget(body_wrap, 1)
 
-        # Create tab widget
-        tab_widget = QTabWidget()
-        tab_widget.setDocumentMode(True)
-        tab_widget.setStyleSheet(
-            f"QTabWidget::pane {{ border: none; }}"
-            f"QTabBar::tab {{ padding: 7px 14px; min-height: 26px; color: {C.TEXT_MID}; "
-            f"background: transparent; border: 1px solid transparent; border-bottom: none; }}"
-            f"QTabBar::tab:selected {{ color: {C.TEXT}; background: {C.BG_RAISED}; "
-            f"border-color: {C.BORDER}; font-weight: 600; }}"
-        )
-
-        # Tab 1: Column Mapping
         mapping_tab = QWidget()
         mapping_layout = QVBoxLayout(mapping_tab)
         mapping_layout.setContentsMargins(0, 0, 0, 0)
@@ -359,39 +448,6 @@ class ColumnMapperDialog(FramelessDialogBase):
 
         file_strip = self._build_file_strip()
         mapping_layout.addWidget(file_strip)
-
-        # Add mode selector for Excel files
-        if os.path.splitext(self.file_path)[1].lower() in ['.xlsx', '.xls']:
-            self.selection_mode_group = QGroupBox("Selection Method")
-            mode_layout = QVBoxLayout(self.selection_mode_group)
-            mode_layout.setContentsMargins(10, 8, 10, 10)
-            mode_layout.setSpacing(6)
-
-            mode_button_row = QHBoxLayout()
-            mode_button_row.setContentsMargins(0, 0, 0, 0)
-            mode_button_row.setSpacing(8)
-
-            self.column_mode_btn = QPushButton("Columns\nclean table")
-            self.range_mode_btn = QPushButton("Cell Ranges\nirregular sheet")
-
-            self.column_mode_btn.setCheckable(True)
-            self.range_mode_btn.setCheckable(True)
-            self.column_mode_btn.setChecked(True)  # Default mode
-
-            self.column_mode_btn.clicked.connect(self.switch_to_column_mode)
-            self.range_mode_btn.clicked.connect(self.switch_to_range_mode)
-
-            mode_button_row.addWidget(self.column_mode_btn)
-            mode_button_row.addWidget(self.range_mode_btn)
-            mode_layout.addLayout(mode_button_row)
-
-            self.selection_mode_help_label = QLabel()
-            self.selection_mode_help_label.setWordWrap(True)
-            self.selection_mode_help_label.setStyleSheet("color: #666; font-style: italic; margin: 0 4px 2px 4px;")
-            self.selection_mode_help_label.hide()
-            mode_layout.addWidget(self.selection_mode_help_label)
-
-            # Added to the left inspector below.
 
         # Add Excel sheet selector if multiple sheets
         if len(self.excel_sheets) > 1:
@@ -432,12 +488,12 @@ class ColumnMapperDialog(FramelessDialogBase):
         # Input format selector (available for all file types)
         input_format_group = QGroupBox("Import Path")
         self.input_format_group = input_format_group
-        input_format_layout = QHBoxLayout(input_format_group)
+        input_format_layout = QVBoxLayout(input_format_group)
         input_format_layout.setContentsMargins(10, 8, 10, 10)
-        input_format_layout.setSpacing(8)
+        input_format_layout.setSpacing(6)
 
-        self.calculated_data_btn = QPushButton("Processed Curve\nsize + passing")
-        self.raw_sieve_btn = QPushButton("Raw Sieve\nweighings")
+        self.calculated_data_btn = QPushButton("Processed curve")
+        self.raw_sieve_btn = QPushButton("Raw sieve weighings")
 
         self.calculated_data_btn.setCheckable(True)
         self.raw_sieve_btn.setCheckable(True)
@@ -455,8 +511,6 @@ class ColumnMapperDialog(FramelessDialogBase):
         self.raw_sieve_btn.clicked.connect(self.switch_to_raw_sieve_mode)
 
         for btn, fa_name in [
-            (getattr(self, 'column_mode_btn', None), 'fa6s.table-columns'),
-            (getattr(self, 'range_mode_btn', None), 'fa6s.object-group'),
             (self.calculated_data_btn, 'fa6s.chart-line'),
             (self.raw_sieve_btn, 'fa6s.scale-balanced'),
         ]:
@@ -513,21 +567,6 @@ class ColumnMapperDialog(FramelessDialogBase):
         preview_head_layout.addWidget(preview_title)
         preview_head_layout.addStretch(1)
 
-        zoom_out_btn = QPushButton()
-        zoom_out_btn.setToolTip("Zoom out")
-        self._style_preview_action_button(zoom_out_btn, "fa6s.magnifying-glass-minus")
-        preview_head_layout.addWidget(zoom_out_btn)
-
-        zoom_in_btn = QPushButton()
-        zoom_in_btn.setToolTip("Zoom in")
-        self._style_preview_action_button(zoom_in_btn, "fa6s.magnifying-glass-plus")
-        preview_head_layout.addWidget(zoom_in_btn)
-
-        numeric_btn = QPushButton("Numeric")
-        numeric_btn.setToolTip("Highlight numeric cells")
-        self._style_preview_action_button(numeric_btn, "fa6s.filter")
-        preview_head_layout.addWidget(numeric_btn)
-
         preview_layout.addWidget(preview_head)
 
         self.preview_hint_label = QLabel(preview_group)
@@ -571,62 +610,53 @@ class ColumnMapperDialog(FramelessDialogBase):
         preview_foot_layout.addWidget(self.preview_footer_status_label)
         preview_layout.addWidget(preview_foot)
 
-        # Smart selection controls (used in range mode)
-        self.range_tools_group = QGroupBox("Selection Tools")
+        # Guided selection exposes one role at a time for irregular sheets.
+        self.range_tools_group = QGroupBox("Guided cell ranges")
         range_tools_layout = QVBoxLayout(self.range_tools_group)
         range_tools_layout.setContentsMargins(10, 8, 10, 10)
-        range_tools_layout.setSpacing(6)
+        range_tools_layout.setSpacing(8)
 
-        range_note = QLabel(
-            "Use cell range selection for irregular sheets. Select the size and percent cells "
-            "directly from the preview table."
+        self.range_step_label = QLabel()
+        self.range_step_label.setWordWrap(True)
+        self.range_step_label.setStyleSheet(
+            f"color: {C.TEXT}; font-weight: 600; background: rgba(107,142,35,.07); "
+            f"border-left: 3px solid {C.OLIVE}; padding: 8px;"
         )
-        range_note.setWordWrap(True)
-        range_note.setStyleSheet("color: #666; font-style: italic; margin: 0 2px 2px 2px;")
-        range_note.hide()
-        range_tools_layout.addWidget(range_note)
+        range_tools_layout.addWidget(self.range_step_label)
 
-        self.range_controls = QWidget()
-        range_controls_layout = QGridLayout(self.range_controls)
-        range_controls_layout.setContentsMargins(0, 0, 0, 0)
-        range_controls_layout.setHorizontalSpacing(8)
-        range_controls_layout.setVerticalSpacing(8)
+        self.active_range_label = QLabel("Current selection: none")
+        self.active_range_label.setFont(QFont(F.MONO, F.SZ_XS))
+        self.active_range_label.setWordWrap(True)
+        self.active_range_label.setStyleSheet(
+            f"color: {C.TEXT_MID}; background: {C.BG}; border: 1px solid {C.BORDER}; "
+            f"border-radius: {SZ.BORDER_RADIUS}px; padding: 6px 8px;"
+        )
+        range_tools_layout.addWidget(self.active_range_label)
 
-        self.mark_size_range_btn = QPushButton("Use Selection\nas Size")
-        self.mark_size_range_btn.clicked.connect(lambda: self._mark_current_selection("size"))
-        self._style_tool_button(self.mark_size_range_btn, "fa6s.ruler-horizontal")
+        self.confirm_range_btn = QPushButton("Use selected cells")
+        self.confirm_range_btn.clicked.connect(self._confirm_guided_range_selection)
+        self._style_tool_button(self.confirm_range_btn, "fa6s.check", primary=True)
+        self.confirm_range_btn.setEnabled(False)
+        range_tools_layout.addWidget(self.confirm_range_btn)
 
-        self.mark_percent_range_btn = QPushButton("Use Selection\nas % Passing")
-        self.mark_percent_range_btn.clicked.connect(lambda: self._mark_current_selection("percent"))
-        self._style_tool_button(self.mark_percent_range_btn, "fa6s.percent")
-
-        self.clear_ranges_btn = QPushButton("Clear\nreset selection")
+        self.clear_ranges_btn = QPushButton("Start over")
         self.clear_ranges_btn.clicked.connect(self.clear_range_selection)
-        self._style_tool_button(self.clear_ranges_btn, "fa6s.eraser")
+        self._style_tool_button(self.clear_ranges_btn, "fa6s.arrow-rotate-left")
+        range_tools_layout.addWidget(self.clear_ranges_btn)
 
-        self.smart_selection_btn = QPushButton("Detect Area\nfrom selection")
-        self.smart_selection_btn.setCheckable(True)
-        self.smart_selection_btn.clicked.connect(self.toggle_smart_selection)
-        self._style_tool_button(self.smart_selection_btn, "fa6s.wand-magic-sparkles")
-
-        self.batch_apply_btn = QPushButton("Apply Pattern\nbatch ready")
+        self.batch_apply_btn = QPushButton("Review batch matches")
         self.batch_apply_btn.clicked.connect(self.apply_pattern_to_batch)
         self.batch_apply_btn.setEnabled(False)
-        self._style_tool_button(self.batch_apply_btn, "fa6s.bolt", primary=True)
-
-        range_controls_layout.addWidget(self.mark_size_range_btn, 0, 0)
-        range_controls_layout.addWidget(self.mark_percent_range_btn, 0, 1)
-        range_controls_layout.addWidget(self.smart_selection_btn, 1, 0)
-        range_controls_layout.addWidget(self.clear_ranges_btn, 1, 1)
-        range_controls_layout.addWidget(self.batch_apply_btn, 2, 0, 1, 2)
-        range_tools_layout.addWidget(self.range_controls)
+        self.batch_apply_btn.hide()
+        self._style_tool_button(self.batch_apply_btn, "fa6s.layer-group")
+        range_tools_layout.addWidget(self.batch_apply_btn)
 
         range_counts = QWidget()
-        range_counts_layout = QHBoxLayout(range_counts)
+        range_counts_layout = QVBoxLayout(range_counts)
         range_counts_layout.setContentsMargins(0, 0, 0, 0)
-        range_counts_layout.setSpacing(8)
-        self.size_range_count_label = QLabel("0 size cells")
-        self.percent_range_count_label = QLabel("0 passing cells")
+        range_counts_layout.setSpacing(6)
+        self.size_range_count_label = QLabel("Particle size: not selected")
+        self.percent_range_count_label = QLabel("Passing: not selected")
         for label in (self.size_range_count_label, self.percent_range_count_label):
             label.setFont(QFont(F.MONO, F.SZ_XS))
             label.setStyleSheet(
@@ -636,9 +666,11 @@ class ColumnMapperDialog(FramelessDialogBase):
             range_counts_layout.addWidget(label)
         range_tools_layout.addWidget(range_counts)
 
-        self.pattern_info_label = QLabel("Select cells in the preview, then mark them as size or passing.")
+        self.pattern_info_label = QLabel()
         self.pattern_info_label.setWordWrap(True)
-        self.pattern_info_label.setStyleSheet("color: #666; font-style: italic; margin: 0 2px 2px 2px;")
+        self.pattern_info_label.setStyleSheet(
+            f"color: {C.TEXT_MUTED}; font-size: {F.SZ_SM}pt;"
+        )
         range_tools_layout.addWidget(self.pattern_info_label)
 
         # Mapping group (for column mode)
@@ -684,28 +716,32 @@ class ColumnMapperDialog(FramelessDialogBase):
         # Validate after auto-detection
         self.validate_required_fields()
 
-        mapping_form.addRow("Particle Size (mm): *", self.size_combo)
-        mapping_form.addRow("Cumulative Percent Passing (0-100): *", self.passing_combo)
+        mapping_form.addRow("Particle size:", self.size_combo)
+        mapping_form.addRow("Cumulative percent passing (0-100):", self.passing_combo)
 
-        # Add header row selector for Excel files
-        if os.path.splitext(self.file_path)[1].lower() in ['.xlsx', '.xls']:
-            self.header_row_spin = QSpinBox()
-            self.header_row_spin.setRange(0, max(0, len(self.sample_data) - 1))
-            self.header_row_spin.setValue(self.header_row)
-            self.header_row_spin.valueChanged.connect(self.update_headers)
-            mapping_form.addRow("Header Row (0-based):", self.header_row_spin)
+        # Header selection is shared by both input pathways and appears before roles.
+        self.header_row_spin = QSpinBox()
+        self.header_row_spin.setRange(1, max(1, len(self.sample_data)))
+        self.header_row_spin.setValue(self.header_row + 1)
+        self.header_row_spin.valueChanged.connect(self._on_header_row_spin_changed)
+        header_group = QGroupBox("Locate the table")
+        header_form = QFormLayout(header_group)
+        header_form.setContentsMargins(10, 8, 10, 10)
+        header_form.addRow("Header row:", self.header_row_spin)
+        self._header_group = header_group
 
         # Compact guidance; detailed behavior is handled by validation and preview highlights.
-        help_text = QLabel(
-            "Processed data must provide cumulative percent passing."
+        self.retained_guidance_label = QLabel(
+            "Retained values cannot be used as cumulative passing. Convert the "
+            "source, or choose Raw sieve weighings for original weights."
         )
-        help_text.setWordWrap(True)
-        help_text.setStyleSheet("color: #666; font-style: italic; margin: 10px;")
-        mapping_form.addRow(help_text)
-        help_text.setText(
-            "Retained values are not converted here. Convert the source first, or import original weights as Raw Sieve Weighings."
+        self.retained_guidance_label.setWordWrap(True)
+        self.retained_guidance_label.setStyleSheet(
+            f"color: #8b4e24; background: #f4e7d9; border-left: 3px solid #b7793d; "
+            f"font-size: {F.SZ_SM}pt; padding: 7px;"
         )
-        help_text.setStyleSheet(f"color: {C.TEXT_MUTED}; font-size: {F.SZ_SM}pt; margin: 4px 6px 2px 6px;")
+        self.retained_guidance_label.hide()
+        mapping_form.addRow(self.retained_guidance_label)
 
         # Added to the left inspector below.
 
@@ -748,6 +784,31 @@ class ColumnMapperDialog(FramelessDialogBase):
         # Added to the left inspector below.
         self.range_tools_group.setVisible(False)
 
+        self.multi_sample_group = QGroupBox("Samples in this sheet")
+        multi_layout = QVBoxLayout(self.multi_sample_group)
+        multi_layout.setContentsMargins(10, 8, 10, 10)
+        multi_layout.setSpacing(8)
+        self.multi_sample_summary_label = QLabel()
+        self.multi_sample_summary_label.setWordWrap(True)
+        self.multi_sample_summary_label.setStyleSheet(
+            f"color: {C.TEXT_MID}; font-size: {F.SZ_SM}pt;"
+        )
+        multi_layout.addWidget(self.multi_sample_summary_label)
+        self.multi_sample_list = QListWidget()
+        self.multi_sample_list.setSelectionMode(
+            QListWidget.SelectionMode.SingleSelection
+        )
+        self.multi_sample_list.setMinimumHeight(150)
+        self.multi_sample_list.setMaximumHeight(260)
+        self.multi_sample_list.itemChanged.connect(
+            self._on_multi_sample_item_changed
+        )
+        self.multi_sample_list.currentItemChanged.connect(
+            self._on_multi_sample_current_changed
+        )
+        multi_layout.addWidget(self.multi_sample_list)
+        self.multi_sample_group.hide()
+
         controls_scroll = QScrollArea()
         controls_scroll.setWidgetResizable(True)
         controls_scroll.setFrameShape(QFrame.Shape.NoFrame)
@@ -757,7 +818,7 @@ class ColumnMapperDialog(FramelessDialogBase):
         )
         controls_scroll.setSizeAdjustPolicy(QAbstractScrollArea.SizeAdjustPolicy.AdjustIgnored)
         controls_scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
-        controls_scroll.setMinimumWidth(390)
+        controls_scroll.setMinimumWidth(370)
         controls_scroll.setMaximumWidth(430)
         controls_scroll.setSizePolicy(QSizePolicy.Policy.Preferred, QSizePolicy.Policy.Expanding)
 
@@ -772,29 +833,36 @@ class ColumnMapperDialog(FramelessDialogBase):
         controls_layout = QVBoxLayout(controls_container)
         controls_layout.setContentsMargins(12, 12, 12, 12)
         controls_layout.setSpacing(10)
+        self._multi_sample_section = self._make_inspector_section(
+            "Samples in this sheet", "fa6s.layer-group", self.multi_sample_group
+        )
+        controls_layout.addWidget(self._multi_sample_section)
+        self._multi_sample_section.hide()
         if self.input_format_group is not None:
             self._import_section = self._make_inspector_section(
-                "Import Path", "fa6s.route", self.input_format_group
+                "Data in this sheet", "fa6s.route", self.input_format_group
             )
             controls_layout.addWidget(self._import_section)
-        if self.selection_mode_group is not None:
-            self._method_section = self._make_inspector_section(
-                "Mapping Method", "fa6s.location-crosshairs", self.selection_mode_group
-            )
-            controls_layout.addWidget(self._method_section)
-        controls_layout.addWidget(self.pathway_summary_label)
+        self._header_section = self._make_inspector_section(
+            "Locate the table", "fa6s.heading", self._header_group
+        )
+        controls_layout.addWidget(self._header_section)
         self._mapping_section = self._make_inspector_section(
-            "Processed Curve Columns", "fa6s.list-check", self.mapping_group
+            "Confirm curve columns", "fa6s.list-check", self.mapping_group
         )
         self._range_section = self._make_inspector_section(
-            "Cell Range Selection", "fa6s.object-group", self.range_tools_group
+            "Select cell ranges", "fa6s.object-group", self.range_tools_group
         )
         self._raw_section = self._make_inspector_section(
-            "Raw Sieve Columns", "fa6s.scale-balanced", self.raw_sieve_group
+            "Confirm weighing columns", "fa6s.scale-balanced", self.raw_sieve_group
         )
         controls_layout.addWidget(self._mapping_section)
         controls_layout.addWidget(self._range_section)
         controls_layout.addWidget(self._raw_section)
+        self.range_toggle_btn = QPushButton("Use cell ranges for an irregular sheet")
+        self.range_toggle_btn.clicked.connect(self._toggle_range_workflow)
+        self._style_tool_button(self.range_toggle_btn, "fa6s.object-group")
+        controls_layout.addWidget(self.range_toggle_btn)
         if self._sheet_group is not None:
             self._sheet_section = self._make_inspector_section(
                 "Sheets", "fa6s.file-excel", self._sheet_group
@@ -802,6 +870,65 @@ class ColumnMapperDialog(FramelessDialogBase):
             controls_layout.addWidget(self._sheet_section)
         controls_layout.addStretch()
         controls_scroll.setWidget(controls_container)
+
+        result_panel = QWidget()
+        result_panel.setObjectName("columnMapperResult")
+        result_panel.setMinimumWidth(280)
+        result_panel.setMaximumWidth(340)
+        result_panel.setStyleSheet(
+            f"QWidget#columnMapperResult {{ background: {C.BG}; "
+            f"border-left: 1px solid {C.BORDER}; }}"
+        )
+        result_layout = QVBoxLayout(result_panel)
+        result_layout.setContentsMargins(14, 14, 14, 14)
+        result_layout.setSpacing(10)
+
+        result_title = QLabel("Interpreted result")
+        result_title.setStyleSheet(f"color: {C.TEXT}; font-weight: 700;")
+        result_layout.addWidget(result_title)
+        result_help = QLabel("This is the curve the program will analyze.")
+        result_help.setWordWrap(True)
+        result_help.setStyleSheet(f"color: {C.TEXT_MUTED}; font-size: {F.SZ_SM}pt;")
+        result_layout.addWidget(result_help)
+
+        self.result_status_label = QLabel("Confirm the required roles")
+        self.result_status_label.setWordWrap(True)
+        self.result_status_label.setStyleSheet(
+            f"background: {C.BG_RAISED}; border: 1px solid {C.BORDER}; "
+            f"border-radius: {SZ.BORDER_RADIUS}px; color: {C.TEXT_MID}; padding: 8px;"
+        )
+        result_layout.addWidget(self.result_status_label)
+
+        self.result_curve = _CurvePreviewWidget()
+        result_layout.addWidget(self.result_curve)
+
+        self.result_metrics_label = QLabel()
+        self.result_metrics_label.setWordWrap(True)
+        self.result_metrics_label.setFont(QFont(F.MONO, F.SZ_XS))
+        self.result_metrics_label.setStyleSheet(
+            f"color: {C.TEXT_MID}; border-top: 1px solid {C.BORDER}; padding-top: 8px;"
+        )
+        result_layout.addWidget(self.result_metrics_label)
+
+        self.checks_title = QLabel("Checks")
+        self.checks_title.setStyleSheet(f"color: {C.TEXT}; font-weight: 700; margin-top: 4px;")
+        result_layout.addWidget(self.checks_title)
+        self.result_checks_label = QLabel()
+        self.result_checks_label.setWordWrap(True)
+        self.result_checks_label.setStyleSheet(
+            f"color: {C.TEXT_MID}; font-size: {F.SZ_SM}pt;"
+        )
+        result_layout.addWidget(self.result_checks_label)
+
+        self.batch_status_label = QLabel()
+        self.batch_status_label.setWordWrap(True)
+        self.batch_status_label.hide()
+        self.batch_status_label.setStyleSheet(
+            f"background: rgba(107,142,35,.07); border-left: 3px solid {C.OLIVE}; "
+            f"color: {C.TEXT_MID}; padding: 8px;"
+        )
+        result_layout.addWidget(self.batch_status_label)
+        result_layout.addStretch(1)
 
         self._mapping_splitter = QSplitter(Qt.Orientation.Horizontal)
         self._mapping_splitter.setChildrenCollapsible(False)
@@ -812,19 +939,15 @@ class ColumnMapperDialog(FramelessDialogBase):
         )
         self._mapping_splitter.addWidget(controls_scroll)
         self._mapping_splitter.addWidget(preview_group)
+        self._mapping_splitter.addWidget(result_panel)
         self._mapping_splitter.setStretchFactor(0, 0)
         self._mapping_splitter.setStretchFactor(1, 1)
-        self._mapping_splitter.setSizes([410, 710])
+        self._mapping_splitter.setStretchFactor(2, 0)
+        self._mapping_splitter.setSizes([390, 680, 310])
         self._mapping_splitter.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
 
         mapping_layout.addWidget(self._mapping_splitter, 1)
 
-        try:
-            tab_widget.addTab(mapping_tab, _icon("fa6s.link", C.TEXT_MUTED, 12), "Mapping")
-        except Exception:
-            tab_widget.addTab(mapping_tab, "Mapping")
-
-        # Tab 2: Sample Parameters
         params_tab = QWidget()
         params_layout = QVBoxLayout(params_tab)
 
@@ -855,41 +978,37 @@ class ColumnMapperDialog(FramelessDialogBase):
         params_form.addRow("Temperature:", self.temperature_spin)
         params_form.addRow("Porosity:", self.porosity_spin)
         params_form.addRow("Sample Name:", self.sample_name_edit)
+        self.sample_name_label = params_form.labelForField(self.sample_name_edit)
 
         params_layout.addWidget(params_group)
         params_layout.addStretch()
 
-        try:
-            tab_widget.addTab(params_tab, _icon("fa6s.sliders", C.TEXT_MUTED, 12), "Parameters")
-        except Exception:
-            tab_widget.addTab(params_tab, "Parameters")
+        self.sample_details_group = params_group
+        self.sample_details_group.setParent(controls_container)
+        self.sample_details_group.hide()
+        self.sample_details_button = QPushButton("Sample details (optional)")
+        self.sample_details_button.setCheckable(True)
+        self.sample_details_button.clicked.connect(self._toggle_sample_details)
+        self._style_tool_button(self.sample_details_button, "fa6s.sliders")
+        insert_at = max(0, controls_layout.count() - 1)
+        controls_layout.insertWidget(insert_at, self.sample_details_button)
+        controls_layout.insertWidget(insert_at + 1, self.sample_details_group)
 
-        layout.addWidget(tab_widget)
-
-        # Footer (added to root, outside body_wrap so it sticks to bottom)
-        footer_status = QWidget()
-        footer_status_layout = QHBoxLayout(footer_status)
-        footer_status_layout.setContentsMargins(0, 0, 0, 0)
-        footer_status_layout.setSpacing(7)
-
-        footer_status_icon = QLabel()
-        try:
-            footer_status_icon.setPixmap(_icon("fa6s.circle-check", C.OLIVE, 12).pixmap(12, 12))
-        except Exception:
-            footer_status_icon.setText("")
-        footer_status_icon.setStyleSheet("background: transparent;")
-        footer_status_layout.addWidget(footer_status_icon)
-
-        self._footer_status_label = QLabel()
-        self._footer_status_label.setFont(QFont(F.MONO, F.SZ_XS))
-        self._footer_status_label.setStyleSheet(f"color: {C.TEXT_MUTED}; background: transparent;")
-        footer_status_layout.addWidget(self._footer_status_label)
+        # The mapper is one confirmation surface; optional details are disclosed inline.
+        layout.addWidget(mapping_tab)
+        mapping_tab.setVisible(True)
 
         footer = make_dialog_footer([
-            ("Preview Results", self.preview_mapping, "secondary"),
             ("Cancel", self.reject, "secondary"),
-            ("Import", self.accept, "primary"),
-        ], left_widget=footer_status)
+            ("Restore detected mapping", self._rerun_auto_detection, "secondary"),
+            ("Import sample", self.accept, "primary"),
+        ])
+        for button in footer.findChildren(QPushButton):
+            if button.text() == "Import sample":
+                self.import_button = button
+            elif button.text() == "Restore detected mapping":
+                self.restore_detection_button = button
+        self.restore_detection_button.setVisible(self.detected_import_candidate is not None)
         root.addWidget(footer)
 
         self.install_chrome_behavior(
@@ -900,15 +1019,211 @@ class ColumnMapperDialog(FramelessDialogBase):
         if not self._initial_state:
             self._apply_detected_import_candidate()
         self._apply_mode_state()
+        self._apply_multi_sample_mode()
 
     def _set_header_row_from_candidate(self, candidate: ImportCandidate) -> None:
         self.header_row = max(0, int(candidate.header_row))
         self._refresh_column_options_for_header_row(self.header_row, preserve_indices=True)
         if hasattr(self, 'header_row_spin'):
             self.header_row_spin.blockSignals(True)
-            self.header_row_spin.setRange(0, max(0, len(self.sample_data) - 1))
-            self.header_row_spin.setValue(min(self.header_row, self.header_row_spin.maximum()))
+            self.header_row_spin.setRange(1, max(1, len(self.sample_data)))
+            self.header_row_spin.setValue(
+                min(self.header_row + 1, self.header_row_spin.maximum())
+            )
             self.header_row_spin.blockSignals(False)
+
+    def _on_header_row_spin_changed(self, visible_row: int) -> None:
+        self.update_headers(max(0, int(visible_row) - 1))
+
+    def _is_multi_sample_mode(self) -> bool:
+        return bool(self.multi_sample_candidates) and not self.raw_sieve_mode
+
+    def _populate_multi_sample_list(self) -> None:
+        if self.multi_sample_list is None:
+            return
+        self.multi_sample_list.blockSignals(True)
+        self.multi_sample_list.clear()
+        for index, candidate in enumerate(self.multi_sample_candidates):
+            item = QListWidgetItem(
+                f"{candidate.sample_name}\n{candidate.source_label}"
+            )
+            item.setData(Qt.ItemDataRole.UserRole, index)
+            item.setFlags(
+                item.flags()
+                | Qt.ItemFlag.ItemIsUserCheckable
+                | Qt.ItemFlag.ItemIsSelectable
+                | Qt.ItemFlag.ItemIsEnabled
+            )
+            item.setCheckState(Qt.CheckState.Checked)
+            item.setToolTip(
+                f"{candidate.sample_name} - {candidate.source_label}"
+            )
+            self.multi_sample_list.addItem(item)
+        self.multi_sample_list.blockSignals(False)
+        if self.multi_sample_list.count():
+            self.multi_sample_list.setCurrentRow(0)
+
+    def _selected_multi_sample_candidates(self) -> List[ImportCandidate]:
+        if self.multi_sample_list is None:
+            return []
+        selected: List[ImportCandidate] = []
+        for row in range(self.multi_sample_list.count()):
+            item = self.multi_sample_list.item(row)
+            if item.checkState() != Qt.CheckState.Checked:
+                continue
+            index = item.data(Qt.ItemDataRole.UserRole)
+            if isinstance(index, int) and 0 <= index < len(self.multi_sample_candidates):
+                selected.append(self.multi_sample_candidates[index])
+        return selected
+
+    def _current_multi_sample_candidate(self) -> Optional[ImportCandidate]:
+        if self.multi_sample_list is None:
+            return None
+        item = self.multi_sample_list.currentItem()
+        if item is None:
+            return None
+        index = item.data(Qt.ItemDataRole.UserRole)
+        if isinstance(index, int) and 0 <= index < len(self.multi_sample_candidates):
+            return self.multi_sample_candidates[index]
+        return None
+
+    def _apply_multi_sample_mode(self) -> None:
+        active = self._is_multi_sample_mode()
+        if self._multi_sample_section is not None:
+            self._multi_sample_section.setVisible(active)
+        if self.multi_sample_group is not None:
+            self.multi_sample_group.setVisible(active)
+        if not active:
+            if self._import_section is not None:
+                self._import_section.show()
+            if self._sheet_section is not None:
+                self._sheet_section.show()
+            self.range_toggle_btn.show()
+            self.restore_detection_button.setVisible(
+                self.detected_import_candidate is not None
+            )
+            self.sample_name_edit.show()
+            if getattr(self, "sample_name_label", None) is not None:
+                self.sample_name_label.show()
+            return
+
+        self.raw_sieve_mode = False
+        self.calculated_selection_mode = "range"
+        self.cell_range_mode = True
+        self._populate_multi_sample_list()
+        self.multi_sample_summary_label.setText(
+            f"{len(self.multi_sample_candidates)} independent curves were detected. "
+            "Clear any sample you do not want to import."
+        )
+        for section in (
+            self._import_section,
+            self._header_section,
+            self._mapping_section,
+            self._range_section,
+            self._raw_section,
+            self._sheet_section,
+        ):
+            if section is not None:
+                section.hide()
+        self.range_toggle_btn.hide()
+        self.restore_detection_button.hide()
+        self.sample_name_edit.hide()
+        if getattr(self, "sample_name_label", None) is not None:
+            self.sample_name_label.hide()
+        self._update_multi_sample_import_state()
+        self._preview_multi_sample_candidate(
+            self._current_multi_sample_candidate()
+        )
+
+    def _on_multi_sample_item_changed(self, _item: QListWidgetItem) -> None:
+        self._update_multi_sample_import_state()
+
+    def _on_multi_sample_current_changed(
+        self,
+        current: Optional[QListWidgetItem],
+        _previous: Optional[QListWidgetItem],
+    ) -> None:
+        candidate = None
+        if current is not None:
+            index = current.data(Qt.ItemDataRole.UserRole)
+            if isinstance(index, int) and 0 <= index < len(self.multi_sample_candidates):
+                candidate = self.multi_sample_candidates[index]
+        self._preview_multi_sample_candidate(candidate)
+
+    def _update_multi_sample_import_state(self) -> None:
+        selected_count = len(self._selected_multi_sample_candidates())
+        if self.import_button is not None:
+            self.import_button.setEnabled(selected_count > 0)
+            self.import_button.setText(
+                f"Import {selected_count} "
+                f"{'sample' if selected_count == 1 else 'samples'}"
+            )
+        if self.preview_footer_status_label is not None:
+            self.preview_footer_status_label.setText(
+                f"{selected_count} of {len(self.multi_sample_candidates)} selected"
+            )
+
+    def _highlight_multi_sample_candidate(
+        self,
+        candidate: ImportCandidate,
+    ) -> None:
+        if not hasattr(self, "preview_table"):
+            return
+        size_cells = set(candidate.size_cells)
+        passing_cells = set(candidate.passing_cells)
+        for row in range(self.preview_table.rowCount()):
+            for column in range(self.preview_table.columnCount()):
+                item = self.preview_table.item(row, column)
+                if item is None:
+                    continue
+                if row == candidate.header_row:
+                    color = QColor("#eadfc9")
+                elif (row, column) in size_cells:
+                    color = QColor("#c3d7ea")
+                elif (row, column) in passing_cells:
+                    color = QColor("#cfe3b4")
+                elif self.is_numeric(item.text().strip()):
+                    color = QColor("#edf3e6")
+                else:
+                    color = QColor("#ffffff")
+                item.setBackground(color)
+        self.preview_table.viewport().update()
+
+    def _preview_multi_sample_candidate(
+        self,
+        candidate: Optional[ImportCandidate],
+    ) -> None:
+        if not self._is_multi_sample_mode() or candidate is None:
+            return
+        try:
+            sizes, passing = extract_candidate_curve(
+                self.sample_data,
+                candidate,
+            )
+            self.result_curve.set_curve(sizes, passing)
+            self.result_status_label.setText(candidate.sample_name)
+            self.result_status_label.setStyleSheet(
+                f"background: rgba(107,142,35,.08); border: 1px solid rgba(107,142,35,.30); "
+                f"border-radius: {SZ.BORDER_RADIUS}px; color: {C.OLIVE_DK}; padding: 8px; "
+                "font-weight: 600;"
+            )
+            self.result_metrics_label.setText(
+                f"Source: {candidate.source_label}\n"
+                f"Valid values: {len(sizes)}\n"
+                f"Particle-size range: {min(sizes):.4g}-{max(sizes):.4g} mm\n"
+                f"Passing range: {min(passing):.3g}-{max(passing):.3g}%"
+            )
+            self.checks_title.show()
+            self.result_checks_label.setText(
+                "Ready - cumulative percent passing is within 0-100 and "
+                "the curve direction is valid."
+            )
+            self._highlight_multi_sample_candidate(candidate)
+        except Exception as error:
+            self.result_curve.clear_curve()
+            self.result_status_label.setText("Candidate needs review")
+            self.result_metrics_label.setText(str(error))
+            self.result_checks_label.setText("")
 
     def _refresh_column_options_for_header_row(
         self,
@@ -917,7 +1232,7 @@ class ColumnMapperDialog(FramelessDialogBase):
         preserve_indices: bool = True,
     ) -> None:
         self.headers = self.headers_from_row(self.sample_data, header_row)
-        column_options = ["(Not Used)"] + self.headers
+        column_options = ["(Not Used)"] + self._labeled_column_headers(self.headers)
         combos = [
             getattr(self, 'size_combo', None),
             getattr(self, 'passing_combo', None),
@@ -934,18 +1249,22 @@ class ColumnMapperDialog(FramelessDialogBase):
             combo.clear()
             combo.addItems(column_options)
             if preserve_indices and previous_index >= 0:
-                combo.setCurrentIndex(min(previous_index, combo.count() - 1))
+                combo.setCurrentIndex(
+                    previous_index if previous_index < combo.count() else 0
+                )
             combo.blockSignals(False)
 
         if hasattr(self, 'preview_table') and self.preview_table.columnCount() > 0:
-            if len(self.headers) >= self.preview_table.columnCount():
-                self.preview_table.setHorizontalHeaderLabels(self.headers[:self.preview_table.columnCount()])
-            else:
-                headers = self.headers + [f"Col {i+1}" for i in range(len(self.headers), self.preview_table.columnCount())]
-                self.preview_table.setHorizontalHeaderLabels(headers)
+            self.preview_table.setHorizontalHeaderLabels(
+                self._labeled_column_headers(
+                    self.headers, self.preview_table.columnCount()
+                )
+            )
 
     def _apply_detected_import_candidate(self, prefer_data_type: str = "processed_curve") -> bool:
         """Apply a backend-detected import candidate to the mapper UI."""
+        if self.multi_sample_candidates and prefer_data_type == "processed_curve":
+            return False
         if os.path.splitext(self.file_path)[1].lower() not in ['.xlsx', '.xls']:
             return False
 
@@ -953,6 +1272,7 @@ class ColumnMapperDialog(FramelessDialogBase):
             self.sample_data,
             sheet_name=self.current_sheet,
             intent=prefer_data_type,
+            allow_multi_sample=self._multi_sample_requested,
         )
         candidate = resolution.candidate
         if candidate is None:
@@ -982,7 +1302,6 @@ class ColumnMapperDialog(FramelessDialogBase):
                         if item.text() == self.current_sheet
                         else Qt.CheckState.Unchecked
                     )
-            self.selected_headers = []
             self.learned_pattern = None
             if hasattr(self, 'pattern_info_label'):
                 self.pattern_info_label.setText(
@@ -1013,55 +1332,54 @@ class ColumnMapperDialog(FramelessDialogBase):
     def _apply_mode_state(self):
         """Synchronize the dialog UI with the active data type + selection method."""
         selection_mode = self.calculated_selection_mode
-        self.cell_range_mode = (not self.raw_sieve_mode and selection_mode == "range")
+        self.cell_range_mode = selection_mode == "range"
 
         self.calculated_data_btn.setChecked(not self.raw_sieve_mode)
         self.raw_sieve_btn.setChecked(self.raw_sieve_mode)
-
-        if hasattr(self, 'column_mode_btn'):
-            self.column_mode_btn.setChecked(selection_mode == "column")
-            self.range_mode_btn.setChecked(selection_mode == "range")
-            self.column_mode_btn.setEnabled(not self.raw_sieve_mode)
-            self.range_mode_btn.setEnabled(not self.raw_sieve_mode)
 
         if hasattr(self, 'mapping_group'):
             self.mapping_group.setVisible(not self.raw_sieve_mode and selection_mode == "column")
         if self._mapping_section is not None:
             self._mapping_section.setVisible(not self.raw_sieve_mode and selection_mode == "column")
         if hasattr(self, 'range_tools_group'):
-            self.range_tools_group.setVisible(not self.raw_sieve_mode and selection_mode == "range")
+            self.range_tools_group.setVisible(selection_mode == "range")
         if self._range_section is not None:
-            self._range_section.setVisible(not self.raw_sieve_mode and selection_mode == "range")
+            self._range_section.setVisible(selection_mode == "range")
         if hasattr(self, 'raw_sieve_group'):
-            self.raw_sieve_group.setVisible(self.raw_sieve_mode)
+            self.raw_sieve_group.setVisible(self.raw_sieve_mode and selection_mode == "column")
         if self._raw_section is not None:
-            self._raw_section.setVisible(self.raw_sieve_mode)
+            self._raw_section.setVisible(self.raw_sieve_mode and selection_mode == "column")
+        if self._header_section is not None:
+            self._header_section.setVisible(selection_mode == "column")
         if self._method_section is not None:
             self._method_section.setEnabled(not self.raw_sieve_mode)
         if self._mapping_splitter is not None:
-            if self.cell_range_mode:
-                self._mapping_splitter.setSizes([390, 730])
-            elif self.raw_sieve_mode:
-                self._mapping_splitter.setSizes([410, 710])
-            else:
-                self._mapping_splitter.setSizes([410, 710])
+            self._mapping_splitter.setSizes([390, 680, 310])
+
+        if hasattr(self, "range_toggle_btn"):
+            self.range_toggle_btn.setText(
+                "Use mapped columns instead"
+                if self.cell_range_mode
+                else "Use cell ranges for an irregular sheet"
+            )
 
         if self.cell_range_mode:
             self.preview_table.setSelectionBehavior(QTableWidget.SelectionBehavior.SelectItems)
             self.preview_table.setSelectionMode(QTableWidget.SelectionMode.ExtendedSelection)
         else:
-            self.selecting_mode = None
             self.preview_table.clearSelection()
             self.preview_table.setSelectionBehavior(QTableWidget.SelectionBehavior.SelectItems)
             self.preview_table.setSelectionMode(QTableWidget.SelectionMode.SingleSelection)
 
         self.update_table_colors()
         self._update_range_summary()
-        self._update_selection_mode_help()
         self._update_pathway_summary()
         self._update_sheet_selection_guidance()
         self._update_preview_guidance()
         self.validate_required_fields()
+        self._update_retained_guidance()
+        self._reset_guided_range_step(keep_ranges=True)
+        self._refresh_result_preview()
 
     def _build_file_strip(self) -> QWidget:
         strip = QWidget()
@@ -1094,37 +1412,280 @@ class ColumnMapperDialog(FramelessDialogBase):
         layout.addWidget(self._file_meta_label)
         layout.addStretch(1)
 
-        chip_style = (
-            f"QLabel {{ border: 1px solid {C.BORDER}; border-radius: 10px; "
-            f"background: rgba(255,255,255,.35); color: {C.TEXT_MID}; "
-            f"padding: 3px 8px; font-size: {F.SZ_XS}pt; }}"
-        )
-        self._file_mapping_status_label = QLabel()
-        self._file_mapping_status_label.setFont(QFont(F.MONO, F.SZ_XS))
-        self._file_mapping_status_label.setStyleSheet(chip_style)
-        layout.addWidget(self._file_mapping_status_label)
-
-        self._file_header_label = QLabel()
-        self._file_header_label.setFont(QFont(F.MONO, F.SZ_XS))
-        self._file_header_label.setStyleSheet(chip_style)
-        layout.addWidget(self._file_header_label)
-
-        auto_detect_btn = QPushButton("Auto-detect")
-        auto_detect_btn.setFixedHeight(24)
-        auto_detect_btn.setStyleSheet(
-            f"QPushButton {{ border: 1px solid rgba(107,142,35,.28); border-radius: {SZ.BORDER_RADIUS}px; "
-            f"background: rgba(107,142,35,.08); color: {C.OLIVE}; padding: 0 10px; }}"
-            f"QPushButton:hover {{ background: rgba(107,142,35,.14); }}"
-        )
-        try:
-            auto_detect_btn.setIcon(_icon("fa6s.wand-magic-sparkles", C.OLIVE))
-        except Exception:
-            pass
-        auto_detect_btn.clicked.connect(self._rerun_auto_detection)
-        layout.addWidget(auto_detect_btn)
-
         self._update_file_strip()
         return strip
+
+    def _toggle_sample_details(self, checked: bool) -> None:
+        if hasattr(self, "sample_details_group"):
+            self.sample_details_group.setVisible(bool(checked))
+
+    def _toggle_range_workflow(self) -> None:
+        self.calculated_selection_mode = (
+            "column" if self.calculated_selection_mode == "range" else "range"
+        )
+        self._apply_mode_state()
+
+    def _guided_range_roles(self) -> List[Tuple[str, str]]:
+        if self.raw_sieve_mode:
+            return [
+                ("size", "sieve-size values"),
+                ("empty", "empty-sieve weights"),
+                ("full", "sieve + sample weights"),
+            ]
+        return [
+            ("size", "particle-size values"),
+            ("percent", "cumulative percent-passing values"),
+        ]
+
+    def _range_for_role(self, role: str) -> List[Tuple[int, int]]:
+        return {
+            "size": self.selected_size_range,
+            "percent": self.selected_percent_range,
+            "empty": self.selected_empty_range,
+            "full": self.selected_full_range,
+        }[role]
+
+    @staticmethod
+    def _spreadsheet_column_name(column: int) -> str:
+        """Return a zero-based column index as an Excel-style column name."""
+        name = ""
+        value = int(column) + 1
+        while value > 0:
+            value, remainder = divmod(value - 1, 26)
+            name = chr(65 + remainder) + name
+        return name
+
+    @classmethod
+    def _labeled_column_headers(
+        cls, headers: List[str], column_count: Optional[int] = None
+    ) -> List[str]:
+        count = len(headers) if column_count is None else max(0, int(column_count))
+        labels: List[str] = []
+        for column in range(count):
+            header = (
+                str(headers[column]).strip()
+                if column < len(headers) and str(headers[column]).strip()
+                else f"Column {column + 1}"
+            )
+            labels.append(f"{cls._spreadsheet_column_name(column)} - {header}")
+        return labels
+
+    @classmethod
+    def _format_cell_range(cls, positions: List[Tuple[int, int]]) -> str:
+        """Format selected zero-based cells as a concise spreadsheet address."""
+        if not positions:
+            return "not selected"
+        ordered = sorted(set(positions), key=lambda pos: (pos[0], pos[1]))
+        first_row, first_col = ordered[0]
+        last_row, last_col = ordered[-1]
+        first = f"{cls._spreadsheet_column_name(first_col)}{first_row + 1}"
+        last = f"{cls._spreadsheet_column_name(last_col)}{last_row + 1}"
+        return first if first == last else f"{first}:{last}"
+
+    @staticmethod
+    def _is_contiguous_column_range(positions: List[Tuple[int, int]]) -> bool:
+        if not positions:
+            return False
+        unique = sorted(set(positions), key=lambda pos: (pos[0], pos[1]))
+        columns = {column for _, column in unique}
+        rows = sorted(row for row, _ in unique)
+        return len(columns) == 1 and rows == list(range(rows[0], rows[-1] + 1))
+
+    def _update_active_range_label(self) -> None:
+        if self.active_range_label is None or not hasattr(self, "preview_table"):
+            return
+        selected = sorted(
+            {(item.row(), item.column()) for item in self.preview_table.selectedItems()},
+            key=lambda pos: (pos[0], pos[1]),
+        )
+        if not selected:
+            self.active_range_label.setText("Current selection: none")
+            self.active_range_label.setStyleSheet(
+                f"color: {C.TEXT_MID}; background: {C.BG}; border: 1px solid {C.BORDER}; "
+                f"border-radius: {SZ.BORDER_RADIUS}px; padding: 6px 8px;"
+            )
+            if self.range_step < len(self._guided_range_roles()):
+                self.confirm_range_btn.setEnabled(False)
+            return
+
+        address = self._format_cell_range(selected)
+        contiguous = self._is_contiguous_column_range(selected)
+        if contiguous:
+            self.active_range_label.setText(
+                f"Current selection: {address} ({len(selected)} cells)"
+            )
+            self.active_range_label.setStyleSheet(
+                f"color: #284b6e; background: #dce9f4; border: 1px solid #8eb0cd; "
+                f"border-radius: {SZ.BORDER_RADIUS}px; padding: 6px 8px;"
+            )
+        else:
+            self.active_range_label.setText(
+                f"Current selection: {address} ({len(selected)} cells) - use one column without gaps"
+            )
+            self.active_range_label.setStyleSheet(
+                f"color: #8b4e24; background: #f4e7d9; border: 1px solid #d7ad86; "
+                f"border-radius: {SZ.BORDER_RADIUS}px; padding: 6px 8px;"
+            )
+        self.confirm_range_btn.setEnabled(contiguous)
+
+    def _set_range_for_role(self, role: str, positions: List[Tuple[int, int]]) -> None:
+        if role == "size":
+            self.selected_size_range = positions
+        elif role == "percent":
+            self.selected_percent_range = positions
+        elif role == "empty":
+            self.selected_empty_range = positions
+        else:
+            self.selected_full_range = positions
+
+    def _reset_guided_range_step(self, *, keep_ranges: bool = False) -> None:
+        if not hasattr(self, "range_step_label"):
+            return
+        if not keep_ranges:
+            self.selected_size_range = []
+            self.selected_percent_range = []
+            self.selected_empty_range = []
+            self.selected_full_range = []
+            self.learned_pattern = None
+
+        roles = self._guided_range_roles()
+        self.range_step = next(
+            (index for index, (role, _) in enumerate(roles) if not self._range_for_role(role)),
+            len(roles),
+        )
+        if self.range_step >= len(roles):
+            self.range_step_label.setText(
+                f"Ranges ready: {len(roles)} of {len(roles)} roles assigned. "
+                "Review the interpreted result before importing."
+            )
+            self.confirm_range_btn.setEnabled(False)
+            self._prepare_batch_pattern()
+        else:
+            _, label = roles[self.range_step]
+            self.range_step_label.setText(
+                f"Step {self.range_step + 1} of {len(roles)}: select the {label} "
+                "in the source preview."
+            )
+            self.batch_apply_btn.hide()
+            if self.batch_status_label is not None:
+                self.batch_status_label.hide()
+        self._update_active_range_label()
+        self._update_range_summary()
+
+    def _confirm_guided_range_selection(self) -> None:
+        roles = self._guided_range_roles()
+        if self.range_step >= len(roles):
+            return
+        selected = sorted(
+            {(item.row(), item.column()) for item in self.preview_table.selectedItems()},
+            key=lambda pos: (pos[0], pos[1]),
+        )
+        if not selected:
+            QMessageBox.warning(
+                self, "No cells selected", "Select one contiguous range in the source preview."
+            )
+            return
+        columns = {column for _, column in selected}
+        rows = sorted({row for row, _ in selected})
+        if len(columns) != 1 or rows != list(range(rows[0], rows[-1] + 1)):
+            QMessageBox.warning(
+                self,
+                "Use one contiguous range",
+                "Select cells from one column without gaps, then try again.",
+            )
+            return
+
+        role, label = roles[self.range_step]
+        self._set_range_for_role(role, selected)
+        self.pattern_info_label.setText(
+            f"Recorded {label}: {self._format_cell_range(selected)} "
+            f"({len(selected)} cells)."
+        )
+        self.preview_table.clearSelection()
+        self.update_table_colors()
+        self._reset_guided_range_step(keep_ranges=True)
+        self._refresh_result_preview()
+
+    def _batch_target_count(self) -> int:
+        if not self.main_window or not hasattr(self.main_window, "dataset_tabs_widget"):
+            return 0
+        tabs = self.main_window.dataset_tabs_widget
+        try:
+            return sum(
+                1
+                for index in range(tabs.count())
+                if getattr(tabs.widget(index), "file_path", None)
+                and getattr(tabs.widget(index), "file_path", None) != self.file_path
+            )
+        except Exception:
+            return 0
+
+    def _prepare_batch_pattern(self) -> None:
+        pattern = self.learn_pattern_from_selection()
+        target_count = self._batch_target_count() if pattern else 0
+        self.batch_apply_btn.setEnabled(bool(pattern and target_count))
+        self.batch_apply_btn.setVisible(bool(pattern and target_count))
+        if self.batch_status_label is not None:
+            self.batch_status_label.setVisible(bool(pattern and target_count))
+            if pattern and target_count:
+                self.batch_status_label.setText(
+                    f"This mapping can be checked against {target_count} waiting "
+                    f"dataset{'s' if target_count != 1 else ''}. Each dataset will be validated separately."
+                )
+
+    def _refresh_result_preview(self) -> None:
+        if self.result_curve is None or self.result_status_label is None:
+            return
+        try:
+            sizes, passing = self.extract_data()
+            if not sizes:
+                raise ValueError("No valid values")
+            self.result_curve.set_curve(sizes, passing)
+            self.result_status_label.setText("Ready to import")
+            self.result_status_label.setStyleSheet(
+                f"background: rgba(107,142,35,.08); border: 1px solid rgba(107,142,35,.30); "
+                f"border-radius: {SZ.BORDER_RADIUS}px; color: {C.OLIVE_DK}; padding: 8px; "
+                "font-weight: 600;"
+            )
+            self.result_metrics_label.setText(
+                f"Valid values: {len(sizes)}\n"
+                f"Particle-size range: {min(sizes):.4g}-{max(sizes):.4g} mm\n"
+                f"Passing range: {min(passing):.3g}-{max(passing):.3g}%"
+            )
+            in_range = all(0.0 <= value <= 100.0 for value in passing)
+            ordered = [
+                value for _, value in sorted(zip(sizes, passing), key=lambda pair: pair[0])
+            ]
+            monotonic = all(
+                ordered[index] <= ordered[index + 1] + 1e-9
+                for index in range(len(ordered) - 1)
+            )
+            checks = [
+                "OK  Values stay within 0-100%" if in_range else "Review  Values leave 0-100%",
+                "OK  Passing increases with particle size"
+                if monotonic
+                else "Review  Passing direction is inconsistent",
+            ]
+            if self.raw_sieve_mode:
+                checks.append("OK  Passing is calculated from the mapped weights")
+            self.checks_title.show()
+            self.result_checks_label.show()
+            self.result_checks_label.setText("\n".join(checks))
+            if self.import_button is not None:
+                self.import_button.setEnabled(True)
+        except Exception as error:
+            self.result_curve.clear_curve()
+            self.result_status_label.setText("Mapping incomplete")
+            self.result_status_label.setStyleSheet(
+                f"background: {C.BG_RAISED}; border: 1px solid {C.BORDER}; "
+                f"border-radius: {SZ.BORDER_RADIUS}px; color: {C.TEXT_MID}; padding: 8px;"
+            )
+            self.result_metrics_label.setText(str(error))
+            self.checks_title.hide()
+            self.result_checks_label.clear()
+            self.result_checks_label.hide()
+            if self.import_button is not None:
+                self.import_button.setEnabled(False)
 
     def _update_file_strip(self):
         if self._file_meta_label is None:
@@ -1136,13 +1697,44 @@ class ColumnMapperDialog(FramelessDialogBase):
             meta_parts.append(self.current_sheet)
         self._file_meta_label.setText(" - ".join(meta_parts))
 
+        if self._is_multi_sample_mode():
+            selected_count = len(self._selected_multi_sample_candidates())
+            total_count = len(self.multi_sample_candidates)
+            if self._file_header_label is not None:
+                self._file_header_label.setText(f"{total_count} samples found")
+            if self._file_mapping_status_label is not None:
+                self._file_mapping_status_label.setText(
+                    f"{selected_count} / {total_count} selected"
+                )
+                color = C.OLIVE if selected_count else '#9a6322'
+                background = (
+                    'rgba(107,142,35,.08)'
+                    if selected_count else 'rgba(154,99,34,.07)'
+                )
+                self._file_mapping_status_label.setStyleSheet(
+                    f"QLabel {{ border: 1px solid {color}; border-radius: 10px; "
+                    f"background: {background}; color: {color}; padding: 3px 8px; "
+                    f"font-size: {F.SZ_XS}pt; }}"
+                )
+            return
+
         if self._file_header_label is not None:
             self._file_header_label.setText(f"Header row {self.header_row}")
 
         if self._file_mapping_status_label is None:
             return
 
-        if self.raw_sieve_mode:
+        if self.cell_range_mode:
+            ranges = [self.selected_size_range, self.selected_percent_range]
+            if self.raw_sieve_mode:
+                ranges = [
+                    self.selected_size_range,
+                    self.selected_empty_range,
+                    self.selected_full_range,
+                ]
+            required_total = len(ranges)
+            mapped_count = sum(1 for positions in ranges if positions)
+        elif self.raw_sieve_mode:
             combos = [
                 getattr(self, "raw_size_combo", None),
                 getattr(self, "empty_sieve_combo", None),
@@ -1203,25 +1795,14 @@ class ColumnMapperDialog(FramelessDialogBase):
             )
         self.preview_hint_label.setText(text)
 
-    def _update_selection_mode_help(self):
-        if self.selection_mode_help_label is None:
-            return
-
-        if self.raw_sieve_mode:
-            text = "Raw Sieve Weighings uses column mapping."
-        elif self.calculated_selection_mode == "range":
-            text = "Cell Range Selection maps one sheet at a time."
-        else:
-            text = "Column Mapping is best for clean tables."
-
-        self.selection_mode_help_label.setText(text)
-
     def _mapped_preview_roles(self) -> Dict[int, str]:
         role_by_column: Dict[int, str] = {}
         if not hasattr(self, "preview_table") or self.preview_table.columnCount() == 0:
             return role_by_column
 
-        if self.raw_sieve_mode:
+        if self.cell_range_mode:
+            combos = []
+        elif self.raw_sieve_mode:
             combos = [
                 (getattr(self, 'raw_size_combo', None), "size"),
                 (getattr(self, 'empty_sieve_combo', None), "retained"),
@@ -1244,8 +1825,15 @@ class ColumnMapperDialog(FramelessDialogBase):
         if not hasattr(self, "preview_table"):
             return set()
 
-        if self.cell_range_mode and not self.raw_sieve_mode:
-            return {row for row, _ in self.selected_size_range} | {row for row, _ in self.selected_percent_range}
+        if self.cell_range_mode:
+            ranges = [self.selected_size_range, self.selected_percent_range]
+            if self.raw_sieve_mode:
+                ranges = [
+                    self.selected_size_range,
+                    self.selected_empty_range,
+                    self.selected_full_range,
+                ]
+            return {row for positions in ranges for row, _ in positions}
 
         role_by_column = self._mapped_preview_roles() if role_by_column is None else role_by_column
         cols_by_role = {role: col for col, role in role_by_column.items()}
@@ -1288,9 +1876,21 @@ class ColumnMapperDialog(FramelessDialogBase):
         used_rows_count = len(self._used_preview_rows())
 
         if self.raw_sieve_mode:
-            text = "Raw Sieve -> Columns"
-            count_text = f"{used_rows_count} rows used" if used_rows_count else "3 / 3"
-            footer_text = "Ready to derive percent passing from raw sieve weighings."
+            if self.cell_range_mode:
+                text = "Raw Sieve -> Cell Ranges"
+                selected_cells = sum(
+                    len(positions)
+                    for positions in (
+                        self.selected_size_range,
+                        self.selected_empty_range,
+                        self.selected_full_range,
+                    )
+                )
+                count_text = f"{selected_cells} cells used"
+            else:
+                text = "Raw Sieve -> Columns"
+                count_text = f"{used_rows_count} rows used" if used_rows_count else "3 / 3"
+            footer_text = "Percent passing will be calculated from the mapped weighings."
             if excel_multi_sheet:
                 text += " - multi-sheet"
         elif self.calculated_selection_mode == "range":
@@ -1317,7 +1917,12 @@ class ColumnMapperDialog(FramelessDialogBase):
         if self.sheet_info_label is None:
             return
 
-        if self.raw_sieve_mode:
+        if self.raw_sieve_mode and self.cell_range_mode:
+            text = (
+                "Complete one raw-sieve range pattern, then review compatible "
+                "matches before applying it to other sheets."
+            )
+        elif self.raw_sieve_mode:
             text = (
                 "Check the sheets you want to import. The same raw sieve column mapping will be "
                 "applied to each checked sheet."
@@ -1412,6 +2017,22 @@ class ColumnMapperDialog(FramelessDialogBase):
         self.preview_table.verticalHeader().setDefaultSectionSize(31)
         self._update_preview_header_highlights()
         self._update_file_strip()
+        self._update_retained_guidance()
+
+    def _update_retained_guidance(self) -> None:
+        label = getattr(self, "retained_guidance_label", None)
+        if label is None:
+            return
+        retained_keywords = ("retained", "retain", "tilbageholdt")
+        has_retained_header = any(
+            any(keyword in str(header).strip().lower() for keyword in retained_keywords)
+            for header in self.headers
+        )
+        label.setVisible(
+            has_retained_header
+            and not self.raw_sieve_mode
+            and self.calculated_selection_mode == "column"
+        )
 
     @staticmethod
     def populate_preview_table(
@@ -1433,19 +2054,19 @@ class ColumnMapperDialog(FramelessDialogBase):
         table.verticalHeader().setDefaultAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
         table.setStyleSheet(
             f"QTableWidget {{ background: rgba(255,255,255,.20); border: none; alternate-background-color: rgba(255,255,255,.40); "
-            f"selection-background-color: rgba(107,142,35,.10); selection-color: {C.TEXT}; }}"
+            f"selection-background-color: #9fc0dc; selection-color: #182a3a; }}"
             f"QHeaderView::section:horizontal {{ border: none; border-bottom: 1px solid {C.BORDER}; "
             f"padding: 6px 8px; color: {C.TEXT_MID}; font-size: {F.SZ_SM}pt; font-weight: 600; }}"
             f"QHeaderView::section:vertical {{ background: {C.BG}; border: none; border-right: 1px solid {C.BORDER}; "
             f"padding: 0 8px; color: {C.TEXT_MUTED}; font-size: {F.SZ_SM}pt; }}"
             f"QTableWidget::item {{ padding: 4px 8px; border-bottom: 1px solid rgba(0,0,0,.04); }}"
+            f"QTableWidget::item:selected {{ background: #9fc0dc; color: #182a3a; "
+            f"border-top: 1px solid #486d95; border-bottom: 1px solid #486d95; }}"
         )
 
-        if len(headers) >= max_cols:
-            table.setHorizontalHeaderLabels(headers[:max_cols])
-        else:
-            derived_headers = headers + [f"Col {i+1}" for i in range(len(headers), max_cols)]
-            table.setHorizontalHeaderLabels(derived_headers)
+        table.setHorizontalHeaderLabels(
+            ColumnMapperDialog._labeled_column_headers(headers, max_cols)
+        )
         table.setVerticalHeaderLabels([str(i + 1) for i in range(len(sample_data))])
 
         for i, row in enumerate(sample_data):
@@ -1575,8 +2196,8 @@ class ColumnMapperDialog(FramelessDialogBase):
         self.preview_table.viewport().update()
         self._update_pathway_summary()
 
-    def auto_detect_columns(self):
-        """Try to automatically detect column types"""
+    def auto_detect_columns(self, *, only_unmapped: bool = False):
+        """Automatically detect processed columns without replacing user choices."""
         if not self.headers:
             return
 
@@ -1585,8 +2206,8 @@ class ColumnMapperDialog(FramelessDialogBase):
         retained_keywords = ['retained', 'retain', 'tilbageholdt']
 
         # Track what we've found to prioritize properly
-        size_found = False
-        passing_found = False
+        size_found = only_unmapped and self.size_combo.currentIndex() > 0
+        passing_found = only_unmapped and self.passing_combo.currentIndex() > 0
 
         for i, header in enumerate(self.headers):
             header_lower = header.lower()
@@ -1603,8 +2224,8 @@ class ColumnMapperDialog(FramelessDialogBase):
                 self.passing_combo.setCurrentIndex(i + 1)
                 passing_found = True
 
-    def _auto_detect_raw_sieve_columns(self):
-        """Try to automatically detect the three raw sieve weighing columns."""
+    def _auto_detect_raw_sieve_columns(self, *, only_unmapped: bool = False):
+        """Detect raw-sieve columns without replacing deliberate mappings."""
         if not self.headers or not hasattr(self, 'raw_size_combo'):
             return
 
@@ -1615,9 +2236,13 @@ class ColumnMapperDialog(FramelessDialogBase):
                              'sieve and sample', 'filled', 'sieve+fraction', 'sieve + fraction',
                              'sieve and fraction', 'sigte + fraktion', 'fraktion']
 
-        size_found  = False
-        empty_found = False
-        full_found  = False
+        size_found = only_unmapped and self.raw_size_combo.currentIndex() > 0
+        empty_found = (
+            only_unmapped and self.empty_sieve_combo.currentIndex() > 0
+        )
+        full_found = (
+            only_unmapped and self.sieve_sample_combo.currentIndex() > 0
+        )
 
         for i, header in enumerate(self.headers):
             h = header.lower()
@@ -1658,6 +2283,8 @@ class ColumnMapperDialog(FramelessDialogBase):
     def extract_data(self) -> Tuple[List[float], List[float]]:
         """Extract data based on current mode (column mapping, cell range, or raw sieve)"""
         if self.raw_sieve_mode:
+            if self.cell_range_mode:
+                return self.extract_data_from_raw_sieve_ranges()
             return self.extract_data_from_raw_sieve()
         elif self.cell_range_mode:
             return self.extract_data_from_ranges()
@@ -1667,6 +2294,12 @@ class ColumnMapperDialog(FramelessDialogBase):
     def extract_data_for_sheet(self, sheet_name: Optional[str]) -> Tuple[List[float], List[float]]:
         """Extract data for a specific sheet using the current mapping settings"""
         if self.raw_sieve_mode:
+            if self.cell_range_mode:
+                if sheet_name and sheet_name != self.current_sheet:
+                    raise ValueError(
+                        "Cell-range patterns must be reviewed before they are applied to another sheet."
+                    )
+                return self.extract_data_from_raw_sieve_ranges(sheet_name=sheet_name)
             return self.extract_data_from_raw_sieve(sheet_name=sheet_name)
         elif self.cell_range_mode:
             if sheet_name and sheet_name != self.current_sheet:
@@ -1813,6 +2446,67 @@ class ColumnMapperDialog(FramelessDialogBase):
     def get_mapping_results(self) -> List[Dict]:
         """Get mapping results for all selected sheets"""
         try:
+            if self._is_multi_sample_mode():
+                selected_candidates = self._selected_multi_sample_candidates()
+                if not selected_candidates:
+                    raise ValueError("Select at least one sample to import.")
+                base_sample_name = os.path.splitext(
+                    os.path.basename(self.file_path)
+                )[0]
+                results: List[Dict] = []
+                for candidate in selected_candidates:
+                    particle_sizes, percent_passing = extract_candidate_curve(
+                        self.sample_data,
+                        candidate,
+                    )
+                    candidate_name = candidate.sample_name.strip()
+                    sample_name = (
+                        candidate_name
+                        if candidate_name and candidate_name != candidate.source_label
+                        else f"{base_sample_name} [{candidate.source_label}]"
+                    )
+                    candidate_state = {
+                        "raw_sieve_mode": False,
+                        "calculated_selection_mode": "range",
+                        "header_row": candidate.header_row,
+                        "sample_name": sample_name,
+                        "temperature": self.temperature_spin.value(),
+                        "porosity": self.porosity_spin.value(),
+                        "current_sheet": self.current_sheet,
+                        "checked_sheets": (
+                            [self.current_sheet] if self.current_sheet else []
+                        ),
+                        "selected_size_range": [
+                            list(position) for position in candidate.size_cells
+                        ],
+                        "selected_percent_range": [
+                            list(position) for position in candidate.passing_cells
+                        ],
+                        "multi_sample_mode": True,
+                        "multi_sample_candidate_key": candidate.candidate_key,
+                        "import_provenance": {
+                            "source": "manual_mapping",
+                            "intent": "processed_curve",
+                            "data_type": "processed_curve",
+                            "selection_method": "range",
+                            "sheet_name": self.current_sheet,
+                            "label": "Confirmed multi-sample candidate",
+                            "candidate_key": candidate.candidate_key,
+                            "source_label": candidate.source_label,
+                            "intent_matched": True,
+                        },
+                    }
+                    results.append({
+                        "particle_sizes": particle_sizes,
+                        "percent_passing": percent_passing,
+                        "sample_name": sample_name,
+                        "temperature": self.temperature_spin.value(),
+                        "porosity": self.porosity_spin.value(),
+                        "sheet_name": self.current_sheet,
+                        "mapping_state": candidate_state,
+                    })
+                return results
+
             selected_sheets = self.get_selected_sheet_names()
             if not selected_sheets:
                 selected_sheets = [self.current_sheet or self._get_preferred_sheet_name()]
@@ -1830,7 +2524,10 @@ class ColumnMapperDialog(FramelessDialogBase):
                 particle_sizes, percent_passing = self.extract_data_for_sheet(sheet_name)
 
                 # Learn pattern from cell range selection if applicable (only once)
-                if idx == 0 and self.cell_range_mode and self.selected_size_range and self.selected_percent_range:
+                if idx == 0 and self.cell_range_mode and all(
+                    self._range_for_role(role)
+                    for role, _ in self._guided_range_roles()
+                ):
                     self.learn_pattern_from_selection()
 
                 sample_name = base_sample_name
@@ -1859,6 +2556,23 @@ class ColumnMapperDialog(FramelessDialogBase):
 
     def get_mapping_state(self) -> Dict:
         """Capture the current mapper state so the same file can be reopened cleanly."""
+        if self._is_multi_sample_mode():
+            return {
+                "raw_sieve_mode": False,
+                "calculated_selection_mode": "multi_sample",
+                "multi_sample_mode": True,
+                "selected_multi_sample_keys": [
+                    candidate.candidate_key
+                    for candidate in self._selected_multi_sample_candidates()
+                ],
+                "temperature": self.temperature_spin.value(),
+                "porosity": self.porosity_spin.value(),
+                "current_sheet": self.current_sheet,
+                "checked_sheets": (
+                    [self.current_sheet] if self.current_sheet else []
+                ),
+            }
+
         state = {
             'raw_sieve_mode': self.raw_sieve_mode,
             'calculated_selection_mode': self.calculated_selection_mode,
@@ -1877,9 +2591,14 @@ class ColumnMapperDialog(FramelessDialogBase):
                 'sieve_sample': self.sieve_sample_combo.currentIndex(),
             },
         }
-        if self.selected_size_range and self.selected_percent_range:
+        if self.selected_size_range:
             state['selected_size_range'] = [list(pos) for pos in self.selected_size_range]
+        if self.selected_percent_range:
             state['selected_percent_range'] = [list(pos) for pos in self.selected_percent_range]
+        if self.selected_empty_range:
+            state['selected_empty_range'] = [list(pos) for pos in self.selected_empty_range]
+        if self.selected_full_range:
+            state['selected_full_range'] = [list(pos) for pos in self.selected_full_range]
         return state
 
     def apply_mapping_state(self, state: Optional[Dict]) -> None:
@@ -1904,8 +2623,8 @@ class ColumnMapperDialog(FramelessDialogBase):
 
         if hasattr(self, 'header_row_spin') and state.get('header_row') is not None:
             header_row = int(state['header_row'])
-            header_row = max(0, min(header_row, self.header_row_spin.maximum()))
-            self.header_row_spin.setValue(header_row)
+            header_row = max(0, min(header_row, len(self.sample_data) - 1))
+            self.header_row_spin.setValue(header_row + 1)
 
         sample_name = state.get('sample_name')
         if sample_name:
@@ -1916,7 +2635,36 @@ class ColumnMapperDialog(FramelessDialogBase):
         if state.get('porosity') is not None:
             self.porosity_spin.setValue(float(state['porosity']))
 
+        if state.get("multi_sample_mode") and self._is_multi_sample_mode():
+            selected_keys = set(state.get("selected_multi_sample_keys") or [])
+            if selected_keys and self.multi_sample_list is not None:
+                self.multi_sample_list.blockSignals(True)
+                for row in range(self.multi_sample_list.count()):
+                    item = self.multi_sample_list.item(row)
+                    index = item.data(Qt.ItemDataRole.UserRole)
+                    candidate = (
+                        self.multi_sample_candidates[index]
+                        if isinstance(index, int)
+                        and 0 <= index < len(self.multi_sample_candidates)
+                        else None
+                    )
+                    item.setCheckState(
+                        Qt.CheckState.Checked
+                        if candidate is not None
+                        and candidate.candidate_key in selected_keys
+                        else Qt.CheckState.Unchecked
+                    )
+                self.multi_sample_list.blockSignals(False)
+            self._update_multi_sample_import_state()
+            self._preview_multi_sample_candidate(
+                self._current_multi_sample_candidate()
+            )
+            return
+
         if state.get('raw_sieve_mode'):
+            self.calculated_selection_mode = state.get(
+                'calculated_selection_mode', 'column'
+            )
             self.switch_to_raw_sieve_mode()
         elif state.get('calculated_selection_mode') == 'range':
             self.switch_to_range_mode()
@@ -1937,10 +2685,13 @@ class ColumnMapperDialog(FramelessDialogBase):
                 combo.setCurrentIndex(index)
         self.retained_combo.setCurrentIndex(0)
 
-        if self.cell_range_mode and not self.raw_sieve_mode:
+        if self.cell_range_mode:
             self.selected_size_range = [tuple(pos) for pos in state.get('selected_size_range', [])]
             self.selected_percent_range = [tuple(pos) for pos in state.get('selected_percent_range', [])]
+            self.selected_empty_range = [tuple(pos) for pos in state.get('selected_empty_range', [])]
+            self.selected_full_range = [tuple(pos) for pos in state.get('selected_full_range', [])]
             self.update_table_colors()
+            self._reset_guided_range_step(keep_ranges=True)
 
         self._update_preview_header_highlights()
         self._update_preview_guidance()
@@ -1959,7 +2710,7 @@ class ColumnMapperDialog(FramelessDialogBase):
             self._select_sheet_in_list(sheet_name)
 
             # Update combo boxes
-            column_options = ["(Not Used)"] + self.headers
+            column_options = ["(Not Used)"] + self._labeled_column_headers(self.headers)
             for combo in [
                 self.size_combo,
                 self.passing_combo,
@@ -1977,13 +2728,14 @@ class ColumnMapperDialog(FramelessDialogBase):
 
             # Update header row spinner if it exists
             if hasattr(self, 'header_row_spin'):
-                self.header_row_spin.setRange(0, max(0, len(self.sample_data) - 1))
-                self.header_row_spin.setValue(self.header_row)
+                self.header_row_spin.setRange(1, max(1, len(self.sample_data)))
+                self.header_row_spin.setValue(self.header_row + 1)
 
             # Reset any learned pattern or selections since data changed
             self.selected_size_range = []
             self.selected_percent_range = []
-            self.selected_headers = []
+            self.selected_empty_range = []
+            self.selected_full_range = []
             self.learned_pattern = None
             if hasattr(self, 'batch_apply_btn'):
                 self.batch_apply_btn.setEnabled(False)
@@ -1993,6 +2745,7 @@ class ColumnMapperDialog(FramelessDialogBase):
                 "raw_sieve" if self.raw_sieve_mode else "processed_curve"
             )
             self._apply_mode_state()
+            self._apply_multi_sample_mode()
 
         except Exception as e:
             QMessageBox.warning(self, "Sheet Load Error", f"Could not load sheet '{sheet_name}':\n{str(e)}")
@@ -2004,11 +2757,13 @@ class ColumnMapperDialog(FramelessDialogBase):
 
         self.header_row = new_header_row
         try:
-            self._refresh_column_options_for_header_row(new_header_row, preserve_indices=False)
+            self._refresh_column_options_for_header_row(
+                new_header_row, preserve_indices=True
+            )
 
-            # Re-run auto detection for both modes
-            self.auto_detect_columns()
-            self._auto_detect_raw_sieve_columns()
+            # Fill only empty roles; deliberate column positions remain stable.
+            self.auto_detect_columns(only_unmapped=True)
+            self._auto_detect_raw_sieve_columns(only_unmapped=True)
             self.validate_required_fields()
             self._update_file_strip()
 
@@ -2045,36 +2800,45 @@ class ColumnMapperDialog(FramelessDialogBase):
             self._apply_detected_import_candidate("processed_curve")
         self._apply_mode_state()
 
-    def _mark_current_selection(self, mode: str) -> None:
-        """Assign the currently selected preview cells to a range role."""
-        selected_items = self.preview_table.selectedItems()
-        if not selected_items:
-            QMessageBox.warning(self, "No Selection", "Select cells in the preview table first.")
-            return
-
-        positions = sorted(
-            {(item.row(), item.column()) for item in selected_items},
-            key=lambda pos: (pos[0], pos[1]),
-        )
-        if mode == "size":
-            self.selected_size_range = positions
-            self.pattern_info_label.setText(f"Marked {len(positions)} particle-size cells.")
-        else:
-            self.selected_percent_range = positions
-            self.pattern_info_label.setText(f"Marked {len(positions)} percent-passing cells.")
-
-        self.preview_table.clearSelection()
-        self.update_table_colors()
-        self._update_range_summary()
-
     def _update_range_summary(self) -> None:
         if hasattr(self, "size_range_count_label"):
-            self.size_range_count_label.setText(f"{len(self.selected_size_range)} size cells")
+            size_name = "Sieve size" if self.raw_sieve_mode else "Particle size"
+            size_address = self._format_cell_range(self.selected_size_range)
+            self.size_range_count_label.setText(
+                f"{size_name}: {size_address}"
+                + (
+                    f" ({len(self.selected_size_range)} cells)"
+                    if self.selected_size_range
+                    else ""
+                )
+            )
         if hasattr(self, "percent_range_count_label"):
-            self.percent_range_count_label.setText(f"{len(self.selected_percent_range)} passing cells")
+            if self.raw_sieve_mode:
+                empty_address = self._format_cell_range(self.selected_empty_range)
+                full_address = self._format_cell_range(self.selected_full_range)
+                self.percent_range_count_label.setText(
+                    f"Empty sieve: {empty_address}\nSieve + sample: {full_address}"
+                )
+            else:
+                passing_address = self._format_cell_range(self.selected_percent_range)
+                self.percent_range_count_label.setText(
+                    f"Passing: {passing_address}"
+                    + (
+                        f" ({len(self.selected_percent_range)} cells)"
+                        if self.selected_percent_range
+                        else ""
+                    )
+                )
         if self.cell_range_mode and self.preview_footer_status_label is not None:
+            ranges = [self.selected_size_range, self.selected_percent_range]
+            if self.raw_sieve_mode:
+                ranges = [
+                    self.selected_size_range,
+                    self.selected_empty_range,
+                    self.selected_full_range,
+                ]
             self.preview_footer_status_label.setText(
-                f"{len(self.selected_size_range) + len(self.selected_percent_range)} cells"
+                f"{sum(len(positions) for positions in ranges)} cells"
             )
         if self.cell_range_mode and self.pathway_summary_label is not None:
             self._update_pathway_summary()
@@ -2169,113 +2933,87 @@ class ColumnMapperDialog(FramelessDialogBase):
             pan_retained_weight=pan_retained_weight,
         )
 
-    def toggle_smart_selection(self):
-        """Toggle smart selection mode"""
-        self.smart_selection_mode = self.smart_selection_btn.isChecked()
+    def extract_data_from_raw_sieve_ranges(
+        self, sheet_name: Optional[str] = None
+    ) -> Tuple[List[float], List[float]]:
+        """Calculate passing from three explicitly selected raw-sieve ranges."""
+        ranges = [
+            self.selected_size_range,
+            self.selected_empty_range,
+            self.selected_full_range,
+        ]
+        if not all(ranges):
+            raise ValueError(
+                "Select the sieve-size, empty-sieve, and sieve + sample ranges."
+            )
+        lengths = {len(positions) for positions in ranges}
+        if len(lengths) != 1:
+            raise ValueError("All three raw-sieve ranges must contain the same number of cells.")
 
-        if self.smart_selection_mode:
-            # Enable smart selection
-            self.preview_table.setSelectionBehavior(QTableWidget.SelectionBehavior.SelectItems)
-            self.preview_table.setSelectionMode(QTableWidget.SelectionMode.ExtendedSelection)
-            self.pattern_info_label.setText("Drag to select the headers and data together.")
-        else:
-            # Clear selection and reset
-            self.preview_table.clearSelection()
-            self.clear_smart_selection()
-            self.pattern_info_label.setText("Select headers and data together, then apply the learned pattern to similar sheets.")
+        rows = self._load_rows_for_sheet(sheet_name)
+        sorted_ranges = [
+            sorted(positions, key=lambda pos: (pos[0], pos[1]))
+            for positions in ranges
+        ]
+        sieve_sizes: List[float] = []
+        empty_weights: List[float] = []
+        full_weights: List[float] = []
+        pan_retained_weight = 0.0
+        pan_labels = {"pan", "bund", "bottom"}
 
-    def clear_smart_selection(self):
-        """Clear smart selection data"""
-        self.selected_size_range = []
-        self.selected_percent_range = []
-        self.selected_headers = []
-        self.learned_pattern = None
-        self.batch_apply_btn.setEnabled(False)
-        self._update_range_summary()
+        for size_pos, empty_pos, full_pos in zip(*sorted_ranges):
+            try:
+                size_text = str(rows[size_pos[0]][size_pos[1]]).strip()
+                empty_text = str(rows[empty_pos[0]][empty_pos[1]]).strip()
+                full_text = str(rows[full_pos[0]][full_pos[1]]).strip()
+            except (IndexError, TypeError):
+                continue
+            if not self.is_numeric(empty_text) or not self.is_numeric(full_text):
+                continue
+            empty = float(empty_text)
+            full = float(full_text)
+            if size_text.lower() in pan_labels:
+                if full >= empty:
+                    pan_retained_weight += full - empty
+                continue
+            if not self.is_numeric(size_text):
+                continue
+            size = float(size_text)
+            if size <= 0:
+                continue
+            sieve_sizes.append(size)
+            empty_weights.append(empty)
+            full_weights.append(full)
 
-        # Reset table colors
-        for i in range(self.preview_table.rowCount()):
-            for j in range(self.preview_table.columnCount()):
-                item = self.preview_table.item(i, j)
-                if item:
-                    # Reset to numeric highlighting or default
-                    if self.is_numeric(item.text().strip()):
-                        item.setBackground(QColor("#edf3e6"))
-                    else:
-                        item.setBackground(QColor("#ffffff"))
-
-    def on_selection_changed(self):
-        """Handle selection changes in smart selection mode"""
-        if not self.smart_selection_mode:
-            return
-
-        selected_items = self.preview_table.selectedItems()
-        if not selected_items:
-            self.clear_smart_selection()
-            return
-
-        # Analyze selection automatically
-        self.analyze_smart_selection(selected_items)
-
-    def start_range_selection(self, mode: str):
-        """Start selecting a range for size or percent data (legacy method)"""
-        # Clear any existing selection
-        self.preview_table.clearSelection()
-
-        self.selecting_mode = mode
-
-        # Enable persistent cell selection in table
-        self.preview_table.setSelectionBehavior(QTableWidget.SelectionBehavior.SelectItems)
-        self.preview_table.setSelectionMode(QTableWidget.SelectionMode.ExtendedSelection)
+        if len(sieve_sizes) < 3:
+            raise ValueError(
+                "Raw sieve range mapping must contain at least three valid sieve rows."
+            )
+        from data_loader import calculate_sieve_percent_passing
+        return calculate_sieve_percent_passing(
+            sieve_sizes,
+            empty_weights,
+            full_weights,
+            pan_retained_weight=pan_retained_weight,
+        )
 
     def clear_range_selection(self):
         """Clear all range selections"""
         self.selected_size_range = []
         self.selected_percent_range = []
-        self.selecting_mode = None
-
+        self.selected_empty_range = []
+        self.selected_full_range = []
         # Clear visual selection in table
         self.preview_table.clearSelection()
         self.update_table_colors()
+        self._reset_guided_range_step(keep_ranges=True)
+        self._refresh_result_preview()
 
     def on_table_selection_changed(self):
         """Handle table selection changes for range selection mode"""
-        if self.smart_selection_mode:
-            self.on_selection_changed()
+        if not self.cell_range_mode:
             return
-
-        if not self.cell_range_mode or not self.selecting_mode:
-            return
-
-        selected_items = self.preview_table.selectedItems()
-
-        # Legacy mode - just track selection count for now
-        # (Old button UI has been replaced with smart selection)
-
-    def confirm_range_selection(self, mode: str):
-        """Confirm the current selection as the final range"""
-        selected_items = self.preview_table.selectedItems()
-        if not selected_items:
-            QMessageBox.warning(self, "No Selection", "Please select some cells first by dragging in the table.")
-            return
-
-        # Get row, col positions of selected items
-        selected_positions = [(item.row(), item.column()) for item in selected_items]
-
-        if mode == 'size':
-            self.selected_size_range = selected_positions
-        else:
-            self.selected_percent_range = selected_positions
-
-        # Reset selecting mode
-        self.selecting_mode = None
-
-        # Update visual highlighting
-        self.update_table_colors()
-        self._update_range_summary()
-
-        # Clear table selection to avoid confusion
-        self.preview_table.clearSelection()
+        self._update_active_range_label()
 
     def update_table_colors(self):
         """Update table cell colors to show selected ranges"""
@@ -2290,8 +3028,8 @@ class ColumnMapperDialog(FramelessDialogBase):
                     else:
                         item.setBackground(QColor("#ffffff"))
 
-        # Highlight selected ranges only while range mode is active.
-        if self.cell_range_mode and not self.raw_sieve_mode:
+        # Highlight assigned roles while the guided range workflow is active.
+        if self.cell_range_mode:
             for row, col in self.selected_size_range:
                 item = self.preview_table.item(row, col)
                 if item:
@@ -2303,6 +3041,16 @@ class ColumnMapperDialog(FramelessDialogBase):
                 if item:
                     item.setBackground(QColor("#cfe3b4"))
                     item.setToolTip("Imported as percent passing data")
+            for row, col in self.selected_empty_range:
+                item = self.preview_table.item(row, col)
+                if item:
+                    item.setBackground(QColor("#e1c5a3"))
+                    item.setToolTip("Imported as empty-sieve weight")
+            for row, col in self.selected_full_range:
+                item = self.preview_table.item(row, col)
+                if item:
+                    item.setBackground(QColor("#cfe3b4"))
+                    item.setToolTip("Imported as sieve + sample weight")
         self._update_range_summary()
         self._update_pathway_summary()
 
@@ -2417,6 +3165,39 @@ class ColumnMapperDialog(FramelessDialogBase):
 
     def learn_pattern_from_selection(self):
         """Learn a pattern from the current cell range selection for batch processing"""
+        if self.raw_sieve_mode:
+            raw_ranges = [
+                self.selected_size_range,
+                self.selected_empty_range,
+                self.selected_full_range,
+            ]
+            if not all(raw_ranges) or len({len(values) for values in raw_ranges}) != 1:
+                return None
+            columns = [values[0][1] for values in raw_ranges]
+            data_start_row = min(row for row, _ in self.selected_size_range)
+
+            def _header_above(column: int) -> Tuple[Optional[str], Optional[int]]:
+                for row in range(data_start_row - 1, max(-1, data_start_row - 16), -1):
+                    if row < len(self.sample_data) and column < len(self.sample_data[row]):
+                        value = str(self.sample_data[row][column]).strip().strip(chr(34)).strip("'")
+                        if value and not self.is_numeric(value):
+                            return value, row
+                return None, None
+
+            header_values = [_header_above(column) for column in columns]
+            if any(value is None or row is None for value, row in header_values):
+                return None
+            header_row = header_values[0][1]
+            self.learned_pattern = {
+                "data_type": "raw_sieve",
+                "size_header": header_values[0][0],
+                "empty_header": header_values[1][0],
+                "full_header": header_values[2][0],
+                "data_offset": data_start_row - header_row,
+                "row_count": len(self.selected_size_range),
+            }
+            return self.learned_pattern
+
         if not self.selected_size_range or not self.selected_percent_range:
             return None
 
@@ -2486,12 +3267,14 @@ class ColumnMapperDialog(FramelessDialogBase):
         size_offset = data_start_row - header_row
 
         pattern = {
+            'data_type': 'processed_curve',
             'size_header': size_header,
             'percent_header': percent_header,
             'size_column': size_col,
             'percent_column': percent_col,
             'data_offset': size_offset,
-            'header_row': header_row
+            'header_row': header_row,
+            'row_count': len(self.selected_size_range),
         }
 
         self.learned_pattern = pattern
@@ -2520,6 +3303,14 @@ class ColumnMapperDialog(FramelessDialogBase):
                 with open(actual_file_path, 'r', encoding='utf-8') as f:
                     reader = csv.reader(f)
                     data = list(reader)
+
+            if pattern.get("data_type") == "raw_sieve":
+                return self._apply_raw_pattern_to_rows(
+                    data,
+                    pattern,
+                    actual_file_path=actual_file_path,
+                    sheet_name=sheet_name,
+                )
 
             # Find headers in the new file
             size_header_pos = None
@@ -2628,17 +3419,103 @@ class ColumnMapperDialog(FramelessDialogBase):
         except Exception as e:
             raise ValueError(f"Pattern application failed: {str(e)}")
 
+    def _apply_raw_pattern_to_rows(
+        self,
+        data: List[List[str]],
+        pattern: Dict,
+        *,
+        actual_file_path: str,
+        sheet_name: Optional[str],
+    ) -> Dict:
+        """Apply and validate a learned three-range raw-sieve pattern."""
+        expected = {
+            "size": str(pattern["size_header"]).strip().strip(chr(34)).strip("'"),
+            "empty": str(pattern["empty_header"]).strip().strip(chr(34)).strip("'"),
+            "full": str(pattern["full_header"]).strip().strip(chr(34)).strip("'"),
+        }
+        positions: Dict[str, Tuple[int, int]] = {}
+        for row_index, row in enumerate(data):
+            for column_index, cell in enumerate(row):
+                value = str(cell).strip().strip(chr(34)).strip("'")
+                for role, header in expected.items():
+                    if value == header:
+                        positions[role] = (row_index, column_index)
+        missing = [role for role in expected if role not in positions]
+        if missing:
+            raise ValueError(
+                "Could not match raw-sieve pattern headers: " + ", ".join(missing)
+            )
+
+        start_row = positions["size"][0] + int(pattern.get("data_offset", 1))
+        row_count = max(1, int(pattern.get("row_count", 20)))
+        size_col = positions["size"][1]
+        empty_col = positions["empty"][1]
+        full_col = positions["full"][1]
+        max_col = max(size_col, empty_col, full_col)
+        sieve_sizes: List[float] = []
+        empty_weights: List[float] = []
+        full_weights: List[float] = []
+        pan_retained_weight = 0.0
+
+        for row in data[start_row:start_row + row_count]:
+            if len(row) <= max_col:
+                continue
+            size_text = str(row[size_col]).strip()
+            empty_text = str(row[empty_col]).strip()
+            full_text = str(row[full_col]).strip()
+            if not self.is_numeric(empty_text) or not self.is_numeric(full_text):
+                continue
+            empty = float(empty_text)
+            full = float(full_text)
+            if size_text.lower() in {"pan", "bund", "bottom"}:
+                if full >= empty:
+                    pan_retained_weight += full - empty
+                continue
+            if not self.is_numeric(size_text):
+                continue
+            size = float(size_text)
+            if size <= 0:
+                continue
+            sieve_sizes.append(size)
+            empty_weights.append(empty)
+            full_weights.append(full)
+
+        if len(sieve_sizes) < 3:
+            raise ValueError("Raw-sieve pattern produced fewer than three valid sieve rows.")
+        from data_loader import calculate_sieve_percent_passing
+        particle_sizes, percent_passing = calculate_sieve_percent_passing(
+            sieve_sizes,
+            empty_weights,
+            full_weights,
+            pan_retained_weight=pan_retained_weight,
+        )
+        return {
+            "particle_sizes": particle_sizes,
+            "percent_passing": percent_passing,
+            "sample_name": os.path.splitext(os.path.basename(actual_file_path))[0],
+            "temperature": 10.0,
+            "porosity": 0.4,
+            "sheet_name": sheet_name,
+        }
+
     def has_learned_pattern(self) -> bool:
         """Check if a pattern has been learned"""
         return self.learned_pattern is not None
 
     def apply_pattern_to_batch(self):
         """Apply the learned pattern to the current workbook and matching Excel error tabs."""
-        if not self.selected_size_range or not self.selected_percent_range:
+        required_ranges = [self.selected_size_range, self.selected_percent_range]
+        if getattr(self, "raw_sieve_mode", False):
+            required_ranges = [
+                self.selected_size_range,
+                self.selected_empty_range,
+                self.selected_full_range,
+            ]
+        if not all(required_ranges):
             QMessageBox.warning(
                 self,
                 "No Selection",
-                "Please select size and percent data ranges first before applying to batch.",
+                "Complete the guided ranges before reviewing batch matches.",
             )
             return
 
@@ -2646,8 +3523,8 @@ class ColumnMapperDialog(FramelessDialogBase):
         if not pattern:
             QMessageBox.warning(
                 self,
-                "Pattern Learning Failed",
-                "Could not learn pattern from selected ranges. Make sure headers are visible above your data.",
+                "Cannot reuse this mapping",
+                "The selected ranges do not define an arrangement that can be checked against other datasets.",
             )
             return
 
@@ -2675,40 +3552,84 @@ class ColumnMapperDialog(FramelessDialogBase):
             QMessageBox.information(self, "No Batch Targets", "No Excel targets were available for batch processing.")
             return
 
-        target_labels = [f"- {os.path.basename(current_file_key)} (current)"]
-        target_labels.extend(f"- {os.path.basename(tab.file_path)}" for tab in error_tabs[:5])
-        if len(error_tabs) > 5:
-            target_labels.append(f"... and {len(error_tabs) - 5} more")
-        file_list = "\n".join(target_labels)
-
-        reply = QMessageBox.question(
-            self,
-            "Batch Fix Error Tabs",
-            f"Found {len(error_tabs) + 1} Excel workbook target(s) to process.\n\n"
-            f"Pattern learned:\n"
-            f"- Size header: '{pattern['size_header']}'\n"
-            f"- Percent header: '{pattern['percent_header']}'\n"
-            f"- Data offset: {pattern['data_offset']} rows below headers\n\n"
-            f"Targets:\n{file_list}\n\n"
-            f"Apply this pattern now?",
-            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
-        )
-
-        if reply != QMessageBox.StandardButton.Yes:
-            return
-
-        successful_fixes = []
-        failed_fixes = []
-        mapping_state = self.get_mapping_state() if hasattr(self, "get_mapping_state") else None
-        current_committed = False
-
         targets = [(current_file_key, getattr(self, "forced_sheet_name", None), None)]
         targets.extend((tab.file_path, getattr(tab, "sheet_name", None), tab) for tab in error_tabs)
 
+        ready_targets = []
+        review_targets = []
         for target_file_key, target_sheet_name, error_tab in targets:
             try:
                 result = self.apply_pattern_to_file(target_file_key)
+                sizes = list(result.get("particle_sizes") or [])
+                passing = list(result.get("percent_passing") or [])
+                if len(sizes) < 2 or len(sizes) != len(passing):
+                    raise ValueError("No matching particle-size and passing series was found.")
+                if any(value < 0.0 or value > 100.0 for value in passing):
+                    raise ValueError("Cumulative passing values fall outside 0-100%.")
+                ordered = [
+                    value for _, value in sorted(zip(sizes, passing), key=lambda pair: pair[0])
+                ]
+                if any(
+                    ordered[index] > ordered[index + 1] + 1e-9
+                    for index in range(len(ordered) - 1)
+                ):
+                    raise ValueError("The interpreted curve has the wrong passing direction.")
+                ready_targets.append(
+                    (target_file_key, target_sheet_name, error_tab, result)
+                )
+            except Exception as error:
+                review_targets.append((target_file_key, str(error)))
 
+        def _target_label(file_key: str) -> str:
+            actual_path, _, sheet = file_key.partition(":::")
+            label = os.path.basename(actual_path)
+            return f"{label} [{sheet}]" if sheet else label
+
+        review_lines = ["Ready to import"]
+        if ready_targets:
+            review_lines.extend(
+                f"  READY  {_target_label(file_key)}"
+                for file_key, _, _, _ in ready_targets
+            )
+        else:
+            review_lines.append("  None")
+        review_lines.append("")
+        review_lines.append("Needs review")
+        if review_targets:
+            review_lines.extend(
+                f"  REVIEW  {_target_label(file_key)} - {error}"
+                for file_key, error in review_targets
+            )
+        else:
+            review_lines.append("  None")
+
+        if not ready_targets:
+            QMessageBox.warning(
+                self,
+                "No datasets ready",
+                "\n".join(review_lines),
+            )
+            return
+
+        ready_count = len(ready_targets)
+        reply = QMessageBox.question(
+            self,
+            "Review mapped datasets",
+            "\n".join(review_lines)
+            + f"\n\nImport {ready_count} ready "
+            + ("sample?" if ready_count == 1 else "samples?"),
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+        )
+        if reply != QMessageBox.StandardButton.Yes:
+            return
+
+        successful_imports = []
+        import_failures = list(review_targets)
+        mapping_state = self.get_mapping_state() if hasattr(self, "get_mapping_state") else None
+        current_committed = False
+
+        for target_file_key, target_sheet_name, error_tab, result in ready_targets:
+            try:
                 if control_panel is not None and hasattr(control_panel, "_apply_mapping_results"):
                     control_panel._apply_mapping_results(
                         target_file_key,
@@ -2729,32 +3650,28 @@ class ColumnMapperDialog(FramelessDialogBase):
                     )
                     error_tab.dataset_fixed.emit(dataset, target_file_key)
 
-                successful_fixes.append(target_file_key)
+                successful_imports.append(target_file_key)
                 if target_file_key == current_file_key:
                     current_committed = True
 
-            except Exception as e:
-                failed_fixes.append((target_file_key, str(e)))
+            except Exception as error:
+                import_failures.append((target_file_key, str(error)))
 
-        result_msg = f"Batch fix complete!\n\n"
-        result_msg += f"Successfully fixed: {len(successful_fixes)} files\n"
-        result_msg += f"Failed to fix: {len(failed_fixes)} files\n\n"
-
-        if successful_fixes:
-            result_msg += "Successfully fixed:\n"
-            for file_path in successful_fixes[:5]:
-                filename = os.path.basename(file_path)
-                result_msg += f"- {filename}\n"
-            if len(successful_fixes) > 5:
-                result_msg += f"... and {len(successful_fixes) - 5} more\n"
-
-        if failed_fixes:
-            result_msg += f"\nFailed to fix:\n"
-            for file_path, error in failed_fixes[:3]:
-                filename = os.path.basename(file_path)
-                result_msg += f"- {filename}: {error[:50]}...\n"
-
-        QMessageBox.information(self, "Batch Fix Results", result_msg)
+        result_lines = [
+            f"Imported: {len(successful_imports)}",
+            f"Needs review: {len(import_failures)}",
+        ]
+        if import_failures:
+            result_lines.append("")
+            result_lines.extend(
+                f"  REVIEW  {_target_label(file_key)} - {error}"
+                for file_key, error in import_failures
+            )
+        QMessageBox.information(
+            self,
+            "Import results",
+            "\n".join(result_lines),
+        )
         if current_committed:
             self._batch_apply_committed = True
             self.accept()

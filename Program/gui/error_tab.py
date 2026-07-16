@@ -64,7 +64,10 @@ class ErrorTab(QWidget):
         """Build the error workspace to match the approved concept."""
         self.setObjectName("error-tab")
         self.setAttribute(Qt.WidgetAttribute.WA_StyledBackground, True)
-        is_mapping = self.issue_variant == "mapping_required"
+        is_mapping = self.issue_variant in {
+            "mapping_required",
+            "multi_sample_confirmation",
+        }
         page_bg = C.BG
         surface = C.BG_RAISED
         surface_subtle = C.BG
@@ -292,6 +295,8 @@ class ErrorTab(QWidget):
         return strip
 
     def _build_hero(self) -> QWidget:
+        is_raw_mapping = self.issue_variant == "mapping_required"
+        is_multi_sample = self.issue_variant == "multi_sample_confirmation"
         hero = QFrame()
         hero.setObjectName("ev-hero")
         hero.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Maximum)
@@ -335,14 +340,22 @@ class ErrorTab(QWidget):
         copy_layout.setContentsMargins(0, 0, 0, 0)
         copy_layout.setSpacing(2)
 
-        eyebrow = QLabel("Mapping Required" if self.issue_variant == "mapping_required" else "Dataset Issue")
+        eyebrow = QLabel(
+            "Samples Detected"
+            if is_multi_sample
+            else ("Mapping Required" if is_raw_mapping else "Dataset Issue")
+        )
         eyebrow.setObjectName("ev-eyebrow")
         copy_layout.addWidget(eyebrow)
 
         self.title_label = QLabel(
-            "Raw sieve columns need mapping"
-            if self.issue_variant == "mapping_required"
-            else "Column mapping needs confirmation"
+            "Review detected samples"
+            if is_multi_sample
+            else (
+                "Raw sieve columns need mapping"
+                if is_raw_mapping
+                else "Column mapping needs confirmation"
+            )
         )
         self.title_label.setObjectName("ev-title")
         self.title_label.setWordWrap(True)
@@ -350,9 +363,13 @@ class ErrorTab(QWidget):
         copy_layout.addWidget(self.title_label)
 
         subtitle = QLabel(
-            "The file has been added as raw sieve weighings. Map the size and weighing columns before analysis."
-            if self.issue_variant == "mapping_required"
-            else "The workbook is in the workspace, but this sheet needs a manual column check before it can be analysed."
+            "The program found several possible grain-size samples. Confirm the detected curves before importing them."
+            if is_multi_sample
+            else (
+                "The file has been added as raw sieve weighings. Map the size and weighing columns before analysis."
+                if is_raw_mapping
+                else "The workbook is in the workspace, but this sheet needs a manual column check before it can be analysed."
+            )
         )
         subtitle.setObjectName("ev-subtitle")
         subtitle.setWordWrap(True)
@@ -370,7 +387,7 @@ class ErrorTab(QWidget):
         actions.setSpacing(8)
 
         self.fix_button = self._action_button(
-            "Open Mapper",
+            "Review Samples" if is_multi_sample else "Open Mapper",
             "fa6s.wand-magic-sparkles",
             "#ffffff",
             primary=True,
@@ -397,9 +414,13 @@ class ErrorTab(QWidget):
             kind="Preview",
             title="Source rows",
             subtitle=(
-                "First 50 source rows for selecting the required raw sieve columns."
-                if self.issue_variant == "mapping_required"
-                else "First 50 source rows for confirming grain-size and percentage columns."
+                "First 50 source rows containing the detected sample columns."
+                if self.issue_variant == "multi_sample_confirmation"
+                else (
+                    "First 50 source rows for selecting the required raw sieve columns."
+                    if self.issue_variant == "mapping_required"
+                    else "First 50 source rows for confirming grain-size and percentage columns."
+                )
             ),
         )
         pane.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
@@ -433,10 +454,14 @@ class ErrorTab(QWidget):
         return pane
 
     def _build_status_pane(self) -> QWidget:
+        is_multi_sample = self.issue_variant == "multi_sample_confirmation"
         pane = self._pane_shell(
             kind="Status",
             title="Next step",
-            subtitle="Open the mapper to continue.",
+            subtitle=(
+                "Review the detected samples to continue."
+                if is_multi_sample else "Open the mapper to continue."
+            ),
         )
         pane.setSizePolicy(QSizePolicy.Policy.Preferred, QSizePolicy.Policy.Maximum)
         body = pane.layout().itemAt(1).widget()
@@ -444,17 +469,30 @@ class ErrorTab(QWidget):
 
         layout.addWidget(self._summary_row("fa6s.file-excel", "Source", self._source_kind_label()))
         layout.addWidget(self._summary_row("fa6s.table-cells-large", "Sheet", self.sheet_name or "Single sheet"))
-        layout.addWidget(self._summary_row("fa6s.arrow-right", "Next step", "Open the mapper"))
+        layout.addWidget(self._summary_row(
+            "fa6s.arrow-right",
+            "Next step",
+            "Review detected samples" if is_multi_sample else "Open the mapper",
+        ))
         return pane
 
     def _build_detail_pane(self) -> QWidget:
+        is_raw_mapping = self.issue_variant == "mapping_required"
+        is_multi_sample = self.issue_variant == "multi_sample_confirmation"
         pane = self._pane_shell(
             kind="Detail",
-            title="Import note" if self.issue_variant == "mapping_required" else "Raw loader message",
+            title=(
+                "Detection note"
+                if is_multi_sample
+                else ("Import note" if is_raw_mapping else "Raw loader message")
+            ),
             subtitle=(
-                "Why mapping is required."
-                if self.issue_variant == "mapping_required"
-                else "Loader diagnostic details."
+                "Why confirmation is required."
+                if is_multi_sample
+                else (
+                    "Why mapping is required."
+                    if is_raw_mapping else "Loader diagnostic details."
+                )
             ),
         )
         pane.setSizePolicy(QSizePolicy.Policy.Preferred, QSizePolicy.Policy.Maximum)
@@ -462,9 +500,13 @@ class ErrorTab(QWidget):
         layout = body.layout()
 
         hint = QLabel(
-            "Raw sieve weighings need explicit size and weight columns before the program can calculate percent passing."
-            if self.issue_variant == "mapping_required"
-            else "The loader could not match the incoming columns to a valid grain-size / percent-passing pair."
+            "This experimental import checks each proposed sample separately. Confirm the source columns and curve preview before import."
+            if is_multi_sample
+            else (
+                "Raw sieve weighings need explicit size and weight columns before the program can calculate percent passing."
+                if is_raw_mapping
+                else "The loader could not match the incoming columns to a valid grain-size / percent-passing pair."
+            )
         )
         hint.setObjectName("ev-note")
         hint.setWordWrap(True)
@@ -475,7 +517,9 @@ class ErrorTab(QWidget):
         self.details_toggle.setToolButtonStyle(Qt.ToolButtonStyle.ToolButtonTextBesideIcon)
         self.details_toggle.setArrowType(Qt.ArrowType.RightArrow)
         self.details_toggle.setText(
-            "Show import note" if self.issue_variant == "mapping_required" else "Show raw message"
+            "Show detection note"
+            if is_multi_sample
+            else ("Show import note" if is_raw_mapping else "Show raw message")
         )
         self.details_toggle.setCursor(Qt.CursorShape.PointingHandCursor)
         self.details_toggle.clicked.connect(self.toggle_details)
@@ -588,7 +632,11 @@ class ErrorTab(QWidget):
             chunks.append(ext.upper())
         if self.sheet_name:
             chunks.append(self.sheet_name)
-        chunks.append("Needs mapping" if self._requires_mapping() else "Load failed")
+        chunks.append(
+            "Review samples"
+            if self.issue_variant == "multi_sample_confirmation"
+            else ("Needs mapping" if self._requires_mapping() else "Load failed")
+        )
         return chunks
 
     def _source_icon_name(self) -> str:
@@ -600,7 +648,7 @@ class ErrorTab(QWidget):
         return "fa6s.file-lines"
 
     def _requires_mapping(self) -> bool:
-        if self.issue_variant == "mapping_required":
+        if self.issue_variant in {"mapping_required", "multi_sample_confirmation"}:
             return True
         lowered = self.error_message.lower()
         return any(token in lowered for token in ("column", "header", "percent", "mapping"))
@@ -616,6 +664,8 @@ class ErrorTab(QWidget):
         return "Source file"
 
     def _fault_line_text(self) -> str:
+        if self.issue_variant == "multi_sample_confirmation":
+            return "detected sample candidates are ready for confirmation"
         if self.issue_variant == "mapping_required":
             return "waiting for raw sieve column mapping"
         lowered = self.error_message.lower()
@@ -659,7 +709,11 @@ class ErrorTab(QWidget):
         self.details_toggle.setArrowType(
             Qt.ArrowType.DownArrow if self._details_expanded else Qt.ArrowType.RightArrow
         )
-        if self.issue_variant == "mapping_required":
+        if self.issue_variant == "multi_sample_confirmation":
+            self.details_toggle.setText(
+                "Hide detection note" if self._details_expanded else "Show detection note"
+            )
+        elif self.issue_variant == "mapping_required":
             self.details_toggle.setText("Hide import note" if self._details_expanded else "Show import note")
         else:
             self.details_toggle.setText("Hide raw message" if self._details_expanded else "Show raw message")
@@ -712,6 +766,9 @@ class ErrorTab(QWidget):
                 main_window,
                 sheet_name=self.sheet_name,
                 initial_state=mapping_state,
+                multi_sample_mode=(
+                    self.issue_variant == "multi_sample_confirmation"
+                ),
             )
             if dialog.exec() == QDialog.DialogCode.Accepted:
                 if getattr(dialog, "_batch_apply_committed", False):

@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 import math
+import re
 import unicodedata
 from typing import Dict, List, Optional, Sequence, Tuple
 
@@ -24,6 +25,9 @@ class ImportCandidate:
     size_cells: Tuple[Cell, ...] = ()
     passing_cells: Tuple[Cell, ...] = ()
     column_indices: Dict[str, int] = field(default_factory=dict)
+    sample_name: str = ""
+    source_label: str = ""
+    candidate_key: str = ""
 
 
 def normalize_text(value: object) -> str:
@@ -124,6 +128,365 @@ def _curve_pair_is_plausible(rows: Rows, pairs: Sequence[Tuple[Cell, Cell]]) -> 
     if violations / transitions > 0.5:
         return False
     return True
+
+
+def extract_candidate_curve(
+    rows: Rows,
+    candidate: ImportCandidate,
+) -> Tuple[List[float], List[float]]:
+    """Extract one concrete processed-curve candidate from source rows."""
+    if len(candidate.size_cells) != len(candidate.passing_cells):
+        raise ValueError("Candidate size and passing ranges have different lengths")
+
+    sizes: List[float] = []
+    passing: List[float] = []
+    for (size_row, size_col), (passing_row, passing_col) in zip(
+        candidate.size_cells,
+        candidate.passing_cells,
+    ):
+        try:
+            size = coerce_float(rows[size_row][size_col])
+            value = coerce_float(rows[passing_row][passing_col])
+        except (IndexError, ValueError):
+            continue
+        if size > 0 and 0 <= value <= 100:
+            sizes.append(size)
+            passing.append(value)
+
+    if len(sizes) < 3:
+        raise ValueError("Candidate contains fewer than three valid curve rows")
+    return sizes, passing
+
+
+_SIZE_ROLE_KEYWORDS = (
+    "particle size",
+    "grain size",
+    "sieve size",
+    "mash size",
+    "maskevidde",
+    "diameter",
+    "size",
+    "d mm",
+    "d mmm",
+    "mesh",
+)
+_PASSING_ROLE_KEYWORDS = (
+    "percent passing",
+    "% passing",
+    "passing",
+    "percent finer",
+    "% finer",
+    "finer",
+    "cumulative percent",
+    "cumulative %",
+    "kummulativ",
+    "on curve",
+    "pa kurve",
+)
+_RETAINED_ROLE_KEYWORDS = ("retained", "retain", "tilbageholdt")
+_SAMPLE_ROLE_KEYWORDS = (
+    "sample id",
+    "sample name",
+    "sample no",
+    "sample nr",
+    "sample",
+    "proeve",
+    "prove",
+)
+
+
+def _header_role(value: object) -> str:
+    text = normalize_text(value)
+    if _contains_any(text, _RETAINED_ROLE_KEYWORDS):
+        return "retained"
+    if _contains_any(text, _PASSING_ROLE_KEYWORDS):
+        return "passing"
+    if _contains_any(text, _SIZE_ROLE_KEYWORDS):
+        return "size"
+    if _contains_any(text, _SAMPLE_ROLE_KEYWORDS):
+        return "sample"
+    return ""
+
+
+def _column_name(column: int) -> str:
+    value = int(column) + 1
+    name = ""
+    while value:
+        value, remainder = divmod(value - 1, 26)
+        name = chr(65 + remainder) + name
+    return name
+
+
+def _candidate_pairs(
+    rows: Rows,
+    *,
+    header_row: int,
+    size_col: int,
+    passing_col: int,
+) -> Tuple[Tuple[Cell, Cell], ...]:
+    """Return the first numeric curve block below a role-header row."""
+    pairs: List[Tuple[Cell, Cell]] = []
+    gap = 0
+    for row_idx in range(header_row + 1, len(rows)):
+        row = rows[row_idx]
+        valid = False
+        if len(row) > max(size_col, passing_col):
+            try:
+                size = coerce_float(row[size_col])
+                passing = coerce_float(row[passing_col])
+                valid = size > 0 and 0 <= passing <= 100
+            except ValueError:
+                valid = False
+        if valid:
+            pairs.append(((row_idx, size_col), (row_idx, passing_col)))
+            gap = 0
+        elif pairs:
+            gap += 1
+            if gap >= 3:
+                break
+    return tuple(pairs)
+
+
+def _sample_label_above(
+    rows: Rows,
+    *,
+    header_row: int,
+    columns: Sequence[int],
+) -> str:
+    """Find a non-role label immediately above a candidate column group."""
+    for row_idx in range(header_row - 1, max(-1, header_row - 4), -1):
+        for column in columns:
+            if row_idx >= len(rows) or column >= len(rows[row_idx]):
+                continue
+            raw = str(rows[row_idx][column]).strip()
+            normalized = normalize_text(raw)
+            role = _header_role(raw)
+            if not normalized or role in {"size", "passing", "retained"}:
+                continue
+            if role == "sample" and normalized in _SAMPLE_ROLE_KEYWORDS:
+                continue
+            if normalized in {"mm", "um", "µm", "μm", "%", "(%)"}:
+                continue
+            return raw
+    return ""
+
+
+def _sample_label_from_passing_header(value: object) -> str:
+    """Extract an explicit sample label from a combined passing-column header."""
+    raw = "" if value is None else str(value).strip()
+    if not raw:
+        return ""
+    cleaned = raw
+    role_phrases = sorted(
+        set(_PASSING_ROLE_KEYWORDS) | {"percent", "procent", "cumulative"},
+        key=len,
+        reverse=True,
+    )
+    for phrase in role_phrases:
+        cleaned = re.sub(re.escape(phrase), " ", cleaned, flags=re.IGNORECASE)
+    cleaned = re.sub(r"[()%\[\]{}]", " ", cleaned)
+    cleaned = " ".join(cleaned.split()).strip(" :|/")
+    if not cleaned or _header_role(cleaned) in {"passing", "retained", "size"}:
+        return ""
+    return cleaned
+
+
+def _finalize_multi_candidates(
+    candidates: Sequence[ImportCandidate],
+) -> Tuple[ImportCandidate, ...]:
+    """Return distinct candidates only when a source clearly contains several."""
+    distinct: List[ImportCandidate] = []
+    seen = set()
+    labels: Dict[str, int] = {}
+    for candidate in candidates:
+        signature = (candidate.size_cells, candidate.passing_cells)
+        if signature in seen:
+            continue
+        seen.add(signature)
+        base_name = candidate.sample_name.strip() or candidate.source_label
+        labels[base_name] = labels.get(base_name, 0) + 1
+        if labels[base_name] > 1:
+            base_name = f"{base_name} ({candidate.source_label})"
+        distinct.append(
+            ImportCandidate(
+                data_type=candidate.data_type,
+                selection_method=candidate.selection_method,
+                header_row=candidate.header_row,
+                sheet_name=candidate.sheet_name,
+                label=candidate.label,
+                size_cells=candidate.size_cells,
+                passing_cells=candidate.passing_cells,
+                column_indices=dict(candidate.column_indices),
+                sample_name=base_name,
+                source_label=candidate.source_label,
+                candidate_key=candidate.candidate_key,
+            )
+        )
+    return tuple(distinct) if len(distinct) >= 2 else ()
+
+
+def _detect_long_table_candidates(
+    rows: Rows,
+    *,
+    sheet_name: Optional[str],
+) -> Tuple[ImportCandidate, ...]:
+    max_cols = _max_cols(rows)
+    for header_row in range(min(16, len(rows))):
+        roles: Dict[str, int] = {}
+        for column in range(max_cols):
+            role = _header_role(rows[header_row][column] if column < len(rows[header_row]) else "")
+            if role in {"sample", "size", "passing"} and role not in roles:
+                roles[role] = column
+        if set(roles) != {"sample", "size", "passing"}:
+            continue
+
+        grouped: Dict[str, List[Tuple[Cell, Cell]]] = {}
+        display_names: Dict[str, str] = {}
+        max_col = max(roles.values())
+        for row_idx in range(header_row + 1, len(rows)):
+            row = rows[row_idx]
+            if len(row) <= max_col:
+                continue
+            raw_name = str(row[roles["sample"]]).strip()
+            if not raw_name:
+                continue
+            try:
+                size = coerce_float(row[roles["size"]])
+                passing = coerce_float(row[roles["passing"]])
+            except ValueError:
+                continue
+            if size <= 0 or not 0 <= passing <= 100:
+                continue
+            key = normalize_text(raw_name)
+            display_names.setdefault(key, raw_name)
+            grouped.setdefault(key, []).append(
+                ((row_idx, roles["size"]), (row_idx, roles["passing"]))
+            )
+
+        candidates: List[ImportCandidate] = []
+        for key, pairs in grouped.items():
+            if not _curve_pair_is_plausible(rows, pairs):
+                continue
+            source_label = (
+                f"{_column_name(roles['sample'])}:"
+                f"{_column_name(roles['passing'])}"
+            )
+            candidates.append(
+                ImportCandidate(
+                    data_type="processed_curve",
+                    selection_method="range",
+                    header_row=header_row,
+                    sheet_name=sheet_name,
+                    label="Detected sample-ID table",
+                    size_cells=tuple(pair[0] for pair in pairs),
+                    passing_cells=tuple(pair[1] for pair in pairs),
+                    sample_name=display_names[key],
+                    source_label=source_label,
+                    candidate_key=f"long:{key}",
+                )
+            )
+        finalized = _finalize_multi_candidates(candidates)
+        if finalized:
+            return finalized
+    return ()
+
+
+def _detect_wide_table_candidates(
+    rows: Rows,
+    *,
+    sheet_name: Optional[str],
+) -> Tuple[ImportCandidate, ...]:
+    max_cols = _max_cols(rows)
+    for header_row in range(min(16, len(rows))):
+        size_cols = [
+            column
+            for column in range(max_cols)
+            if _header_role(rows[header_row][column] if column < len(rows[header_row]) else "") == "size"
+        ]
+        passing_cols = [
+            column
+            for column in range(max_cols)
+            if _header_role(rows[header_row][column] if column < len(rows[header_row]) else "") == "passing"
+        ]
+        if not size_cols or len(passing_cols) < 2:
+            continue
+
+        column_pairs: List[Tuple[int, int]] = []
+        if len(size_cols) == 1:
+            column_pairs = [(size_cols[0], passing_col) for passing_col in passing_cols]
+        else:
+            unused_passing = set(passing_cols)
+            for size_col in size_cols:
+                nearby = sorted(
+                    (
+                        (abs(passing_col - size_col), passing_col)
+                        for passing_col in unused_passing
+                        if abs(passing_col - size_col) <= 3
+                    )
+                )
+                if nearby:
+                    passing_col = nearby[0][1]
+                    unused_passing.remove(passing_col)
+                    column_pairs.append((size_col, passing_col))
+
+        candidates: List[ImportCandidate] = []
+        for size_col, passing_col in column_pairs:
+            pairs = _candidate_pairs(
+                rows,
+                header_row=header_row,
+                size_col=size_col,
+                passing_col=passing_col,
+            )
+            if not _curve_pair_is_plausible(rows, pairs):
+                continue
+            source_label = (
+                f"Columns {_column_name(size_col)}:{_column_name(passing_col)}"
+            )
+            sample_name = _sample_label_above(
+                rows,
+                header_row=header_row,
+                columns=(passing_col, size_col),
+            ) or _sample_label_from_passing_header(
+                rows[header_row][passing_col]
+                if passing_col < len(rows[header_row]) else ""
+            ) or source_label
+            candidates.append(
+                ImportCandidate(
+                    data_type="processed_curve",
+                    selection_method="range",
+                    header_row=header_row,
+                    sheet_name=sheet_name,
+                    label="Detected multi-sample columns",
+                    size_cells=tuple(pair[0] for pair in pairs),
+                    passing_cells=tuple(pair[1] for pair in pairs),
+                    sample_name=sample_name,
+                    source_label=source_label,
+                    candidate_key=f"wide:{size_col}:{passing_col}",
+                )
+            )
+
+        finalized = _finalize_multi_candidates(candidates)
+        if finalized:
+            return finalized
+    return ()
+
+
+def detect_multi_sample_candidates(
+    rows: Rows,
+    *,
+    sheet_name: Optional[str] = None,
+) -> Tuple[ImportCandidate, ...]:
+    """Detect explicit multi-sample processed-curve layouts.
+
+    This intentionally excludes incremental, retained, or generically labelled
+    percentage columns. Ambiguous scientific semantics remain in manual mapping.
+    """
+    if not rows:
+        return ()
+    return (
+        _detect_long_table_candidates(rows, sheet_name=sheet_name)
+        or _detect_wide_table_candidates(rows, sheet_name=sheet_name)
+    )
 
 
 def detect_processed_curve_candidate(

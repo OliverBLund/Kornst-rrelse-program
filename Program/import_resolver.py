@@ -10,10 +10,20 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import Any, Mapping, Optional, Sequence
 
-from excel_import_detection import ImportCandidate, find_best_import_candidate
+from excel_import_detection import (
+    ImportCandidate,
+    detect_multi_sample_candidates,
+    find_best_import_candidate,
+)
 
 
 Rows = Sequence[Sequence[str]]
+MULTI_SAMPLE_CONFIRMATION_TEXT = "sample candidates require confirmation"
+
+
+def is_multi_sample_confirmation_message(message: object) -> bool:
+    """Return whether a loader message represents candidate review, not failure."""
+    return MULTI_SAMPLE_CONFIRMATION_TEXT in str(message or "").strip().lower()
 
 
 @dataclass(frozen=True)
@@ -23,6 +33,7 @@ class ImportResolution:
     action: str
     intent: str
     candidate: Optional[ImportCandidate] = None
+    candidates: tuple[ImportCandidate, ...] = ()
     mapping_state: Mapping[str, Any] = field(default_factory=dict)
     provenance: Mapping[str, Any] = field(default_factory=dict)
     message: str = ""
@@ -116,9 +127,20 @@ def resolve_excel_import(
     *,
     sheet_name: str | None = None,
     intent: object = "processed",
+    allow_multi_sample: bool = False,
 ) -> ImportResolution:
     """Resolve one Excel sheet into an automatic import plan or mapper fallback."""
     normalized_intent = normalize_import_intent(intent)
+    if allow_multi_sample and normalized_intent == "processed_curve":
+        candidates = detect_multi_sample_candidates(rows, sheet_name=sheet_name)
+        if candidates:
+            return ImportResolution(
+                action="manual_mapping",
+                intent=normalized_intent,
+                candidates=candidates,
+                message=f"{len(candidates)} sample candidates require confirmation",
+            )
+
     candidate = find_best_import_candidate(
         rows,
         sheet_name=sheet_name,

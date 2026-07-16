@@ -6,1201 +6,160 @@
 <title>12 - Column Mapper Concept</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-<link href="https://fonts.googleapis.com/css2?family=Playfair+Display:wght@700&family=Source+Sans+3:wght@300;400;500;600&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+<link href="https://fonts.googleapis.com/css2?family=Playfair+Display:wght@700&family=Source+Sans+3:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
 <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/all.min.css">
 <link rel="stylesheet" href="_shared.css">
-
-<style>
-body{
-  overflow:auto;
-  background:
-    linear-gradient(180deg, rgba(238,232,220,.9), rgba(245,245,240,.96)),
-    var(--bg);
-}
-
-.stage{
-  min-height:100vh;
-  padding:28px;
-  display:flex;
-  align-items:center;
-  justify-content:center;
-}
-
-.mapper-dialog{
-  width:min(1180px, calc(100vw - 38px));
-  height:min(760px, calc(100vh - 38px));
-  min-height:620px;
-  display:flex;
-  flex-direction:column;
-  overflow:hidden;
-  border:1px solid var(--border);
-  border-radius:8px;
-  background:var(--bg);
-  box-shadow:0 24px 70px rgba(46,29,12,.18),0 6px 18px rgba(46,29,12,.1);
-  animation:dialog-in .24s cubic-bezier(.18,.7,.34,1) both;
-}
-
-@keyframes dialog-in{
-  from{opacity:0;transform:translateY(10px) scale(.985)}
-  to{opacity:1;transform:none}
-}
-
-.dialog-head{
-  height:58px;
-  flex-shrink:0;
-  display:flex;
-  align-items:center;
-  gap:12px;
-  padding:0 16px;
-  background:var(--bg-raised);
-  border-bottom:1px solid var(--border);
-}
-
-.head-icon{
-  width:30px;
-  height:30px;
-  display:flex;
-  align-items:center;
-  justify-content:center;
-  border-radius:5px;
-  background:rgba(107,142,35,.12);
-  border:1px solid rgba(107,142,35,.25);
-  color:var(--olive);
-  flex-shrink:0;
-}
-
-.head-title{
-  min-width:0;
-  flex:1;
-}
-
-.head-title h1{
-  font-family:var(--fd);
-  font-size:15px;
-  line-height:1.05;
-  color:var(--text);
-}
-
-.head-title .sub{
-  margin-top:3px;
-  display:flex;
-  align-items:center;
-  gap:7px;
-  min-width:0;
-  color:var(--text-muted);
-  font-family:var(--fm);
-  font-size:10.5px;
-}
-
-.sub .file{
-  color:var(--text-mid);
-  max-width:460px;
-  overflow:hidden;
-  text-overflow:ellipsis;
-  white-space:nowrap;
-}
-
-.head-actions{
-  display:flex;
-  align-items:center;
-  gap:8px;
-}
-
-.icon-btn{
-  width:28px;
-  height:28px;
-  border:1px solid transparent;
-  border-radius:5px;
-  display:flex;
-  align-items:center;
-  justify-content:center;
-  background:transparent;
-  color:var(--text-muted);
-  transition:all .12s;
-}
-
-.icon-btn:hover{
-  background:var(--bg-low);
-  border-color:var(--border);
-  color:var(--text);
-}
-
-.mapper-tabs{
-  height:36px;
-  flex-shrink:0;
-  display:flex;
-  align-items:end;
-  gap:2px;
-  padding:0 12px;
-  background:var(--bg);
-  border-bottom:1px solid var(--border);
-}
-
-.mapper-tab{
-  height:30px;
-  padding:0 13px;
-  border:1px solid transparent;
-  border-bottom:none;
-  border-radius:5px 5px 0 0;
-  display:flex;
-  align-items:center;
-  gap:7px;
-  color:var(--text-muted);
-  background:transparent;
-  font-size:12px;
-  transition:all .12s;
-}
-
-.mapper-tab i{font-size:11px}
-.mapper-tab.on{
-  color:var(--text);
-  background:var(--bg-raised);
-  border-color:var(--border);
-  font-weight:600;
-}
-
-.file-strip{
-  min-height:38px;
-  flex-shrink:0;
-  display:grid;
-  grid-template-columns:minmax(0,1fr) auto;
-  align-items:center;
-  gap:12px;
-  padding:0 14px;
-  background:var(--bg-low);
-  border-bottom:1px solid var(--border);
-}
-
-.file-meta{
-  display:flex;
-  align-items:center;
-  gap:9px;
-  min-width:0;
-  font-family:var(--fm);
-  font-size:10.5px;
-  color:var(--text-muted);
-}
-
-.file-meta i{color:var(--earth)}
-.file-meta strong{
-  color:var(--text);
-  font-family:var(--fu);
-  font-size:12px;
-  font-weight:600;
-  overflow:hidden;
-  text-overflow:ellipsis;
-  white-space:nowrap;
-}
-
-.chip-row{
-  display:flex;
-  align-items:center;
-  gap:6px;
-  overflow:hidden;
-}
-
-.chip{
-  display:inline-flex;
-  align-items:center;
-  gap:5px;
-  height:22px;
-  padding:0 8px;
-  border:1px solid var(--border);
-  border-radius:99px;
-  background:rgba(255,255,255,.35);
-  color:var(--text-mid);
-  font-family:var(--fm);
-  font-size:9.5px;
-  white-space:nowrap;
-}
-
-.chip.ok{
-  color:var(--olive);
-  border-color:rgba(107,142,35,.27);
-  background:rgba(107,142,35,.08);
-}
-
-.chip.warn{
-  color:#9a6322;
-  border-color:rgba(154,99,34,.26);
-  background:rgba(154,99,34,.07);
-}
-
-.auto-btn{
-  height:26px;
-  border:1px solid rgba(107,142,35,.3);
-  border-radius:5px;
-  display:flex;
-  align-items:center;
-  gap:6px;
-  padding:0 11px;
-  color:var(--olive);
-  background:rgba(107,142,35,.08);
-  font-size:12px;
-  transition:all .12s;
-}
-
-.auto-btn:hover{background:rgba(107,142,35,.14)}
-
-.workspace{
-  flex:1;
-  min-height:0;
-  display:grid;
-  grid-template-columns:390px minmax(0,1fr);
-  overflow:hidden;
-}
-
-.inspector{
-  min-width:0;
-  display:flex;
-  flex-direction:column;
-  overflow:hidden;
-  background:var(--bg-raised);
-  border-right:1px solid var(--border);
-}
-
-.inspector-scroll{
-  flex:1;
-  min-height:0;
-  overflow:auto;
-  padding:14px;
-  display:flex;
-  flex-direction:column;
-  gap:13px;
-}
-
-.section-title{
-  display:flex;
-  align-items:center;
-  gap:7px;
-  margin-bottom:7px;
-  color:var(--text-muted);
-  font-size:9.5px;
-  font-weight:700;
-  letter-spacing:.1em;
-  text-transform:uppercase;
-}
-
-.section-title::after{
-  content:"";
-  flex:1;
-  height:1px;
-  background:var(--border);
-}
-
-.seg-grid{
-  display:grid;
-  grid-template-columns:1fr 1fr;
-  gap:7px;
-}
-
-.seg{
-  min-height:44px;
-  border:1px solid var(--border);
-  border-radius:6px;
-  background:rgba(255,255,255,.28);
-  color:var(--text-mid);
-  display:flex;
-  align-items:center;
-  gap:9px;
-  padding:8px 10px;
-  text-align:left;
-  transition:all .14s;
-}
-
-.seg i{
-  width:22px;
-  height:22px;
-  display:flex;
-  align-items:center;
-  justify-content:center;
-  border-radius:4px;
-  border:1px solid var(--border);
-  background:rgba(255,255,255,.35);
-  color:var(--text-muted);
-  flex-shrink:0;
-}
-
-.seg .seg-t{
-  display:block;
-  font-size:12px;
-  line-height:1.1;
-  font-weight:600;
-  color:var(--text-mid);
-}
-
-.seg .seg-s{
-  display:block;
-  margin-top:2px;
-  font-family:var(--fm);
-  font-size:9px;
-  color:var(--text-muted);
-}
-
-.seg:hover{
-  background:var(--bg-low);
-  border-color:var(--border-dk);
-}
-
-.seg.on{
-  background:rgba(107,142,35,.08);
-  border-color:rgba(107,142,35,.32);
-  box-shadow:inset 3px 0 0 var(--olive);
-}
-
-.seg.on i{
-  color:var(--olive);
-  border-color:rgba(107,142,35,.28);
-  background:rgba(107,142,35,.1);
-}
-
-.seg.on .seg-t{color:var(--text)}
-
-.path-strip{
-  min-height:32px;
-  display:flex;
-  align-items:center;
-  gap:7px;
-  padding:0 9px;
-  border:1px solid var(--border);
-  border-radius:5px;
-  background:var(--bg);
-  color:var(--text-mid);
-  font-family:var(--fm);
-  font-size:10px;
-}
-
-.path-strip i{color:var(--olive);font-size:11px}
-.path-strip .sp{flex:1}
-
-.map-panel,
-.range-panel,
-.raw-panel{
-  display:none;
-  animation:panel-in .16s ease-out both;
-}
-
-.map-panel.on,
-.range-panel.on,
-.raw-panel.on{display:block}
-
-@keyframes panel-in{
-  from{opacity:0;transform:translateY(4px)}
-  to{opacity:1;transform:none}
-}
-
-.field-stack{
-  display:flex;
-  flex-direction:column;
-  gap:9px;
-}
-
-.field{
-  border:1px solid var(--border);
-  border-radius:6px;
-  background:var(--bg);
-  padding:8px;
-  transition:all .14s;
-}
-
-.field:focus-within{
-  border-color:rgba(107,142,35,.44);
-  box-shadow:0 0 0 2px rgba(107,142,35,.08);
-}
-
-.field-top{
-  display:flex;
-  align-items:center;
-  gap:8px;
-  margin-bottom:6px;
-}
-
-.field-label{
-  flex:1;
-  min-width:0;
-  display:flex;
-  align-items:center;
-  gap:6px;
-  color:var(--text);
-  font-size:12.5px;
-  font-weight:600;
-}
-
-.field-label i{
-  color:var(--text-muted);
-  font-size:11px;
-  width:13px;
-}
-
-.req{
-  height:18px;
-  display:flex;
-  align-items:center;
-  border-radius:99px;
-  padding:0 6px;
-  font-family:var(--fm);
-  font-size:8.5px;
-  color:var(--olive);
-  border:1px solid rgba(107,142,35,.26);
-  background:rgba(107,142,35,.08);
-}
-
-.select-wrap{
-  position:relative;
-}
-
-.select-wrap select{
-  width:100%;
-  height:34px;
-  border:1px solid var(--border);
-  border-radius:5px;
-  background:rgba(255,255,255,.55);
-  color:var(--text);
-  padding:0 34px 0 10px;
-  font-size:12px;
-  appearance:none;
-}
-
-.select-wrap::after{
-  content:"\f078";
-  font-family:"Font Awesome 6 Free";
-  font-weight:900;
-  position:absolute;
-  right:11px;
-  top:50%;
-  transform:translateY(-50%);
-  color:var(--text-muted);
-  font-size:9px;
-  pointer-events:none;
-}
-
-.field-foot{
-  display:flex;
-  align-items:center;
-  gap:7px;
-  min-height:20px;
-  margin-top:6px;
-  font-family:var(--fm);
-  font-size:9.5px;
-  color:var(--text-muted);
-}
-
-.field-foot .swatch{
-  width:8px;
-  height:8px;
-  border-radius:50%;
-  background:var(--olive);
-  box-shadow:0 0 0 2px rgba(107,142,35,.12);
-}
-
-.field-foot .muted{color:var(--text-muted)}
-
-.header-row{
-  display:grid;
-  grid-template-columns:1fr 88px;
-  gap:8px;
-}
-
-.mini-input{
-  height:32px;
-  border:1px solid var(--border);
-  border-radius:5px;
-  background:rgba(255,255,255,.55);
-  color:var(--text);
-  padding:0 9px;
-  font-family:var(--fm);
-  font-size:11px;
-}
-
-.range-tools{
-  display:grid;
-  grid-template-columns:1fr 1fr;
-  gap:8px;
-}
-
-.range-tool{
-  min-height:68px;
-  border:1px solid var(--border);
-  border-radius:6px;
-  background:var(--bg);
-  display:flex;
-  flex-direction:column;
-  align-items:flex-start;
-  justify-content:center;
-  gap:5px;
-  padding:9px 10px;
-  color:var(--text-mid);
-  transition:all .14s;
-}
-
-.range-tool i{color:var(--text-muted)}
-.range-tool strong{font-size:12.5px;color:var(--text)}
-.range-tool span{font-family:var(--fm);font-size:9.5px;color:var(--text-muted)}
-.range-tool.on{
-  border-color:rgba(107,142,35,.34);
-  background:rgba(107,142,35,.08);
-}
-.range-tool.on i{color:var(--olive)}
-
-.range-summary{
-  display:grid;
-  grid-template-columns:1fr 1fr;
-  gap:8px;
-  margin-top:9px;
-}
-
-.range-stat{
-  min-height:46px;
-  border:1px solid var(--border);
-  border-radius:6px;
-  background:var(--bg);
-  padding:7px 9px;
-}
-
-.range-stat .n{
-  font-family:var(--fm);
-  font-size:15px;
-  color:var(--text);
-}
-
-.range-stat .l{
-  font-size:10.5px;
-  color:var(--text-muted);
-}
-
-.sheet-list{
-  display:flex;
-  flex-wrap:wrap;
-  gap:6px;
-}
-
-.sheet-chip{
-  height:24px;
-  display:flex;
-  align-items:center;
-  gap:6px;
-  border:1px solid var(--border);
-  border-radius:99px;
-  background:rgba(255,255,255,.3);
-  padding:0 8px;
-  color:var(--text-mid);
-  font-size:11px;
-}
-
-.sheet-chip.on{
-  color:var(--olive);
-  border-color:rgba(107,142,35,.3);
-  background:rgba(107,142,35,.08);
-}
-
-.preview{
-  min-width:0;
-  display:flex;
-  flex-direction:column;
-  overflow:hidden;
-}
-
-.preview-head{
-  height:44px;
-  flex-shrink:0;
-  display:flex;
-  align-items:center;
-  gap:12px;
-  padding:0 14px;
-  background:var(--bg);
-  border-bottom:1px solid var(--border);
-}
-
-.preview-title{
-  min-width:0;
-  flex:1;
-  display:flex;
-  align-items:center;
-  gap:8px;
-  color:var(--text);
-  font-weight:700;
-  font-size:13px;
-}
-
-.preview-title i{color:var(--earth)}
-
-.preview-actions{
-  display:flex;
-  align-items:center;
-  gap:6px;
-}
-
-.tool-btn{
-  height:26px;
-  border:1px solid var(--border);
-  border-radius:5px;
-  background:var(--bg-raised);
-  color:var(--text-mid);
-  display:flex;
-  align-items:center;
-  gap:6px;
-  padding:0 9px;
-  font-size:11.5px;
-  transition:all .12s;
-}
-
-.tool-btn:hover{
-  border-color:var(--border-dk);
-  background:var(--bg-low);
-  color:var(--text);
-}
-
-.table-wrap{
-  flex:1;
-  min-height:0;
-  overflow:auto;
-  background:
-    linear-gradient(90deg, rgba(107,142,35,.04), transparent 44%),
-    rgba(255,255,255,.2);
-}
-
-.data-table{
-  width:100%;
-  min-width:760px;
-  border-collapse:separate;
-  border-spacing:0;
-  font-family:var(--fm);
-  font-size:11.5px;
-}
-
-.data-table th{
-  position:sticky;
-  top:0;
-  z-index:3;
-  height:32px;
-  background:var(--bg-low);
-  border-bottom:1px solid var(--border);
-  color:var(--text-mid);
-  font-weight:500;
-  text-align:left;
-  padding:0 10px;
-  white-space:nowrap;
-}
-
-.data-table th:first-child{
-  position:sticky;
-  left:0;
-  z-index:4;
-  width:44px;
-  min-width:44px;
-  color:var(--text-muted);
-  text-align:right;
-  background:var(--bg-low);
-}
-
-.data-table td{
-  height:31px;
-  border-bottom:1px solid rgba(212,196,168,.45);
-  padding:0 10px;
-  color:var(--text);
-  background:rgba(255,255,255,.32);
-  white-space:nowrap;
-}
-
-.data-table td:first-child{
-  position:sticky;
-  left:0;
-  z-index:2;
-  width:44px;
-  min-width:44px;
-  text-align:right;
-  color:var(--text-muted);
-  background:var(--bg);
-  border-right:1px solid var(--border);
-}
-
-.data-table tr:hover td:not(:first-child){
-  background:rgba(107,142,35,.05);
-}
-
-.data-table .num{
-  color:#24352a;
-  background:rgba(107,142,35,.07);
-}
-
-.data-table th.mapped-size,
-.data-table td.mapped-size{
-  background:rgba(104,132,171,.15);
-  box-shadow:inset 3px 0 0 #6884ab;
-}
-
-.data-table th.mapped-pass,
-.data-table td.mapped-pass{
-  background:rgba(107,142,35,.13);
-  box-shadow:inset 3px 0 0 var(--olive);
-}
-
-.data-table th.mapped-ret,
-.data-table td.mapped-ret{
-  background:rgba(154,99,34,.11);
-  box-shadow:inset 3px 0 0 #9a6322;
-}
-
-.data-table .sel-size{
-  background:rgba(104,132,171,.2)!important;
-  outline:1px solid rgba(104,132,171,.38);
-  outline-offset:-2px;
-}
-
-.data-table .sel-pass{
-  background:rgba(107,142,35,.18)!important;
-  outline:1px solid rgba(107,142,35,.38);
-  outline-offset:-2px;
-}
-
-.preview-foot{
-  min-height:38px;
-  flex-shrink:0;
-  display:flex;
-  align-items:center;
-  gap:8px;
-  padding:0 14px;
-  background:var(--bg);
-  border-top:1px solid var(--border);
-  color:var(--text-muted);
-  font-size:11px;
-}
-
-.legend-dot{
-  width:8px;
-  height:8px;
-  border-radius:50%;
-  display:inline-flex;
-  flex-shrink:0;
-}
-
-.legend-dot.size{background:#6884ab}
-.legend-dot.pass{background:var(--olive)}
-.legend-dot.ret{background:#9a6322}
-.preview-foot .sp{flex:1}
-
-.dialog-foot{
-  height:48px;
-  flex-shrink:0;
-  display:flex;
-  align-items:center;
-  gap:8px;
-  padding:0 13px;
-  background:var(--bg-raised);
-  border-top:1px solid var(--border);
-}
-
-.footer-status{
-  flex:1;
-  min-width:0;
-  display:flex;
-  align-items:center;
-  gap:8px;
-  color:var(--text-muted);
-  font-family:var(--fm);
-  font-size:10px;
-}
-
-.footer-status i{color:var(--olive)}
-
-.btn{
-  height:30px;
-  border:1px solid var(--border);
-  border-radius:5px;
-  background:var(--bg);
-  color:var(--text-mid);
-  display:flex;
-  align-items:center;
-  justify-content:center;
-  gap:7px;
-  padding:0 14px;
-  font-size:12.5px;
-  transition:all .12s;
-}
-
-.btn:hover{
-  background:var(--bg-low);
-  color:var(--text);
-  border-color:var(--border-dk);
-}
-
-.btn.primary{
-  background:var(--olive);
-  border-color:var(--olive-dk);
-  color:white;
-  font-weight:600;
-}
-
-.btn.primary:hover{background:var(--olive-h)}
-
-@media (max-width:900px){
-  .stage{padding:10px}
-  .mapper-dialog{
-    width:100%;
-    height:calc(100vh - 20px);
-    min-height:0;
-  }
-  .workspace{
-    grid-template-columns:1fr;
-    grid-template-rows:auto minmax(0,1fr);
-  }
-  .inspector{
-    max-height:330px;
-    border-right:none;
-    border-bottom:1px solid var(--border);
-  }
-  .seg-grid{grid-template-columns:1fr}
-  .header-row{grid-template-columns:1fr}
-  .file-strip{grid-template-columns:1fr}
-  .chip-row{display:none}
-}
-</style>
+<link rel="stylesheet" href="12_column_mapper.css">
 </head>
-
 <body>
 <div class="stage">
-  <section class="mapper-dialog" aria-label="Column Mapper redesign concept">
-    <header class="dialog-head">
-      <div class="head-icon"><i class="fa-solid fa-table-columns"></i></div>
-      <div class="head-title">
-        <h1>Column Mapper</h1>
-        <div class="sub">
-          <span class="file">Example_1_Case_1_Vukovic.csv</span>
-          <span>mapped to grain-size data</span>
-        </div>
-      </div>
-      <div class="head-actions">
-        <button class="icon-btn" title="Help"><i class="fa-regular fa-circle-question"></i></button>
-        <button class="icon-btn" title="Close"><i class="fa-solid fa-xmark"></i></button>
-      </div>
-    </header>
-
-    <nav class="mapper-tabs" aria-label="Mapper tabs">
-      <button class="mapper-tab on"><i class="fa-solid fa-link"></i>Mapping</button>
-      <button class="mapper-tab"><i class="fa-solid fa-sliders"></i>Parameters</button>
-    </nav>
-
-    <div class="file-strip">
-      <div class="file-meta">
-        <i class="fa-regular fa-file-lines"></i>
-        <strong>Example_1_Case_1_Vukovic.csv</strong>
-        <span>8 preview rows</span>
-        <span>2 columns</span>
-      </div>
-      <div class="chip-row">
-        <span class="chip ok"><i class="fa-solid fa-check"></i>2 required mapped</span>
-        <span class="chip">Header row 0</span>
-        <button class="auto-btn"><i class="fa-solid fa-wand-magic-sparkles"></i>Auto-detect</button>
-      </div>
+<section class="mapper processed-mode" id="mapper" aria-label="Confirm imported data">
+  <header class="dialog-head">
+    <div class="head-mark"><i class="fa-solid fa-table-columns"></i></div>
+    <div class="head-copy"><h1>Confirm imported data</h1><div class="file-line"><i class="fa-regular fa-file-excel"></i><span class="filename">250115 Clay phase 1 samples.xlsx</span><span class="divider"></span><span>Sheet: Analysis</span></div></div>
+    <div class="detected-status" id="detectedStatus"><i class="fa-solid fa-wand-magic-sparkles"></i><span>Processed curve detected</span></div>
+    <button class="icon-button" title="Mapper help" aria-label="Mapper help"><i class="fa-regular fa-circle-question"></i></button>
+    <button class="icon-button" title="Close" aria-label="Close"><i class="fa-solid fa-xmark"></i></button>
+  </header>
+  <div class="source-bar">
+    <span class="source-label">Data in this sheet</span>
+    <div class="path-switch" role="group" aria-label="Input type">
+      <button class="path-option on" data-path="processed"><i class="fa-solid fa-chart-line"></i>Processed curve</button>
+      <button class="path-option" data-path="raw"><i class="fa-solid fa-scale-balanced"></i>Raw sieve weighings</button>
     </div>
-
-    <main class="workspace">
-      <aside class="inspector">
-        <div class="inspector-scroll">
-          <section>
-            <div class="section-title"><i class="fa-solid fa-route"></i>Import Path</div>
-            <div class="seg-grid">
-              <button class="seg on" data-import="processed">
-                <i class="fa-solid fa-chart-line"></i>
-                <span><span class="seg-t">Processed Curve</span><span class="seg-s">size + passing</span></span>
-              </button>
-              <button class="seg" data-import="raw">
-                <i class="fa-solid fa-scale-balanced"></i>
-                <span><span class="seg-t">Raw Sieve</span><span class="seg-s">weighings</span></span>
-              </button>
-            </div>
-          </section>
-
-          <section class="method-section">
-            <div class="section-title"><i class="fa-solid fa-location-crosshairs"></i>Mapping Method</div>
-            <div class="seg-grid">
-              <button class="seg on" data-method="column">
-                <i class="fa-solid fa-table-columns"></i>
-                <span><span class="seg-t">Columns</span><span class="seg-s">clean table</span></span>
-              </button>
-              <button class="seg" data-method="range">
-                <i class="fa-regular fa-object-group"></i>
-                <span><span class="seg-t">Cell Ranges</span><span class="seg-s">irregular sheet</span></span>
-              </button>
-            </div>
-          </section>
-
-          <div class="path-strip">
-            <i class="fa-solid fa-circle-check"></i>
-            <span id="pathLabel">Processed Curve -> Column Mapping</span>
-            <span class="sp"></span>
-            <span id="pathCount">2 / 2</span>
-          </div>
-
-          <section class="map-panel on" id="columnPanel">
-            <div class="section-title"><i class="fa-solid fa-list-check"></i>Processed Curve Columns</div>
-            <div class="field-stack">
-              <label class="field">
-                <div class="field-top">
-                  <div class="field-label"><i class="fa-solid fa-ruler-horizontal"></i>Particle Size</div>
-                  <span class="req">required</span>
-                </div>
-                <div class="select-wrap">
-                  <select data-map="size">
-                    <option>Particle Size (mm)</option>
-                    <option>Percent Passing (%)</option>
-                    <option>(Not Used)</option>
-                  </select>
-                </div>
-                <div class="field-foot"><span class="swatch" style="background:#6884ab"></span><span>preview column A</span></div>
-              </label>
-
-              <label class="field">
-                <div class="field-top">
-                  <div class="field-label"><i class="fa-solid fa-percent"></i>Percent Passing</div>
-                  <span class="req">required</span>
-                </div>
-                <div class="select-wrap">
-                  <select data-map="pass">
-                    <option>Percent Passing (%)</option>
-                    <option>Particle Size (mm)</option>
-                    <option>(Not Used)</option>
-                  </select>
-                </div>
-                <div class="field-foot"><span class="swatch"></span><span>preview column B</span></div>
-              </label>
-
-              <label class="field">
-                <div class="field-top">
-                  <div class="field-label"><i class="fa-solid fa-layer-group"></i>Percent Retained</div>
-                  <span class="chip">optional</span>
-                </div>
-                <div class="select-wrap">
-                  <select data-map="retained">
-                    <option>(Not Used)</option>
-                    <option>Percent Passing (%)</option>
-                    <option>Particle Size (mm)</option>
-                  </select>
-                </div>
-                <div class="field-foot"><span class="muted">unused while passing values are mapped</span></div>
-              </label>
-
-              <div class="header-row">
-                <label class="field">
-                  <div class="field-top">
-                    <div class="field-label"><i class="fa-solid fa-heading"></i>Header Row</div>
-                  </div>
-                  <input class="mini-input" value="0">
-                </label>
-                <button class="btn"><i class="fa-solid fa-rotate-right"></i>Refresh</button>
-              </div>
-            </div>
-          </section>
-
-          <section class="range-panel" id="rangePanel">
-            <div class="section-title"><i class="fa-regular fa-object-group"></i>Cell Range Selection</div>
-            <div class="range-tools">
-              <button class="range-tool on" data-select="size">
-                <i class="fa-solid fa-ruler-horizontal"></i>
-                <strong>Size Cells</strong>
-                <span>A3:A8 selected</span>
-              </button>
-              <button class="range-tool" data-select="passing">
-                <i class="fa-solid fa-percent"></i>
-                <strong>Passing Cells</strong>
-                <span>B3:B8 selected</span>
-              </button>
-              <button class="range-tool">
-                <i class="fa-solid fa-eraser"></i>
-                <strong>Clear</strong>
-                <span>reset selection</span>
-              </button>
-              <button class="range-tool">
-                <i class="fa-solid fa-bolt"></i>
-                <strong>Learn Pattern</strong>
-                <span>batch ready</span>
-              </button>
-            </div>
-            <div class="range-summary">
-              <div class="range-stat">
-                <div class="n">6</div>
-                <div class="l">size cells</div>
-              </div>
-              <div class="range-stat">
-                <div class="n">6</div>
-                <div class="l">passing cells</div>
-              </div>
-            </div>
-          </section>
-
-          <section class="raw-panel" id="rawPanel">
-            <div class="section-title"><i class="fa-solid fa-scale-balanced"></i>Raw Sieve Columns</div>
-            <div class="field-stack">
-              <label class="field">
-                <div class="field-top">
-                  <div class="field-label"><i class="fa-solid fa-ruler-horizontal"></i>Sieve Size</div>
-                  <span class="req">required</span>
-                </div>
-                <div class="select-wrap">
-                  <select><option>Sieve Size (mm)</option><option>(Not Used)</option></select>
-                </div>
-              </label>
-              <label class="field">
-                <div class="field-top">
-                  <div class="field-label"><i class="fa-solid fa-weight-hanging"></i>Empty Sieve</div>
-                  <span class="req">required</span>
-                </div>
-                <div class="select-wrap">
-                  <select><option>Weight Empty (g)</option><option>(Not Used)</option></select>
-                </div>
-              </label>
-              <label class="field">
-                <div class="field-top">
-                  <div class="field-label"><i class="fa-solid fa-scale-balanced"></i>Sieve + Sample</div>
-                  <span class="req">required</span>
-                </div>
-                <div class="select-wrap">
-                  <select><option>Weight Full (g)</option><option>(Not Used)</option></select>
-                </div>
-              </label>
-            </div>
-          </section>
-
-          <section>
-            <div class="section-title"><i class="fa-regular fa-file-excel"></i>Sheets</div>
-            <div class="sheet-list">
-              <span class="sheet-chip on"><i class="fa-solid fa-check"></i>Sheet1</span>
-              <span class="sheet-chip">Repeat_2</span>
-              <span class="sheet-chip">QC</span>
-            </div>
-          </section>
-        </div>
-      </aside>
-
-      <section class="preview">
-        <header class="preview-head">
-          <div class="preview-title"><i class="fa-solid fa-table"></i>Data Preview</div>
-          <div class="preview-actions">
-            <button class="tool-btn"><i class="fa-solid fa-magnifying-glass-minus"></i></button>
-            <button class="tool-btn"><i class="fa-solid fa-magnifying-glass-plus"></i></button>
-            <button class="tool-btn"><i class="fa-solid fa-filter"></i>Numeric</button>
-          </div>
-        </header>
-
-        <div class="table-wrap">
-          <table class="data-table" aria-label="source data preview">
-            <thead>
-              <tr>
-                <th></th>
-                <th class="mapped-size">A&nbsp;&nbsp;Particle Size (mm)</th>
-                <th class="mapped-pass">B&nbsp;&nbsp;Percent Passing (%)</th>
-                <th>C&nbsp;&nbsp;Notes</th>
-                <th>D&nbsp;&nbsp;Operator</th>
-                <th>E&nbsp;&nbsp;Batch</th>
-              </tr>
-            </thead>
-            <tbody>
-              <tr><td>1</td><td>Particle Size (mm)</td><td>Percent Passing (%)</td><td>checked</td><td>OL</td><td>V-01</td></tr>
-              <tr><td>2</td><td class="num mapped-size sel-size">2.00</td><td class="num mapped-pass sel-pass">100</td><td></td><td></td><td></td></tr>
-              <tr><td>3</td><td class="num mapped-size sel-size">0.82</td><td class="num mapped-pass sel-pass">80</td><td></td><td></td><td></td></tr>
-              <tr><td>4</td><td class="num mapped-size sel-size">0.55</td><td class="num mapped-pass sel-pass">60</td><td></td><td></td><td></td></tr>
-              <tr><td>5</td><td class="num mapped-size sel-size">0.42</td><td class="num mapped-pass sel-pass">40</td><td></td><td></td><td></td></tr>
-              <tr><td>6</td><td class="num mapped-size sel-size">0.28</td><td class="num mapped-pass sel-pass">20</td><td></td><td></td><td></td></tr>
-              <tr><td>7</td><td class="num mapped-size sel-size">0.15</td><td class="num mapped-pass sel-pass">10</td><td></td><td></td><td></td></tr>
-              <tr><td>8</td><td class="num mapped-size">0.045</td><td class="num mapped-pass">0</td><td>pan</td><td></td><td></td></tr>
-              <tr><td>9</td><td></td><td></td><td></td><td></td><td></td></tr>
-              <tr><td>10</td><td></td><td></td><td></td><td></td><td></td></tr>
-              <tr><td>11</td><td></td><td></td><td></td><td></td><td></td></tr>
-              <tr><td>12</td><td></td><td></td><td></td><td></td><td></td></tr>
-              <tr><td>13</td><td></td><td></td><td></td><td></td><td></td></tr>
-            </tbody>
-          </table>
-        </div>
-
-        <footer class="preview-foot">
-          <span class="legend-dot size"></span><span>Particle size</span>
-          <span class="legend-dot pass"></span><span>Percent passing</span>
-          <span class="legend-dot ret"></span><span>Percent retained</span>
-          <span class="sp"></span>
-          <span>6 numeric rows selected</span>
-        </footer>
+    <span class="source-note processed-only"><strong>Needs:</strong> particle size and cumulative percent passing</span>
+    <span class="source-note raw-only"><strong>Needs:</strong> sieve size, empty sieve, and sieve + sample</span>
+    <span class="source-spacer"></span>
+    <span class="candidate-count"><i class="fa-solid fa-layer-group"></i>4 candidates</span>
+    <label class="sheet-control">Sheet <select><option>Analysis</option><option>Repeat 2</option><option>QC notes</option></select></label>
+  </div>
+  <main class="workspace">
+    <aside class="inspector" aria-label="Mapping controls">
+      <section class="section">
+        <div class="section-heading"><span class="step-number"><i class="fa-solid fa-check"></i></span><div><h2>Locate the table</h2><p>Set the row that contains the column names.</p></div></div>
+        <label class="field"><span class="field-label"><span>Header row</span><span class="column-id">Detected</span></span><div class="header-picker"><input class="row-input" id="headerRow" value="5" inputmode="numeric"><button class="small-button" id="applyHeader"><i class="fa-solid fa-rotate"></i>Apply</button></div><span class="field-hint" id="headerHint"><i class="fa-solid fa-check"></i>Row 5 contains recognizable headings</span></label>
       </section>
-    </main>
-
-    <footer class="dialog-foot">
-      <div class="footer-status">
-        <i class="fa-solid fa-circle-check"></i>
-        <span id="footerText">Ready to import processed curve data from two mapped columns.</span>
-      </div>
-      <button class="btn"><i class="fa-solid fa-eye"></i>Preview Results</button>
-      <button class="btn">Cancel</button>
-      <button class="btn primary"><i class="fa-solid fa-file-import"></i>Import</button>
-    </footer>
-  </section>
+      <section class="section">
+        <div class="section-heading"><span class="step-number"><i class="fa-solid fa-check"></i></span><div><h2 class="processed-only">Confirm the curve columns</h2><h2 class="raw-only">Confirm the weighing columns</h2><p class="processed-only">Detected roles are highlighted in the source.</p><p class="raw-only">Percent passing will be calculated from these weights.</p></div></div>
+        <div class="processed-only">
+          <label class="field"><span class="field-label"><span>Particle size</span><span class="column-id">Column B</span></span><div class="mapped-field"><span class="role-color"></span><div class="select-field"><select><option>B - Size (um)</option><option>C - % Volume In</option><option>D - % Volume In</option><option>Not used</option></select></div></div><span class="field-hint"><i class="fa-solid fa-check"></i>Values converted from um to mm</span></label>
+          <label class="field"><span class="field-label"><span>Cumulative percent passing (0-100)</span><span class="column-id">Column C</span></span><div class="mapped-field"><span class="role-color passing"></span><div class="select-field"><select><option>C - % Volume In</option><option>D - % Volume In</option><option>E - % Volume In</option><option>Not used</option></select></div></div><span class="field-hint"><i class="fa-solid fa-check"></i>Direction and range are consistent with passing</span></label>
+        </div>
+        <div class="raw-only">
+          <label class="field"><span class="field-label"><span>Sieve size</span><span class="column-id">Column A</span></span><div class="mapped-field"><span class="role-color"></span><div class="select-field"><select><option>A - Sieve size (mm)</option><option>B - Empty sieve (g)</option><option>C - Sieve + sample (g)</option></select></div></div></label>
+          <label class="field"><span class="field-label"><span>Empty sieve</span><span class="column-id">Column B</span></span><div class="mapped-field"><span class="role-color empty"></span><div class="select-field"><select><option>B - Empty sieve (g)</option><option>C - Sieve + sample (g)</option><option>Not used</option></select></div></div></label>
+          <label class="field"><span class="field-label"><span>Sieve + sample</span><span class="column-id">Column C</span></span><div class="mapped-field"><span class="role-color"></span><div class="select-field"><select><option>C - Sieve + sample (g)</option><option>B - Empty sieve (g)</option><option>Not used</option></select></div></div><span class="field-hint"><i class="fa-solid fa-calculator"></i>Retained weight and passing will be calculated</span></label>
+        </div>
+        <div class="mapping-summary processed-only"><strong>Detected interpretation:</strong> one particle-size column paired with one cumulative-passing column.</div>
+        <div class="mapping-summary raw-only"><strong>Detected interpretation:</strong> 8 sieve rows produce one calculated cumulative-passing curve.</div>
+        <div class="irregular-launch"><span>Data not arranged as a clean table?</span><button class="text-button" id="rangeToggle"><i class="fa-regular fa-object-group"></i>Use cell ranges</button></div>
+        <div class="range-guide" id="rangeGuide">
+          <div class="range-progress processed-only"><span class="current" data-range-step="1">1. Particle size</span><span data-range-step="2">2. Percent passing</span></div>
+          <div class="range-progress three raw-only"><span class="current" data-range-step="1">1. Sieve size</span><span data-range-step="2">2. Empty sieve</span><span data-range-step="3">3. Sieve + sample</span></div>
+          <div class="range-instruction">
+            <strong id="rangeTitle">Select the particle-size values</strong>
+            <p id="rangeCopy">Click the highlighted source column to record its numeric range.</p>
+            <div class="recorded-stack">
+              <div class="recorded-range" id="recordedSize" hidden><span class="role-color"></span><span id="recordedSizeLabel">Particle size</span><code id="recordedSizeCode">B6:B20</code></div>
+              <div class="recorded-range" id="recordedSecond" hidden><span class="role-color passing"></span><span id="recordedSecondLabel">Percent passing</span><code id="recordedSecondCode">C6:C20</code></div>
+              <div class="recorded-range raw-only" id="recordedThird" hidden><span class="role-color"></span><span>Sieve + sample</span><code>C4:C11</code></div>
+            </div>
+            <div class="batch-result" id="batchResult" hidden>
+              <div class="batch-result-head"><i class="fa-solid fa-wand-magic-sparkles"></i><strong>Pattern checked against 3 remaining candidates</strong></div>
+              <div class="batch-counts"><span><i class="fa-solid fa-check"></i>3 matched</span><span>0 need review</span></div>
+              <button class="text-button" id="reviewMatches">Review 4 samples</button>
+            </div>
+            <div class="range-actions"><button class="text-button" id="rangeReset"><i class="fa-solid fa-arrow-rotate-left"></i>Start over</button><button class="text-button" id="rangeClose">Use columns instead</button></div>
+          </div>
+        </div>
+      </section>
+      <button class="accordion" id="advancedToggle" aria-expanded="false"><i class="fa-solid fa-sliders"></i>Sample details <span class="column-id">Optional</span><i class="fa-solid fa-chevron-down chevron"></i></button>
+      <div class="advanced-body" id="advancedBody"><div class="advanced-grid"><label class="field"><span class="field-label">Sample name</span><input class="plain-input" value="250115 Clay phase 1 - 32"></label><label class="field"><span class="field-label">Temperature (C)</span><input class="plain-input" value="20"></label><label class="field"><span class="field-label">Porosity</span><input class="plain-input" placeholder="Not set"></label></div></div>
+    </aside>
+    <section class="preview" aria-label="Source preview">
+      <header class="preview-head"><div class="preview-heading"><h2><i class="fa-solid fa-table"></i>Source preview</h2><p>Mapped values remain highlighted while you review the sheet.</p></div></header>
+      <div class="table-shell"><table class="source-table" aria-label="Spreadsheet data">
+        <thead>
+          <tr class="processed-data"><th></th><th>A - Sample</th><th class="size-col">B - Size (um)</th><th class="pass-col">C - % Volume In</th><th>D - % Volume In</th><th>E - % Volume In</th><th>F - Notes</th></tr>
+          <tr class="raw-data"><th></th><th class="size-col">A - Sieve size (mm)</th><th class="empty-col">B - Empty sieve (g)</th><th class="full-col">C - Sieve + sample (g)</th><th>D - Operator</th><th>E - Notes</th></tr>
+        </thead>
+        <tbody class="processed-data">
+          <tr><td>1</td><td>250115</td><td></td><td></td><td></td><td></td><td>Clay phase 1</td></tr>
+          <tr><td>2</td><td></td><td></td><td></td><td></td><td></td><td></td></tr>
+          <tr><td>3</td><td>Sample nr.</td><td>32</td><td>33</td><td>48</td><td>51</td><td></td></tr>
+          <tr><td>4</td><td></td><td></td><td></td><td></td><td></td><td></td></tr>
+          <tr><td>5</td><td class="header-row-cell">Curve data</td><td class="size-col header-row-cell">Size (um)</td><td class="pass-col header-row-cell">% Volume In</td><td class="header-row-cell">% Volume In</td><td class="header-row-cell">% Volume In</td><td></td></tr>
+          <tr><td>6</td><td></td><td class="size-col selectable">0.0995</td><td class="pass-col selectable">0</td><td>0</td><td>0</td><td></td></tr>
+          <tr><td>7</td><td></td><td class="size-col selectable">0.113</td><td class="pass-col selectable">0</td><td>0</td><td>0</td><td></td></tr>
+          <tr><td>8</td><td></td><td class="size-col selectable">0.128</td><td class="pass-col selectable">0</td><td>0</td><td>0</td><td></td></tr>
+          <tr><td>9</td><td></td><td class="size-col selectable">0.146</td><td class="pass-col selectable">0.2</td><td>0</td><td>0</td><td></td></tr>
+          <tr><td>10</td><td></td><td class="size-col selectable">0.188</td><td class="pass-col selectable">1.4</td><td>0.1</td><td>0</td><td></td></tr>
+          <tr><td>11</td><td></td><td class="size-col selectable">0.243</td><td class="pass-col selectable">5.8</td><td>1.2</td><td>0.4</td><td></td></tr>
+          <tr><td>12</td><td></td><td class="size-col selectable">0.314</td><td class="pass-col selectable">15.1</td><td>4.8</td><td>2.3</td><td></td></tr>
+          <tr><td>13</td><td></td><td class="size-col selectable">0.405</td><td class="pass-col selectable">31.0</td><td>12.4</td><td>7.8</td><td></td></tr>
+          <tr><td>14</td><td></td><td class="size-col selectable">0.523</td><td class="pass-col selectable">52.6</td><td>28.9</td><td>18.5</td><td></td></tr>
+          <tr><td>15</td><td></td><td class="size-col selectable">0.675</td><td class="pass-col selectable">74.3</td><td>49.2</td><td>36.1</td><td></td></tr>
+          <tr><td>16</td><td></td><td class="size-col selectable">0.872</td><td class="pass-col selectable">91.8</td><td>72.3</td><td>58.7</td><td></td></tr>
+          <tr><td>17</td><td></td><td class="size-col selectable">0.991</td><td class="pass-col selectable">100</td><td>86.4</td><td>77.5</td><td></td></tr>
+          <tr><td>18</td><td></td><td class="size-col selectable">1.21</td><td class="pass-col selectable">100</td><td>96.2</td><td>91.0</td><td></td></tr>
+          <tr><td>19</td><td></td><td class="size-col selectable">1.48</td><td class="pass-col selectable">100</td><td>100</td><td>98.4</td><td></td></tr>
+          <tr><td>20</td><td></td><td class="size-col selectable">1.72</td><td class="pass-col selectable">100</td><td>100</td><td>100</td><td></td></tr>
+        </tbody>
+        <tbody class="raw-data">
+          <tr><td>1</td><td>Raw sieve analysis</td><td></td><td></td><td>OL</td><td></td></tr>
+          <tr><td>2</td><td></td><td></td><td></td><td></td><td></td></tr>
+          <tr><td>3</td><td class="size-col header-row-cell">Sieve size (mm)</td><td class="empty-col header-row-cell">Empty sieve (g)</td><td class="full-col header-row-cell">Sieve + sample (g)</td><td class="header-row-cell">Operator</td><td class="header-row-cell">Notes</td></tr>
+          <tr><td>4</td><td class="size-col">4.000</td><td class="empty-col">412.24</td><td class="full-col">412.24</td><td>OL</td><td></td></tr>
+          <tr><td>5</td><td class="size-col">2.000</td><td class="empty-col">389.11</td><td class="full-col">391.56</td><td>OL</td><td></td></tr>
+          <tr><td>6</td><td class="size-col">1.000</td><td class="empty-col">375.48</td><td class="full-col">386.17</td><td>OL</td><td></td></tr>
+          <tr><td>7</td><td class="size-col">0.500</td><td class="empty-col">361.05</td><td class="full-col">402.41</td><td>OL</td><td></td></tr>
+          <tr><td>8</td><td class="size-col">0.250</td><td class="empty-col">348.19</td><td class="full-col">401.74</td><td>OL</td><td></td></tr>
+          <tr><td>9</td><td class="size-col">0.125</td><td class="empty-col">335.62</td><td class="full-col">370.28</td><td>OL</td><td></td></tr>
+          <tr><td>10</td><td class="size-col">0.063</td><td class="empty-col">321.43</td><td class="full-col">335.65</td><td>OL</td><td></td></tr>
+          <tr><td>11</td><td class="size-col">Pan</td><td class="empty-col">298.07</td><td class="full-col">304.18</td><td>OL</td><td>included</td></tr>
+        </tbody>
+      </table></div>
+      <footer class="preview-foot"><span class="legend"><span class="legend-mark"></span><span class="processed-only">Particle size</span><span class="raw-only">Sieve size</span></span><span class="legend"><span class="legend-mark passing"></span><span class="processed-only">Cumulative passing</span><span class="raw-only">Weighing columns</span></span><span class="spacer"></span><span id="rowCount">15 numeric rows</span></footer>
+    </section>
+    <aside class="result" aria-label="Interpreted result">
+      <section class="result-section">
+        <div class="result-title"><i class="fa-solid fa-chart-line"></i><div><h2>Interpreted result</h2><p class="processed-only">This is the curve the program will analyze.</p><p class="raw-only">Calculated from the mapped sieve weighings.</p></div></div>
+        <div class="ready-line"><i class="fa-solid fa-circle-check"></i><span id="readyLabel">Ready to import</span></div>
+        <div class="batch-queue" id="batchQueue" hidden>
+          <div class="batch-queue-head"><strong>Candidate samples</strong><span>4 ready</span></div>
+          <button class="candidate-row current"><i class="fa-solid fa-check"></i><span>Sample 32</span><small>Mapped manually</small></button>
+          <button class="candidate-row"><i class="fa-solid fa-check"></i><span>Sample 33</span><small>Pattern matched</small></button>
+          <button class="candidate-row"><i class="fa-solid fa-check"></i><span>Sample 48</span><small>Pattern matched</small></button>
+          <button class="candidate-row"><i class="fa-solid fa-check"></i><span>Sample 51</span><small>Pattern matched</small></button>
+        </div>
+        <div class="chart-wrap">
+          <div class="chart-caption"><span>250115 Clay phase 1 - 32</span><span>Passing (%)</span></div>
+          <svg class="chart" viewBox="0 0 278 166" role="img" aria-label="Interpreted cumulative passing curve">
+            <line class="grid" x1="38" y1="24" x2="260" y2="24"/><line class="grid" x1="38" y1="54" x2="260" y2="54"/><line class="grid" x1="38" y1="84" x2="260" y2="84"/><line class="grid" x1="38" y1="114" x2="260" y2="114"/><line class="grid" x1="38" y1="144" x2="260" y2="144"/><line class="grid" x1="80" y1="18" x2="80" y2="144"/><line class="grid" x1="143" y1="18" x2="143" y2="144"/><line class="grid" x1="206" y1="18" x2="206" y2="144"/>
+            <line class="axis" x1="38" y1="144" x2="260" y2="144"/><line class="axis" x1="38" y1="18" x2="38" y2="144"/>
+            <text x="16" y="147">0</text><text x="11" y="117">25</text><text x="11" y="87">50</text><text x="11" y="57">75</text><text x="7" y="27">100</text><text x="70" y="158">0.01</text><text x="136" y="158">0.1</text><text x="204" y="158">1</text>
+            <path class="curve processed-curve" d="M69 142 C92 141,111 139,126 132 S151 111,164 84 S187 42,212 27 S239 22,254 22"/><path class="curve raw-curve" d="M63 143 C91 142,109 137,125 125 S151 92,166 68 S194 34,223 25 S246 22,256 22" style="display:none"/>
+            <circle class="point" cx="69" cy="142" r="2.8"/><circle class="point" cx="126" cy="132" r="2.8"/><circle class="point" cx="164" cy="84" r="2.8"/><circle class="point" cx="212" cy="27" r="2.8"/><circle class="point" cx="254" cy="22" r="2.8"/>
+          </svg>
+        </div>
+        <div class="metric-list"><div class="metric"><span>Valid values</span><strong id="validRows">15 rows</strong></div><div class="metric"><span>Particle-size range</span><strong id="sizeRange">0.00010-0.00172 mm</strong></div><div class="metric"><span>Passing range</span><strong id="passRange">0-100%</strong></div><div class="metric"><span>Skipped values</span><strong>0</strong></div></div>
+        <div class="calculation-note raw-only">Passing is derived from retained weight: sieve + sample minus empty sieve. The pan is included in the total sample weight.</div>
+      </section>
+      <section class="result-section">
+        <div class="result-title"><i class="fa-solid fa-shield-halved"></i><div><h2>Checks</h2><p>Issues that could change the analysis are shown here.</p></div></div>
+        <div class="check-list processed-only"><div class="check-item"><i class="fa-solid fa-check"></i><span>Values stay within the required 0-100% range.</span></div><div class="check-item"><i class="fa-solid fa-check"></i><span>Passing increases with particle size.</span></div><div class="check-item"><i class="fa-solid fa-check"></i><span>Particle sizes are positive and contain no duplicates.</span></div></div>
+        <div class="check-list raw-only"><div class="check-item"><i class="fa-solid fa-check"></i><span>Full-sieve weights are not below empty-sieve weights.</span></div><div class="check-item"><i class="fa-solid fa-check"></i><span>Calculated retained weights sum to 162.04 g.</span></div><div class="check-item"><i class="fa-solid fa-check"></i><span>The pan row is recognized and included.</span></div></div>
+      </section>
+    </aside>
+  </main>
+  <footer class="dialog-foot">
+    <div class="footer-state"><i class="fa-solid fa-circle-check"></i><span><strong id="footerReady">1 sample ready.</strong> Review the curve, then import it into the workspace.</span></div>
+    <button class="button secondary">Cancel</button>
+    <button class="button" title="Restore automatically detected roles"><i class="fa-solid fa-wand-magic-sparkles"></i>Reset detection</button>
+    <button class="button primary" id="importButton"><i class="fa-solid fa-file-import"></i><span>Import sample</span></button>
+  </footer>
+</section>
 </div>
-
-<script>
-const importButtons = document.querySelectorAll("[data-import]");
-const methodButtons = document.querySelectorAll("[data-method]");
-const columnPanel = document.getElementById("columnPanel");
-const rangePanel = document.getElementById("rangePanel");
-const rawPanel = document.getElementById("rawPanel");
-const pathLabel = document.getElementById("pathLabel");
-const pathCount = document.getElementById("pathCount");
-const footerText = document.getElementById("footerText");
-const methodSection = document.querySelector(".method-section");
-
-let importMode = "processed";
-let methodMode = "column";
-
-function setActive(group, attr, value){
-  group.forEach(btn => btn.classList.toggle("on", btn.dataset[attr] === value));
-}
-
-function updatePanels(){
-  const raw = importMode === "raw";
-  methodSection.style.opacity = raw ? ".45" : "1";
-  methodSection.style.pointerEvents = raw ? "none" : "auto";
-
-  columnPanel.classList.toggle("on", !raw && methodMode === "column");
-  rangePanel.classList.toggle("on", !raw && methodMode === "range");
-  rawPanel.classList.toggle("on", raw);
-
-  if(raw){
-    pathLabel.textContent = "Raw Sieve -> Column Mapping";
-    pathCount.textContent = "3 / 3";
-    footerText.textContent = "Ready to derive percent passing from raw sieve weighings.";
-    return;
-  }
-
-  if(methodMode === "range"){
-    pathLabel.textContent = "Processed Curve -> Cell Range Selection";
-    pathCount.textContent = "12 cells";
-    footerText.textContent = "Ready to import selected size and percent-passing cells.";
-  }else{
-    pathLabel.textContent = "Processed Curve -> Column Mapping";
-    pathCount.textContent = "2 / 2";
-    footerText.textContent = "Ready to import processed curve data from two mapped columns.";
-  }
-}
-
-importButtons.forEach(btn => {
-  btn.addEventListener("click", () => {
-    importMode = btn.dataset.import;
-    setActive(importButtons, "import", importMode);
-    updatePanels();
-  });
-});
-
-methodButtons.forEach(btn => {
-  btn.addEventListener("click", () => {
-    methodMode = btn.dataset.method;
-    setActive(methodButtons, "method", methodMode);
-    updatePanels();
-  });
-});
-
-document.querySelectorAll(".range-tool[data-select]").forEach(btn => {
-  btn.addEventListener("click", () => {
-    document.querySelectorAll(".range-tool[data-select]").forEach(item => item.classList.remove("on"));
-    btn.classList.add("on");
-  });
-});
-</script>
+<script src="12_column_mapper.js"></script>
 </body>
 </html>

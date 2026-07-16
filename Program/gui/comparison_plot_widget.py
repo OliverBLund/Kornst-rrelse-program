@@ -188,6 +188,7 @@ class ComparisonPlotWidget(QWidget):
     def set_style(self, style: PlotStyle) -> None:
         """Swap the active PlotStyle and re-render."""
         self.current_style = style
+        self.show_grid = bool(style.grid_show or style.show_minor_grid)
         if hasattr(self, "figure"):
             self.figure.patch.set_facecolor(style.figure_facecolor)
         self._sync_sidebar_style_widgets(style)
@@ -687,10 +688,6 @@ class ComparisonPlotWidget(QWidget):
             "Display Options", "fa6s.eye",
             CollapsibleSection.OLIVE, expanded=True,
         )
-        row_grid, self._sw_grid = make_toggle_row("Show grid lines", self.show_grid)
-        self._sw_grid.toggled.connect(self._on_sidebar_grid_toggled)
-        self._sect_display.add_widget(row_grid)
-
         row_legend, self._sw_legend = make_toggle_row("Show legend", self.show_legend)
         self._sw_legend.toggled.connect(self._on_sidebar_legend_toggled)
         self._sect_display.add_widget(row_legend)
@@ -800,7 +797,7 @@ class ComparisonPlotWidget(QWidget):
             include_reset=True,
         )
         self._style_control_sections.style_changed.connect(
-            lambda changes: self._update_style_fields(**changes)
+            self._on_shared_style_changed
         )
         self._style_control_sections.reset_requested.connect(
             self._on_reset_custom_style
@@ -827,6 +824,13 @@ class ComparisonPlotWidget(QWidget):
         self._marker_mode_combo = self._style_control_sections.marker_mode_combo
         self._row_marker_size = self._style_control_sections.row_marker_size
         self._marker_size_spin = self._style_control_sections.marker_size_spin
+        self._grid_show_switch = self._style_control_sections.grid_show_switch
+        self._minor_grid_switch = self._style_control_sections.minor_grid_switch
+        self._grid_style_combo = self._style_control_sections.grid_style_combo
+        self._grid_alpha_spin = self._style_control_sections.grid_alpha_spin
+        self._minor_grid_alpha_spin = (
+            self._style_control_sections.minor_grid_alpha_spin
+        )
         self._style_reset_btn = self._style_control_sections.reset_button
         lay.addWidget(self._sect_advanced)
 
@@ -877,10 +881,6 @@ class ComparisonPlotWidget(QWidget):
 
     # ── Sidebar handlers ───────────────────────────────────────────
 
-    def _on_sidebar_grid_toggled(self, on: bool) -> None:
-        self.show_grid = on
-        self.refresh_plot()
-
     def _on_sidebar_legend_toggled(self, on: bool) -> None:
         self.show_legend = on
         self.refresh_plot()
@@ -912,6 +912,19 @@ class ComparisonPlotWidget(QWidget):
         self._style_is_custom = True
         self._sync_reset_button()
         self.refresh_plot()
+
+    def _on_shared_style_changed(self, changes: dict) -> None:
+        if {"grid_show", "show_minor_grid"} & changes.keys():
+            major_visible = bool(
+                changes.get("grid_show", self.current_style.grid_show)
+            )
+            minor_visible = bool(
+                changes.get(
+                    "show_minor_grid", self.current_style.show_minor_grid
+                )
+            )
+            self.show_grid = major_visible or minor_visible
+        self._update_style_fields(**changes)
 
     def _sync_sidebar_style_widgets(self, style: PlotStyle) -> None:
         """Push the given style into the sidebar spinboxes/combos without firing."""
@@ -968,6 +981,7 @@ class ComparisonPlotWidget(QWidget):
             return
         preset = get_style(self.style_selector.currentText())
         self.current_style = preset
+        self.show_grid = bool(preset.grid_show or preset.show_minor_grid)
         self._style_is_custom = False
         self.figure.patch.set_facecolor(preset.figure_facecolor)
         self._sync_sidebar_style_widgets(preset)
@@ -1517,8 +1531,6 @@ class ComparisonPlotWidget(QWidget):
     
     def update_display_options(self):
         """Update display options from the sidebar controls."""
-        if hasattr(self, "_sw_grid"):
-            self.show_grid = self._sw_grid.isChecked()
         if hasattr(self, "_sw_legend"):
             self.show_legend = self._sw_legend.isChecked()
         self.refresh_plot()

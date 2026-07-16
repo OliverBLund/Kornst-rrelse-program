@@ -65,6 +65,30 @@ class StackFadeController(QObject):
     def is_animating(self) -> bool:
         return self._running
 
+    def jump_to(
+        self,
+        index: int,
+        after_switch: Callable[[], None] | None = None,
+    ) -> bool:
+        """Switch immediately, cancelling any active or queued transition."""
+        if index < 0 or index >= self._stack.count():
+            return False
+
+        if self._active_animation is not None:
+            self._active_animation.stop()
+        self._clear_effect(self._active_widget, self._active_effect)
+        self._active_widget = None
+        self._active_effect = None
+        self._active_animation = None
+        self._pending = None
+        self._running = False
+
+        changed = self._stack.currentIndex() != index
+        self._stack.setCurrentIndex(index)
+        if after_switch is not None:
+            QTimer.singleShot(0, after_switch)
+        return changed
+
     def _should_animate(self, current_widget: QWidget | None) -> bool:
         return (
             current_widget is not None

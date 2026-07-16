@@ -65,6 +65,13 @@ MARKER_MODES: list[tuple[str, Optional[bool]]] = [
     ("Hide", False),
 ]
 
+GRID_LINE_STYLES: list[tuple[str, str]] = [
+    ("Solid", "-"),
+    ("Dashed", "--"),
+    ("Dotted", ":"),
+    ("Dash-dot", "-."),
+]
+
 
 _ROW_BORDER_QSS = "border-bottom: 1px solid rgba(212,196,168,0.4);"
 
@@ -270,7 +277,7 @@ def make_dspin_row(label: str, minimum: float, maximum: float,
 
 
 class PlotStyleControlSections(QWidget):
-    """Shared typography, line/marker, and legend accordion controls."""
+    """Shared typography, curve, grid, and legend accordion controls."""
 
     style_changed = pyqtSignal(dict)
     reset_requested = pyqtSignal()
@@ -325,6 +332,32 @@ class PlotStyleControlSections(QWidget):
         )
         self.lines_markers_section.add_widget(self.row_marker_size)
         root.addWidget(self.lines_markers_section)
+
+        self.grid_section = CollapsibleSection(
+            "Grid", "fa6s.hashtag",
+            CollapsibleSection.OLIVE, expanded=False,
+        )
+        self.row_grid_show, self.grid_show_switch = make_toggle_row(
+            "Show major grid", bool(style.grid_show)
+        )
+        self.grid_section.add_widget(self.row_grid_show)
+        self.row_minor_grid, self.minor_grid_switch = make_toggle_row(
+            "Show minor grid", bool(style.show_minor_grid)
+        )
+        self.grid_section.add_widget(self.row_minor_grid)
+        self.row_grid_style, self.grid_style_combo = make_combo_row(
+            "Line style", [label for label, _value in GRID_LINE_STYLES]
+        )
+        self.grid_section.add_widget(self.row_grid_style)
+        self.row_grid_alpha, self.grid_alpha_spin = make_dspin_row(
+            "Major opacity", 0.0, 1.0, 0.05, 2
+        )
+        self.grid_section.add_widget(self.row_grid_alpha)
+        self.row_minor_grid_alpha, self.minor_grid_alpha_spin = make_dspin_row(
+            "Minor opacity", 0.0, 1.0, 0.05, 2
+        )
+        self.grid_section.add_widget(self.row_minor_grid_alpha)
+        root.addWidget(self.grid_section)
 
         self.legend_section = CollapsibleSection(
             "Legend", "fa6s.list",
@@ -382,6 +415,17 @@ class PlotStyleControlSections(QWidget):
         self.marker_size_spin.valueChanged.connect(
             lambda value: self.style_changed.emit({"curve_markersize": float(value)})
         )
+        self.grid_show_switch.toggled.connect(self._on_grid_show_changed)
+        self.minor_grid_switch.toggled.connect(self._on_minor_grid_changed)
+        self.grid_style_combo.currentIndexChanged.connect(
+            self._on_grid_style_changed
+        )
+        self.grid_alpha_spin.valueChanged.connect(
+            lambda value: self.style_changed.emit({"grid_alpha": float(value)})
+        )
+        self.minor_grid_alpha_spin.valueChanged.connect(
+            lambda value: self.style_changed.emit({"minor_grid_alpha": float(value)})
+        )
         self.legend_loc_combo.currentIndexChanged.connect(
             self._on_legend_location_changed
         )
@@ -406,6 +450,27 @@ class PlotStyleControlSections(QWidget):
         """Show the curve controls only when the active chart draws curves."""
         self.lines_markers_section.setVisible(visible)
 
+    def _on_grid_show_changed(self, visible: bool) -> None:
+        self._sync_grid_enabled_state()
+        self.style_changed.emit({"grid_show": bool(visible)})
+
+    def _on_minor_grid_changed(self, visible: bool) -> None:
+        self._sync_grid_enabled_state()
+        self.style_changed.emit({"show_minor_grid": bool(visible)})
+
+    def _on_grid_style_changed(self, index: int) -> None:
+        _label, line_style = GRID_LINE_STYLES[index]
+        self.style_changed.emit({"grid_linestyle": line_style})
+
+    def _sync_grid_enabled_state(self) -> None:
+        major_visible = self.grid_show_switch.isChecked()
+        minor_visible = self.minor_grid_switch.isChecked()
+        any_grid_visible = major_visible or minor_visible
+        self.minor_grid_switch.setEnabled(True)
+        self.grid_style_combo.setEnabled(any_grid_visible)
+        self.grid_alpha_spin.setEnabled(major_visible)
+        self.minor_grid_alpha_spin.setEnabled(minor_visible)
+
     def _on_legend_location_changed(self, index: int) -> None:
         loc, bbox, _label = LEGEND_LOCATIONS[index]
         self.style_changed.emit({
@@ -421,6 +486,9 @@ class PlotStyleControlSections(QWidget):
         loc, bbox, _label = LEGEND_LOCATIONS[self.legend_loc_combo.currentIndex()]
         ncol, _label = LEGEND_LAYOUTS[self.legend_layout_combo.currentIndex()]
         marker_mode = MARKER_MODES[self.marker_mode_combo.currentIndex()][1]
+        _grid_label, grid_linestyle = GRID_LINE_STYLES[
+            self.grid_style_combo.currentIndex()
+        ]
         return {
             "title_fontsize": self.title_size_spin.value(),
             "label_fontsize": self.label_size_spin.value(),
@@ -428,6 +496,11 @@ class PlotStyleControlSections(QWidget):
             "curve_linewidth": self.curve_width_spin.value(),
             "curve_markers_visible": marker_mode,
             "curve_markersize": self.marker_size_spin.value(),
+            "grid_show": self.grid_show_switch.isChecked(),
+            "show_minor_grid": self.minor_grid_switch.isChecked(),
+            "grid_linestyle": grid_linestyle,
+            "grid_alpha": self.grid_alpha_spin.value(),
+            "minor_grid_alpha": self.minor_grid_alpha_spin.value(),
             "legend_loc": loc,
             "legend_bbox_to_anchor": bbox,
             "legend_ncol": ncol,
@@ -443,6 +516,11 @@ class PlotStyleControlSections(QWidget):
             self.curve_width_spin,
             self.marker_mode_combo,
             self.marker_size_spin,
+            self.grid_show_switch,
+            self.minor_grid_switch,
+            self.grid_style_combo,
+            self.grid_alpha_spin,
+            self.minor_grid_alpha_spin,
             self.legend_loc_combo,
             self.legend_layout_combo,
             self.legend_alpha_spin,
@@ -467,6 +545,22 @@ class PlotStyleControlSections(QWidget):
         self.marker_mode_combo.setCurrentIndex(marker_index)
         self.marker_size_spin.setValue(float(style.curve_markersize))
         self.marker_size_spin.setEnabled(marker_mode is not False)
+        self.grid_show_switch.setChecked(bool(style.grid_show), animate=False)
+        self.minor_grid_switch.setChecked(
+            bool(style.show_minor_grid), animate=False
+        )
+        grid_style_index = next(
+            (
+                index
+                for index, (_label, value) in enumerate(GRID_LINE_STYLES)
+                if value == style.grid_linestyle
+            ),
+            0,
+        )
+        self.grid_style_combo.setCurrentIndex(grid_style_index)
+        self.grid_alpha_spin.setValue(float(style.grid_alpha))
+        self.minor_grid_alpha_spin.setValue(float(style.minor_grid_alpha))
+        self._sync_grid_enabled_state()
 
         loc_index = next(
             (

@@ -297,6 +297,11 @@ class TestReportGeneratorAppendices(unittest.TestCase):
             curve_linewidth=3.25,
             curve_markers_visible=False,
             curve_markersize=6.5,
+            grid_show=False,
+            show_minor_grid=False,
+            grid_alpha=0.35,
+            minor_grid_alpha=0.1,
+            grid_linestyle=':',
         )
         overrides = {
             'title_fontsize': 23,
@@ -309,6 +314,11 @@ class TestReportGeneratorAppendices(unittest.TestCase):
             'curve_linewidth': 3.25,
             'curve_markers_visible': False,
             'curve_markersize': 6.5,
+            'grid_show': False,
+            'show_minor_grid': False,
+            'grid_alpha': 0.35,
+            'minor_grid_alpha': 0.1,
+            'grid_linestyle': ':',
         }
 
         with patch(

@@ -56,7 +56,7 @@ def _custom_overrides_for_preset(chosen: dict) -> dict:
 
 
 def open_report_style_dialog(parent: Optional[QWidget] = None) -> bool:
-    """Compact typography/legend override panel for the global report style.
+    """Compact presentation override panel for the global report style.
 
     Returns ``True`` when the user saved or reset (i.e. the persisted style may
     have changed), ``False`` on cancel.

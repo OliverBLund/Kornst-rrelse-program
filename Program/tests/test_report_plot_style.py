@@ -49,6 +49,11 @@ class TestReportPlotStyle(unittest.TestCase):
             "curve_linewidth": 3.25,
             "curve_markers_visible": False,
             "curve_markersize": 6.5,
+            "grid_show": False,
+            "show_minor_grid": True,
+            "grid_alpha": 0.4,
+            "minor_grid_alpha": 0.2,
+            "grid_linestyle": ":",
         })
         rps._reset_cache_for_tests()
         style = rps.resolve_report_style()
@@ -59,6 +64,11 @@ class TestReportPlotStyle(unittest.TestCase):
         self.assertEqual(style.curve_linewidth, 3.25)
         self.assertFalse(style.curve_markers_visible)
         self.assertEqual(style.curve_markersize, 6.5)
+        self.assertFalse(style.grid_show)
+        self.assertTrue(style.show_minor_grid)
+        self.assertEqual(style.grid_alpha, 0.4)
+        self.assertEqual(style.minor_grid_alpha, 0.2)
+        self.assertEqual(style.grid_linestyle, ":")
 
     def test_unknown_override_fields_are_dropped(self):
         rps.set_report_style_overrides({"not_a_field": 5, "title_fontsize": 18})
@@ -136,10 +146,13 @@ class TestReportPlotStyle(unittest.TestCase):
 
         sections = captured["dialog"].findChildren(CollapsibleSection)
         titles = [section._title.text() for section in sections]
-        self.assertEqual(titles, ["Typography", "Lines & Markers", "Legend"])
+        self.assertEqual(
+            titles, ["Typography", "Lines & Markers", "Grid", "Legend"]
+        )
         self.assertFalse(sections[0].is_expanded())
         self.assertTrue(sections[1].is_expanded())
         self.assertFalse(sections[2].is_expanded())
+        self.assertFalse(sections[3].is_expanded())
 
     def test_explicit_marker_visibility_controls_single_and_overlay_curves(self):
         import dataclasses
@@ -180,6 +193,56 @@ class TestReportPlotStyle(unittest.TestCase):
         overlay_ax = Figure().subplots()
         render_distribution_overlay(overlay_ax, [dataset], style=hidden)
         self.assertEqual(overlay_ax.lines[0].get_marker(), "None")
+
+    def test_shared_grid_renderer_applies_major_and_minor_style(self):
+        import dataclasses
+        from matplotlib.backends.backend_agg import FigureCanvasAgg
+        from matplotlib.figure import Figure
+        from gui.plot_renderers import apply_grid_style
+        from gui.plot_styles import PROFESSIONAL_STYLE
+
+        style = dataclasses.replace(
+            PROFESSIONAL_STYLE,
+            grid_show=True,
+            show_minor_grid=True,
+            grid_alpha=0.4,
+            minor_grid_alpha=0.15,
+            grid_linestyle=":",
+        )
+        figure = Figure()
+        FigureCanvasAgg(figure)
+        ax = figure.subplots()
+        ax.set_xscale("log")
+        ax.plot([0.1, 1.0, 10.0], [0.0, 1.0, 2.0])
+
+        apply_grid_style(ax, style, True)
+        figure.canvas.draw()
+
+        major = [line for line in ax.get_xgridlines() if line.get_visible()]
+        minor = [
+            tick.gridline
+            for tick in ax.xaxis.get_minor_ticks()
+            if tick.gridline.get_visible()
+        ]
+        self.assertTrue(major)
+        self.assertTrue(minor)
+        self.assertEqual(major[0].get_linestyle(), ":")
+        self.assertEqual(major[0].get_alpha(), 0.4)
+        self.assertEqual(minor[0].get_alpha(), 0.15)
+
+        minor_only = dataclasses.replace(style, grid_show=False)
+        apply_grid_style(ax, minor_only, True)
+        figure.canvas.draw()
+
+        self.assertFalse(
+            any(line.get_visible() for line in ax.get_xgridlines())
+        )
+        self.assertTrue(
+            any(
+                tick.gridline.get_visible()
+                for tick in ax.xaxis.get_minor_ticks()
+            )
+        )
 
     def test_palette_persists_and_resolves_colors(self):
         from gui.plot_constants import DATASET_COLORS

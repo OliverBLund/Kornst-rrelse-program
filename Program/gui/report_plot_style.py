@@ -23,16 +23,19 @@ from .plot_constants import CATEGORICAL_PALETTE, PALETTE_NAMES, palette_colors
 
 # Override fields the customize panel may set, with light type coercion so a
 # round-trip through JSON/QSettings restores the right Python types. Mirrors the
-# fields the per-tab style panels expose (typography + legend placement).
+# fields the per-tab style panels expose (typography, curves, grids, and legend).
 _INT_FIELDS = {
     "title_fontsize", "label_fontsize", "tick_fontsize", "legend_fontsize",
     "legend_ncol",
 }
 _FLOAT_FIELDS = {
     "legend_framealpha", "curve_linewidth", "curve_markersize",
+    "grid_alpha", "minor_grid_alpha",
 }
-_BOOL_FIELDS = {"curve_markers_visible"}
-_STR_FIELDS = {"legend_loc"}
+_BOOL_FIELDS = {
+    "curve_markers_visible", "grid_show", "show_minor_grid",
+}
+_STR_FIELDS = {"legend_loc", "grid_linestyle"}
 _TUPLE_FIELDS = {"legend_bbox_to_anchor"}  # (x, y) or None
 ALLOWED_OVERRIDE_FIELDS = (
     _INT_FIELDS | _FLOAT_FIELDS | _BOOL_FIELDS | _STR_FIELDS | _TUPLE_FIELDS

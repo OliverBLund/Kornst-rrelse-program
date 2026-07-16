@@ -13,6 +13,7 @@ from .matplotlib_canvas import FigureCanvas, NavigationToolbar
 from .plot_interactions import AxesInteractionController
 from .plot_constants import METHOD_COLORS
 from .plot_renderers import (
+    apply_grid_style,
     apply_legend_aware_layout,
     render_grain_size_distribution,
     render_k_bar_chart,
@@ -145,10 +146,7 @@ class PlotWidget(QWidget):
         ax.set_xlim(0.001, 100)
         ax.set_ylim(0, self._DIST_Y_MAX)
         ax.set_facecolor(style.axes_facecolor)
-        if style.grid_show:
-            ax.grid(True, which='major', linestyle=style.grid_linestyle,
-                    color=style.grid_color, linewidth=style.grid_linewidth,
-                    alpha=style.grid_alpha)
+        apply_grid_style(ax, style, True)
 
         ax.text(
             0.5, 0.5, 'Load grain size data to view distribution curve',

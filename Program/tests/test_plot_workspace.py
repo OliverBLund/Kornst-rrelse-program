@@ -190,6 +190,46 @@ class TestPlotWorkspaceWiring(unittest.TestCase):
             True,
         )
 
+    def test_shared_grid_controls_update_individual_plot_and_toolbar(self):
+        self.workspace.current_plot_type = "distribution"
+        self.workspace._minor_grid_switch.setChecked(False, animate=False)
+        self.workspace._grid_show_switch.setChecked(False, animate=False)
+
+        self.assertFalse(self.workspace.show_grid)
+        self.assertFalse(self.workspace._chk_grid.isChecked())
+        self.assertFalse(
+            any(
+                line.get_visible()
+                for line in self.workspace.plot_widget.current_ax.get_ygridlines()
+            )
+        )
+
+        self.workspace._grid_show_switch.setChecked(True, animate=False)
+        self.workspace._minor_grid_switch.setChecked(False, animate=False)
+        dotted_index = self.workspace._grid_style_combo.findText("Dotted")
+        self.workspace._grid_style_combo.setCurrentIndex(dotted_index)
+        self.workspace._grid_alpha_spin.setValue(0.45)
+
+        gridlines = [
+            line
+            for line in self.workspace.plot_widget.current_ax.get_ygridlines()
+            if line.get_visible()
+        ]
+        self.assertTrue(gridlines)
+        self.assertTrue(self.workspace._chk_grid.isChecked())
+        self.assertEqual(gridlines[0].get_linestyle(), ":")
+        self.assertEqual(gridlines[0].get_alpha(), 0.45)
+
+    def test_minor_grid_remains_available_when_major_grid_is_hidden(self):
+        self.workspace._grid_show_switch.setChecked(False, animate=False)
+
+        self.assertTrue(self.workspace._minor_grid_switch.isEnabled())
+        self.assertTrue(self.workspace._minor_grid_switch.isChecked())
+        self.assertFalse(self.workspace._effective_style().grid_show)
+        self.assertTrue(self.workspace._effective_style().show_minor_grid)
+        self.assertTrue(self.workspace.show_grid)
+        self.assertTrue(self.workspace._chk_grid.isChecked())
+
     def test_lines_and_markers_section_only_shows_for_curve_plots(self):
         section = self.workspace._style_control_sections.lines_markers_section
 
@@ -325,7 +365,7 @@ class TestPlotWorkspaceWiring(unittest.TestCase):
         self.assertTrue(self.workspace._row_zones.isHidden())
         self.assertTrue(self.workspace._row_dlines.isHidden())
         self.assertTrue(self.workspace._row_fill.isHidden())
-        self.assertFalse(
+        self.assertTrue(
             self.workspace._style_control_sections.lines_markers_section.isHidden()
         )
         self.assertEqual(self.workspace._lbl_ymin.text(), 'Y min (m/s)')

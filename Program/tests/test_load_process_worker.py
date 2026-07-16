@@ -268,6 +268,36 @@ class TestLoadProcessWorker(unittest.TestCase):
         self.assertEqual(dataset.particle_sizes, [2.0, 1.0, 0.5])
         self.assertEqual(dataset.percent_passing, [90.0, 60.0, 10.0])
 
+    def test_mapped_raw_sieve_ranges_can_be_restored_without_dialog(self):
+        with tempfile.TemporaryDirectory() as tempdir:
+            csv_path = os.path.join(tempdir, "raw_range_mapped.csv")
+            with open(csv_path, "w", encoding="utf-8") as handle:
+                handle.write("size,empty,full\n")
+                handle.write("2.0,100,110\n")
+                handle.write("1.0,100,130\n")
+                handle.write("0.5,100,150\n")
+                handle.write("Pan,100,110\n")
+
+            source = {
+                "file_key": csv_path,
+                "file_path": csv_path,
+                "sample_name": "Restored raw range sample",
+                "mapping_state": {
+                    "raw_sieve_mode": True,
+                    "calculated_selection_mode": "range",
+                    "selected_size_range": [[1, 0], [2, 0], [3, 0], [4, 0]],
+                    "selected_empty_range": [[1, 1], [2, 1], [3, 1], [4, 1]],
+                    "selected_full_range": [[1, 2], [2, 2], [3, 2], [4, 2]],
+                },
+            }
+
+            dataset = _load_mapped_source(source)
+
+        self.assertEqual(dataset.sample_name, "Restored raw range sample")
+        self.assertEqual(dataset.particle_sizes, [2.0, 1.0, 0.5])
+        self.assertEqual(dataset.percent_passing, [90.0, 60.0, 10.0])
+        self.assertEqual(dataset._source_mapping_state["selected_full_range"][-1], [4, 2])
+
     def test_batch_import_loads_detected_sheet_qualified_excel_without_review(self):
         with tempfile.TemporaryDirectory() as tempdir:
             workbook = os.path.join(tempdir, "nbal_like.xlsx")

@@ -135,7 +135,7 @@ def render_grain_size_distribution(
     else:
         ax.set_title("")
 
-    _apply_grid(ax, style, show_grid)
+    apply_grid_style(ax, style, show_grid)
     ax.set_facecolor(style.axes_facecolor)
     ax.tick_params(labelsize=style.tick_fontsize)
 
@@ -222,10 +222,7 @@ def render_k_bar_chart(
     else:
         apply_linear_bar_limits(ax, k_values)
 
-    if show_grid and style.grid_show:
-        ax.grid(True, axis="y", alpha=style.grid_alpha,
-                linestyle=style.grid_linestyle, color=style.grid_color,
-                linewidth=style.grid_linewidth)
+    apply_grid_style(ax, style, show_grid, axis="y")
 
     # Reference lines ─────────────────────────────────────────────
     reference_source = k_values if reference_values is None else reference_values
@@ -310,7 +307,7 @@ def render_distribution_overlay(
     ax.set_ylim(y_min, y_max)
     ax.tick_params(labelsize=style.tick_fontsize)
 
-    _apply_grid(ax, style, show_grid, which="both")
+    apply_grid_style(ax, style, show_grid)
 
     if show_legend:
         _apply_styled_legend(ax, style)
@@ -403,7 +400,7 @@ def render_distribution_groups(
     ax.set_xlim(x_min, x_max)
     ax.set_ylim(y_min, y_max)
     ax.tick_params(labelsize=style.tick_fontsize)
-    _apply_grid(ax, style, show_grid, which="both")
+    apply_grid_style(ax, style, show_grid)
     if show_legend:
         _apply_styled_legend(ax, style)
 
@@ -495,8 +492,7 @@ def render_k_overlay(
             add_bbox=n_datasets > 1,
         )
 
-    if show_grid:
-        ax.grid(True, axis="y", alpha=0.3)
+    apply_grid_style(ax, style, show_grid, axis="y")
     if show_legend:
         if has_flagged:
             _add_flagged_legend_handle(ax, style)
@@ -616,7 +612,7 @@ def render_k_distribution_function(
         else:
             ax.set_xlim(xmin / 1.7, xmax * 1.7)
 
-    _apply_grid(ax, style, show_grid, which="both")
+    apply_grid_style(ax, style, show_grid)
 
     if show_legend:
         _apply_styled_legend(ax, style)
@@ -921,7 +917,7 @@ def render_k_histogram(
     ax.set_ylim(bottom=0)
     ax.tick_params(labelsize=style.tick_fontsize)
 
-    _apply_grid(ax, style, show_grid)
+    apply_grid_style(ax, style, show_grid)
 
     if single:
         p = prepared[0]
@@ -990,8 +986,7 @@ def render_k_boxplot(
     ax.set_title(title, fontsize=style.title_fontsize,
                  fontweight=style.title_fontweight, fontfamily=style.font_family)
 
-    if show_grid:
-        ax.grid(True, axis="y", alpha=0.3, linestyle="--")
+    apply_grid_style(ax, style, show_grid, axis="y")
     if len(labels) > 5:
         ax.set_xticklabels(labels, rotation=45, ha="right",
                            fontsize=style.tick_fontsize)
@@ -1079,8 +1074,7 @@ def render_k_scope_boxplot(
         fontfamily=style.font_family,
     )
 
-    if show_grid:
-        ax.grid(True, axis="y", alpha=0.3, linestyle="--")
+    apply_grid_style(ax, style, show_grid, axis="y")
     if len(labels) > 5 or any(len(label) > 14 for label in labels):
         ax.set_xticklabels(labels, rotation=35, ha="right", fontsize=style.tick_fontsize)
 
@@ -1315,18 +1309,38 @@ def _draw_fill_zone_labels(ax, particle_sizes, percent_passing,
                 color="#3a2e1c", alpha=0.72, zorder=3)
 
 
-def _apply_grid(ax: Axes, style: PlotStyle, show: bool,
-                which: str = "major") -> None:
-    """Apply grid styling from *style*."""
-    if not (show and style.grid_show):
+def apply_grid_style(
+    ax: Axes,
+    style: PlotStyle,
+    show: bool,
+    *,
+    axis: str = "both",
+) -> None:
+    """Apply the shared major/minor grid contract to an axes."""
+    ax.grid(False, which="both", axis=axis)
+    if not show:
         return
-    ax.grid(True, alpha=style.grid_alpha, which=which,
-            linestyle=style.grid_linestyle, color=style.grid_color,
-            linewidth=style.grid_linewidth)
-    if which == "major" and style.show_minor_grid:
-        ax.grid(True, alpha=style.minor_grid_alpha, which="minor",
-                linestyle=":", color=style.grid_color,
-                linewidth=style.grid_linewidth * 0.5)
+    if style.grid_show:
+        ax.grid(
+            True,
+            alpha=style.grid_alpha,
+            which="major",
+            axis=axis,
+            linestyle=style.grid_linestyle,
+            color=style.grid_color,
+            linewidth=style.grid_linewidth,
+        )
+    if style.show_minor_grid:
+        ax.minorticks_on()
+        ax.grid(
+            True,
+            alpha=style.minor_grid_alpha,
+            which="minor",
+            axis=axis,
+            linestyle=style.grid_linestyle,
+            color=style.grid_color,
+            linewidth=style.grid_linewidth * 0.5,
+        )
 
 
 def _estimated_legend_width_points(

@@ -25,6 +25,7 @@ import numpy as np
 from matplotlib.patches import Patch
 
 from .plot_renderers import (
+    apply_grid_style,
     build_legend_kwargs,
     render_distribution_groups,
     render_distribution_overlay,
@@ -850,8 +851,7 @@ def _plot_k_values_grid(figure, spec: ComparisonPlotSpec) -> int:
             apply_linear_bar_limits(ax, values)
         ax.tick_params(labelsize=spec.style.tick_fontsize)
 
-        if spec.show_grid:
-            ax.grid(True, axis='y', alpha=0.3)
+        apply_grid_style(ax, spec.style, spec.show_grid, axis="y")
     _draw_facet_overflow_note(figure, hidden)
     return rows
 
@@ -960,8 +960,7 @@ def _plot_combined(figure, spec: ComparisonPlotSpec) -> int:
             else:
                 apply_linear_bar_limits(ax2, values)
             ax2.tick_params(labelsize=6)
-            if spec.show_grid:
-                ax2.grid(True, axis='y', alpha=0.3)
+            apply_grid_style(ax2, spec.style, spec.show_grid, axis="y")
         else:
             ax2.text(0.5, 0.5, 'No K-values', transform=ax2.transAxes,
                      ha='center', va='center', fontsize=8)
@@ -1067,17 +1066,7 @@ def _plot_histogram_comparison(
     for tick in ax.get_yticklabels():
         tick.set_fontfamily(style.font_family)
 
-    if spec.show_grid and style.grid_show:
-        ax.grid(
-            True,
-            axis="y",
-            alpha=style.grid_alpha,
-            linestyle=style.grid_linestyle,
-            color=style.grid_color,
-            linewidth=style.grid_linewidth,
-        )
-    else:
-        ax.grid(False)
+    apply_grid_style(ax, style, spec.show_grid, axis="y")
 
     if spec.show_legend and len(units) > 1:
         _handles, legend_labels = ax.get_legend_handles_labels()
@@ -1251,16 +1240,6 @@ def _plot_histogram(figure, spec: ComparisonPlotSpec) -> int:
         for tick in ax.get_yticklabels():
             tick.set_fontfamily(style.font_family)
 
-        if spec.show_grid and style.grid_show:
-            ax.grid(
-                True,
-                axis='y',
-                alpha=style.grid_alpha,
-                linestyle=style.grid_linestyle,
-                color=style.grid_color,
-                linewidth=style.grid_linewidth,
-            )
-        else:
-            ax.grid(False)
+        apply_grid_style(ax, style, spec.show_grid, axis="y")
     _draw_facet_overflow_note(figure, hidden)
     return rows

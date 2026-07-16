@@ -27,7 +27,10 @@ from gui.loading_dialog import LoadingDialog
 from gui.theme import C, F, SZ, icon
 from qt_chrome.frameless_dialog_base import FramelessDialogBase
 from load_process_worker import run_batch_import
-from import_resolver import manual_mapping_provenance
+from import_resolver import (
+    is_multi_sample_confirmation_message,
+    manual_mapping_provenance,
+)
 from k_aggregation import build_k_result_summary
 from grain_classification import (
     ISO14688, GrainClassificationScheme, ClassificationResult,
@@ -174,6 +177,7 @@ class _SampleCard(QWidget):
         'mapping': C.OLIVE,
         'failed':  C.LED_ERR,
         'review':  C.LED_WARN,
+        'confirmation': C.OLIVE,
         'loaded':  C.OLIVE,
     }
 
@@ -509,6 +513,7 @@ class _SampleCard(QWidget):
             'mapping': 'Mapping required',
             'failed': '\u274c Load failed',
             'review': '\u26a0 Needs review',
+            'confirmation': 'Review detected samples',
             'loaded': '\u2705 Loaded successfully',
         }.get(self._status, self._status)
         self._status_line.setText(status_text)
@@ -702,7 +707,10 @@ class _FileListWidget(QScrollArea):
 
     def get_warning_count(self) -> int:
         return sum(1 for card in self._cards.values()
-                   if card._status in ('mapping', 'review', 'failed'))
+                   if card._status in ('mapping', 'review', 'failed', 'confirmation'))
+
+    def get_status_count(self, status: str) -> int:
+        return sum(1 for card in self._cards.values() if card._status == status)
 
     def apply_filter(self, filter_type: str):
         """Show/hide cards based on filter: 'all', 'selected', 'warnings'."""
@@ -712,7 +720,7 @@ class _FileListWidget(QScrollArea):
             elif filter_type == 'selected':
                 card.setVisible(card.is_selected)
             elif filter_type == 'warnings':
-                card.setVisible(card._status in ('mapping', 'review', 'failed'))
+                card.setVisible(card._status in ('mapping', 'review', 'failed', 'confirmation'))
         if (
             self._selection_anchor
             and self._selection_anchor not in self.get_visible_paths()
@@ -1673,6 +1681,7 @@ class ControlPanel(QFrame):
     sample_selected = pyqtSignal(str)  # Emitted when a sample is selected
     error_dataset = pyqtSignal(str, str)  # Emitted when dataset fails to load (file_path, error_message)
     mapping_required = pyqtSignal(str, str)  # Emitted when a valid import path needs user mapping
+    multi_sample_confirmation = pyqtSignal(str, str)  # Detected samples need user confirmation
     dataset_loaded_successfully = pyqtSignal(object, str)  # Emitted when dataset loads successfully (dataset, file_path)
     update_error_tab_message = pyqtSignal(str, str)  # Update existing error tab with new message
     dataset_fix_requested = pyqtSignal(str)  # Emitted when user wants to fix/remap a dataset (file_path)
@@ -1685,6 +1694,8 @@ class ControlPanel(QFrame):
     def __init__(self):
         super().__init__()
         self.loaded_samples = {}  # Dictionary to store sample data
+        self._card_sources: dict[str, str] = {}
+        self._card_samples: dict[str, str] = {}
         self.file_mapping_states = {}  # Remember mapper path and column choices per file
         self.validation_errors = []  # Track validation issues
         self.data_loader = DataLoader()  # Data loading engine
@@ -1696,6 +1707,7 @@ class ControlPanel(QFrame):
         self._import_finalize_summary = None
         self._pending_import_ui_events = deque()
         self._import_ui_total = 0
+        self._multi_sample_confirmation_count = 0
         self._import_ui_processed = 0
         self._import_dialog = None
         self._import_poll_timer = QTimer(self)
@@ -1865,7 +1877,7 @@ class ControlPanel(QFrame):
 
     def _track_pending_file_entries(self, file_entries: list) -> None:
         for file_entry in file_entries:
-            file_key = self._file_entry_key(file_entry)
+            file_key = ControlPanel._file_entry_key(self, file_entry)
             self.file_statuses[file_key] = 'pending'
 
         for file_entry in file_entries:
@@ -2480,6 +2492,16 @@ class ControlPanel(QFrame):
 
     def _on_card_clicked(self, file_path: str):
         """Sync card click to the hidden table selection."""
+        entry_key = getattr(self, '_card_samples', {}).get(file_path)
+        if entry_key:
+            entry = self.loaded_samples.get(entry_key) or {}
+            dataset = entry.get('data')
+            sample_name = getattr(dataset, 'sample_name', entry_key)
+            self._file_list.set_active(file_path)
+            self.sample_info_label.setText(f"Selected: {sample_name} (loaded)")
+            self.sample_selected.emit(sample_name)
+            self._refresh_stratigraphy(file_path)
+            return
         for row in range(self.samples_table.rowCount()):
             item = self.samples_table.item(row, 0)
             if item and item.data(Qt.ItemDataRole.UserRole) == file_path:
@@ -2489,12 +2511,16 @@ class ControlPanel(QFrame):
 
     def _on_card_context_menu(self, file_path: str, global_pos):
         """Show context menu triggered from a _SampleCard right-click."""
-        status = self.file_statuses.get(file_path, 'pending')
+        source_path = getattr(self, '_card_sources', {}).get(file_path, file_path)
+        status = self.file_statuses.get(source_path, 'pending')
         menu = QMenu(self)
 
-        if status in ('mapping', 'review'):
-            act = QAction("Map Columns\u2026", self)
-            act.triggered.connect(lambda: self.edit_file_mapping(file_path))
+        if status in ('mapping', 'review', 'confirmation'):
+            act = QAction(
+                "Review Samples\u2026" if status == 'confirmation' else "Map Columns\u2026",
+                self,
+            )
+            act.triggered.connect(lambda: self.edit_file_mapping(source_path))
             menu.addAction(act)
         elif status == 'loaded':
             act = QAction("Show Info\u2026", self)
@@ -2502,11 +2528,11 @@ class ControlPanel(QFrame):
             menu.addAction(act)
             menu.addSeparator()
             act2 = QAction("Edit Mapping\u2026", self)
-            act2.triggered.connect(lambda: self.edit_file_mapping(file_path))
+            act2.triggered.connect(lambda: self.edit_file_mapping(source_path))
             menu.addAction(act2)
         elif status == 'failed':
             act = QAction("Fix / Remap\u2026", self)
-            act.triggered.connect(lambda: self.edit_file_mapping(file_path))
+            act.triggered.connect(lambda: self.edit_file_mapping(source_path))
             menu.addAction(act)
 
         menu.addSeparator()
@@ -2547,11 +2573,10 @@ class ControlPanel(QFrame):
 
     def _update_inventory_bar(self):
         """Refresh stat chips from current file_statuses and card state."""
-        total = len(self.file_statuses)
+        total = self._file_list.get_loaded_count()
         selected = self._file_list.get_selected_count()
-        loaded = sum(1 for s in self.file_statuses.values() if s == 'loaded')
-        warnings = sum(1 for s in self.file_statuses.values()
-                       if s in ('mapping', 'review', 'failed'))
+        loaded = self._file_list.get_status_count('loaded')
+        warnings = self._file_list.get_warning_count()
 
         self._chip_loaded.setText(f"{loaded} loaded" if total else "0 loaded")
         self._chip_selected.setText(f"{selected} included")
@@ -2566,7 +2591,7 @@ class ControlPanel(QFrame):
 
     def _push_card_meta(self, file_path: str):
         """Extract D50/K from loaded dataset and update the card."""
-        _, entry = self._find_loaded_entry_by_file(file_path)
+        _, entry = self._find_loaded_entry_by_card(file_path)
         if not entry:
             return
         dataset = entry.get('data')
@@ -2616,7 +2641,7 @@ class ControlPanel(QFrame):
     def update_sample_group(self, file_path: str, group_name: str = "Ungrouped") -> None:
         """Refresh the visible group label for a loaded sample card."""
         self._file_list.update_card_group(file_path, group_name)
-        _, entry = self._find_loaded_entry_by_file(file_path)
+        _, entry = self._find_loaded_entry_by_card(file_path)
         dataset = entry.get("data") if entry else None
         if dataset is not None:
             try:
@@ -2798,7 +2823,7 @@ class ControlPanel(QFrame):
                 return
             file_path = active
 
-        _, entry = self._find_loaded_entry_by_file(file_path)
+        _, entry = self._find_loaded_entry_by_card(file_path)
         if not entry:
             self._strata_widget.update_result(None)
             return
@@ -2842,11 +2867,23 @@ class ControlPanel(QFrame):
         raw_action = QAction("Raw Sieve Weighings...", menu)
         raw_action.triggered.connect(lambda _checked=False: self.add_files("raw_sieve"))
         menu.addAction(raw_action)
+        menu.addSeparator()
+
+        multi_action = QAction(
+            "Multiple Samples in One File (Experimental)...",
+            menu,
+        )
+        multi_action.triggered.connect(
+            lambda _checked=False: self.add_multi_sample_file()
+        )
+        menu.addAction(multi_action)
         return menu
 
     def _install_add_data_menu(self, button: QPushButton) -> None:
         button.setMenu(self._build_add_data_menu(button))
-        button.setToolTip("Choose whether the files contain processed sieve data or raw sieve weighings")
+        button.setToolTip(
+            "Add processed data, raw sieve weighings, or explicitly try the experimental multi-sample import"
+        )
 
     def _show_add_data_menu_for_drop_zone(self, event) -> None:
         if event.button() != Qt.MouseButton.LeftButton:
@@ -2940,6 +2977,83 @@ class ControlPanel(QFrame):
                 elif already_added:
                     QMessageBox.information(self, "No New Files", f"All {len(already_added)} selected files are already in the list.")
 
+    def add_multi_sample_file(self):
+        """Explicitly try the experimental multi-sample candidate workflow."""
+        file_path, _ = QFileDialog.getOpenFileName(
+            self,
+            "Multiple Samples in One File (Experimental)",
+            "",
+            "Supported files (*.csv *.xlsx *.xls);;Excel files (*.xlsx *.xls);;CSV files (*.csv);;All files (*.*)",
+        )
+        if not file_path:
+            return
+
+        entries = [file_path]
+        if file_path.lower().endswith((".xlsx", ".xls")):
+            selected_sheets = self.handle_multisheet_excel(file_path)
+            if selected_sheets == []:
+                return
+            if selected_sheets:
+                entries = selected_sheets
+
+        imported = 0
+        for entry in entries:
+            actual_path, sheet_name, file_key = self._file_entry_parts(entry)
+            if file_key in self.file_statuses:
+                QMessageBox.information(
+                    self,
+                    "Already in Workspace",
+                    f"{self._format_file_display_name(file_key)} is already loaded. Remove it before trying a different import pathway.",
+                )
+                continue
+
+            dialog = ColumnMapperDialog(
+                actual_path,
+                self,
+                self.window(),
+                sheet_name=sheet_name,
+                multi_sample_mode=True,
+            )
+            if not dialog._is_multi_sample_mode():
+                sheet_detail = f" on sheet '{sheet_name}'" if sheet_name else ""
+                QMessageBox.information(
+                    self,
+                    "Multiple Samples Not Detected",
+                    "The experimental importer did not find multiple explicit "
+                    f"particle-size / cumulative-percent-passing curves{sheet_detail}.\n\n"
+                    "Use Processed Sieve Data for the normal import pathway, or prepare the source in one of the documented experimental layouts.",
+                )
+                dialog.close()
+                dialog.deleteLater()
+                continue
+
+            if dialog.exec() != QDialog.DialogCode.Accepted:
+                continue
+            mapping_results = dialog.get_mapping_results()
+            if not mapping_results:
+                continue
+
+            self.file_statuses[file_key] = 'confirmation'
+            self.add_file_to_table(
+                file_key,
+                'confirmation',
+                display_name=self._file_entry_display_name(entry),
+            )
+            self._apply_mapping_results(
+                file_key,
+                mapping_results,
+                forced_sheet_name=sheet_name,
+                mapping_state=dialog.get_mapping_state(),
+            )
+            imported += len(mapping_results)
+
+        if imported:
+            self.update_ui_state()
+            self.sample_info_label.setText(
+                f"Loaded {imported} experimental multi-sample candidate"
+                f"{'s' if imported != 1 else ''}"
+            )
+
     def _queue_raw_sieve_files_for_mapping(self, file_entries: list, already_added: list | None = None):
         """Register raw-weighing files as neutral mapping-required items."""
         already_added = already_added or []
@@ -2949,9 +3063,9 @@ class ControlPanel(QFrame):
         )
 
         for file_entry in file_entries:
-            file_key = self._file_entry_key(file_entry)
-            display_name = self._file_entry_display_name(file_entry)
-            _, sheet_name, _ = self._file_entry_parts(file_entry)
+            file_key = ControlPanel._file_entry_key(self, file_entry)
+            display_name = ControlPanel._file_entry_display_name(self, file_entry)
+            _, sheet_name, _ = ControlPanel._file_entry_parts(self, file_entry)
             mapping_state = {
                 "raw_sieve_mode": True,
                 "calculated_selection_mode": "column",
@@ -3158,6 +3272,7 @@ class ControlPanel(QFrame):
             'mapping': 'Map Columns',
             'failed': 'Failed',
             'review': 'Needs Review',
+            'confirmation': 'Review Samples',
             'loaded': 'Loaded'
         }
         return status_map.get(status, 'Unknown')
@@ -3169,6 +3284,7 @@ class ControlPanel(QFrame):
             'mapping': 'Raw sieve weighing file is waiting for column mapping',
             'failed': 'File failed validation - contains errors',
             'review': 'File needs manual column mapping',
+            'confirmation': 'Detected samples are waiting for confirmation',
             'loaded': 'File successfully loaded and ready for analysis'
         }
         return tooltip_map.get(status, 'Unknown status')
@@ -3233,6 +3349,7 @@ class ControlPanel(QFrame):
 
     def edit_file_mapping(self, file_path: str):
         """Open column mapping dialog for a specific file"""
+        file_path = getattr(self, '_card_sources', {}).get(file_path, file_path)
         try:
             actual_file_path, sheet_name = self._split_sheet_key(file_path)
             dialog = ColumnMapperDialog(
@@ -3344,7 +3461,8 @@ class ControlPanel(QFrame):
 
     def show_file_info(self, file_path: str):
         """Show concept-aligned data inspector for a loaded dataset."""
-        _, entry = self._find_loaded_entry_by_file(file_path)
+        source_path = getattr(self, '_card_sources', {}).get(file_path, file_path)
+        _, entry = self._find_loaded_entry_by_card(file_path)
         if not entry:
             QMessageBox.information(self, "Inspect", "Dataset not yet loaded.")
             return
@@ -3354,12 +3472,12 @@ class ControlPanel(QFrame):
         mapping_state = (
             entry.get('mapping_state')
             or getattr(dataset, '_source_mapping_state', None)
-            or self.file_mapping_states.get(file_path)
+            or self.file_mapping_states.get(source_path)
         )
         dlg = DataInspectorDialog(
             dataset=dataset,
             scheme=self._active_scheme,
-            file_path=file_path,
+            file_path=source_path,
             dataset_tab=ds_tab,
             mapping_state=mapping_state,
             parent=self,
@@ -3368,12 +3486,13 @@ class ControlPanel(QFrame):
 
     def show_file_log(self, file_path: str):
         """Show the load-time validation log for a dataset."""
+        source_path = getattr(self, '_card_sources', {}).get(file_path, file_path)
         host_window = self.window()
         if host_window is not None and hasattr(host_window, "show_log_overlay"):
-            host_window.show_log_overlay(file_key=file_path)
+            host_window.show_log_overlay(file_key=source_path)
             return
 
-        _, entry = self._find_loaded_entry_by_file(file_path)
+        _, entry = self._find_loaded_entry_by_card(file_path)
         if not entry:
             QMessageBox.information(self, "Log", "Dataset not yet loaded.")
             return
@@ -3416,7 +3535,7 @@ class ControlPanel(QFrame):
 
     def show_file_props(self, file_path: str):
         """Per-dataset properties editor: temperature + porosity override."""
-        _, entry = self._find_loaded_entry_by_file(file_path)
+        _, entry = self._find_loaded_entry_by_card(file_path)
         if not entry:
             QMessageBox.information(self, "Props", "Dataset not yet loaded.")
             return
@@ -3529,10 +3648,32 @@ class ControlPanel(QFrame):
 
     def register_external_file(self, file_path: str, dataset):
         """Register a file that was loaded externally (e.g., from recent files/sessions)"""
-        self._remove_loaded_entries_for_file(file_path)
         mapping_state = getattr(dataset, "_source_mapping_state", None) or self.file_mapping_states.get(file_path)
+        candidate_key = (
+            mapping_state.get('multi_sample_candidate_key')
+            if isinstance(mapping_state, Mapping)
+            else None
+        )
+        is_multi_sample = bool(candidate_key)
+        if not is_multi_sample:
+            self._remove_loaded_entries_for_file(file_path)
+            ControlPanel._remove_cards_for_source(self, file_path)
         if mapping_state:
-            self.file_mapping_states[file_path] = dict(mapping_state)
+            if is_multi_sample:
+                existing_state = dict(self.file_mapping_states.get(file_path) or {})
+                selected_keys = list(existing_state.get('selected_multi_sample_keys') or [])
+                if candidate_key not in selected_keys:
+                    selected_keys.append(candidate_key)
+                existing_state.update({
+                    'raw_sieve_mode': False,
+                    'calculated_selection_mode': 'multi_sample',
+                    'multi_sample_mode': True,
+                    'selected_multi_sample_keys': selected_keys,
+                    'current_sheet': mapping_state.get('current_sheet'),
+                })
+                self.file_mapping_states[file_path] = existing_state
+            else:
+                self.file_mapping_states[file_path] = dict(mapping_state)
         provenance = getattr(dataset, "_source_import_provenance", None)
         # Check if already in the list
         if file_path in self.file_statuses:
@@ -3547,16 +3688,40 @@ class ControlPanel(QFrame):
             # Add to table
             self.add_file_to_table(file_path, 'loaded')
 
-        self.loaded_samples[sample_name] = {
+        entry_key = sample_name
+        suffix = 2
+        while entry_key in self.loaded_samples:
+            entry_key = f"{sample_name} ({suffix})"
+            suffix += 1
+        self.loaded_samples[entry_key] = {
             'file_path': file_path,
             'data': dataset,
             'datasets': [dataset],
             'status': 'loaded',
-            'mapping_state': self.file_mapping_states.get(file_path),
+            'mapping_state': dict(mapping_state or {}),
             'import_provenance': provenance,
         }
 
-        self._push_card_meta(file_path)
+        if is_multi_sample:
+            self._file_list.remove_card(file_path)
+            card_key = ControlPanel._dataset_card_key(
+                file_path,
+                sample_name,
+                len([
+                    source for source in self._card_sources.values()
+                    if source == file_path
+                ]),
+                candidate_key,
+            )
+            dataset._workspace_key = card_key
+            self._card_sources[card_key] = file_path
+            self._card_samples[card_key] = entry_key
+            self._file_list.add_card(card_key, sample_name, 'loaded')
+            self._push_card_meta(card_key)
+        else:
+            dataset._workspace_key = file_path
+            self._file_list.add_card(file_path, self._format_file_display_name(file_path), 'loaded')
+            self._push_card_meta(file_path)
         self._update_inventory_bar()
         self.update_ui_state()
         self.sample_info_label.setText(f"{len(self.loaded_samples)} sample(s) loaded")
@@ -3578,6 +3743,8 @@ class ControlPanel(QFrame):
         file_name = self._format_file_display_name(file_path)
         if status == 'failed':
             self.sample_info_label.setText(f"Needs fixing: {file_name}")
+        elif status == 'confirmation':
+            self.sample_info_label.setText(f"Review detected samples: {file_name}")
         else:
             self.sample_info_label.setText(f"Needs review: {file_name}")
 
@@ -3585,7 +3752,7 @@ class ControlPanel(QFrame):
         """Open manual column mapping for files that need review"""
         review_files = [
             path for path, status in self.file_statuses.items()
-            if status in ('mapping', 'review')
+            if status in ('mapping', 'review', 'confirmation')
         ]
 
         for file_path in review_files:
@@ -3676,10 +3843,40 @@ class ControlPanel(QFrame):
         if not file_path:
             return False
 
+        card_sources = getattr(self, '_card_sources', {})
+        card_samples = getattr(self, '_card_samples', {})
+        source_path = card_sources.get(file_path, file_path)
+        is_sample_card = file_path in card_sources
+
         if sync_workspace:
             host_window = self.window()
             if host_window and host_window is not self and hasattr(host_window, "_remove_tabs_for_file"):
                 host_window._remove_tabs_for_file(file_path)
+
+        if is_sample_card:
+            sample_key = card_samples.pop(file_path, None)
+            card_sources.pop(file_path, None)
+            removed_entry = self.loaded_samples.pop(sample_key, None) if sample_key else None
+            self._file_list.remove_card(file_path)
+
+            source_has_cards = source_path in card_sources.values()
+            if not source_has_cards:
+                row = self._find_table_row_for_file(source_path)
+                self.file_statuses.pop(source_path, None)
+                self.file_mapping_states.pop(source_path, None)
+                if row >= 0:
+                    self.samples_table.removeRow(row)
+
+            if refresh_ui:
+                self.update_ui_state()
+            if announce:
+                label = (
+                    removed_entry.get('data').sample_name
+                    if removed_entry and removed_entry.get('data') is not None
+                    else self._format_file_display_name(source_path)
+                )
+                self.sample_info_label.setText(f"Removed: {label}")
+            return bool(removed_entry) or not source_has_cards
 
         row = self._find_table_row_for_file(file_path)
         had_tracking = file_path in self.file_statuses
@@ -3688,7 +3885,7 @@ class ControlPanel(QFrame):
 
         self.file_statuses.pop(file_path, None)
         self.file_mapping_states.pop(file_path, None)
-        self._file_list.remove_card(file_path)
+        ControlPanel._remove_cards_for_source(self, file_path)
 
         if row >= 0:
             self.samples_table.removeRow(row)
@@ -3709,7 +3906,12 @@ class ControlPanel(QFrame):
             return 0
 
         host_window = self.window()
+        contains_sample_cards = any(
+            path in getattr(self, '_card_sources', {}) for path in paths
+        )
         workspace_pre_synced = bool(
+            not contains_sample_cards
+            and
             host_window
             and host_window is not self
             and (
@@ -3751,15 +3953,15 @@ class ControlPanel(QFrame):
     def clear_all_files(self):
         """Confirm and remove every sample through the workspace sync path."""
         file_paths = list(self.file_statuses)
-        total_files = len(file_paths)
-        if total_files == 0:
+        total_samples = self._file_list.get_loaded_count()
+        if not file_paths:
             return
 
         reply = QMessageBox.question(
             self,
             "Clear all samples",
             (
-                f"Remove all {total_files} samples?\n\n"
+                f"Remove all {total_samples} samples?\n\n"
                 "All dataset tabs will be closed."
             ),
             QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
@@ -3767,11 +3969,11 @@ class ControlPanel(QFrame):
         if reply != QMessageBox.StandardButton.Yes:
             return
 
-        removed_count = self._remove_files_in_batch(file_paths)
+        self._remove_files_in_batch(file_paths)
 
         self.sample_info_label.setText(
-            f"Cleared {removed_count} sample"
-            f"{'s' if removed_count != 1 else ''}"
+            f"Cleared {total_samples} sample"
+            f"{'s' if total_samples != 1 else ''}"
         )
         self._update_batch_actions()
 
@@ -3834,6 +4036,40 @@ class ControlPanel(QFrame):
                 return sample_name, entry
         return None, None
 
+    def _find_loaded_entry_by_card(self, card_key: str):
+        card_samples = getattr(self, '_card_samples', {})
+        card_sources = getattr(self, '_card_sources', {})
+        sample_name = card_samples.get(card_key)
+        if sample_name and sample_name in self.loaded_samples:
+            return sample_name, self.loaded_samples[sample_name]
+        return self._find_loaded_entry_by_file(
+            card_sources.get(card_key, card_key)
+        )
+
+    @staticmethod
+    def _dataset_card_key(
+        file_path: str,
+        sample_name: str,
+        index: int,
+        candidate_key: str | None = None,
+    ) -> str:
+        token = candidate_key or f"{index}:{sample_name}"
+        return f"{file_path}::sample::{token}"
+
+    def _remove_cards_for_source(self, file_path: str) -> None:
+        """Remove visual/sample-card identities owned by one physical source."""
+        card_sources = getattr(self, '_card_sources', {})
+        card_samples = getattr(self, '_card_samples', {})
+        card_keys = [
+            key for key, source in card_sources.items()
+            if source == file_path
+        ]
+        for card_key in card_keys:
+            self._file_list.remove_card(card_key)
+            card_sources.pop(card_key, None)
+            card_samples.pop(card_key, None)
+        self._file_list.remove_card(file_path)
+
     def _record_log_event(self, event: Mapping) -> None:
         host_window = self.window()
         if host_window is not None and hasattr(host_window, "record_log_event"):
@@ -3877,6 +4113,12 @@ class ControlPanel(QFrame):
         for sample_name, entry in list(self.loaded_samples.items()):
             if entry.get('file_path') == file_path:
                 removed.append((sample_name, entry))
+                dataset = entry.get('data')
+                workspace_key = getattr(dataset, '_workspace_key', '')
+                if workspace_key and workspace_key != file_path:
+                    self._file_list.remove_card(workspace_key)
+                    getattr(self, '_card_sources', {}).pop(workspace_key, None)
+                    getattr(self, '_card_samples', {}).pop(workspace_key, None)
                 del self.loaded_samples[sample_name]
         return removed
 
@@ -3907,7 +4149,9 @@ class ControlPanel(QFrame):
             )
             if dataset.has_errors():
                 raise ValueError(dataset.get_detailed_validation_report())
-            source_mapping_state = dict(mapping_state or {})
+            source_mapping_state = dict(
+                mapping.get("mapping_state") or mapping_state or {}
+            )
             if source_mapping_state and not source_mapping_state.get("import_provenance"):
                 source_mapping_state["import_provenance"] = manual_mapping_provenance(source_mapping_state)
             provenance = (
@@ -3923,25 +4167,65 @@ class ControlPanel(QFrame):
             return
 
         self._remove_loaded_entries_for_file(file_path)
-        if created_datasets[0]._source_mapping_state:
-            self.file_mapping_states[file_path] = created_datasets[0]._source_mapping_state
+        ControlPanel._remove_cards_for_source(self, file_path)
+        file_mapping_state = dict(
+            mapping_state or created_datasets[0]._source_mapping_state or {}
+        )
+        if file_mapping_state:
+            self.file_mapping_states[file_path] = file_mapping_state
 
-        sample_key = created_datasets[0].sample_name
         sheet_names = [(mapping.get('sheet_name') or forced_sheet_name or '') for mapping in mapping_results]
-        entry = {
-            'file_path': file_path,
-            'data': created_datasets[0],
-            'datasets': created_datasets,
-            'status': 'loaded',
-            'sheet_names': sheet_names,
-            'mapping_state': self.file_mapping_states.get(file_path),
-            'import_provenance': getattr(created_datasets[0], '_source_import_provenance', None),
-        }
-        self.loaded_samples[sample_key] = entry
-
         self.file_statuses[file_path] = 'loaded'
         self.update_file_in_table(file_path, 'loaded')
-        self._push_card_meta(file_path)
+
+        if len(created_datasets) == 1:
+            dataset = created_datasets[0]
+            dataset._workspace_key = file_path
+            self.loaded_samples[dataset.sample_name] = {
+                'file_path': file_path,
+                'data': dataset,
+                'datasets': [dataset],
+                'status': 'loaded',
+                'sheet_names': sheet_names,
+                'mapping_state': dataset._source_mapping_state,
+                'import_provenance': getattr(dataset, '_source_import_provenance', None),
+            }
+            self._file_list.add_card(
+                file_path,
+                self._format_file_display_name(file_path),
+                'loaded',
+            )
+            self._push_card_meta(file_path)
+        else:
+            for index, dataset in enumerate(created_datasets):
+                candidate_key = dataset._source_mapping_state.get(
+                    'multi_sample_candidate_key'
+                )
+                card_key = ControlPanel._dataset_card_key(
+                    file_path,
+                    dataset.sample_name,
+                    index,
+                    candidate_key,
+                )
+                dataset._workspace_key = card_key
+                entry_key = dataset.sample_name
+                suffix = 2
+                while entry_key in self.loaded_samples:
+                    entry_key = f"{dataset.sample_name} ({suffix})"
+                    suffix += 1
+                self.loaded_samples[entry_key] = {
+                    'file_path': file_path,
+                    'data': dataset,
+                    'datasets': [dataset],
+                    'status': 'loaded',
+                    'sheet_names': [sheet_names[index] if index < len(sheet_names) else ''],
+                    'mapping_state': dataset._source_mapping_state,
+                    'import_provenance': getattr(dataset, '_source_import_provenance', None),
+                }
+                self._card_sources[card_key] = file_path
+                self._card_samples[card_key] = entry_key
+                self._file_list.add_card(card_key, dataset.sample_name, 'loaded')
+                self._push_card_meta(card_key)
         self._update_inventory_bar()
 
         self.dataset_loaded_successfully.emit(created_datasets, file_path)
@@ -3950,11 +4234,10 @@ class ControlPanel(QFrame):
             for dataset in created_datasets:
                 record_manual_import(file_path, dataset)
 
-        if any(sheet_names):
-            summary = ", ".join(name for name in sheet_names if name)
-            self.sample_info_label.setText(f"\u2705 Loaded {len(created_datasets)} sheet(s): {summary}")
-        else:
-            self.sample_info_label.setText(f"\u2705 Loaded {len(created_datasets)} sheet(s)")
+        sample_word = "sample" if len(created_datasets) == 1 else "samples"
+        self.sample_info_label.setText(
+            f"\u2705 Loaded {len(created_datasets)} {sample_word}"
+        )
 
     def update_ui_state(self):
         """Update UI state based on loaded samples and file statuses"""
@@ -3963,9 +4246,13 @@ class ControlPanel(QFrame):
 
         # Count files by status
         review_count = sum(1 for status in self.file_statuses.values() if status == 'review')
+        confirmation_count = sum(
+            1 for status in self.file_statuses.values()
+            if status == 'confirmation'
+        )
         mapping_count = sum(1 for status in self.file_statuses.values() if status == 'mapping')
-        action_count = review_count + mapping_count
-        loaded_count = sum(1 for status in self.file_statuses.values() if status == 'loaded')
+        action_count = review_count + mapping_count + confirmation_count
+        loaded_count = self._file_list.get_status_count('loaded')
 
         # Update batch action buttons
         self.review_failed_btn.setEnabled(action_count > 0)
@@ -3981,10 +4268,14 @@ class ControlPanel(QFrame):
                     summary += f", {mapping_count} need mapping"
                 if review_count > 0:
                     summary += f", {review_count} need review"
+                if confirmation_count > 0:
+                    summary += f", {confirmation_count} ready for sample review"
             elif mapping_count > 0:
                 summary = f"{mapping_count} need mapping"
                 if review_count > 0:
                     summary += f", {review_count} need review"
+            elif confirmation_count > 0:
+                summary = f"{confirmation_count} ready for sample review"
             elif review_count > 0:
                 summary = f"{review_count} need review"
             else:
@@ -4304,6 +4595,7 @@ class ControlPanel(QFrame):
         self._import_finalize_summary = None
         self._pending_import_ui_events.clear()
         self._import_ui_total = 0
+        self._multi_sample_confirmation_count = 0
         self._import_ui_processed = 0
         self._import_queue = ctx.Queue()
         self._import_process = ctx.Process(
@@ -4471,6 +4763,13 @@ class ControlPanel(QFrame):
     def _on_import_worker_failed(self, file_key: str, detail: str):
         self._remove_loaded_entries_for_file(file_key)
         self._file_list.update_card_meta(file_key, "", "")
+        if is_multi_sample_confirmation_message(detail):
+            self._multi_sample_confirmation_count += 1
+            self.file_statuses[file_key] = 'confirmation'
+            self.update_file_in_table(file_key, 'confirmation')
+            self.multi_sample_confirmation.emit(file_key, detail)
+            self._update_inventory_bar()
+            return
         self.file_statuses[file_key] = 'review'
         self.update_file_in_table(file_key, 'review')
         self.update_error_tab_message.emit(file_key, detail)
@@ -4479,6 +4778,8 @@ class ControlPanel(QFrame):
     def _on_import_worker_finished(self, summary: dict):
         loaded = summary.get('loaded', 0)
         review = summary.get('review', 0)
+        confirmations = self._multi_sample_confirmation_count
+        review = max(0, review - confirmations)
         failed = summary.get('failed', 0)
         canceled = summary.get('canceled', False)
 
@@ -4498,6 +4799,8 @@ class ControlPanel(QFrame):
                 parts.append(f"{loaded} loaded")
             if review:
                 parts.append(f"{review} need review")
+            if confirmations:
+                parts.append(f"{confirmations} ready for sample review")
             if failed:
                 parts.append(f"{failed} invalid")
             headline = "Import complete"
@@ -4542,6 +4845,7 @@ class ControlPanel(QFrame):
         self._import_finalize_summary = None
         self._pending_import_ui_events.clear()
         self._import_ui_total = 0
+        self._multi_sample_confirmation_count = 0
         self._import_ui_processed = 0
 
     # ================================

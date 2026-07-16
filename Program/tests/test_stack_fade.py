@@ -14,7 +14,7 @@ sys.path.insert(0, 'Program')
 from PyQt6.QtWidgets import QApplication, QLabel, QStackedWidget, QTabWidget
 
 from gui.stack_fade import StackFadeController, TabFadeInController
-from gui.main_window import MainWindow
+from gui.main_window import HOME_TAB, INDIVIDUAL_TAB, MainWindow
 
 
 APP = QApplication.instance() or QApplication(["codex-test"])
@@ -81,6 +81,21 @@ class TestStackFadeController(unittest.TestCase):
         self.assertFalse(self.controller.is_animating)
         self.assertIsNone(self.stack.currentWidget().graphicsEffect())
 
+    def test_jump_to_cancels_active_transition(self):
+        self.stack.resize(320, 180)
+        self.stack.show()
+        APP.processEvents()
+
+        self.controller.switch_to(1)
+        self.assertTrue(self.controller.is_animating)
+
+        self.controller.jump_to(2)
+        APP.processEvents()
+
+        self.assertEqual(self.stack.currentIndex(), 2)
+        self.assertFalse(self.controller.is_animating)
+        self.assertIsNone(self.stack.widget(0).graphicsEffect())
+
 
 class TestTabFadeInController(unittest.TestCase):
     def setUp(self):
@@ -132,6 +147,35 @@ class TestMainWindowDatasetTabFade(unittest.TestCase):
         source = inspect.getsource(MainWindow._configure_dataset_tab_bar)
 
         self.assertIn("tab_bar.hide()", source)
+
+    def test_home_to_individual_switch_is_immediate(self):
+        stack = QStackedWidget()
+        stack.addWidget(QLabel("Home"))
+        stack.addWidget(QLabel("Individual"))
+        stack.setCurrentIndex(HOME_TAB)
+
+        class Harness:
+            _switch_content_page = MainWindow._switch_content_page
+
+            def __init__(self):
+                self.content_stack = stack
+                self._content_stack_fader = StackFadeController(
+                    stack,
+                    fade_out_ms=100,
+                    fade_in_ms=100,
+                )
+                self.posted = []
+
+            def _post_nav_tab_switch(self, index):
+                self.posted.append(index)
+
+        harness = Harness()
+        harness._switch_content_page(INDIVIDUAL_TAB)
+        APP.processEvents()
+
+        self.assertEqual(stack.currentIndex(), INDIVIDUAL_TAB)
+        self.assertFalse(harness._content_stack_fader.is_animating)
+        self.assertEqual(harness.posted, [INDIVIDUAL_TAB])
 
 
 if __name__ == '__main__':

@@ -13,6 +13,7 @@ os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 sys.path.insert(0, "Program")
 
 from PyQt6.QtWidgets import QApplication, QFormLayout, QTableWidgetSelectionRange
+from PyQt6.QtCore import Qt
 
 from gui.column_mapper import ColumnMapperDialog
 
@@ -90,6 +91,24 @@ class TestColumnMapperDialog(unittest.TestCase):
             pd.DataFrame(rows).to_excel(writer, sheet_name="English", header=False, index=False)
         return path
 
+    def _write_multi_sample_workbook(self, filename: str = "multi_sample.xlsx") -> str:
+        path = os.path.join(self._tempdir.name, filename)
+        rows = [
+            ["", "Sample A", "Sample B"],
+            ["Particle Size (mm)", "Percent Passing", "Percent Passing"],
+            [0.063, 5.0, 8.0],
+            [0.125, 18.0, 24.0],
+            [0.25, 42.0, 50.0],
+            [0.5, 70.0, 76.0],
+            [1.0, 92.0, 95.0],
+            [2.0, 100.0, 100.0],
+        ]
+        with pd.ExcelWriter(path) as writer:
+            pd.DataFrame(rows).to_excel(
+                writer, sheet_name="Data", header=False, index=False
+            )
+        return path
+
     def tearDown(self):
         excel_file = getattr(self.dialog, "_excel_file", None)
         if excel_file is not None and hasattr(excel_file, "close"):
@@ -109,8 +128,9 @@ class TestColumnMapperDialog(unittest.TestCase):
         self.assertIn("Processed Curve -> Columns", self.dialog.pathway_summary_label.text())
         self.assertIn("Check the sheets you want to import", self.dialog.sheet_info_label.text())
         self.assertLess(self.dialog.sizeHint().height(), 900)
+        self.assertGreaterEqual(self.dialog.sizeHint().width(), 1300)
 
-    def test_switching_back_from_raw_restores_previous_calculated_selection_method(self):
+    def test_range_workflow_adapts_between_processed_and_raw_input_types(self):
         self.dialog.switch_to_range_mode()
         APP.processEvents()
         self.assertEqual(self.dialog.calculated_selection_mode, "range")
@@ -119,12 +139,12 @@ class TestColumnMapperDialog(unittest.TestCase):
         self.dialog.switch_to_raw_sieve_mode()
         APP.processEvents()
         self.assertTrue(self.dialog.raw_sieve_mode)
-        self.assertFalse(self.dialog.raw_sieve_group.isHidden())
+        self.assertTrue(self.dialog.raw_sieve_group.isHidden())
         self.assertTrue(self.dialog.mapping_group.isHidden())
-        self.assertTrue(self.dialog.range_tools_group.isHidden())
-        self.assertFalse(self.dialog.column_mode_btn.isEnabled())
-        self.assertFalse(self.dialog.range_mode_btn.isEnabled())
-        self.assertIn("Raw Sieve -> Columns", self.dialog.pathway_summary_label.text())
+        self.assertFalse(self.dialog.range_tools_group.isHidden())
+        self.assertTrue(self.dialog._header_section.isHidden())
+        self.assertIn("Raw Sieve -> Cell Ranges", self.dialog.pathway_summary_label.text())
+        self.assertIn("Step 1 of 3", self.dialog.range_step_label.text())
 
         self.dialog.switch_to_calculated_mode()
         APP.processEvents()
@@ -140,12 +160,12 @@ class TestColumnMapperDialog(unittest.TestCase):
 
         self.dialog.switch_to_raw_sieve_mode()
         APP.processEvents()
-        self.assertIn("same raw sieve column mapping", self.dialog.sheet_info_label.text())
+        self.assertIn("raw-sieve range pattern", self.dialog.sheet_info_label.text())
 
     def test_mapper_inspector_keeps_readable_control_width(self):
         self.assertIsNotNone(self.dialog._mapping_splitter)
         controls = self.dialog._mapping_splitter.widget(0)
-        self.assertGreaterEqual(controls.minimumWidth(), 390)
+        self.assertGreaterEqual(controls.minimumWidth(), 330)
         self.assertEqual(
             self.dialog.mapping_group.layout().rowWrapPolicy(),
             QFormLayout.RowWrapPolicy.WrapAllRows,
@@ -157,11 +177,72 @@ class TestColumnMapperDialog(unittest.TestCase):
 
         self.assertEqual(
             passing_label.text(),
-            "Cumulative Percent Passing (0-100): *",
+            "Cumulative percent passing (0-100):",
         )
         self.assertIsNone(mapping_form.labelForField(self.dialog.retained_combo))
         self.assertTrue(self.dialog.retained_combo.isHidden())
         self.assertEqual(self.dialog.retained_combo.currentIndex(), 0)
+
+    def test_header_row_change_preserves_deliberate_column_positions(self):
+        self.dialog.size_combo.setCurrentIndex(3)
+        self.dialog.passing_combo.setCurrentIndex(1)
+
+        self.dialog.update_headers(1)
+
+        self.assertEqual(self.dialog.header_row, 1)
+        self.assertEqual(self.dialog.size_combo.currentIndex(), 3)
+        self.assertEqual(self.dialog.passing_combo.currentIndex(), 1)
+
+    def test_header_row_control_uses_visible_spreadsheet_row_numbers(self):
+        self.dialog.header_row_spin.setValue(2)
+
+        self.assertEqual(self.dialog.header_row, 1)
+        self.assertEqual(self.dialog.header_row_spin.value(), 2)
+
+    def test_column_labels_include_spreadsheet_letters(self):
+        labels = self.dialog._labeled_column_headers(["Value", "Value", "Passing"])
+
+        self.assertEqual(labels, ["A - Value", "B - Value", "C - Passing"])
+
+    def test_retained_guidance_is_contextual(self):
+        self.assertFalse(self.dialog.retained_guidance_label.isHidden())
+
+        self.dialog.switch_to_range_mode()
+        APP.processEvents()
+
+        self.assertTrue(self.dialog.retained_guidance_label.isHidden())
+        self.assertTrue(self.dialog._header_section.isHidden())
+
+    def test_header_row_change_auto_detects_only_unmapped_roles(self):
+        path = os.path.join(self._tempdir.name, "two_header_rows.xlsx")
+        rows = [
+            ["Size old", "% Passing old", "Manual choice"],
+            ["Diameter", "Finer", "Other"],
+            [4.75, 100.0, 10.0],
+            [2.0, 84.0, 20.0],
+            [1.0, 55.0, 30.0],
+        ]
+        with pd.ExcelWriter(path) as writer:
+            pd.DataFrame(rows).to_excel(
+                writer, sheet_name="Data", header=False, index=False
+            )
+
+        dialog = ColumnMapperDialog(path, sheet_name="Data")
+        APP.processEvents()
+        try:
+            dialog.size_combo.setCurrentIndex(3)
+            dialog.passing_combo.setCurrentIndex(0)
+
+            dialog.update_headers(1)
+
+            self.assertEqual(dialog.size_combo.currentIndex(), 3)
+            self.assertEqual(dialog.passing_combo.currentIndex(), 2)
+            self.assertEqual(dialog.size_combo.currentText(), "C - Other")
+            self.assertEqual(dialog.passing_combo.currentText(), "B - Finer")
+        finally:
+            dialog.close()
+            dialog.deleteLater()
+            APP.processEvents()
 
     def test_range_mode_can_mark_selected_size_and_passing_cells(self):
         self.dialog.switch_to_range_mode()
@@ -171,18 +252,128 @@ class TestColumnMapperDialog(unittest.TestCase):
             QTableWidgetSelectionRange(1, 0, 3, 0),
             True,
         )
-        self.dialog._mark_current_selection("size")
+        APP.processEvents()
+        self.assertIn("A2:A4", self.dialog.active_range_label.text())
+        self.assertTrue(self.dialog.confirm_range_btn.isEnabled())
+        self.assertIn(
+            "selection-background-color: #9fc0dc",
+            self.dialog.preview_table.styleSheet(),
+        )
+        self.dialog._confirm_guided_range_selection()
 
         self.dialog.preview_table.setRangeSelected(
             QTableWidgetSelectionRange(1, 1, 3, 1),
             True,
         )
-        self.dialog._mark_current_selection("percent")
+        self.dialog._confirm_guided_range_selection()
 
         self.assertEqual(len(self.dialog.selected_size_range), 3)
         self.assertEqual(len(self.dialog.selected_percent_range), 3)
-        self.assertIn("3 size cells", self.dialog.size_range_count_label.text())
-        self.assertIn("3 passing cells", self.dialog.percent_range_count_label.text())
+        self.assertIn("Particle size: A2:A4", self.dialog.size_range_count_label.text())
+        self.assertIn("Passing: B2:B4", self.dialog.percent_range_count_label.text())
+
+    def test_import_action_tracks_mapping_validation(self):
+        self.dialog.size_combo.setCurrentIndex(0)
+        self.dialog.passing_combo.setCurrentIndex(0)
+        self.dialog._refresh_result_preview()
+
+        self.assertFalse(self.dialog.import_button.isEnabled())
+        self.assertEqual(self.dialog.result_status_label.text(), "Mapping incomplete")
+        self.assertTrue(self.dialog.checks_title.isHidden())
+
+        self.dialog.size_combo.setCurrentIndex(1)
+        self.dialog.passing_combo.setCurrentIndex(2)
+        self.dialog._refresh_result_preview()
+
+        self.assertTrue(self.dialog.import_button.isEnabled())
+        self.assertEqual(self.dialog.result_status_label.text(), "Ready to import")
+        self.assertFalse(self.dialog.checks_title.isHidden())
+
+    def test_multi_sample_confirmation_returns_selected_curves(self):
+        path = self._write_multi_sample_workbook()
+        dialog = ColumnMapperDialog(
+            path,
+            sheet_name="Data",
+            multi_sample_mode=True,
+        )
+        APP.processEvents()
+        try:
+            self.assertTrue(dialog._is_multi_sample_mode())
+            self.assertEqual(dialog.multi_sample_list.count(), 2)
+            self.assertFalse(dialog._multi_sample_section.isHidden())
+            self.assertFalse(dialog.multi_sample_group.isHidden())
+            self.assertFalse(dialog.multi_sample_list.isHidden())
+            self.assertTrue(dialog._mapping_section.isHidden())
+            self.assertEqual(dialog.import_button.text(), "Import 2 samples")
+            self.assertEqual(dialog.result_status_label.text(), "Sample A")
+
+            second = dialog.multi_sample_list.item(1)
+            second.setCheckState(Qt.CheckState.Unchecked)
+            APP.processEvents()
+            self.assertEqual(dialog.import_button.text(), "Import 1 sample")
+
+            results = dialog.get_mapping_results()
+            self.assertEqual(len(results), 1)
+            self.assertEqual(results[0]["sample_name"], "Sample A")
+            self.assertEqual(results[0]["percent_passing"][:2], [5.0, 18.0])
+            self.assertEqual(
+                results[0]["mapping_state"]["selected_percent_range"][0],
+                [2, 1],
+            )
+        finally:
+            dialog.close()
+            dialog.deleteLater()
+            APP.processEvents()
+
+    def test_guided_processed_range_flow_exposes_one_role_at_a_time(self):
+        self.dialog.switch_to_range_mode()
+        APP.processEvents()
+        self.assertIn("Step 1 of 2", self.dialog.range_step_label.text())
+
+        self.dialog.preview_table.setRangeSelected(
+            QTableWidgetSelectionRange(1, 0, 3, 0), True
+        )
+        self.dialog._confirm_guided_range_selection()
+        self.assertIn("Step 2 of 2", self.dialog.range_step_label.text())
+
+        self.dialog.preview_table.setRangeSelected(
+            QTableWidgetSelectionRange(1, 1, 3, 1), True
+        )
+        self.dialog._confirm_guided_range_selection()
+        self.assertIn("Ranges ready", self.dialog.range_step_label.text())
+        self.assertEqual(len(self.dialog.selected_size_range), 3)
+        self.assertEqual(len(self.dialog.selected_percent_range), 3)
+
+    def test_guided_raw_ranges_extract_and_restore_three_roles(self):
+        self.dialog.reload_sheet("Raw")
+        self.dialog.switch_to_raw_sieve_mode()
+        self.dialog._toggle_range_workflow()
+        APP.processEvents()
+
+        for column in range(3):
+            self.dialog.preview_table.setRangeSelected(
+                QTableWidgetSelectionRange(1, column, 3, column), True
+            )
+            self.dialog._confirm_guided_range_selection()
+
+        sizes, passing = self.dialog.extract_data()
+        self.assertEqual(len(sizes), 3)
+        self.assertEqual(len(passing), 3)
+        self.assertIn("Ranges ready", self.dialog.range_step_label.text())
+
+        state = self.dialog.get_mapping_state()
+        self.assertTrue(state["raw_sieve_mode"])
+        self.assertEqual(state["calculated_selection_mode"], "range")
+        self.assertEqual(len(state["selected_empty_range"]), 3)
+        self.assertEqual(len(state["selected_full_range"]), 3)
+
+        pattern = self.dialog.learn_pattern_from_selection()
+        self.assertEqual(pattern["data_type"], "raw_sieve")
+        propagated = self.dialog.apply_pattern_to_file(
+            f"{self.excel_path}:::Raw"
+        )
+        self.assertEqual(len(propagated["particle_sizes"]), 3)
+        self.assertEqual(len(propagated["percent_passing"]), 3)
 
     def test_excel_preview_uses_full_sheet_and_applies_detected_curve(self):
         path = self._write_nbal_style_workbook()
@@ -232,9 +423,9 @@ class TestColumnMapperDialog(unittest.TestCase):
         try:
             self.assertTrue(dialog.raw_sieve_mode)
             self.assertEqual(dialog.header_row, 2)
-            self.assertEqual(dialog.raw_size_combo.currentText(), "Maskevidde-")
-            self.assertEqual(dialog.sieve_sample_combo.currentText(), "Sigte + fraktion")
-            self.assertEqual(dialog.empty_sieve_combo.currentText(), "sigte tom")
+            self.assertEqual(dialog.raw_size_combo.currentText(), "A - Maskevidde-")
+            self.assertEqual(dialog.sieve_sample_combo.currentText(), "B - Sigte + fraktion")
+            self.assertEqual(dialog.empty_sieve_combo.currentText(), "C - sigte tom")
             self.assertNotIn("Sigtetab", dialog.raw_size_combo.currentText())
 
             sizes, passing = dialog.extract_data()

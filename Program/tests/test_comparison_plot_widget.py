@@ -738,7 +738,8 @@ class TestComparisonPlotWidget(unittest.TestCase):
         self.assertEqual(self.widget.plot_selector.objectName(), 'pw-style-sel')
         self.assertTrue(self.widget.zoom_in_btn.property('pw-btn'))
         self.assertTrue(self.widget._tb_sidebar_btn.property('pw-chk'))
-        self.assertTrue(hasattr(self.widget, '_sw_grid'))
+        self.assertTrue(hasattr(self.widget, '_grid_show_switch'))
+        self.assertFalse(hasattr(self.widget, '_sw_grid'))
         self.assertTrue(hasattr(self.widget, '_sw_legend'))
         self.assertGreaterEqual(
             self.widget._legend_loc_combo.findText('Outside top - right'),
@@ -804,6 +805,44 @@ class TestComparisonPlotWidget(unittest.TestCase):
         self.assertTrue(all(line.get_linewidth() == 3.25 for line in curves))
         self.assertTrue(all(line.get_marker() == 'None' for line in curves))
         self.assertFalse(self.widget.current_style.curve_markers_visible)
+
+    def test_shared_grid_controls_update_comparison_plot(self):
+        self.widget.on_plot_type_changed("Distribution")
+        self.widget.set_display_mode("overlay")
+        self.widget._minor_grid_switch.setChecked(False, animate=False)
+        self.widget._grid_show_switch.setChecked(False, animate=False)
+
+        self.assertFalse(self.widget.show_grid)
+        self.assertFalse(self.widget.current_style.grid_show)
+        self.assertFalse(
+            any(
+                line.get_visible()
+                for line in self.widget.figure.axes[0].get_ygridlines()
+            )
+        )
+
+        self.widget._grid_show_switch.setChecked(True, animate=False)
+        self.widget._minor_grid_switch.setChecked(False, animate=False)
+        dotted_index = self.widget._grid_style_combo.findText("Dotted")
+        self.widget._grid_style_combo.setCurrentIndex(dotted_index)
+        self.widget._grid_alpha_spin.setValue(0.4)
+
+        gridlines = [
+            line
+            for line in self.widget.figure.axes[0].get_ygridlines()
+            if line.get_visible()
+        ]
+        self.assertTrue(gridlines)
+        self.assertEqual(gridlines[0].get_linestyle(), ":")
+        self.assertEqual(gridlines[0].get_alpha(), 0.4)
+
+    def test_minor_grid_remains_available_without_major_grid(self):
+        self.widget._grid_show_switch.setChecked(False, animate=False)
+
+        self.assertTrue(self.widget._minor_grid_switch.isEnabled())
+        self.assertTrue(self.widget.current_style.show_minor_grid)
+        self.assertFalse(self.widget.current_style.grid_show)
+        self.assertTrue(self.widget.show_grid)
 
     def test_distribution_overlay_legend_is_group_structured(self):
         self.widget.set_datasets([

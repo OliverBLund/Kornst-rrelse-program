@@ -48,6 +48,7 @@ from k_aggregation import build_k_result_summary
 from method_registry import normalize_method_selection
 from grain_classification import ISO14688
 from load_process_worker import run_external_load
+from import_resolver import is_multi_sample_confirmation_message
 
 
 # ─────────────────────────────────────────────────────────────────────
@@ -618,6 +619,9 @@ class MainWindow(FramelessMainWindowMixin, QMainWindow):
         self.control_panel.setMinimumWidth(318)
         self.control_panel.error_dataset.connect(self.add_error_tab)
         self.control_panel.mapping_required.connect(self.add_mapping_required_tab)
+        self.control_panel.multi_sample_confirmation.connect(
+            self.add_multi_sample_confirmation_tab
+        )
         self.control_panel.dataset_loaded_successfully.connect(self.replace_error_tab_with_dataset)
         self.control_panel.update_error_tab_message.connect(self.update_error_tab_message)
         self.control_panel.dataset_integration_started.connect(self._begin_bulk_dataset_add)
@@ -762,6 +766,17 @@ class MainWindow(FramelessMainWindowMixin, QMainWindow):
         open_raw_action.setIcon(icon("fa6s.table-columns", C.TEXT_MUTED))
         open_raw_action.triggered.connect(lambda _checked=False: self.control_panel.add_files("raw_sieve"))
         file_menu.addAction(open_raw_action)
+        file_menu.addSeparator()
+
+        open_multi_action = QAction(
+            "Multiple Samples in One File (Experimental)\u2026",
+            self,
+        )
+        open_multi_action.setIcon(icon("fa6s.table-columns", C.TEXT_MUTED))
+        open_multi_action.triggered.connect(
+            lambda _checked=False: self.control_panel.add_multi_sample_file()
+        )
+        file_menu.addAction(open_multi_action)
 
         file_menu.addSeparator()
 
@@ -1068,6 +1083,14 @@ class MainWindow(FramelessMainWindowMixin, QMainWindow):
 
     def _switch_content_page(self, index: int) -> None:
         """Animate a top-level page switch, then run the page-specific refresh."""
+        # Home contains several custom-painted widgets. Avoid wrapping that page in
+        # a graphics effect, and make successful imports leave Home immediately.
+        if index == HOME_TAB or self.content_stack.currentIndex() == HOME_TAB:
+            self._content_stack_fader.jump_to(
+                index,
+                after_switch=lambda idx=index: self._post_nav_tab_switch(idx),
+            )
+            return
         self._content_stack_fader.switch_to(
             index,
             after_switch=lambda idx=index: self._post_nav_tab_switch(idx),
@@ -1101,6 +1124,10 @@ class MainWindow(FramelessMainWindowMixin, QMainWindow):
         self._refresh_dataset_tab_icons()
         tab = self.dataset_tabs_widget.widget(index)
         if tab and hasattr(tab, 'dataset'):
+            workspace_key = getattr(tab.dataset, "_workspace_key", "")
+            if workspace_key:
+                self.control_panel._file_list.set_active(workspace_key)
+                return
             # Find the file_path for this dataset in the sidebar
             for fp, status in self.control_panel.file_statuses.items():
                 sample_name = self.control_panel.extract_sample_name(fp)
@@ -1433,7 +1460,13 @@ class MainWindow(FramelessMainWindowMixin, QMainWindow):
             source = self._normalize_session_source(raw_source)
             if source is None:
                 continue
-            key = source["file_key"]
+            mapping_state = source.get('mapping_state') or {}
+            candidate_key = mapping_state.get('multi_sample_candidate_key')
+            key = (
+                source["file_key"],
+                candidate_key or None,
+                source.get('sample_name') if candidate_key else None,
+            )
             if key in seen:
                 continue
             seen.add(key)
@@ -1516,7 +1549,7 @@ class MainWindow(FramelessMainWindowMixin, QMainWindow):
         sources = self._normalize_session_sources(session_data)
         if not sources:
             return None
-        files = [source["file_key"] for source in sources]
+        files = list(dict.fromkeys(source["file_key"] for source in sources))
 
         timestamp = str(session_data.get("timestamp") or "")
         date = str(session_data.get("date") or "")
@@ -1556,7 +1589,15 @@ class MainWindow(FramelessMainWindowMixin, QMainWindow):
     def _session_match_key(self, session_data: dict) -> tuple[str, ...]:
         sources = session_data.get("sources")
         if sources:
-            return tuple(sorted(self._source_file_key(source) for source in sources))
+            identities = []
+            for source in sources:
+                mapping_state = source.get('mapping_state') or {}
+                candidate_key = mapping_state.get('multi_sample_candidate_key')
+                identity = self._source_file_key(source)
+                if candidate_key:
+                    identity = f"{identity}::{candidate_key}"
+                identities.append(identity)
+            return tuple(sorted(identities))
         return tuple(sorted(self._normalize_session_files(session_data.get("files", []))))
 
     def _load_recent_sessions(self) -> List[dict]:
@@ -1653,6 +1694,20 @@ class MainWindow(FramelessMainWindowMixin, QMainWindow):
                 if normalized not in seen_files:
                     seen_files.add(normalized)
                     current_files.append(normalized)
+                source_state = source.get('mapping_state') or {}
+                source_identity = (
+                    normalized,
+                    source_state.get('multi_sample_candidate_key'),
+                    source.get('sample_name'),
+                )
+                if source_identity not in {
+                    (
+                        existing['file_key'],
+                        (existing.get('mapping_state') or {}).get('multi_sample_candidate_key'),
+                        existing.get('sample_name'),
+                    )
+                    for existing in current_sources
+                }:
                     current_sources.append(source)
 
             sample_name = getattr(dataset, "sample_name", "")
@@ -1905,6 +1960,18 @@ class MainWindow(FramelessMainWindowMixin, QMainWindow):
             self._save_recent_file(file_path)
 
     def _on_external_load_file_failed(self, file_path: str, detail: str):
+        if is_multi_sample_confirmation_message(detail):
+            self.control_panel.register_external_issue(
+                file_path,
+                detail,
+                status="confirmation",
+            )
+            self.add_multi_sample_confirmation_tab(file_path, detail)
+            if self._external_load_context is not None:
+                self._external_load_context.setdefault(
+                    "confirmation_files", []
+                ).append(file_path)
+            return
         self.control_panel.register_external_issue(file_path, detail, status="review")
         self.update_error_tab_message(file_path, detail)
 
@@ -1922,6 +1989,7 @@ class MainWindow(FramelessMainWindowMixin, QMainWindow):
         loaded = summary.get("loaded", 0)
         canceled = summary.get("canceled", False)
         failed_files = context.get("failed_files", [])
+        confirmation_files = context.get("confirmation_files", [])
         missing_files = context.get("missing_files", [])
         skipped_count = context.get("skipped_count", 0)
 
@@ -1932,7 +2000,7 @@ class MainWindow(FramelessMainWindowMixin, QMainWindow):
 
         self._update_welcome_recents()
 
-        if loaded or skipped_count:
+        if loaded or skipped_count or confirmation_files:
             self._hide_welcome()
 
         if mode == "session":
@@ -1943,6 +2011,8 @@ class MainWindow(FramelessMainWindowMixin, QMainWindow):
                 details.append(f"{skipped_count} already open")
             if failed_files:
                 details.append(f"{len(failed_files)} failed")
+            if confirmation_files:
+                details.append(f"{len(confirmation_files)} awaiting sample review")
             headline = "Session restored" if not failed_files and not missing_files else "Session restore complete"
             detail = f"{loaded} loaded"
             if details:
@@ -1951,10 +2021,21 @@ class MainWindow(FramelessMainWindowMixin, QMainWindow):
             status = f"Resumed session: {detail}"
         else:
             requested_label = context.get("requested_label", "dataset")
-            headline = "Dataset opened" if not failed_files and not canceled else "Open complete"
-            detail = f"{loaded} loaded"
+            if confirmation_files and not failed_files and not canceled:
+                headline = "Review detected samples"
+                detail = (
+                    f"{len(confirmation_files)} file"
+                    f"{'s' if len(confirmation_files) != 1 else ''} awaiting confirmation"
+                )
+            else:
+                headline = "Dataset opened" if not failed_files and not canceled else "Open complete"
+                detail = f"{loaded} loaded"
             ok = not failed_files and not canceled
-            status = f"Opened: {requested_label}" if ok else f"Open complete: {detail}"
+            status = (
+                "Detected samples are ready for review"
+                if confirmation_files and not failed_files
+                else (f"Opened: {requested_label}" if ok else f"Open complete: {detail}")
+            )
 
         self._show_status_message(status, ok=ok)
 
@@ -2054,7 +2135,7 @@ class MainWindow(FramelessMainWindowMixin, QMainWindow):
         path_set = set(selected_paths)
         filtered = [t for t in self.dataset_tabs
                     if hasattr(t, 'dataset') and hasattr(t.dataset, 'file_path')
-                    and t.dataset.file_path in path_set]
+                    and getattr(t.dataset, '_workspace_key', t.dataset.file_path) in path_set]
         return filtered if filtered else self.dataset_tabs
 
     def _dataset_paths_for_tabs(self, dataset_tabs) -> list[str]:
@@ -2062,7 +2143,10 @@ class MainWindow(FramelessMainWindowMixin, QMainWindow):
         paths: list[str] = []
         for tab in dataset_tabs:
             dataset = tab.get_dataset() if hasattr(tab, "get_dataset") else getattr(tab, "dataset", None)
-            file_path = getattr(dataset, "file_path", "") if dataset is not None else ""
+            file_path = (
+                getattr(dataset, "_workspace_key", getattr(dataset, "file_path", ""))
+                if dataset is not None else ""
+            )
             if file_path:
                 paths.append(file_path)
         return paths
@@ -2075,7 +2159,7 @@ class MainWindow(FramelessMainWindowMixin, QMainWindow):
             dataset = tab.get_dataset() if hasattr(tab, "get_dataset") else getattr(tab, "dataset", None)
             if dataset is None:
                 continue
-            file_path = getattr(dataset, "file_path", "")
+            file_path = getattr(dataset, "_workspace_key", getattr(dataset, "file_path", ""))
             if file_path:
                 self.control_panel.update_sample_group(
                     file_path,
@@ -2314,6 +2398,30 @@ class MainWindow(FramelessMainWindowMixin, QMainWindow):
             self._refresh_dataset_tab_icons()
             self._show_status_message(f"Mapping required: {file_name}")
 
+    def add_multi_sample_confirmation_tab(self, file_path: str, message: str):
+        """Add a neutral review surface for detected multi-sample candidates."""
+        bulk_mode = self._bulk_dataset_add_depth > 0
+        self._hide_welcome()
+        review_tab = ErrorTab(
+            file_path,
+            message,
+            self,
+            issue_variant="multi_sample_confirmation",
+        )
+        review_tab.dataset_fixed.connect(self.on_dataset_fixed)
+        file_name = os.path.basename(file_path)
+        index = self.dataset_tabs_widget.addTab(review_tab, file_name)
+        self.dataset_tabs_widget.setTabToolTip(index, file_name)
+        self.dataset_tabs_widget.tabBar().setTabTextColor(index, QColor(C.OLIVE_DK))
+        if bulk_mode:
+            self._bulk_dataset_add_dirty = True
+            self._bulk_dataset_add_last_index = index
+            self._bulk_dataset_add_last_label = file_name
+        else:
+            self.dataset_tabs_widget.setCurrentIndex(index)
+            self._refresh_dataset_tab_icons()
+            self._show_status_message(f"Review detected samples: {file_name}")
+
     def _remove_error_tab(self, file_path: str) -> bool:
         for i in range(self.dataset_tabs_widget.count()):
             widget = self.dataset_tabs_widget.widget(i)
@@ -2324,7 +2432,7 @@ class MainWindow(FramelessMainWindowMixin, QMainWindow):
 
     def _remove_tabs_for_file(self, file_path: str) -> int:
         """Remove stale error/dataset tabs for a file before adding corrected data."""
-        return self._remove_tabs_for_files([file_path])
+        return MainWindow._remove_tabs_for_files(self, [file_path])
 
     def _remove_tabs_for_files(self, file_paths) -> int:
         """Remove tabs for several files and synchronize dependent views once."""
@@ -2340,7 +2448,10 @@ class MainWindow(FramelessMainWindowMixin, QMainWindow):
         try:
             for i in range(self.dataset_tabs_widget.count() - 1, -1, -1):
                 widget = self.dataset_tabs_widget.widget(i)
-                if self._tab_file_path(widget) not in path_set:
+                if (
+                    MainWindow._tab_file_path(self, widget) not in path_set
+                    and MainWindow._tab_workspace_key(self, widget) not in path_set
+                ):
                     continue
 
                 removed_widget_ids.add(id(widget))
@@ -2376,6 +2487,16 @@ class MainWindow(FramelessMainWindowMixin, QMainWindow):
         if dataset is not None:
             tab_file_path = getattr(dataset, "file_path", tab_file_path)
         return tab_file_path
+
+    def _tab_workspace_key(self, widget) -> str | None:
+        dataset = getattr(widget, "dataset", None)
+        if dataset is not None:
+            return getattr(
+                dataset,
+                "_workspace_key",
+                getattr(dataset, "file_path", None),
+            )
+        return MainWindow._tab_file_path(self, widget)
 
     def _has_open_tabs_for_file(self, file_path: str) -> bool:
         if not file_path:
@@ -2446,9 +2567,10 @@ class MainWindow(FramelessMainWindowMixin, QMainWindow):
 
         self.add_error_tab(file_path, error_message)
 
-    def close_dataset_tab(self, index: int):
+    def close_dataset_tab(self, index: int, *, sync_sidebar: bool = True):
         widget = self.dataset_tabs_widget.widget(index)
         file_path = self._tab_file_path(widget)
+        workspace_key = MainWindow._tab_workspace_key(self, widget)
 
         if widget in self.dataset_tabs:
             self.dataset_tabs.remove(widget)
@@ -2463,7 +2585,13 @@ class MainWindow(FramelessMainWindowMixin, QMainWindow):
         self.reporting_tab.set_dataset_tabs(self.dataset_tabs)
         self._update_export_tab()
         self._refresh_dataset_status_segments()
-        if file_path and not self._has_open_tabs_for_file(file_path):
+        if sync_sidebar and workspace_key and workspace_key != file_path:
+            self.control_panel.remove_file_by_path(
+                workspace_key,
+                sync_workspace=False,
+                announce=False,
+            )
+        elif sync_sidebar and file_path and not self._has_open_tabs_for_file(file_path):
             self.control_panel.remove_file_by_path(
                 file_path,
                 sync_workspace=False,

@@ -331,6 +331,60 @@ def _extract_raw_sieve_from_rows(rows: list[list[str]], mapping_state: Mapping[s
     )
 
 
+def _extract_raw_sieve_ranges_from_rows(
+    rows: list[list[str]], mapping_state: Mapping[str, Any]
+) -> tuple[list[float], list[float]]:
+    ranges = [
+        mapping_state.get("selected_size_range") or [],
+        mapping_state.get("selected_empty_range") or [],
+        mapping_state.get("selected_full_range") or [],
+    ]
+    if not all(ranges) or len({len(values) for values in ranges}) != 1:
+        raise ValueError("Mapped raw sieve source is missing three matching cell ranges")
+
+    positions = [
+        sorted((int(row), int(col)) for row, col in values)
+        for values in ranges
+    ]
+    sieve_sizes: list[float] = []
+    empty_weights: list[float] = []
+    full_weights: list[float] = []
+    pan_retained_weight = 0.0
+
+    for size_pos, empty_pos, full_pos in zip(*positions):
+        try:
+            size_text = rows[size_pos[0]][size_pos[1]]
+            empty_text = rows[empty_pos[0]][empty_pos[1]]
+            full_text = rows[full_pos[0]][full_pos[1]]
+        except (IndexError, TypeError):
+            continue
+        if not (_is_numeric(empty_text) and _is_numeric(full_text)):
+            continue
+        empty = _coerce_float(empty_text)
+        full = _coerce_float(full_text)
+        if str(size_text).strip().lower() in {"pan", "bund", "bottom"}:
+            if full >= empty:
+                pan_retained_weight += full - empty
+            continue
+        if not _is_numeric(size_text):
+            continue
+        size = _coerce_float(size_text)
+        if size <= 0:
+            continue
+        sieve_sizes.append(size)
+        empty_weights.append(empty)
+        full_weights.append(full)
+
+    if len(sieve_sizes) < 3:
+        raise ValueError("Mapped raw sieve ranges contain fewer than three valid sieve rows")
+    return calculate_sieve_percent_passing(
+        sieve_sizes,
+        empty_weights,
+        full_weights,
+        pan_retained_weight=pan_retained_weight,
+    )
+
+
 def _load_mapped_source(source: Mapping[str, Any]) -> GrainSizeData:
     mapping_state = source.get("mapping_state") or {}
     if not isinstance(mapping_state, Mapping):
@@ -341,7 +395,14 @@ def _load_mapped_source(source: Mapping[str, Any]) -> GrainSizeData:
     sheet_name = source.get("sheet_name") or sheet_from_key or mapping_state.get("current_sheet")
     rows = _load_rows(file_path, sheet_name=sheet_name)
 
-    if mapping_state.get("raw_sieve_mode"):
+    if (
+        mapping_state.get("raw_sieve_mode")
+        and mapping_state.get("calculated_selection_mode") == "range"
+    ):
+        particle_sizes, percent_passing = _extract_raw_sieve_ranges_from_rows(
+            rows, mapping_state
+        )
+    elif mapping_state.get("raw_sieve_mode"):
         particle_sizes, percent_passing = _extract_raw_sieve_from_rows(rows, mapping_state)
     elif mapping_state.get("calculated_selection_mode") == "range":
         particle_sizes, percent_passing = _extract_ranges_from_rows(rows, mapping_state)

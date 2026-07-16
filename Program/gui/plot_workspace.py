@@ -36,7 +36,7 @@ from .sidebar_controls import (
     make_axis_row, make_color_row, make_combo_row, make_dspin_row,
     make_spin_row, make_toggle_row, set_swatch_color,
 )
-from .plot_renderers import apply_legend_aware_layout
+from .plot_renderers import apply_grid_style, apply_legend_aware_layout
 from .plot_text_options import (
     GlobalPlotStylingPlaceholderDialog,
     PlotTextOptionsDialog,
@@ -154,8 +154,8 @@ class PlotWorkspace(QWidget):
         self.log_k_y_scale = False
 
         # Per-workspace custom style — starts as None (preset is authoritative).
-        # Populated when the user tweaks any field in the "Legend & Typography"
-        # section; cleared when the user picks a different preset or clicks Reset.
+        # Populated when the user tweaks any field in the shared style controls;
+        # cleared when the user picks a different preset or clicks Reset.
         self._custom_style: Optional[PlotStyle] = None
 
         self._init_ui()
@@ -730,7 +730,6 @@ class PlotWorkspace(QWidget):
             CollapsibleSection.OLIVE, expanded=True,
         )
         for label_text, checked, row_attr, switch_attr in [
-            ("Show grid lines",      True,  "_row_grid",        "_sw_grid"),
             ("Show soil zones",      False, "_row_zones",       "_sw_zones"),
             ("Show D10 / D50 / D60", True,  "_row_dlines",      "_sw_dlines"),
         ]:
@@ -777,7 +776,7 @@ class PlotWorkspace(QWidget):
             include_reset=True,
         )
         self._style_control_sections.style_changed.connect(
-            lambda changes: self._update_style_fields(**changes)
+            self._on_shared_style_changed
         )
         self._style_control_sections.reset_requested.connect(
             self._on_reset_custom_style
@@ -804,6 +803,13 @@ class PlotWorkspace(QWidget):
         self._marker_mode_combo = self._style_control_sections.marker_mode_combo
         self._row_marker_size = self._style_control_sections.row_marker_size
         self._marker_size_spin = self._style_control_sections.marker_size_spin
+        self._grid_show_switch = self._style_control_sections.grid_show_switch
+        self._minor_grid_switch = self._style_control_sections.minor_grid_switch
+        self._grid_style_combo = self._style_control_sections.grid_style_combo
+        self._grid_alpha_spin = self._style_control_sections.grid_alpha_spin
+        self._minor_grid_alpha_spin = (
+            self._style_control_sections.minor_grid_alpha_spin
+        )
 
         self._row_k_label_size, self._k_label_size_spin = self._spin_row(
             "K value label size", 5, 14)
@@ -1022,12 +1028,15 @@ class PlotWorkspace(QWidget):
 
     def _on_style_changed(self, style_name: str):
         # Switching presets discards any per-field customizations — the preset
-        # becomes authoritative again. The "Legend & Typography" widgets resync
+        # becomes authoritative again. The shared style widgets resync
         # to the new preset values below.
         self._custom_style = None
         preset = get_style(style_name)
         if self.plot_widget:
             self.plot_widget.set_style(preset)
+        self._sync_grid_quick_toggle(
+            preset.grid_show or preset.show_minor_grid
+        )
         self._sync_advanced_style_widgets(preset)
         self._sync_reset_button()
         self.refresh_plot()
@@ -1072,6 +1081,27 @@ class PlotWorkspace(QWidget):
             self.plot_widget.set_style(self._custom_style)
         self._sync_reset_button()
         self.refresh_plot()
+
+    def _on_shared_style_changed(self, changes: dict) -> None:
+        if {"grid_show", "show_minor_grid"} & changes.keys():
+            style = self._effective_style()
+            major_visible = bool(changes.get("grid_show", style.grid_show))
+            minor_visible = bool(
+                changes.get("show_minor_grid", style.show_minor_grid)
+            )
+            self._sync_grid_quick_toggle(major_visible or minor_visible)
+        self._update_style_fields(**changes)
+
+    def _sync_grid_quick_toggle(self, visible: bool) -> None:
+        self.show_grid = bool(visible)
+        if not hasattr(self, "_chk_grid"):
+            return
+        self._chk_grid.blockSignals(True)
+        self._chk_grid.setChecked(self.show_grid)
+        self._chk_grid.setProperty("active", self.show_grid)
+        self._chk_grid.style().unpolish(self._chk_grid)
+        self._chk_grid.style().polish(self._chk_grid)
+        self._chk_grid.blockSignals(False)
 
     def _on_legend_location_changed(self, index: int) -> None:
         """Apply both legend_loc and legend_bbox_to_anchor from the dropdown."""
@@ -1143,6 +1173,9 @@ class PlotWorkspace(QWidget):
         preset = get_style(self._style_sel.currentText())
         if self.plot_widget:
             self.plot_widget.set_style(preset)
+        self._sync_grid_quick_toggle(
+            preset.grid_show or preset.show_minor_grid
+        )
         self._sync_advanced_style_widgets(preset)
         self._sync_reset_button()
         self.refresh_plot()
@@ -1152,8 +1185,23 @@ class PlotWorkspace(QWidget):
         self.show_legend = self._chk_legend.isChecked()
         self.show_zones = self._chk_zones.isChecked()
         self.show_dlines = self._chk_dlines.isChecked()
+        base = self._custom_style or get_style(self._style_sel.currentText())
+        grid_changes = {}
+        if not self.show_grid:
+            grid_changes = {
+                "grid_show": False,
+                "show_minor_grid": False,
+            }
+        elif not (base.grid_show or base.show_minor_grid):
+            grid_changes = {"grid_show": True}
+        if any(getattr(base, key) != value for key, value in grid_changes.items()):
+            self._custom_style = dataclasses.replace(base, **grid_changes)
+            if self.plot_widget:
+                self.plot_widget.set_style(self._custom_style)
+            self._sync_advanced_style_widgets(self._custom_style)
+            self._sync_reset_button()
+
         # Sync sidebar toggle switches (if visible)
-        self._sw_grid.setChecked(self.show_grid, animate=False)
         self._sw_zones.setChecked(self.show_zones, animate=False)
         self._sw_dlines.setChecked(self.show_dlines, animate=False)
 
@@ -1162,7 +1210,6 @@ class PlotWorkspace(QWidget):
 
     def _on_sidebar_toggle_changed(self, _on: bool):
         """Sync sidebar toggle switches back to toolbar checks."""
-        self.show_grid = self._sw_grid.isChecked()
         self.show_zones = self._sw_zones.isChecked()
         self.show_dlines = self._sw_dlines.isChecked()
         self.fill_curve = self._sw_fill.isChecked()
@@ -1171,13 +1218,6 @@ class PlotWorkspace(QWidget):
         self.log_k_y_scale = self._sw_k_log.isChecked()
 
         # Sync toolbar check buttons
-        self._chk_grid.blockSignals(True)
-        self._chk_grid.setChecked(self.show_grid)
-        self._chk_grid.setProperty("active", self.show_grid)
-        self._chk_grid.style().unpolish(self._chk_grid)
-        self._chk_grid.style().polish(self._chk_grid)
-        self._chk_grid.blockSignals(False)
-
         self._chk_zones.blockSignals(True)
         self._chk_zones.setChecked(self.show_zones)
         self._chk_zones.setProperty("active", self.show_zones)
@@ -1263,7 +1303,6 @@ class PlotWorkspace(QWidget):
             self._lbl_ymax.setText("Y max (%)")
 
         # Sidebar section rows
-        self._set_context_visibility(self._row_grid, True)
         self._set_context_visibility(self._row_zones, supports_zones)
         self._set_context_visibility(self._row_dlines, supports_dlines)
         self._set_context_visibility(self._row_fill, supports_fill)
@@ -1286,7 +1325,6 @@ class PlotWorkspace(QWidget):
         display_section_visible = any(
             not row.isHidden()
             for row in (
-                self._row_grid,
                 self._row_zones,
                 self._row_dlines,
                 self._row_fill,
@@ -1424,10 +1462,7 @@ class PlotWorkspace(QWidget):
                                ha='right', fontsize=style.tick_fontsize)
             ax.set_facecolor(style.axes_facecolor)
             ax.tick_params(labelsize=style.tick_fontsize)
-            if self.show_grid and style.grid_show:
-                ax.grid(True, alpha=style.grid_alpha,
-                        linestyle=style.grid_linestyle,
-                        color=style.grid_color, linewidth=style.grid_linewidth)
+            apply_grid_style(ax, style, self.show_grid, axis="y")
         else:
             ax.bar(range(len(rows)), weights,
                    tick_label=tick_labels)
