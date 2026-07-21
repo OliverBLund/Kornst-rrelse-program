@@ -5,6 +5,7 @@ Regression tests for export manager CSV filtering behavior.
 import csv
 import json
 import os
+import re
 import sys
 import tempfile
 import unittest
@@ -1288,7 +1289,7 @@ class TestExportTabConfig(unittest.TestCase):
         for tabs in self.tab.findChildren(QTabWidget):
             tab_sets.append({tabs.tabText(index) for index in range(tabs.count())})
         self.assertTrue(any(
-            {'Data tables', 'Individual plots', 'Comparison plots'}.issubset(labels)
+            {'Data', 'Individual', 'Comparison'}.issubset(labels)
             for labels in tab_sets
         ))
 
@@ -1312,7 +1313,7 @@ class TestExportTabConfig(unittest.TestCase):
 
     def test_plot_actions_are_contextual_to_selected_plots(self):
         self.assertFalse(hasattr(self.tab, 'plot_options_btn'))
-        self.assertEqual(self.tab.open_dataset_btn.text(), 'Open Source Sample')
+        self.assertEqual(self.tab.open_dataset_btn.text(), 'Go to Sample')
         self.assertTrue(self.tab.export_btn.text().startswith('Export'))
 
     def test_excel_format_defaults_to_combined_workbook(self):
@@ -1340,6 +1341,7 @@ class TestExportTabConfig(unittest.TestCase):
                 'pdf': False,
             },
         )
+        self.assertFalse(config['include_collection_aggregates'])
         self.assertFalse(config['grain_distribution'])
         self.assertEqual(config['selected_percentiles'], ['d10', 'd30', 'd50', 'd60'])
         self.assertFalse(config['plots'])
@@ -1408,18 +1410,18 @@ class TestExportTabConfig(unittest.TestCase):
         config = self.tab._build_export_config()
         self.assertIn('k_distribution', config['selected_plot_types'])
 
-    def test_plot_content_options_are_written_to_export_config(self):
+    def test_plot_legend_option_and_style_owned_grid_are_written_to_export_config(self):
         self.tab._toggle_content_item('plots', 'include_legend', False)
-        self.tab._toggle_content_item('plots', 'include_grid', False)
         self.tab._toggle_content_item('plots', 'k_value_bar', True)
 
         config = self.tab._build_export_config()
 
         self.assertFalse(config['plot_include_legend'])
-        self.assertFalse(config['plot_include_grid'])
+        self.assertTrue(config['plot_include_grid'])
         self.assertEqual(config['selected_plot_types'], ['grain_size_curve', 'k_value_bar'])
         self.assertEqual(config['plot_contexts'][0]['style'], PROFESSIONAL_STYLE)
-        self.assertFalse(config['plot_contexts'][0]['show_grid'])
+        self.assertTrue(config['plot_contexts'][0]['show_grid'])
+        self.assertTrue(config['plot_contexts'][0]['show_legend'])
 
     def test_disabling_grain_size_plot_item_disables_plot_export(self):
         self.tab._toggle_content_item('plots', 'grain_size_curve', False)
@@ -1652,7 +1654,11 @@ class TestExportTabConfig(unittest.TestCase):
         self.assertEqual(plot_folder.child(0).text(0), self.dataset.sample_name)
         self.assertEqual(plot_folder.child(1).text(0), 'Sample B')
         self.assertGreater(plot_folder.child(0).childCount(), 0)
-        self.assertEqual(plot_folder.child(0).child(0).text(0), 'plot.png')
+        planned_name = plot_folder.child(0).child(0).text(0)
+        self.assertRegex(
+            planned_name,
+            rf'^{re.escape(self.dataset.sample_name)}_results_\d{{8}}_plot\.png$',
+        )
 
     def test_grouped_plot_queue_selection_still_targets_dataset(self):
         other_dataset = build_dataset('Sample B')

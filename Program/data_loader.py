@@ -17,6 +17,11 @@ from grain_classification import (
 import logging
 import pandas as pd
 import numpy as np
+from delimited_text import (
+    DELIMITED_TEXT_EXTENSIONS,
+    detect_delimiter as detect_text_delimiter,
+    detect_text_encoding,
+)
 
 # Set up logging
 logging.basicConfig(level=logging.INFO)
@@ -693,7 +698,7 @@ class DataLoader:
     """Main data loader class for grain size analysis"""
 
     def __init__(self):
-        self.supported_formats = ['.csv', '.xlsx', '.xls']
+        self.supported_formats = ['.csv', '.txt', '.xlsx', '.xls']
         self.loaded_datasets: List[GrainSizeData] = []
 
     def load_file(self, file_path: str) -> GrainSizeData:
@@ -705,7 +710,7 @@ class DataLoader:
         if file_ext not in self.supported_formats:
             raise ValueError(f"Unsupported file format: {file_ext}")
 
-        if file_ext == '.csv':
+        if file_ext in DELIMITED_TEXT_EXTENSIONS:
             return self._load_csv(file_path)
         elif file_ext in ['.xlsx', '.xls']:
             return self._load_excel(file_path)
@@ -743,89 +748,11 @@ class DataLoader:
             return float(value.strip().replace(',', '.'))
 
     def _detect_delimiter(self, file_path: str) -> tuple:
-        """
-        Simple delimiter detection - try common delimiters and return best match
-        Returns: (delimiter, confidence_score)
-        """
-        delimiters = [',', ';', '\t', '|']
-
-        try:
-            with open(file_path, 'r', encoding='utf-8') as file:
-                # Read first few lines for analysis
-                sample_lines = []
-                for i, line in enumerate(file):
-                    if i >= 10:  # Analyze first 10 lines
-                        break
-                    sample_lines.append(line.strip())
-        except Exception:
-            return ',', 0.5  # Default fallback
-
-        if not sample_lines:
-            return ',', 0.5
-
-        best_delimiter = ','
-        best_score = 0
-
-        for delimiter in delimiters:
-            score = self._score_delimiter(sample_lines, delimiter)
-            if score > best_score:
-                best_score = score
-                best_delimiter = delimiter
-
-        return best_delimiter, best_score
-
-    def _score_delimiter(self, sample_lines: list, delimiter: str) -> float:
-        """Score a delimiter based on consistency and data patterns"""
-        if not sample_lines:
-            return 0.0
-
-        # Count columns in each line
-        column_counts = []
-        numeric_column_counts = []
-
-        for line in sample_lines:
-            if not line:
-                continue
-
-            parts = line.split(delimiter)
-            column_counts.append(len(parts))
-
-            # Count numeric columns (handle both US and European decimal formats)
-            numeric_count = 0
-            for part in parts:
-                try:
-                    # Try standard US format first
-                    float(part.strip())
-                    numeric_count += 1
-                except ValueError:
-                    try:
-                        # Try European format (comma as decimal separator)
-                        float(part.strip().replace(',', '.'))
-                        numeric_count += 1
-                    except ValueError:
-                        pass
-            numeric_column_counts.append(numeric_count)
-
-        if not column_counts:
-            return 0.0
-
-        # Consistency score - prefer consistent column counts
-        most_common_count = max(set(column_counts), key=column_counts.count)
-        consistency = column_counts.count(most_common_count) / len(column_counts)
-
-        # Prefer at least 2 columns
-        if most_common_count < 2:
-            return 0.0
-
-        # Numeric data score - expect some numeric columns
-        avg_numeric = sum(numeric_column_counts) / len(numeric_column_counts) if numeric_column_counts else 0
-        numeric_score = min(1.0, avg_numeric / 2)  # Normalize expecting ~2 numeric columns
-
-        # Combined score
-        return consistency * 0.7 + numeric_score * 0.3
+        """Detect the shared CSV/TXT delimiter and return its confidence."""
+        return detect_text_delimiter(file_path)
 
     def _load_csv(self, file_path: str) -> GrainSizeData:
-        """Load CSV file with flexible format detection"""
+        """Load a CSV or delimited TXT file with flexible format detection."""
         try:
             # First detect the best delimiter
             delimiter, confidence = self._detect_delimiter(file_path)
@@ -856,18 +783,18 @@ class DataLoader:
                     pass
 
             if dataset is None:
-                raise ValueError(f"Could not parse CSV file format in {file_path}")
+                raise ValueError(f"Could not parse delimited text format in {file_path}")
 
             return dataset
 
         except Exception as e:
-            raise ValueError(f"Error reading CSV file {file_path}: {str(e)}")
+            raise ValueError(f"Error reading delimited text file {file_path}: {str(e)}")
 
     def _validate_processed_csv_headers(self, file_path: str, delimiter: str) -> None:
         """Reject an explicitly retained-only processed CSV before numeric parsing."""
         passing_headers = []
         retained_headers = []
-        with open(file_path, "r", encoding="utf-8") as file:
+        with open(file_path, "r", encoding=detect_text_encoding(file_path), newline="") as file:
             reader = csv.reader(file, delimiter=delimiter)
             for row_index, row in enumerate(reader):
                 if row_index >= 20:
@@ -895,7 +822,7 @@ class DataLoader:
         particle_sizes = []
         percent_passing = []
 
-        with open(file_path, 'r', encoding='utf-8') as file:
+        with open(file_path, 'r', encoding=detect_text_encoding(file_path), newline='') as file:
             reader = csv.reader(file, delimiter=delimiter)
             data_section_started = False
 
@@ -947,7 +874,7 @@ class DataLoader:
         particle_sizes = []
         percent_passing = []
 
-        with open(file_path, 'r', encoding='utf-8') as file:
+        with open(file_path, 'r', encoding=detect_text_encoding(file_path), newline='') as file:
             reader = csv.reader(file, delimiter=delimiter)
 
             # Skip potential header row
@@ -980,7 +907,7 @@ class DataLoader:
 
     def _load_csv_multi_column(self, file_path: str, delimiter: str = ',') -> GrainSizeData:
         """Load multi-column CSV with flexible header detection"""
-        with open(file_path, 'r', encoding='utf-8') as file:
+        with open(file_path, 'r', encoding=detect_text_encoding(file_path), newline='') as file:
             reader = csv.reader(file, delimiter=delimiter)
 
             # Read first few rows to detect headers
@@ -1034,7 +961,7 @@ class DataLoader:
         percent_passing = []
 
         # Re-read file and extract data
-        with open(file_path, 'r', encoding='utf-8') as file:
+        with open(file_path, 'r', encoding=detect_text_encoding(file_path), newline='') as file:
             reader = csv.reader(file, delimiter=delimiter)
 
             # Skip to data rows

@@ -7,9 +7,10 @@ instance methods.
 
 from __future__ import annotations
 
-import csv
 import os
 from typing import List, Optional
+
+from delimited_text import DELIMITED_TEXT_EXTENSIONS, read_delimited_rows
 
 
 HEADER_KEYWORDS = (
@@ -56,13 +57,8 @@ def load_preview_rows(
     discovered_sheets = list(excel_sheets or [])
     resolved_sheet = sheet_name
 
-    if file_ext == '.csv':
-        with open(file_path, 'r', encoding='utf-8') as file:
-            reader = csv.reader(file)
-            for index, row in enumerate(reader):
-                if index >= 50:
-                    break
-                rows.append(row)
+    if file_ext in DELIMITED_TEXT_EXTENSIONS:
+        rows, _delimiter, _encoding = read_delimited_rows(file_path, limit=50)
     elif file_ext in ('.xlsx', '.xls'):
         import pandas as pd
 

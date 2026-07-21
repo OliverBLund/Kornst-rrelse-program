@@ -14,13 +14,13 @@ class ReportBrand:
 
     org_name:      str = "Danmarks Tekniske Universitet"
     org_subtitle:  str = "Department of Civil Engineering"
-    logo_path:     str = ""         # absolute path to PNG/JPG/SVG; empty = SVG placeholder
+    logo_path:     str = ""         # absolute path to PNG/JPG/SVG; empty = no cover image
     primary_color: str = "#990000"  # DTU red
 
     # ── Logo helpers ──────────────────────────────────────────────────────────
 
     def get_logo_html(self, height_px: int = 60) -> str:
-        """Return an <img> tag embedding the logo, or a generated SVG placeholder."""
+        """Return an embedded, bounded logo image or an empty string."""
         if self.logo_path and os.path.exists(self.logo_path):
             ext = os.path.splitext(self.logo_path)[1].lower().lstrip(".")
             mime = {
@@ -34,29 +34,12 @@ class ReportBrand:
                 b64 = base64.b64encode(fh.read()).decode()
             return (
                 f'<img src="data:{mime};base64,{b64}" '
-                f'style="height:{height_px}px;display:block;" alt="logo">'
+                f'class="cover-logo-image" '
+                f'style="max-height:{height_px}px;max-width:220px;'
+                f'width:auto;height:auto;object-fit:contain;display:block;" '
+                f'alt="Organization logo">'
             )
-        return self._placeholder_svg(height_px)
-
-    def _placeholder_svg(self, height_px: int) -> str:
-        color = self.primary_color
-        initials = "".join(w[0].upper() for w in self.org_name.split()[:3] if w)
-        w, h = height_px * 2, height_px
-        fs = int(h * 0.42)
-        svg = (
-            f'<svg xmlns="http://www.w3.org/2000/svg" width="{w}" height="{h}" '
-            f'viewBox="0 0 {w} {h}">'
-            f'<rect width="{w}" height="{h}" fill="{color}" rx="3"/>'
-            f'<text x="{w // 2}" y="{int(h * 0.67)}" font-family="Arial,sans-serif" '
-            f'font-size="{fs}" font-weight="bold" fill="white" '
-            f'text-anchor="middle">{initials}</text>'
-            f'</svg>'
-        )
-        b64 = base64.b64encode(svg.encode()).decode()
-        return (
-            f'<img src="data:image/svg+xml;base64,{b64}" '
-            f'style="height:{height_px}px;display:block;" alt="logo">'
-        )
+        return ""
 
     # ── Persistence ───────────────────────────────────────────────────────────
 

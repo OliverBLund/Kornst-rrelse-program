@@ -941,6 +941,34 @@ class TestReportGeneratorAppendices(unittest.TestCase):
         self.assertIn('Grain Size Analysis Report', document_xml)
         self.assertIn('Detailed Percentile Data', document_xml)
 
+    def test_docx_cover_without_optional_logo_has_valid_table_cells(self):
+        from xml.etree import ElementTree
+
+        from gui.report_brand import ReportBrand
+
+        brand = ReportBrand(logo_path='')
+        html = self.generator._create_cover_page(
+            'Grain Size Analysis Report',
+            'Technical results',
+            {'project_name': 'Test project'},
+            brand=brand,
+        )
+        docx_bytes = self.generator.generate_docx_from_html(
+            f'<html><body>{html}<h1>Results</h1></body></html>',
+            brand=brand,
+        )
+
+        with zipfile.ZipFile(io.BytesIO(docx_bytes)) as archive:
+            document = ElementTree.fromstring(archive.read('word/document.xml'))
+
+        word_ns = '{http://schemas.openxmlformats.org/wordprocessingml/2006/main}'
+        for cell in document.iter(f'{word_ns}tc'):
+            block_children = [
+                child for child in cell
+                if child.tag in {f'{word_ns}p', f'{word_ns}tbl'}
+            ]
+            self.assertTrue(block_children)
+
     def test_docx_export_switches_large_plot_pages_to_landscape(self):
         from docx import Document
 

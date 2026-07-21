@@ -1371,7 +1371,7 @@ class WelcomeWidget(QWidget):
                 "Getting Started",
                 "getting_started",
                 "fa6s.route",
-                "Tour the main navigation, Samples sidebar, settings, and activity log.",
+                "Tour the main navigation, Samples panel, settings, and activity log.",
             ),
             (
                 "Individual Samples",
@@ -1395,7 +1395,7 @@ class WelcomeWidget(QWidget):
                 "Export",
                 "export",
                 "fa6s.file-export",
-                "Tour export scope, formats, preview, and output settings.",
+                "Tour export scope, recipes, formats, plot appearance, Review, and final output.",
             ),
         ]:
             btn = QPushButton(name)

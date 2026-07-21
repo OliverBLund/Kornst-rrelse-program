@@ -13,6 +13,8 @@ import math
 import statistics
 from typing import Iterable, Mapping, Optional, Sequence
 
+from natural_order import natural_sort_key
+
 
 UNGROUPED_LABEL = "Ungrouped"
 
@@ -385,7 +387,10 @@ def build_k_aggregation(dataset_tabs: Sequence[object], options: KAggregationOpt
         if updated.included:
             included_records.append(updated)
 
-    group_names = tuple(dict.fromkeys(group_by_dataset.get(name, UNGROUPED_LABEL) for name in dataset_names))
+    group_names = tuple(sorted(
+        dict.fromkeys(group_by_dataset.get(name, UNGROUPED_LABEL) for name in dataset_names),
+        key=natural_sort_key,
+    ))
     overall = _stats_for("All selected", records, dataset_names=dataset_names, method_names=method_names)
 
     records_by_group: dict[str, list[KValueRecord]] = defaultdict(list)

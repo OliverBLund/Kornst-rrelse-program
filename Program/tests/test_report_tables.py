@@ -92,6 +92,14 @@ def test_small_comparison_does_not_recommend_excel():
     assert not analysis.excel_recommended
 
 
+def test_sample_overview_uses_degree_symbol_in_temperature_header():
+    html = comparison_html(2)
+    tables = {table.table_id: table for table in extract_report_tables(html)}
+
+    assert tables['sample-properties'].rows[0][1].text == 'Temp (\N{DEGREE SIGN}C)'
+    assert 'Temp (?C)' not in html
+
+
 def test_externalize_report_tables_replaces_only_selected_tables():
     html = """
     <html><body>

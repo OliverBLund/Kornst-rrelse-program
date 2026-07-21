@@ -193,6 +193,16 @@ class TestDatasetTabResultsTable(unittest.TestCase):
         )
         self.assertEqual(self.tab._stat_valid.text(), "2 / 3")
 
+        stats = self.tab.statistics_tab
+        self.assertEqual(stats.k_summary_card._meta_label.text(), "All active / OK only")
+        self.assertEqual(
+            stats._k_table.item(stats._k_table.rowCount() - 1, 0).text(),
+            "Included OK methods",
+        )
+        self.assertIn("Uses 2 of 3 active methods", stats._k_note.text())
+        self.assertIn("Warnings and errors are excluded", stats._k_note.text())
+        self.assertIn("Analysis > Choose K Methods", stats._k_note.text())
+
         headers = [
             self.tab.results_table.horizontalHeaderItem(column).text()
             for column in range(self.tab.results_table.columnCount())

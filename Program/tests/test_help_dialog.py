@@ -87,10 +87,15 @@ class TestHelpDialog(unittest.TestCase):
             "Weight of Sieve + Sample (g)",
             text,
         )
-        self.assertEqual(text.count("This works because:"), 4)
+        self.assertEqual(text.count("This works because:"), 5)
         irregular_position = text.index("5. Irregular Excel: Automatic or Mapper")
         self.assertGreater(irregular_position, positions[-1])
         self.assertLess(irregular_position, text.index("Choose the Correct Import"))
+        experimental_position = text.index(
+            "Experimental: Multiple Samples in One File"
+        )
+        self.assertGreater(experimental_position, irregular_position)
+        self.assertLess(experimental_position, text.index("Choose the Correct Import"))
         self.assertIn("Why a gibberish header may still load", text)
         self.assertIn("uncertain sheets open the mapper", text)
 

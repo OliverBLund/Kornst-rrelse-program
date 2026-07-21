@@ -74,6 +74,8 @@ def style_dialog_button(button: QPushButton, style: str = "secondary") -> None:
             f"border-color: {C.BORDER_DK}; color: {C.TEXT}; }}"
             f"QPushButton:pressed {{ background: {C.BG_LOW}; "
             f"border-color: {C.EARTH}; color: {C.TEXT}; }}"
+            f"QPushButton:disabled {{ background: {C.BG_LOW}; "
+            f"border-color: {C.BORDER}; color: {C.TEXT_MUTED}; }}"
         )
 
 

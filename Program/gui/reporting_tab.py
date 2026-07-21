@@ -1288,7 +1288,7 @@ class ReportingTab(QWidget):
         lhdr.setContentsMargins(0, 0, 0, 4)
         llay.addWidget(lhdr)
 
-        self._logo_drop = QPushButton("  Upload logo (PNG, SVG) \u2014 click to browse")
+        self._logo_drop = QPushButton("  Add optional logo (PNG, JPG, SVG)")
         self._logo_drop.setIcon(theme_icon("fa6s.upload", C.TEXT_MUTED, 14))
         self._logo_drop.setIconSize(QSize(14, 14))
         self._logo_drop.setCursor(Qt.CursorShape.PointingHandCursor)
@@ -1310,7 +1310,33 @@ class ReportingTab(QWidget):
             }}
         """)
         self._logo_drop.clicked.connect(self._pick_logo)
-        llay.addWidget(self._logo_drop)
+        logo_actions = QHBoxLayout()
+        logo_actions.setContentsMargins(0, 0, 0, 0)
+        logo_actions.setSpacing(6)
+        logo_actions.addWidget(self._logo_drop, 1)
+
+        self._logo_clear_btn = QPushButton("Remove")
+        self._logo_clear_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        self._logo_clear_btn.setFixedSize(76, 58)
+        self._logo_clear_btn.setToolTip("Use a clean text-only cover")
+        self._logo_clear_btn.setStyleSheet(f"""
+            QPushButton {{
+                background: rgba(255,255,255,0.45);
+                border: 1px solid {C.BORDER};
+                border-radius: 5px;
+                color: {C.TEXT_MID};
+                font-family: "{F.UI}";
+                font-size: {F.SZ_MD}pt;
+            }}
+            QPushButton:hover {{
+                border-color: {C.BORDER_DK};
+                color: {C.TEXT};
+                background: {C.BG};
+            }}
+        """)
+        self._logo_clear_btn.clicked.connect(self._clear_logo)
+        logo_actions.addWidget(self._logo_clear_btn)
+        llay.addLayout(logo_actions)
 
         # Notes
         notes_wrap = QWidget()
@@ -1796,8 +1822,23 @@ class ReportingTab(QWidget):
         self._scheme = scheme
         self.report_generator.set_scheme(scheme)
 
-    def set_dataset_tabs(self, dataset_tabs: List) -> None:
-        self.dataset_tabs = list(dataset_tabs)
+    def set_dataset_tabs(
+        self,
+        dataset_tabs: List,
+        *,
+        preserve_report_if_unchanged: bool = False,
+    ) -> None:
+        incoming_tabs = list(dataset_tabs)
+        tabs_unchanged = (
+            len(incoming_tabs) == len(self.dataset_tabs)
+            and all(
+                incoming is current
+                for incoming, current in zip(incoming_tabs, self.dataset_tabs)
+            )
+        )
+        if preserve_report_if_unchanged and tabs_unchanged:
+            return
+        self.dataset_tabs = incoming_tabs
         self._refresh_sample_list()
 
     @staticmethod
@@ -1986,13 +2027,21 @@ class ReportingTab(QWidget):
             self.brand.save()
             self._refresh_logo_button()
 
+    def _clear_logo(self) -> None:
+        self.brand.logo_path = ""
+        self.brand.save()
+        self._refresh_logo_button()
+
     def _refresh_logo_button(self) -> None:
-        if self.brand.logo_path and os.path.exists(self.brand.logo_path):
+        has_logo = bool(self.brand.logo_path and os.path.exists(self.brand.logo_path))
+        if has_logo:
             self._logo_drop.setIcon(theme_icon("fa6s.check", C.OLIVE, 14))
             self._logo_drop.setText(f"  {os.path.basename(self.brand.logo_path)}")
         else:
             self._logo_drop.setIcon(theme_icon("fa6s.upload", C.TEXT_MUTED, 14))
-            self._logo_drop.setText("  Upload logo (PNG, SVG) \u2014 click to browse")
+            self._logo_drop.setText("  Add optional logo (PNG, JPG, SVG)")
+        if hasattr(self, "_logo_clear_btn"):
+            self._logo_clear_btn.setVisible(has_logo)
 
     @staticmethod
     def _normalized_report_color(value: str) -> str:

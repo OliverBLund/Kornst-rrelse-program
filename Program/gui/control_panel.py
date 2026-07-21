@@ -2910,7 +2910,7 @@ class ControlPanel(QFrame):
             self,
             title,
             "",
-            "All Supported (*.csv *.xlsx *.xls);;CSV files (*.csv);;Excel files (*.xlsx *.xls);;All files (*.*)"
+            "All Supported (*.csv *.txt *.xlsx *.xls);;Delimited text (*.csv *.txt);;CSV files (*.csv);;Text files (*.txt);;Excel files (*.xlsx *.xls);;All files (*.*)"
         )
 
         if file_paths:
@@ -2983,7 +2983,7 @@ class ControlPanel(QFrame):
             self,
             "Multiple Samples in One File (Experimental)",
             "",
-            "Supported files (*.csv *.xlsx *.xls);;Excel files (*.xlsx *.xls);;CSV files (*.csv);;All files (*.*)",
+            "Supported files (*.csv *.txt *.xlsx *.xls);;Delimited text (*.csv *.txt);;Excel files (*.xlsx *.xls);;CSV files (*.csv);;Text files (*.txt);;All files (*.*)",
         )
         if not file_path:
             return
@@ -4102,10 +4102,37 @@ class ControlPanel(QFrame):
         if not hasattr(self, 'main_window') or not hasattr(self.main_window, 'dataset_tabs_widget'):
             return None
 
+        tabs = []
         for i in range(self.main_window.dataset_tabs_widget.count()):
             tab = self.main_window.dataset_tabs_widget.widget(i)
-            if hasattr(tab, 'dataset') and tab.dataset is dataset:
+            if not hasattr(tab, 'dataset'):
+                continue
+            tabs.append(tab)
+            if tab.dataset is dataset:
                 return tab
+
+        target_workspace = getattr(dataset, '_workspace_key', None)
+        target_file = getattr(dataset, 'file_path', None)
+        target_name = getattr(dataset, 'sample_name', None)
+        for tab in tabs:
+            candidate = tab.dataset
+            candidate_workspace = getattr(candidate, '_workspace_key', None)
+            if target_workspace and candidate_workspace == target_workspace:
+                return tab
+            if (
+                target_file
+                and getattr(candidate, 'file_path', None) == target_file
+                and target_name
+                and getattr(candidate, 'sample_name', None) == target_name
+            ):
+                return tab
+
+        name_matches = [
+            tab for tab in tabs
+            if target_name and getattr(tab.dataset, 'sample_name', None) == target_name
+        ]
+        if len(name_matches) == 1:
+            return name_matches[0]
         return None
 
     def _remove_loaded_entries_for_file(self, file_path: str):

@@ -81,20 +81,60 @@
     <p>Processed analysis expects <strong>cumulative percent passing</strong>: the percentage of the sample finer than each particle size. Retained columns are not converted automatically because cumulative retained and per-sieve retained require different calculations. Convert cumulative retained in the source with <code>passing = 100 - retained</code>, or import the original sieve weights as <strong>Raw Sieve Weighings</strong>.</p>
   </div>
 
+  <h2 id="multi-sample-experimental">Experimental: Multiple Samples in One File</h2>
+  <p>Choose <strong>Add &gt; Multiple Samples in One File (Experimental)</strong>. This explicit command is required: ordinary <strong>Processed Sieve Data</strong> and <strong>Raw Sieve Weighings</strong> imports do not scan a table for several samples.</p>
+
+  <h3>Primary supported layout: one shared size column</h3>
+  <p class="example-meta">Maintained fixture: <code>test_data/multi_sample_shared_size.xlsx</code> &middot; Worksheet: <code>Grain size results</code> &middot; Three candidate samples</p>
+  <table class="compact-table">
+    <tr><th>Particle Size (mm)</th><th>BH-01 Percent Passing (%)</th><th>BH-02 Percent Passing (%)</th><th>BH-03 Percent Passing (%)</th></tr>
+    <tr><td>0.063</td><td>2</td><td>1</td><td>0</td></tr>
+    <tr><td>0.125</td><td>6</td><td>4</td><td>2</td></tr>
+    <tr><td>0.250</td><td>18</td><td>12</td><td>8</td></tr>
+    <tr><td>0.500</td><td>47</td><td>35</td><td>24</td></tr>
+    <tr><td>1.000</td><td>78</td><td>68</td><td>55</td></tr>
+    <tr><td>2.000</td><td>96</td><td>91</td><td>84</td></tr>
+    <tr><td>4.000</td><td>100</td><td>100</td><td>100</td></tr>
+  </table>
+  <p class="example-note"><strong>This works because:</strong> one explicit particle-size header supplies the shared millimeter values, and every other series has a sample name plus an explicit cumulative percent-passing header.</p>
+
+  <h3>Other layouts the experimental detector recognizes</h3>
+  <table>
+    <tr><th>Layout</th><th>Required column pattern</th></tr>
+    <tr><td>Repeated pairs</td><td><code>BH-01 Size</code>, <code>BH-01 Passing</code>, <code>BH-02 Size</code>, <code>BH-02 Passing</code>. Each sample has its own size and passing columns.</td></tr>
+    <tr><td>Long table</td><td><code>Sample ID</code>, <code>Particle Size</code>, <code>Cumulative Percent Passing</code>. Several rows share each explicit sample ID.</td></tr>
+  </table>
+
+  <h3>Review before importing</h3>
+  <p>The mapper proposes candidates in a checked list. Selecting one candidate highlights its source cells and previews that interpreted curve. Clear any candidate that should not be imported, then verify:</p>
+  <ul>
+    <li>the proposed sample name and source columns;</li>
+    <li>particle-size units are millimeters;</li>
+    <li>the percentage column is cumulative percent passing or finer, not retained or incremental;</li>
+    <li>the preview follows a plausible direction and remains within 0 to 100.</li>
+  </ul>
+  <p>Only checked candidates are created when you choose <strong>Import N samples</strong>.</p>
+
+  <div class="callout warning">
+    <div class="callout-title">Experimental, not a universal workbook importer</div>
+    <p>Retained values, incremental percentages such as <code>% Volume In</code>, merged or irregular headers, mixed particle-size units, and transposed tables may not produce safe candidates. Cancel the candidate review and use the ordinary mapper, or prepare each sample as a supported single-sample table. Do not import a candidate when its source columns or preview are unclear.</p>
+  </div>
+
   <h2>Choose the Correct Import</h2>
   <table>
     <tr><th>Your file contains</th><th>Open as</th><th>What happens</th></tr>
-    <tr><td>Particle size and cumulative percent passing</td><td><strong>Processed Sieve Data</strong></td><td>A clean two-column CSV may load directly. Excel and uncertain layouts open the mapper for confirmation.</td></tr>
+    <tr><td>Particle size and cumulative percent passing</td><td><strong>Processed Sieve Data</strong></td><td>A clean two-column CSV or delimited TXT table may load directly. Excel and uncertain layouts open the mapper for confirmation.</td></tr>
     <tr><td>Sieve size, empty-sieve weight, and sieve-plus-sample weight</td><td><strong>Raw Sieve Weighings</strong></td><td>The mapper confirms the weight columns, then calculates retained mass and cumulative percent passing.</td></tr>
   </table>
 
-  <h2>CSV and Excel Rules</h2>
+  <h2>Delimited Text and Excel Rules</h2>
   <table>
     <tr><th>Format</th><th>Supported files</th><th>Reliable structure</th></tr>
-    <tr><td>CSV</td><td><code>.csv</code></td><td>Plain tabular data with one delimiter, one header row, and one sample per file. Comma-separated examples are shown above.</td></tr>
+    <tr><td>CSV</td><td><code>.csv</code></td><td>Plain tabular data using a detected comma, semicolon, tab, or pipe delimiter. The comma-separated examples above use this same reader.</td></tr>
+    <tr><td>Delimited TXT</td><td><code>.txt</code></td><td>The same supported table structure as CSV, commonly written by laboratory instruments with tab or semicolon separators. Free-form text and reports are not supported.</td></tr>
     <tr><td>Excel</td><td><code>.xlsx</code>, <code>.xls</code></td><td>Use one clearly named worksheet per sample when possible. Clean and recognizable irregular sheets may load automatically; uncertain sheets open the mapper.</td></tr>
   </table>
-  <p class="muted">Workbooks containing several samples in one worksheet are not imported automatically as separate datasets. Map one sample at a time until multi-sample worksheet import is added.</p>
+  <p class="muted">Ordinary imports treat one delimited table or worksheet as one dataset. To review several candidates from one supported table, use <strong>Add &gt; Multiple Samples in One File (Experimental)</strong>; otherwise map one sample at a time.</p>
 
   <h2>Validation Checklist</h2>
   <ul>

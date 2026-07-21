@@ -12,6 +12,8 @@ from dataclasses import dataclass, field
 import statistics
 from typing import Any, Iterable, Mapping, Optional, Sequence
 
+from natural_order import natural_sort_key
+
 from grain_classification import ISO14688, interpolate_at
 from k_aggregation import (
     KAggregationOptions,
@@ -150,7 +152,10 @@ def _build_grain_aggregation(
     scheme: object,
 ) -> GrainAggregationReport:
     dataset_names = tuple(item.label for item in inputs)
-    group_names = tuple(dict.fromkeys(item.group_name for item in inputs))
+    group_names = tuple(sorted(
+        dict.fromkeys(item.group_name for item in inputs),
+        key=natural_sort_key,
+    ))
     metrics_by_dataset = {
         item.label: _grain_metrics_for_dataset(item.dataset, scheme)
         for item in inputs

@@ -16,6 +16,7 @@ Layout:
 from __future__ import annotations
 
 import math
+import os
 from typing import List, Optional
 
 import numpy as np
@@ -36,6 +37,7 @@ from grain_classification import (
     permeability_class as _gc_perm_class,
 )
 from method_registry import DEFAULT_METHOD_ORDER
+from exporting.table_model import ExportTable, write_csv_table, write_excel_table
 from k_aggregation import UNGROUPED_LABEL, KAggregationOptions, dataset_group_name
 from k_calculations_v2 import CalculationStatus
 from matplotlib.figure import Figure
@@ -54,6 +56,7 @@ from PyQt6.QtWidgets import (
     QHBoxLayout,
     QHeaderView,
     QLabel,
+    QMessageBox,
     QPushButton,
     QScrollArea,
     QSizePolicy,
@@ -397,10 +400,34 @@ class ComparisonTab(QWidget):
             self,
             duration_ms=100,
         )
+        self._sync_export_action()
 
     def _on_comparison_subtab_changed(self, index: int) -> None:
         if self._tabs.tabText(index) == "Details":
             self._set_details_heat_enabled(False)
+        self._sync_export_action()
+
+    def _sync_export_action(self) -> None:
+        if not hasattr(self, '_export_btn') or not hasattr(self, '_tabs'):
+            return
+        label = self._tabs.tabText(self._tabs.currentIndex())
+        actions = {
+            'Plot': (
+                'Export Plot…',
+                'Save the active comparison figure as PNG, SVG or PDF.',
+            ),
+            'Details': (
+                'Export Details…',
+                'Save the currently visible Details table as Excel or CSV.',
+            ),
+            'Statistics': (
+                'Export Statistics…',
+                'Save the currently visible Statistics table as Excel or CSV.',
+            ),
+        }
+        text, tooltip = actions.get(label, ('Export…', 'Export the active comparison view.'))
+        self._export_btn.setText(text)
+        self._export_btn.setToolTip(tooltip)
 
     def _build_header(self) -> QWidget:
         """Top 52 px header bar — title/subtitle block + action buttons."""
@@ -456,10 +483,10 @@ class ComparisonTab(QWidget):
         self._update_btn.setEnabled(False)
         self._update_btn.clicked.connect(self.update_comparison)
 
-        self._export_btn = QPushButton("Export Selected")
+        self._export_btn = QPushButton("Export Plot…")
         self._export_btn.setFixedHeight(28)
         self._export_btn.setEnabled(False)
-        self._export_btn.clicked.connect(self._export_plot)
+        self._export_btn.clicked.connect(self._export_active_view)
         try:
             self._export_btn.setIcon(theme_icon("fa6s.file-export", C.TEXT_MID))
             self._export_btn.setIconSize(QSize(11, 11))
@@ -5430,30 +5457,174 @@ class ComparisonTab(QWidget):
 
     # ── Export ────────────────────────────────────────────────────────────────
 
-    def _export_plot(self) -> None:
-        """Save the comparison plot (Plot tab canvas) as PNG or SVG."""
-        path, _ = QFileDialog.getSaveFileName(
+    def _export_active_view(self) -> None:
+        label = self._tabs.tabText(self._tabs.currentIndex())
+        if label == 'Details':
+            self._export_details()
+        elif label == 'Statistics':
+            self._export_statistics()
+        else:
+            self._export_plot()
+
+    @staticmethod
+    def _ensure_export_extension(
+        path: str,
+        selected_filter: str,
+        allowed: tuple[str, ...],
+        default: str,
+    ) -> tuple[str, str]:
+        extension = os.path.splitext(path)[1].lower().lstrip('.')
+        if extension not in allowed:
+            extension = next(
+                (candidate for candidate in allowed
+                 if candidate.upper() in selected_filter.upper()),
+                default,
+            )
+            path = f'{path}.{extension}'
+        return path, extension
+
+    @staticmethod
+    def _table_widget_text(widget: QWidget | None) -> str:
+        if widget is None:
+            return ''
+        labels = [
+            label.text().strip()
+            for label in widget.findChildren(QLabel)
+            if label.text().strip()
+        ]
+        return labels[0] if labels else ''
+
+    def _visible_table_model(self, table: QTableWidget, name: str) -> ExportTable:
+        columns = [
+            column for column in range(table.columnCount())
+            if not table.isColumnHidden(column)
+        ]
+        headers = []
+        for column in columns:
+            item = table.horizontalHeaderItem(column)
+            if item is None:
+                headers.append(f'Column {column + 1}')
+            else:
+                headers.append(item.toolTip().strip() or item.text().strip())
+
+        rows = []
+        for row in range(table.rowCount()):
+            if table.isRowHidden(row):
+                continue
+            values = []
+            for column in columns:
+                item = table.item(row, column)
+                text = item.text().strip() if item is not None else ''
+                if not text:
+                    text = self._table_widget_text(table.cellWidget(row, column))
+                values.append(text)
+            rows.append(values)
+        return ExportTable.from_rows(name, headers, rows)
+
+    def _export_table_model(self, table: ExportTable, default_name: str) -> None:
+        path, selected_filter = QFileDialog.getSaveFileName(
             self,
-            "Export Comparison Plot",
-            "comparison.png",
-            "PNG Image (*.png);;SVG Vector (*.svg)",
+            'Export Comparison Table',
+            f'{default_name}.xlsx',
+            'Excel Workbook (*.xlsx);;CSV File (*.csv)',
         )
         if not path:
             return
+        path, extension = self._ensure_export_extension(
+            path,
+            selected_filter,
+            ('xlsx', 'csv'),
+            'xlsx',
+        )
+        try:
+            if extension == 'csv':
+                write_csv_table(path, table)
+            else:
+                from openpyxl import Workbook
+
+                workbook = Workbook()
+                worksheet = workbook.active
+                worksheet.title = table.name[:31] or 'Comparison'
+                write_excel_table(worksheet, table)
+                worksheet.freeze_panes = 'A2'
+                workbook.save(path)
+            QMessageBox.information(
+                self,
+                'Export Successful',
+                f'Comparison table exported to:\n{path}',
+            )
+        except Exception as exc:
+            QMessageBox.warning(self, 'Export Failed', f'Could not save table:\n{exc}')
+
+    def _export_details(self) -> None:
+        table = self._details_stack.currentWidget()
+        if not isinstance(table, QTableWidget):
+            return
+        if self._details_view_mode == 'aggregate':
+            stem = 'comparison_details_aggregate'
+            table_name = 'Details Aggregate'
+        elif self._details_mode == 'k':
+            stem = 'comparison_details_k_values'
+            table_name = 'Details K Values'
+        else:
+            stem = 'comparison_details_grain'
+            table_name = 'Details Grain'
+        self._export_table_model(
+            self._visible_table_model(table, table_name),
+            stem,
+        )
+
+    def _export_statistics(self) -> None:
+        if self._stats_view_mode == 'coverage':
+            table = self._stats_method_table
+            stem = 'comparison_statistics_methods'
+            table_name = 'Method Statistics'
+        else:
+            table = self._stats_scope_table
+            stem = 'comparison_statistics_scopes'
+            table_name = 'Scope Statistics'
+        self._export_table_model(
+            self._visible_table_model(table, table_name),
+            stem,
+        )
+
+    def _export_plot(self) -> None:
+        """Save the comparison plot as a raster or vector figure."""
+        path, selected_filter = QFileDialog.getSaveFileName(
+            self,
+            "Export Comparison Plot",
+            "comparison.png",
+            "PNG Image (*.png);;SVG Vector (*.svg);;PDF Figure (*.pdf)",
+        )
+        if not path:
+            return
+        path, extension = self._ensure_export_extension(
+            path,
+            selected_filter,
+            ('png', 'svg', 'pdf'),
+            'png',
+        )
         try:
             if hasattr(self._plot_widget, "figure"):
-                self._plot_widget.figure.savefig(path, dpi=300, bbox_inches="tight")
+                self._plot_widget.figure.savefig(
+                    path, format=extension, dpi=300, bbox_inches="tight"
+                )
             elif hasattr(self._plot_widget, "_fig"):
-                self._plot_widget._fig.savefig(path, dpi=300, bbox_inches="tight")
+                self._plot_widget._fig.savefig(
+                    path, format=extension, dpi=300, bbox_inches="tight"
+                )
             elif hasattr(self._plot_widget, "canvas") and hasattr(
                 self._plot_widget.canvas, "figure"
             ):
                 self._plot_widget.canvas.figure.savefig(
-                    path, dpi=300, bbox_inches="tight"
+                    path, format=extension, dpi=300, bbox_inches="tight"
                 )
+            QMessageBox.information(
+                self,
+                'Export Successful',
+                f'Comparison plot exported to:\n{path}',
+            )
         except Exception as exc:
-            from PyQt6.QtWidgets import QMessageBox
-
             QMessageBox.warning(
                 self,
                 "Export Failed",

@@ -1,53 +1,151 @@
 <div class="page">
   <p class="eyebrow">Tab Guide</p>
   <h1>Export Tab</h1>
-  <p class="lead">The <strong>Export</strong> tab writes data tables and plot image files to a structured export folder. Choose a scope, the formats, and the content to include, then run the export.</p>
+  <p class="lead">Use <strong>Export</strong> to create reusable CSV tables, a typed Excel workbook, and batches of standalone plot files. The workflow is <strong>Configure &rarr; Review &rarr; Export</strong>. For a formatted narrative document, use <a href="reports_tab.html">Reports</a> instead.</p>
 
-  <h2>Choose A Scope</h2>
-  <table>
-    <tr>
-      <th>Scope</th>
-      <th>Exports</th>
-    </tr>
-    <tr><td>All</td><td>Every loaded dataset.</td></tr>
-    <tr><td>Current</td><td>The dataset currently open in Individual Samples.</td></tr>
-    <tr><td>Selected</td><td>The dataset subset chosen through the sidebar / comparison selection.</td></tr>
-  </table>
-
-  <div class="callout note">
-    <div class="callout-title">Scope is independent of the sidebar</div>
-    <p>Sidebar selection does <strong>not</strong> limit export unless the scope is set to <strong>Selected</strong>. If an export has more or fewer datasets than you expected, check the scope selector first.</p>
-  </div>
-
-  <h2>Formats</h2>
-  <ul>
-    <li><strong>Tables</strong>: CSV (long and wide layouts) and a combined Excel workbook.</li>
-    <li><strong>Plots</strong>: PNG, SVG, and PDF image files.</li>
-  </ul>
-
-  <h2>Included Content</h2>
-  <ul>
-    <li><strong>Data tables</strong> controls raw grain distribution rows, percentiles, K-values, statistics, aggregates, and metadata.</li>
-    <li><strong>Individual sample plots</strong> selects one-file-per-sample figures; <strong>Comparison plots</strong> selects collection figures and their per-group/per-dataset breakdown where supported.</li>
-  </ul>
-
-  <h2>Plot Style</h2>
-  <p>The Export tab has the same <strong>Plot Style</strong> control as the Reports tab: a <strong>preset</strong> for typography and a <strong>palette</strong> for colour, plus <strong>Customize…</strong>. They share one setting, so report and export plots match. The rule is the same: <strong>the preset sizes the text, the palette colours the data.</strong></p>
-
-  <h2>Run The Export</h2>
+  <h2>Fast Workflow</h2>
   <ol>
-    <li>Review the live preview, the files-to-create tree, and the destination folder.</li>
-    <li>Run the export. Large exports run in the background with a progress dialog you can cancel.</li>
+    <li>Choose <strong>All</strong>, <strong>Current</strong>, or <strong>Selected</strong> under Dataset Scope.</li>
+    <li>Start with the recipe closest to your deliverable.</li>
+    <li>Open <strong>Formats</strong> only when you need to add or remove a file type.</li>
+    <li>Open <strong>Included Content</strong> only when the recipe needs finer adjustment.</li>
+    <li>If plot files are selected, set their shared look in <strong>Plot Appearance</strong>.</li>
+    <li>Open <strong>Review</strong>, choose the destination, and inspect <strong>Files to Create</strong> and the previews.</li>
+    <li>Check the file count, then run the export.</li>
   </ol>
 
   <div class="callout tip">
-    <div class="callout-title">Use the right output path</div>
-    <p>For formal deliverables across multiple datasets, use this tab rather than per-widget copy buttons. For a formatted document (HTML/PDF/Word), use the <a href="reports_tab.html">Reports</a> tab instead.</p>
+    <div class="callout-title">Recipe first</div>
+    <p>A recipe configures both formats and content. If a recipe already matches the deliverable, leave <strong>Included Content</strong> collapsed. Any manual format or content change moves the recipe to <strong>Custom</strong> without discarding the change.</p>
   </div>
+
+  <h2>Configure: Dataset Scope</h2>
+  <table>
+    <tr><th>Scope</th><th>What is exported</th></tr>
+    <tr><td>All</td><td>Every loaded dataset, in natural name order.</td></tr>
+    <tr><td>Current</td><td>Only the sample chosen in the source selector.</td></tr>
+    <tr><td>Selected</td><td>The included sample set managed through <strong>Scope &amp; Groups</strong> in the always-visible Samples sidebar.</td></tr>
+  </table>
+
+  <div class="callout note">
+    <div class="callout-title">Selected uses the shared inclusion set</div>
+    <p>Export does not provide a second scope-management dialog. Use the sidebar <strong>Scope &amp; Groups</strong> control to change included samples and group labels, then choose <strong>Selected</strong> here. Group labels are used by aggregate tables and group-aware comparison plots.</p>
+  </div>
+
+  <h2>Configure: Recipes</h2>
+  <table>
+    <tr><th>Recipe</th><th>Starting package</th><th>Use it for</th></tr>
+    <tr><td>CSV + Grain Curves</td><td>CSV Long/Wide, selected grain/aggregate CSV tables, and PNG grain-size curves.</td><td>A general reusable handoff with tables and one curve per sample.</td></tr>
+    <tr><td>Summary CSV</td><td>One CSV Wide table with core grain and K metrics; no plots.</td><td>A compact spreadsheet or analysis handoff.</td></tr>
+    <tr><td>Analysis Tables</td><td>CSV Wide, aggregate CSV when applicable, and one combined Excel workbook; no plots.</td><td>Typed tables for analysis and review.</td></tr>
+    <tr><td>Workbook + Plots</td><td>One Excel workbook plus common PNG and PDF individual/comparison plots.</td><td>A presentation-oriented package without a narrative report.</td></tr>
+    <tr><td>Complete Package</td><td>Every table format, every plot format, all percentiles, detailed K fields, and all exportable plot types.</td><td>A comprehensive archive or technical handoff.</td></tr>
+    <tr><td>Custom</td><td>The current manually adjusted formats or content.</td><td>Any package that differs from a named recipe.</td></tr>
+  </table>
+
+  <h2>Configure: Formats</h2>
+  <p>The <strong>Formats</strong> field is a grouped multi-select menu. Open it and tick any combination of data and plot formats.</p>
+  <table>
+    <tr><th>Format</th><th>What it contains</th><th>Best use</th></tr>
+    <tr><td>CSV Long</td><td>One row per selected K-method result, with sample and selected context fields.</td><td>R, Python, databases, filtering, and tidy-data workflows.</td></tr>
+    <tr><td>CSV Wide</td><td>One row per sample, with grain metrics and K-method values in columns.</td><td>Spreadsheet comparison and statistical analysis.</td></tr>
+    <tr><td>Excel</td><td>One typed workbook with <code>K_Results_Long</code>, <code>Sample_Wide</code>, and conditional grain-distribution and aggregate sheets.</td><td>Review, calculation, and structured handoff in Excel.</td></tr>
+    <tr><td>PNG</td><td>High-resolution 300 dpi raster plot files.</td><td>Slides, email, and quick insertion into documents.</td></tr>
+    <tr><td>SVG</td><td>Scalable vector plot files.</td><td>Editing and lossless scaling in vector software.</td></tr>
+    <tr><td>PDF</td><td>One print-ready vector file per selected plot.</td><td>Static figure sharing and publication workflows.</td></tr>
+  </table>
+
+  <div class="callout warning">
+    <div class="callout-title">Export PDF means a plot file</div>
+    <p>PDF in the Export tab creates standalone figure files. It does not create a multi-page report. Use <a href="reports_tab.html">Reports</a> for a formatted HTML, PDF, or Word document.</p>
+  </div>
+
+  <h2>Configure: Included Content</h2>
+  <p>This section controls <em>what is written inside</em> the selected formats. Its three tabs are intentionally separate from styling:</p>
+  <table>
+    <tr><th>Tab</th><th>Controls</th></tr>
+    <tr><td>Data</td><td>Grain distribution rows, selected percentiles, gradation values, classification, K results, formulas, validation messages, statistics, aggregates, units, and metadata.</td></tr>
+    <tr><td>Individual</td><td>One plot per sample: grain-size curve, class histogram, K-value bar chart, and method-applicability heatmap.</td></tr>
+    <tr><td>Comparison</td><td>Plots across the export scope: distribution overlay, class-histogram comparison, K-value comparison, overall/group K boxplot, lognormal K distribution, and reliability matrix.</td></tr>
+  </table>
+
+  <p>Some Comparison rows have a breakdown selector:</p>
+  <ul>
+    <li><strong>Per group</strong> organizes the plotted series by the group labels from Scope &amp; Groups.</li>
+    <li><strong>Per dataset</strong> uses dataset-level series.</li>
+    <li><strong>Both</strong> creates both variants and therefore adds another file per selected plot format.</li>
+  </ul>
+
+  <div class="callout note">
+    <div class="callout-title">Plot selection is not plot styling</div>
+    <p>The Individual and Comparison checklists decide <strong>which figure files exist</strong>. They do not control fonts, colours, grids, or legend layout. Those choices belong to <strong>Plot Appearance</strong>.</p>
+  </div>
+
+  <h2>Configure: Plot Appearance</h2>
+  <p><strong>Plot Appearance</strong> is shown only when PNG, SVG, or PDF is selected. Its settings apply to every selected individual and comparison plot:</p>
+  <ul>
+    <li><strong>Preset</strong> sets the overall typography and figure density.</li>
+    <li><strong>Palette</strong> sets the data-series colours.</li>
+    <li><strong>Customize&hellip;</strong> adjusts typography, curves, grids, and legend position, columns, opacity, and size.</li>
+  </ul>
+  <p class="muted">Reports and Export share this saved style. A change in either workspace affects subsequently generated report and export plots.</p>
+
+  <h2>Review Before Export</h2>
+  <table>
+    <tr><th>Review control</th><th>What to check</th></tr>
+    <tr><td>Output Folder</td><td>The root folder where the structured export package will be created.</td></tr>
+    <tr><td>Files to Create</td><td>The actual dated filenames and subfolders planned from the current scope, formats, content, and breakdowns.</td></tr>
+    <tr><td>Selected Plots</td><td>Every individual and collection plot record that will be written in each selected plot format.</td></tr>
+    <tr><td>CSV / Excel previews</td><td>Representative rows and workbook structure generated from the same table builders as the writer.</td></tr>
+    <tr><td>Plots preview</td><td>The selected plot rendered by the same backend used for export.</td></tr>
+  </table>
+
+  <p><strong>Go to Sample</strong> is a navigation shortcut for an individual plot. It opens that plot's source sample in <strong>Individual Samples</strong>. It is unavailable for comparison plots because a collection plot has no single source sample.</p>
+
+  <h2>Output Folder Structure</h2>
+  <p>The exact names appear in <strong>Files to Create</strong>. A typical package looks like this:</p>
+  <pre><code>chosen folder/
+  tables/csv/
+    combined_all_datasets_results_YYYYMMDD.csv
+    wide_format_all_datasets_results_YYYYMMDD.csv
+    grain_distribution_results_YYYYMMDD.csv
+    aggregate_statistics_results_YYYYMMDD.csv
+  workbooks/
+    combined_all_datasets_results_YYYYMMDD.xlsx
+  plots/
+    BH-01/
+      BH-01_results_YYYYMMDD_plot.png
+    all_datasets/
+      all_datasets_results_YYYYMMDD_distribution_overlay.png</code></pre>
+  <p class="muted">Files are conditional: only the formats and content selected in Configure are created. With Selected scope, the collection plot folder is <code>selected_datasets</code>. Unsafe filename characters are replaced automatically.</p>
+
+  <h2>Understand The File Count</h2>
+  <p>Individual plots multiply by the number of samples and selected plot formats. For example, five samples &times; one individual plot type &times; PNG produces five plot files. Comparison plots are added once per chosen variant and format. CSV tables and the combined workbook are package-level files.</p>
+  <p>Samples and groups are written in natural name order, so <code>BH-2</code> comes before <code>BH-10</code>. If duplicate sample labels occur, the writer assigns stable disambiguated labels.</p>
+
+  <h2>Common Checks</h2>
+  <table>
+    <tr><th>Unexpected result</th><th>Check</th></tr>
+    <tr><td>Too many or too few samples</td><td>Check Dataset Scope. For Selected, edit the inclusion set in sidebar Scope &amp; Groups.</td></tr>
+    <tr><td>No plot files</td><td>Select at least one plot format <em>and</em> at least one plot type under Individual or Comparison.</td></tr>
+    <tr><td>Plot Appearance is missing</td><td>Select PNG, SVG, or PDF in Formats.</td></tr>
+    <tr><td>File count is larger than expected</td><td>Check individual plot multiplication and Comparison rows set to Both.</td></tr>
+    <tr><td>Recipe shows Custom</td><td>A format or content choice differs from the named recipe. The current choices remain active.</td></tr>
+    <tr><td>A plot needs investigation</td><td>Select it in Selected Plots; use Go to Sample when it belongs to one sample.</td></tr>
+  </table>
+
+  <h2>Run The Export</h2>
+  <ol>
+    <li>Confirm the bottom summary: file count, dataset count, format count, destination, and estimated size.</li>
+    <li>Select <strong>Export N Files</strong>.</li>
+    <li>Large packages run in the background with cancellable progress.</li>
+    <li>After completion, open representative CSV, Excel, and plot files from the destination.</li>
+  </ol>
 
   <p class="link-list">
     <a href="reports_tab.html">Reports Tab</a>
     <a href="comparison_tab.html">Comparison Tab</a>
+    <a href="workspace_tour.html">Workspace Tour</a>
     <a href="common_issues.html">Common Issues</a>
   </p>
 </div>

@@ -4,7 +4,7 @@ import csv
 import io
 import os
 
-from PyQt6.QtCore import QTimer, Qt, QRectF
+from PyQt6.QtCore import QSize, QTimer, Qt, QRectF
 from PyQt6.QtGui import QColor, QFont, QPainter, QPen
 from PyQt6.QtWidgets import (
     QApplication, QAbstractItemView, QButtonGroup, QFrame, QHBoxLayout,
@@ -12,9 +12,9 @@ from PyQt6.QtWidgets import (
     QTableWidgetItem, QTabWidget, QVBoxLayout, QWidget,
 )
 
-from data_loader import DataLoader
+from delimited_text import DELIMITED_TEXT_EXTENSIONS, read_delimited_rows
 from gui.column_mapper import ColumnMapperDialog
-from gui.dialog_chrome import make_dialog_footer, make_dialog_header
+from gui.dialog_chrome import make_dialog_footer, make_dialog_header, style_dialog_button
 from gui.theme import C, F, SZ, icon as _icon
 from qt_chrome.frameless_dialog_base import FramelessDialogBase
 
@@ -177,36 +177,133 @@ class DataInspectorDialog(FramelessDialogBase):
         root.addWidget(self._header_widget)
 
         toolbar = QWidget()
+        toolbar.setObjectName("inspectorToolbar")
         tb = QHBoxLayout(toolbar)
-        tb.setContentsMargins(14, 10, 14, 10)
-        tb.setSpacing(8)
-        toolbar.setStyleSheet(f"background: {C.BG_LOW}; border-bottom: 1px solid {C.BORDER};")
+        tb.setContentsMargins(16, 8, 14, 8)
+        tb.setSpacing(10)
+        toolbar.setStyleSheet(
+            f"QWidget#inspectorToolbar {{ background: {C.BG_LOW}; "
+            f"border-bottom: 1px solid {C.BORDER}; }}"
+        )
+
+        metric_strip = QWidget()
+        metric_strip.setObjectName("inspectorMetricStrip")
+        metrics_layout = QHBoxLayout(metric_strip)
+        metrics_layout.setContentsMargins(0, 0, 0, 0)
+        metrics_layout.setSpacing(0)
+        metric_strip.setStyleSheet(
+            "QWidget#inspectorMetricStrip, QWidget#inspectorMetricCell {"
+            " background: transparent; border: none; }"
+            f"QLabel#inspectorMetricLabel {{ color: {C.TEXT_MUTED};"
+            f" font-size: {F.SZ_XS}pt; background: transparent; border: none; }}"
+            f"QLabel#inspectorMetricValue {{ color: {C.TEXT};"
+            f" font-size: {F.SZ_SM}pt; background: transparent; border: none; }}"
+            f"QFrame#inspectorMetricDivider {{ background: {C.BORDER_DK};"
+            " border: none; }"
+        )
         self._metric = {}
-        for key, label in (("d10", "D10"), ("d50", "D50"), ("d60", "D60"), ("cu", "Cu")):
-            chip = QWidget()
-            chip.setStyleSheet(f"background: {C.BG_RAISED}; border: 1px solid {C.BORDER}; border-radius: {SZ.BORDER_RADIUS}px;")
-            lay = QHBoxLayout(chip); lay.setContentsMargins(9, 4, 9, 4); lay.setSpacing(6)
-            lay.addWidget(QLabel(label))
-            value = QLabel("—"); value.setFont(QFont(F.MONO, F.SZ_SM)); self._metric[key] = value; lay.addWidget(value)
-            tb.addWidget(chip)
+        metrics = (("d10", "D10"), ("d50", "D50"), ("d60", "D60"), ("cu", "Cu"))
+        for index, (key, label) in enumerate(metrics):
+            cell = QWidget()
+            cell.setObjectName("inspectorMetricCell")
+            cell.setMinimumWidth(76 if key == "cu" else 96)
+            lay = QVBoxLayout(cell)
+            lay.setContentsMargins(10 if index else 0, 1, 10, 1)
+            lay.setSpacing(1)
+            caption = QLabel(label)
+            caption.setObjectName("inspectorMetricLabel")
+            caption.setFont(QFont(F.UI, F.SZ_XS, QFont.Weight.DemiBold))
+            value = QLabel("—")
+            value.setObjectName("inspectorMetricValue")
+            value.setFont(QFont(F.MONO, F.SZ_SM))
+            self._metric[key] = value
+            lay.addWidget(caption)
+            lay.addWidget(value)
+            metrics_layout.addWidget(cell)
+            if index < len(metrics) - 1:
+                divider = QFrame()
+                divider.setObjectName("inspectorMetricDivider")
+                divider.setFrameShape(QFrame.Shape.NoFrame)
+                divider.setFixedWidth(1)
+                divider.setMinimumHeight(30)
+                metrics_layout.addWidget(divider)
+        tb.addWidget(metric_strip)
         tb.addStretch(1)
-        self._mode_group = QButtonGroup(self); self._mode_group.setExclusive(True); self._mode_btns = {}
-        mode_wrap = QWidget(); mode_wrap.setStyleSheet(f"background: {C.BG_RAISED}; border: 1px solid {C.BORDER}; border-radius: {SZ.BORDER_RADIUS}px;")
-        ml = QHBoxLayout(mode_wrap); ml.setContentsMargins(0, 0, 0, 0); ml.setSpacing(0)
-        for text, mode in (("% Passing", self._MODE_PASSING), ("Mass (g)", self._MODE_MASS), ("Both", self._MODE_BOTH)):
-            btn = QPushButton(text); btn.setCheckable(True); btn.clicked.connect(lambda _=False, m=mode: self._set_mode(m)); self._mode_group.addButton(btn); self._mode_btns[mode] = btn; ml.addWidget(btn)
+        view_label = QLabel("View")
+        view_label.setFont(QFont(F.UI, F.SZ_SM, QFont.Weight.DemiBold))
+        view_label.setStyleSheet(f"color: {C.TEXT_MUTED}; background: transparent; border: none;")
+        tb.addWidget(view_label)
+        self._mode_group = QButtonGroup(self)
+        self._mode_group.setExclusive(True)
+        self._mode_btns = {}
+        mode_wrap = QFrame()
+        mode_wrap.setObjectName("inspectorViewSwitch")
+        mode_wrap.setStyleSheet(
+            f"QFrame#inspectorViewSwitch {{ background: {C.BG}; "
+            f"border: 1px solid {C.BORDER_DK}; border-radius: {SZ.BORDER_RADIUS}px; }}"
+            "QFrame#inspectorViewSwitch QPushButton[inspectorView=\"true\"] {"
+            f" background: transparent; border: none; border-right: 1px solid {C.BORDER};"
+            f" border-radius: 0; color: {C.TEXT_MID}; padding: 0 11px;"
+            f" min-height: 27px; font-size: {F.SZ_SM}pt; }}"
+            "QFrame#inspectorViewSwitch QPushButton[segmentEdge=\"first\"] {"
+            f" border-top-left-radius: {SZ.BORDER_RADIUS - 1}px;"
+            f" border-bottom-left-radius: {SZ.BORDER_RADIUS - 1}px; }}"
+            "QFrame#inspectorViewSwitch QPushButton[segmentEdge=\"last\"] {"
+            f" border-right: none; border-top-right-radius: {SZ.BORDER_RADIUS - 1}px;"
+            f" border-bottom-right-radius: {SZ.BORDER_RADIUS - 1}px; }}"
+            "QFrame#inspectorViewSwitch QPushButton[inspectorView=\"true\"]:hover:!checked {"
+            f" background: {C.BG_LOW}; color: {C.TEXT}; }}"
+            "QFrame#inspectorViewSwitch QPushButton[inspectorView=\"true\"]:checked {"
+            f" background: {C.OLIVE}; color: white; font-weight: 700; }}"
+            "QFrame#inspectorViewSwitch QPushButton[inspectorView=\"true\"]:checked:hover {"
+            f" background: {C.OLIVE_H}; }}"
+        )
+        ml = QHBoxLayout(mode_wrap)
+        ml.setContentsMargins(1, 1, 1, 1)
+        ml.setSpacing(0)
+        modes = (("% Passing", self._MODE_PASSING), ("Mass (g)", self._MODE_MASS), ("Both", self._MODE_BOTH))
+        for index, (text, mode) in enumerate(modes):
+            btn = QPushButton(text)
+            btn.setCheckable(True)
+            btn.setProperty("inspectorView", True)
+            if index == 0:
+                btn.setProperty("segmentEdge", "first")
+            elif index == len(modes) - 1:
+                btn.setProperty("segmentEdge", "last")
+            btn.clicked.connect(lambda _=False, m=mode: self._set_mode(m))
+            self._mode_group.addButton(btn)
+            self._mode_btns[mode] = btn
+            ml.addWidget(btn)
         tb.addWidget(mode_wrap)
         root.addWidget(toolbar)
 
         self._tabs = QTabWidget()
         page1 = QWidget(); v1 = QVBoxLayout(page1); v1.setContentsMargins(0, 0, 0, 0); v1.setSpacing(0)
         top = QFrame(); tl = QHBoxLayout(top); tl.setContentsMargins(14, 10, 14, 10); tl.setSpacing(10); top.setStyleSheet(f"background: {C.BG_RAISED}; border-bottom: 1px solid {C.BORDER};")
+        top.setObjectName("inspectorEditBar")
+        top.setStyleSheet(
+            f"QFrame#inspectorEditBar {{ background: {C.BG_RAISED}; "
+            f"border-bottom: 1px solid {C.BORDER}; }}"
+        )
         info = QWidget(); il = QVBoxLayout(info); il.setContentsMargins(0, 0, 0, 0); il.setSpacing(2)
         self._extract_summary = QLabel(""); self._extract_summary.setFont(QFont(F.MONO, F.SZ_SM))
         self._extract_hint = QLabel(""); self._extract_hint.setWordWrap(True); self._extract_hint.setStyleSheet(f"color: {C.TEXT_MUTED};")
         il.addWidget(self._extract_summary); il.addWidget(self._extract_hint); tl.addWidget(info, 1)
         self._add_btn = QPushButton("Add Row"); self._remove_btn = QPushButton("Remove Row"); self._reset_btn = QPushButton("Reset"); self._apply_btn = QPushButton("Apply")
-        for btn in (self._add_btn, self._remove_btn, self._reset_btn, self._apply_btn): tl.addWidget(btn)
+        edit_actions = (
+            (self._add_btn, "secondary", "fa6s.plus"),
+            (self._remove_btn, "secondary", "fa6s.minus"),
+            (self._reset_btn, "secondary", "fa6s.rotate-left"),
+            (self._apply_btn, "primary", "fa6s.check"),
+        )
+        for btn, style, icon_name in edit_actions:
+            style_dialog_button(btn, style)
+            btn.setIconSize(QSize(12, 12))
+            try:
+                btn.setIcon(_icon(icon_name, "white" if style == "primary" else C.TEXT_MID))
+            except Exception:
+                pass
+            tl.addWidget(btn)
         self._add_btn.clicked.connect(self._add_row); self._remove_btn.clicked.connect(self._remove_rows); self._reset_btn.clicked.connect(self._reset_table); self._apply_btn.clicked.connect(self._apply_rows)
         v1.addWidget(top)
         self._table = QTableWidget(0, 5); self._table.setHorizontalHeaderLabels(["#", "Sieve (mm)", "% Passing", "Mass (g)", "Distribution"])
@@ -223,8 +320,21 @@ class DataInspectorDialog(FramelessDialogBase):
         v2.addWidget(self._source_table, 1); self._tabs.addTab(page2, "Source")
         root.addWidget(self._tabs, 1)
 
-        self._status_icon = QLabel(); self._status_icon.setFixedSize(10, 10); self._status = QLabel(); self._status.setFont(QFont(F.MONO, F.SZ_XS))
-        status_wrap = QWidget(); sw = QHBoxLayout(status_wrap); sw.setContentsMargins(0, 0, 0, 0); sw.setSpacing(4); sw.addWidget(self._status_icon); sw.addWidget(self._status)
+        self._status_icon = QLabel()
+        self._status_icon.setFixedSize(14, 14)
+        self._status_icon.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self._status = QLabel()
+        self._status.setFont(QFont(F.UI, F.SZ_SM))
+        self._status.setStyleSheet(f"color: {C.TEXT_MID}; background: transparent; border: none;")
+        status_wrap = QWidget()
+        status_wrap.setObjectName("inspectorStatus")
+        status_wrap.setMinimumHeight(28)
+        status_wrap.setStyleSheet("QWidget#inspectorStatus { background: transparent; border: none; }")
+        sw = QHBoxLayout(status_wrap)
+        sw.setContentsMargins(2, 2, 12, 2)
+        sw.setSpacing(7)
+        sw.addWidget(self._status_icon, 0, Qt.AlignmentFlag.AlignVCenter)
+        sw.addWidget(self._status, 0, Qt.AlignmentFlag.AlignVCenter)
         buttons = []
         if self._can_open_mapper(): buttons.append(("Open Mapper", self._open_mapper, "secondary"))
         buttons.extend([("Copy CSV", self._copy_csv, "secondary"), ("Close", self.accept, "primary")])
@@ -279,7 +389,20 @@ class DataInspectorDialog(FramelessDialogBase):
         can_edit = self.dataset_tab is not None
         selected = []
         if self._table.selectionModel(): selected = [i.row() for i in self._table.selectionModel().selectedRows()]
-        self._add_btn.setEnabled(can_edit); self._remove_btn.setEnabled(can_edit and any(r < self._table.rowCount() - 1 for r in selected)); self._reset_btn.setEnabled(can_edit and self._dirty); self._apply_btn.setEnabled(can_edit and self._dirty)
+        has_data_row = any(r < self._table.rowCount() - 1 for r in selected)
+        self._add_btn.setEnabled(can_edit)
+        self._remove_btn.setEnabled(can_edit and has_data_row)
+        self._reset_btn.setEnabled(can_edit and self._dirty)
+        self._apply_btn.setEnabled(can_edit and self._dirty)
+        if not can_edit:
+            unavailable = "Editing is unavailable because this sample is not attached to a live dataset tab."
+            for btn in (self._add_btn, self._remove_btn, self._reset_btn, self._apply_btn):
+                btn.setToolTip(unavailable)
+            return
+        self._add_btn.setToolTip("Add a blank data row above the total.")
+        self._remove_btn.setToolTip("Remove the selected data row." if has_data_row else "Select a data row to remove it.")
+        self._reset_btn.setToolTip("Discard the current unsaved edits." if self._dirty else "There are no unsaved edits to reset.")
+        self._apply_btn.setToolTip("Apply the edited rows to this sample." if self._dirty else "Make a change before applying.")
 
     def _add_row(self):
         if not self.dataset_tab: return
@@ -364,7 +487,7 @@ class DataInspectorDialog(FramelessDialogBase):
         self._set_status(text, C.OLIVE, "fa6s.circle-check")
 
     def _set_status(self, text: str, color: str, icon_name: str):
-        try: self._status_icon.setPixmap(_icon(icon_name, color).pixmap(10, 10))
+        try: self._status_icon.setPixmap(_icon(icon_name, color).pixmap(13, 13))
         except Exception: self._status_icon.setText("•"); self._status_icon.setStyleSheet(f"color: {color};")
         self._status.setText(text)
 
@@ -383,9 +506,10 @@ class DataInspectorDialog(FramelessDialogBase):
         if not os.path.exists(self._actual_file_path): self._source_error = f"Source file not found: {self._actual_file_path}"; return
         ext = os.path.splitext(self._actual_file_path)[1].lower()
         try:
-            if ext == ".csv":
-                delimiter, _score = DataLoader()._detect_delimiter(self._actual_file_path)
-                with open(self._actual_file_path, "r", encoding="utf-8") as handle: self._source_rows = [list(r) for r in csv.reader(handle, delimiter=delimiter)]
+            if ext in DELIMITED_TEXT_EXTENSIONS:
+                self._source_rows, _delimiter, _encoding = read_delimited_rows(
+                    self._actual_file_path
+                )
             elif ext in {".xlsx", ".xls"}:
                 import pandas as pd
                 excel_file = pd.ExcelFile(self._actual_file_path)

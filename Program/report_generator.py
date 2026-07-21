@@ -20,6 +20,7 @@ from analysis.comparison_snapshot import (
     build_comparison_snapshot,
 )
 from k_calculations import KCalculationResult
+from natural_order import natural_sort_key
 from k_aggregation import (
     KAggregationOptions,
     UNGROUPED_LABEL,
@@ -202,43 +203,140 @@ class ReportGenerator:
                 margin: 0 -50px 40px -50px;
             }
 
-            /* ── Cover page — bleeds to body edges ───────────── */
+            /* ── Cover page — restrained technical dossier ─────── */
+            .report-top-bar + .cover-page {
+                margin-top: -46px;
+            }
+
             .cover-page {
-                padding: 50px 0 48px;
-                min-height: 560px;
+                position: relative;
+                padding: 48px 0 36px;
+                min-height: 760px;
                 display: flex;
                 flex-direction: column;
-                border-bottom: 1px solid var(--border);
-                margin-bottom: 40px;
+                page-break-after: always;
+                break-after: page;
+            }
+
+            .cover-page::before {
+                content: "";
+                position: absolute;
+                top: 0;
+                left: 0;
+                width: 76px;
+                height: 8px;
+                background: var(--brand);
             }
 
             .cover-brand-block {
-                margin-bottom: 64px;
+                display: flex;
+                align-items: flex-start;
+                justify-content: space-between;
+                gap: 28px;
+                min-height: 76px;
+            }
+
+            .cover-org-block {
+                max-width: 420px;
+                padding-top: 2px;
+            }
+
+            .cover-org-name {
+                color: var(--brand);
+                font-size: 12px;
+                font-weight: 700;
+                letter-spacing: 0.02em;
+            }
+
+            .cover-org-subtitle {
+                color: var(--text-muted);
+                font-size: 10px;
+                margin-top: 4px;
+            }
+
+            .cover-logo-wrap {
+                width: 220px;
+                height: 72px;
+                display: flex;
+                align-items: flex-start;
+                justify-content: flex-end;
+            }
+
+            .cover-logo-image {
+                max-width: 220px;
+                max-height: 72px;
+                width: auto;
+                height: auto;
+                object-fit: contain;
+            }
+
+            .cover-title-block {
+                margin-top: 88px;
+                max-width: 650px;
+            }
+
+            .cover-kicker {
+                color: var(--brand);
+                font-size: 9px;
+                font-weight: 700;
+                letter-spacing: 0.16em;
+                text-transform: uppercase;
+                margin-bottom: 18px;
             }
 
             .cover-title {
-                font-size: 34px;
+                font-size: 38px;
                 font-weight: 700;
-                color: var(--brand);
-                margin-bottom: 10px;
-                letter-spacing: -0.5px;
-                line-height: 1.15;
+                color: var(--text);
+                letter-spacing: -0.7px;
+                line-height: 1.08;
+                margin-bottom: 16px;
             }
 
             .cover-subtitle {
-                font-size: 15px;
+                max-width: 560px;
+                font-size: 16px;
+                line-height: 1.4;
                 color: var(--text-mid);
                 font-weight: 400;
-                margin-bottom: 0;
             }
 
             .cover-meta {
                 margin-top: auto;
-                font-size: 10pt;
-                color: var(--text-mid);
-                line-height: 2;
-                border-top: 1px solid var(--border);
-                padding-top: 18px;
+                display: grid;
+                grid-template-columns: repeat(2, minmax(0, 1fr));
+                column-gap: 44px;
+                row-gap: 18px;
+                border-top: 2px solid var(--brand);
+                padding-top: 20px;
+            }
+
+            .cover-meta-item {
+                min-width: 0;
+            }
+
+            .cover-meta-label {
+                color: var(--text-muted);
+                font-size: 8px;
+                font-weight: 700;
+                letter-spacing: 0.09em;
+                text-transform: uppercase;
+                margin-bottom: 4px;
+            }
+
+            .cover-meta-value {
+                color: var(--text);
+                font-size: 10.5pt;
+                line-height: 1.35;
+                overflow-wrap: anywhere;
+            }
+
+            @media print {
+                .cover-page {
+                    min-height: 232mm;
+                    padding-top: 12mm;
+                    padding-bottom: 8mm;
+                }
             }
 
             /* ── Typography ──────────────────────────────────── */
@@ -738,6 +836,16 @@ class ReportGenerator:
                 return match
         return None
 
+    @classmethod
+    def _find_first_class(cls, node: _HtmlNode, class_name: str) -> Optional[_HtmlNode]:
+        if class_name in cls._node_classes(node):
+            return node
+        for child in cls._child_nodes(node):
+            match = cls._find_first_class(child, class_name)
+            if match is not None:
+                return match
+        return None
+
     @staticmethod
     def _parse_html_tree(html_text: str) -> _HtmlNode:
         parser = _HtmlTreeBuilder()
@@ -842,10 +950,15 @@ class ReportGenerator:
 
     def _apply_docx_header_footer(self, document, metadata: dict[str, str],
                                   brand, brand_rgb: tuple[int, int, int],
-                                  ctx: dict[str, Any]) -> None:
+                                  ctx: dict[str, Any], *, has_cover: bool = False) -> None:
         section = document.sections[0]
         section.header_distance = ctx["Mm"](8)
         section.footer_distance = ctx["Mm"](8)
+        if has_cover:
+            section.different_first_page_header_footer = True
+            section.first_page_header.paragraphs[0].text = ""
+            section.first_page_footer.paragraphs[0].text = ""
+
 
         project = (metadata.get("project_name") or "Grain Size Analysis Report").strip()
         project_no = (metadata.get("project_no") or "").strip()
@@ -1062,35 +1175,232 @@ class ReportGenerator:
             )
             table.rows[row_index]._tr.get_or_add_trPr().append(header)
 
+    @staticmethod
+    def _rasterize_svg_bytes(svg_bytes: bytes) -> Optional[bytes]:
+        """Rasterize an SVG for Word, which cannot embed SVG reliably."""
+        try:
+            from PyQt6.QtCore import QByteArray, QBuffer, QIODevice
+            from PyQt6.QtGui import QGuiApplication, QImage, QPainter
+            from PyQt6.QtSvg import QSvgRenderer
+
+            qt_app = QGuiApplication.instance()
+            if qt_app is None:
+                os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
+                qt_app = QGuiApplication([])
+            renderer = QSvgRenderer(QByteArray(svg_bytes))
+            if not renderer.isValid():
+                return None
+            size = renderer.defaultSize()
+            width = size.width()
+            height = size.height()
+            if width <= 0 or height <= 0:
+                width, height = 1200, 400
+            scale = min(1.0, 1600.0 / max(width, height))
+            image = QImage(
+                max(1, int(width * scale)),
+                max(1, int(height * scale)),
+                QImage.Format.Format_ARGB32,
+            )
+            image.fill(0)
+            painter = QPainter(image)
+            renderer.render(painter)
+            painter.end()
+
+            buffer = QBuffer()
+            if not buffer.open(QIODevice.OpenModeFlag.WriteOnly):
+                return None
+            if not image.save(buffer, "PNG"):
+                return None
+            return bytes(buffer.data())
+        except Exception:
+            return None
+
     def _render_docx_image(self, container, node: _HtmlNode, ctx: dict[str, Any]) -> None:
         src = node.attrs.get("src", "")
         if not src:
             return
 
         image_bytes = None
+        mime_type = ""
         if src.startswith("data:"):
             match = re.match(r"data:([^;]+);base64,(.*)", src, flags=re.DOTALL)
             if not match:
                 return
             mime_type = match.group(1).lower()
-            if "svg" in mime_type:
-                return
             image_bytes = base64.b64decode(match.group(2))
         elif os.path.exists(src):
             with open(src, "rb") as fh:
                 image_bytes = fh.read()
+            if os.path.splitext(src)[1].lower() == ".svg":
+                mime_type = "image/svg+xml"
 
         if not image_bytes:
             return
+        if "svg" in mime_type:
+            image_bytes = self._rasterize_svg_bytes(image_bytes)
+            if not image_bytes:
+                return
 
-        paragraph = container.add_paragraph()
-        paragraph.alignment = ctx["WD_ALIGN_PARAGRAPH"].CENTER
-        run = paragraph.add_run()
+        classes = self._node_classes(node)
         alt_text = (node.attrs.get("alt", "") or "").lower()
-        image_width = 2.0 if "logo" in alt_text else (10.2 if ctx.get("landscape") else 6.0)
-        width = ctx["Inches"](image_width)
-        run.add_picture(io.BytesIO(image_bytes), width=width)
+        is_logo = "cover-logo-image" in classes or "logo" in alt_text
+        paragraph = container.add_paragraph()
+        paragraph.alignment = (
+            ctx["WD_ALIGN_PARAGRAPH"].RIGHT if is_logo
+            else ctx["WD_ALIGN_PARAGRAPH"].CENTER
+        )
+        run = paragraph.add_run()
+        if is_logo:
+            try:
+                from docx.image.image import Image as DocxImage
+                image_info = DocxImage.from_blob(image_bytes)
+                pixel_width = int(image_info.px_width or 220)
+                pixel_height = int(image_info.px_height or 72)
+            except Exception:
+                pixel_width, pixel_height = (220, 72)
+            max_width, max_height = 2.2, 0.78
+            if pixel_width / max(pixel_height, 1) >= max_width / max_height:
+                run.add_picture(io.BytesIO(image_bytes), width=ctx["Inches"](max_width))
+            else:
+                run.add_picture(io.BytesIO(image_bytes), height=ctx["Inches"](max_height))
+        else:
+            image_width = 10.2 if ctx.get("landscape") else 6.0
+            run.add_picture(io.BytesIO(image_bytes), width=ctx["Inches"](image_width))
 
+    def _render_docx_cover(self, container, node: _HtmlNode, ctx: dict[str, Any],
+                           brand_rgb: tuple[int, int, int], state: dict[str, bool]) -> None:
+        """Render a dedicated, fully editable Word cover page."""
+        accent_hex = self._docx_rgb_hex(brand_rgb)
+
+        accent = container.add_table(rows=1, cols=1)
+        accent.alignment = ctx["WD_TABLE_ALIGNMENT"].LEFT
+        accent_cell = accent.cell(0, 0)
+        self._apply_docx_header_shading(accent_cell, accent_hex, ctx)
+        accent_paragraph = accent_cell.paragraphs[0]
+        accent_paragraph.paragraph_format.space_before = ctx["Pt"](0)
+        accent_paragraph.paragraph_format.space_after = ctx["Pt"](0)
+        accent_paragraph.add_run(" ").font.size = ctx["Pt"](2)
+
+        brand_block = self._find_first_class(node, "cover-brand-block")
+        if brand_block is not None:
+            brand_table = container.add_table(rows=1, cols=2)
+            brand_table.alignment = ctx["WD_TABLE_ALIGNMENT"].LEFT
+            brand_table.autofit = False
+            brand_table.columns[0].width = ctx["Inches"](4.45)
+            brand_table.columns[1].width = ctx["Inches"](1.75)
+            left_cell, right_cell = brand_table.rows[0].cells
+            left_cell._tc.clear_content()
+            right_cell._tc.clear_content()
+
+            org_name_node = self._find_first_class(brand_block, "cover-org-name")
+            org_subtitle_node = self._find_first_class(brand_block, "cover-org-subtitle")
+            if org_name_node is not None:
+                paragraph = left_cell.add_paragraph()
+                run = paragraph.add_run(self._node_text(org_name_node))
+                run.bold = True
+                run.font.name = "Calibri"
+                run.font.size = ctx["Pt"](9.5)
+                run.font.color.rgb = ctx["RGBColor"](*brand_rgb)
+                paragraph.paragraph_format.space_after = ctx["Pt"](2)
+            if org_subtitle_node is not None:
+                paragraph = left_cell.add_paragraph()
+                run = paragraph.add_run(self._node_text(org_subtitle_node))
+                run.font.name = "Calibri"
+                run.font.size = ctx["Pt"](8.5)
+                run.font.color.rgb = ctx["RGBColor"](108, 117, 125)
+
+            logo_node = self._find_first_class(brand_block, "cover-logo-image")
+            if logo_node is not None:
+                self._render_docx_image(right_cell, logo_node, ctx)
+
+            # A Word table cell must contain at least one paragraph or nested
+            # table. ``clear_content()`` removes the default paragraph, so an
+            # optional/missing logo would otherwise leave invalid OOXML that
+            # Word reports as a damaged document.
+            for cell in (left_cell, right_cell):
+                if not cell.paragraphs and not cell.tables:
+                    cell.add_paragraph()
+
+        spacer = container.add_paragraph()
+        spacer.paragraph_format.space_after = ctx["Pt"](48)
+
+        kicker_node = self._find_first_class(node, "cover-kicker")
+        if kicker_node is not None:
+            paragraph = container.add_paragraph()
+            run = paragraph.add_run(self._node_text(kicker_node).upper())
+            run.bold = True
+            run.font.name = "Calibri"
+            run.font.size = ctx["Pt"](8)
+            run.font.color.rgb = ctx["RGBColor"](*brand_rgb)
+            paragraph.paragraph_format.space_after = ctx["Pt"](12)
+            paragraph.paragraph_format.keep_with_next = True
+
+        title_node = self._find_first_class(node, "cover-title")
+        if title_node is not None:
+            paragraph = container.add_paragraph()
+            run = paragraph.add_run(self._node_text(title_node))
+            run.bold = True
+            run.font.name = "Calibri"
+            run.font.size = ctx["Pt"](30)
+            run.font.color.rgb = ctx["RGBColor"](31, 41, 51)
+            paragraph.paragraph_format.space_after = ctx["Pt"](10)
+            paragraph.paragraph_format.keep_with_next = True
+
+        subtitle_node = self._find_first_class(node, "cover-subtitle")
+        if subtitle_node is not None:
+            paragraph = container.add_paragraph()
+            run = paragraph.add_run(self._node_text(subtitle_node))
+            run.font.name = "Calibri"
+            run.font.size = ctx["Pt"](13)
+            run.font.color.rgb = ctx["RGBColor"](75, 85, 99)
+            paragraph.paragraph_format.space_after = ctx["Pt"](92)
+
+        meta_node = self._find_first_class(node, "cover-meta")
+        meta_items: list[tuple[str, str]] = []
+        if meta_node is not None:
+            for item in self._child_nodes(meta_node):
+                if "cover-meta-item" not in self._node_classes(item):
+                    continue
+                label_node = self._find_first_class(item, "cover-meta-label")
+                value_node = self._find_first_class(item, "cover-meta-value")
+                label = self._node_text(label_node) if label_node is not None else ""
+                value = self._node_text(value_node) if value_node is not None else ""
+                if label and value:
+                    meta_items.append((label, value))
+
+        if meta_items:
+            rule = container.add_paragraph()
+            rule.paragraph_format.space_after = ctx["Pt"](10)
+            rule_ppr = rule._p.get_or_add_pPr()
+            rule_ppr.append(ctx["parse_xml"](
+                f'<w:pBdr {ctx["nsdecls"]("w")}>'
+                f'<w:bottom w:val="single" w:sz="12" w:space="1" w:color="{accent_hex}"/>'
+                f'</w:pBdr>'
+            ))
+
+            rows = (len(meta_items) + 1) // 2
+            meta_table = container.add_table(rows=rows, cols=2)
+            meta_table.alignment = ctx["WD_TABLE_ALIGNMENT"].LEFT
+            meta_table.autofit = False
+            for index, (label, value) in enumerate(meta_items):
+                cell = meta_table.cell(index // 2, index % 2)
+                cell._tc.clear_content()
+                label_paragraph = cell.add_paragraph()
+                label_run = label_paragraph.add_run(label.upper())
+                label_run.bold = True
+                label_run.font.name = "Calibri"
+                label_run.font.size = ctx["Pt"](7.5)
+                label_run.font.color.rgb = ctx["RGBColor"](108, 117, 125)
+                label_paragraph.paragraph_format.space_after = ctx["Pt"](2)
+                value_paragraph = cell.add_paragraph()
+                value_run = value_paragraph.add_run(value)
+                value_run.font.name = "Calibri"
+                value_run.font.size = ctx["Pt"](10)
+                value_run.font.color.rgb = ctx["RGBColor"](31, 41, 51)
+                value_paragraph.paragraph_format.space_after = ctx["Pt"](8)
+
+        container.add_page_break()
+        state["started_content"] = True
     def _render_docx_node(self, container, node: _HtmlNode,
                           ctx: dict[str, Any], brand_rgb: tuple[int, int, int],
                           state: dict[str, bool]) -> None:
@@ -1106,6 +1416,9 @@ class ReportGenerator:
             return
 
         if tag == "div":
+            if "cover-page" in classes:
+                self._render_docx_cover(container, node, ctx, brand_rgb, state)
+                return
             if "report-top-bar" in classes or "footer" in classes:
                 return
             if "page-break" in classes and state.get("started_content") and hasattr(container, "add_page_break"):
@@ -1268,7 +1581,10 @@ class ReportGenerator:
             "externalized_table_titles": dict(externalized_table_titles or {}),
             "landscape": False,
         }
-        self._apply_docx_header_footer(document, dict(metadata or {}), brand, brand_rgb, ctx)
+        has_cover = self._find_first_class(body, "cover-page") is not None
+        self._apply_docx_header_footer(
+            document, dict(metadata or {}), brand, brand_rgb, ctx, has_cover=has_cover
+        )
         state = {"started_content": False}
         landscape_active = False
         landscape_page_started = False
@@ -1480,39 +1796,54 @@ class ReportGenerator:
 
     def _create_cover_page(self, title: str, subtitle: str,
                            metadata: Dict[str, str], brand=None) -> str:
-        """Create a professional cover page"""
-        html = '<div class="cover-page page-break">'
+        """Create a professional cover that remains balanced without an image."""
+        html = '<div class="cover-page">'
 
-        # Brand header (logo + org name) if branding provided
-        if brand is not None:
-            html += f'<div style="margin-bottom:24px;">{brand.get_logo_html(56)}</div>'
-            html += (
-                f'<div style="font-size:13px;font-weight:600;'
-                f'color:{brand.primary_color};margin-bottom:4px;">'
-                f'{self._esc(brand.org_name)}</div>'
-            )
-            if brand.org_subtitle:
-                html += (
-                    f'<div style="font-size:11px;color:#7f8c8d;'
-                    f'margin-bottom:28px;">{self._esc(brand.org_subtitle)}</div>'
-                )
+        logo_html = brand.get_logo_html(72) if brand is not None else ""
+        org_name = str(getattr(brand, "org_name", "") or "").strip()
+        org_subtitle = str(getattr(brand, "org_subtitle", "") or "").strip()
+        if logo_html or org_name or org_subtitle:
+            html += '<div class="cover-brand-block">'
+            if org_name or org_subtitle:
+                html += '<div class="cover-org-block">'
+                if org_name:
+                    html += f'<div class="cover-org-name">{self._esc(org_name)}</div>'
+                if org_subtitle:
+                    html += (
+                        f'<div class="cover-org-subtitle">'
+                        f'{self._esc(org_subtitle)}</div>'
+                    )
+                html += '</div>'
+            if logo_html:
+                html += f'<div class="cover-logo-wrap">{logo_html}</div>'
+            html += '</div>'
 
+        html += '<div class="cover-title-block">'
+        html += '<div class="cover-kicker">Technical report</div>'
         html += f'<div class="cover-title">{self._esc(title)}</div>'
-        html += f'<div class="cover-subtitle">{self._esc(subtitle)}</div>'
+        if subtitle:
+            html += f'<div class="cover-subtitle">{self._esc(subtitle)}</div>'
+        html += '</div>'
 
+        meta_items = [
+            ("Project", metadata.get("project_name", "")),
+            ("Project no.", metadata.get("project_no", "")),
+            ("Location", metadata.get("location", "")),
+            ("Client", metadata.get("client", "")),
+            ("Prepared by", metadata.get("analyst", "")),
+            ("Report date", metadata.get("date", "") or datetime.now().strftime("%Y-%m-%d")),
+        ]
         html += '<div class="cover-meta">'
-        if metadata.get('project_name'):
-            html += f'<div><strong>Project:</strong> {self._esc(metadata["project_name"])}</div>'
-        if metadata.get('location'):
-            html += f'<div><strong>Location:</strong> {self._esc(metadata["location"])}</div>'
-        if metadata.get('client'):
-            html += f'<div><strong>Client:</strong> {self._esc(metadata["client"])}</div>'
-        if metadata.get('analyst'):
-            html += f'<div><strong>Analyst:</strong> {self._esc(metadata["analyst"])}</div>'
-        html += f'<div><strong>Date:</strong> {datetime.now().strftime("%B %d, %Y")}</div>'
+        for label, value in meta_items:
+            clean_value = str(value or "").strip()
+            if not clean_value:
+                continue
+            html += '<div class="cover-meta-item">'
+            html += f'<div class="cover-meta-label">{self._esc(label)}</div>'
+            html += f'<div class="cover-meta-value">{self._esc(clean_value)}</div>'
+            html += '</div>'
         html += '</div>'
         html += '</div>'
-
         return html
 
     def _global_report_style(self):
@@ -2815,6 +3146,13 @@ class ReportGenerator:
                 })
             sample_details = normalized_details
 
+        # Keep report tables and figures aligned with CSV/Excel exports even
+        # when source files were loaded in a different order.
+        sample_details = sorted(
+            sample_details,
+            key=lambda item: natural_sort_key(item.get('label', '')),
+        )
+
         datasets = [item["dataset"] for item in sample_details]
         sample_labels = [str(item["label"]) for item in sample_details]
         plot_results_dict = {
@@ -3519,7 +3857,7 @@ class ReportGenerator:
         <div class="table-pair">
         <table class="table-compact" data-report-table="sample-properties">
             <thead><tr>
-                <th>Sample</th><th class="num">Temp (?C)</th><th class="num">Porosity</th>
+                <th>Sample</th><th class="num">Temp (&#176;C)</th><th class="num">Porosity</th>
                 <th class="num">D10 (mm)</th><th class="num">D50 (mm)</th>
                 <th class="num">D60 (mm)</th><th class="num">Cu</th>
             </tr></thead><tbody>

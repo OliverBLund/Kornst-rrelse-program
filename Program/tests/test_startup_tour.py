@@ -314,6 +314,10 @@ class TestStartupTourOverlay(unittest.TestCase):
         self.assertIn("_nav_btns[COMPARISON_TAB]", steps_source)
         self.assertIn("_nav_btns[REPORTS_TAB]", steps_source)
         self.assertIn("_nav_btns[EXPORT_TAB]", steps_source)
+        self.assertIn("_help_menu_btn", steps_source)
+        self.assertNotIn("app_toolbar._help_btn", steps_source)
+        self.assertIn("Samples panel", steps_source)
+        self.assertNotIn("main sidebar", steps_source)
         self.assertNotIn("_add_btn", steps_source)
         self.assertNotIn("_calc_btn", steps_source)
 

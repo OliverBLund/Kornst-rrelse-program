@@ -560,10 +560,14 @@ class StatisticsTab(QWidget):
         return frame
 
     def _build_k_summary_card(self) -> _Card:
-        card = _Card("Hydraulic Conductivity Summary", "aggregates from Results")
+        card = _Card("Hydraulic Conductivity Summary", "All active / OK only")
         self._k_table = _make_table(["Statistic", "m/s", "cm/s", "m/d"])
+        self._k_table.setToolTip(
+            "Statistics use positive OK results from the active workspace K methods."
+        )
         card.add(self._k_table)
         self._k_note = QLabel("Calculate K-values to see the aggregate summary.")
+        self._k_note.setWordWrap(True)
         self._k_note.setStyleSheet(
             f"color: {C.TEXT_MUTED}; font-family: '{F.UI}'; font-size: {F.SZ_SM}pt;"
             f" font-style: italic;"
@@ -810,11 +814,21 @@ class StatisticsTab(QWidget):
 
     def _update_k_summary(self, summary) -> None:
         self._k_table.setRowCount(0)
+        self.k_summary_card.set_meta("All active / OK only")
         if not summary:
             self._k_table.hide()
+            self._k_note.setText(
+                "Calculate K-values to see the OK-only aggregate summary. "
+                "The active method set is controlled under Analysis > Choose K Methods."
+            )
             self._k_note.show()
             return
-        self._k_note.hide()
+        self._k_note.setText(
+            f"Uses {summary.included_count} of {summary.total_cells} active methods: "
+            "positive OK results only. Warnings and errors are excluded. "
+            "Change the active set under Analysis > Choose K Methods."
+        )
+        self._k_note.show()
         self._k_table.show()
 
         rows = [
@@ -854,7 +868,7 @@ class StatisticsTab(QWidget):
         r = self._k_table.rowCount()
         self._k_table.insertRow(r)
         excluded = summary.warning_count + summary.error_count
-        self._k_table.setItem(r, 0, _cell("Included methods"))
+        self._k_table.setItem(r, 0, _cell("Included OK methods"))
         self._k_table.setItem(
             r, 1, _cell(f"{summary.included_count} / {summary.total_cells}", align_right=True))
         self._k_table.setItem(

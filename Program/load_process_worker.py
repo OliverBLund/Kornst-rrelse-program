@@ -5,6 +5,7 @@ import os
 from typing import Any, Mapping, Sequence
 
 from data_loader import DataLoader, GrainSizeData, calculate_sieve_percent_passing
+from delimited_text import DELIMITED_TEXT_EXTENSIONS, read_delimited_rows
 from import_resolver import resolve_excel_import
 from k_calculations import KCalculator
 
@@ -187,11 +188,9 @@ def _is_numeric(value: Any) -> bool:
 
 def _load_rows(file_path: str, sheet_name: str | None = None) -> list[list[str]]:
     file_ext = os.path.splitext(file_path)[1].lower()
-    if file_ext == ".csv":
-        import csv
-
-        with open(file_path, "r", encoding="utf-8") as handle:
-            return [list(row) for row in csv.reader(handle)]
+    if file_ext in DELIMITED_TEXT_EXTENSIONS:
+        rows, _delimiter, _encoding = read_delimited_rows(file_path)
+        return rows
 
     if file_ext in {".xlsx", ".xls"}:
         import pandas as pd

@@ -33,6 +33,7 @@ from grain_classification import (
 from calculation_internals import compute_calculation_internals
 from exporting.table_model import ExportTable, write_csv_table, write_excel_table
 from method_registry import DEFAULT_METHOD_ORDER, METHOD_CATEGORY_MAP, ordered_methods
+from natural_order import natural_sort_key
 from .plot_renderers import (
     apply_legend_aware_layout,
     render_applicability_heatmap,
@@ -111,6 +112,14 @@ class ExportManager:
 
     def _stable_export_datasets(self, datasets: List[tuple]) -> List[tuple]:
         """Return export tuples with deterministic labels for duplicate sample names."""
+        return [
+            (label, dataset, results)
+            for label, dataset, results, _source_index
+            in self._stable_export_records(datasets)
+        ]
+
+    def _stable_export_records(self, datasets: List[tuple]) -> List[tuple]:
+        """Return naturally ordered export tuples plus their source index."""
         base_names: list[str] = []
         for index, (name, dataset, _results) in enumerate(datasets):
             fallback = getattr(dataset, 'sample_name', None) or f"Dataset {index + 1}"
@@ -122,7 +131,9 @@ class ExportManager:
         used: set[str] = set()
         stable: list[tuple] = []
 
-        for base, (_name, dataset, results) in zip(base_names, datasets):
+        for source_index, (base, (_name, dataset, results)) in enumerate(
+            zip(base_names, datasets)
+        ):
             seen[base] += 1
             root = f"{base} ({seen[base]})" if counts[base] > 1 else base
             label = root
@@ -137,9 +148,9 @@ class ExportManager:
             else:
                 export_dataset = copy.copy(dataset)
                 export_dataset.sample_name = label
-            stable.append((label, export_dataset, results))
+            stable.append((label, export_dataset, results, source_index))
 
-        return stable
+        return sorted(stable, key=lambda item: natural_sort_key(item[0]))
 
     def set_scheme(self, scheme) -> None:
         """Set the active classification scheme used in all exports."""
@@ -616,6 +627,7 @@ class ExportManager:
         max_data_rows: Optional[int] = None,
     ) -> List[List[Any]]:
         """Build Overall/Group/Dataset aggregate rows from the shared snapshot."""
+        datasets = self._stable_export_datasets(datasets)
         header = [
             'Scope_Type',
             'Scope',
@@ -731,8 +743,18 @@ class ExportManager:
             List of exported file paths
         """
         self.exported_files = []
-        datasets = self._stable_export_datasets(datasets)
+        records = self._stable_export_records(datasets)
+        datasets = [
+            (label, dataset, results)
+            for label, dataset, results, _source_index in records
+        ]
         config = dict(config)
+        plot_contexts = list(config.get('plot_contexts') or [])
+        if plot_contexts:
+            config['plot_contexts'] = [
+                plot_contexts[source_index] if source_index < len(plot_contexts) else {}
+                for _label, _dataset, _results, source_index in records
+            ]
         if self._metadata_enabled(config, 'export_timestamp') and '_export_timestamp' not in config:
             config['_export_timestamp'] = datetime.now().isoformat(timespec='seconds')
         total_steps = max(int(config.get('expected_file_count') or 0), self._calculate_total_steps(datasets, config))

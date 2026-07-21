@@ -33,8 +33,10 @@
   <h2>Export Does Not Match What You Expected</h2>
   <ul>
     <li>The <strong>Export</strong> tab uses its own scope selector: <strong>All</strong>, <strong>Current</strong>, or <strong>Selected</strong>.</li>
-    <li>Sidebar selection does <strong>not</strong> limit export unless the export scope is explicitly set to <strong>Selected</strong>.</li>
-    <li>Review the included-content toggles if percentile, gradation, classification, or K-value sections are missing from the preview.</li>
+    <li><strong>Selected</strong> uses the included sample set from sidebar <strong>Scope &amp; Groups</strong>.</li>
+    <li>If a named recipe is close but not exact, adjust Formats or Included Content; the recipe changes to <strong>Custom</strong>.</li>
+    <li>If plot files are missing, select both a plot format and at least one Individual or Comparison plot type.</li>
+    <li>Use <strong>Review &gt; Files to Create</strong> as the final check of dated filenames, folders, and file count.</li>
     <li>If K-values are missing, rerun calculations before exporting.</li>
   </ul>
 
@@ -46,7 +48,7 @@
     </tr>
     <tr>
       <td>Plot colours are not what you picked</td>
-      <td>Colour comes from the <strong>palette</strong>, not the preset. Set the <strong>Palette</strong> in <strong>Plot Style</strong> to a colour map (for example Viridis or Grayscale); <strong>Categorical</strong> keeps the standard colours.</td>
+      <td>Colour comes from the palette, not the preset. Set <strong>Palette</strong> under Reports Plot Style or Export Plot Appearance; <strong>Categorical</strong> keeps the standard colours.</td>
     </tr>
     <tr>
       <td>Fonts too small or too large</td>
@@ -54,7 +56,7 @@
     </tr>
     <tr>
       <td>Report and export plots do not match</td>
-      <td>They share the same Plot Style. Make sure the same preset and palette are selected, and regenerate.</td>
+      <td>They share one saved appearance. Confirm the preset, palette, and Customize overrides, then regenerate or re-export.</td>
     </tr>
     <tr>
       <td>Per-sample plots are missing from a report</td>

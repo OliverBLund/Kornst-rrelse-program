@@ -102,12 +102,11 @@ def _save_welcome_preference(settings, dont_show: bool) -> None:
 
 class _AppToolbar(QWidget):
     """
-    Global toolbar: navigation tabs (left) + log/help actions (right).
+    Global toolbar: navigation tabs (left) + activity-log action (right).
     Styled entirely via QSS properties defined in theme.build_stylesheet().
     """
     tab_changed = pyqtSignal(int)
     log_clicked = pyqtSignal()
-    help_clicked = pyqtSignal()
 
     _TABS = [
         ("fa6s.house",         "Home"),
@@ -175,7 +174,6 @@ class _AppToolbar(QWidget):
             pass
         self._log_btn.clicked.connect(self.log_clicked)
         layout.addWidget(self._log_btn)
-        layout.addSpacing(4)
 
         self._log_badge = QLabel(self._log_btn)
         self._log_badge.setObjectName("toolbar-badge")
@@ -186,19 +184,6 @@ class _AppToolbar(QWidget):
         self._log_badge.setFixedHeight(16)
         self._log_badge.setMinimumWidth(16)
         self._log_badge.hide()
-
-        # ── Help — .tb-btn ───────────────────────────────────────────
-        self._help_btn = QPushButton(" Help")
-        self._help_btn.setObjectName("tb-help")
-        self._help_btn.setProperty("toolaction", True)
-        try:
-            self._help_btn.setIcon(icon("fa6s.book", C.TEXT_MID))
-            self._help_btn.setIconSize(self._CHROME_ICON_SIZE)
-        except Exception:
-            pass
-        self._help_btn.setCursor(Qt.CursorShape.PointingHandCursor)
-        self._help_btn.clicked.connect(self.help_clicked)
-        layout.addWidget(self._help_btn)
 
         self._refresh_nav_styles()
 
@@ -642,7 +627,6 @@ class MainWindow(FramelessMainWindowMixin, QMainWindow):
         self.app_toolbar = _AppToolbar()
         self.app_toolbar.tab_changed.connect(self._on_nav_tab_changed)
         self.app_toolbar.log_clicked.connect(self.toggle_log_overlay)
-        self.app_toolbar.help_clicked.connect(self.show_help)
         main_layout.addWidget(self.app_toolbar)
 
         self._log_overlay = LogDropdownPanel(self.log_store, self)
@@ -715,7 +699,6 @@ class MainWindow(FramelessMainWindowMixin, QMainWindow):
         # Page 4 — Export
         self.export_tab = ExportTab()
         self.export_tab.jump_to_dataset_requested.connect(self._on_export_dataset_requested)
-        self.export_tab.dataset_selection_requested.connect(self._on_export_selection_requested)
         self.content_stack.addWidget(self.export_tab)
 
         settings_tmp = QSettings("GrainSizeAnalysis", "MainWindow")
@@ -935,7 +918,8 @@ class MainWindow(FramelessMainWindowMixin, QMainWindow):
         about_action.setIcon(icon("fa6s.circle-info", C.TEXT_MUTED))
         about_action.triggered.connect(self.show_about)
         help_menu.addAction(about_action)
-        menu_layout.addWidget(self._make_menu_button("Help", help_menu))
+        self._help_menu_btn = self._make_menu_button("Help", help_menu)
+        menu_layout.addWidget(self._help_menu_btn)
 
         spacer = QWidget()
         spacer.setObjectName("menubar-spacer")
@@ -1101,7 +1085,10 @@ class MainWindow(FramelessMainWindowMixin, QMainWindow):
         if index == COMPARISON_TAB and len(self.dataset_tabs) >= 2:
             self.comparison_tab.update_comparison()
         elif index == REPORTS_TAB:
-            self.reporting_tab.set_dataset_tabs(self.dataset_tabs)
+            self.reporting_tab.set_dataset_tabs(
+                self.dataset_tabs,
+                preserve_report_if_unchanged=True,
+            )
         elif index == EXPORT_TAB:
             self._update_export_tab()
 
@@ -2245,12 +2232,6 @@ class MainWindow(FramelessMainWindowMixin, QMainWindow):
         self.control_panel.set_selected_paths(file_paths, emit_signal=False)
         self._sync_scope_outputs()
 
-    def _on_export_selection_requested(self, file_paths: list[str]) -> None:
-        """Apply export-dialog selections back onto the sidebar cards."""
-        self._refresh_sidebar_group_labels()
-        self.control_panel.set_selected_paths(file_paths, emit_signal=False)
-        self._sync_scope_outputs()
-
     def _on_scheme_changed(self, scheme):
         """Propagate a new classification scheme to all open dataset tabs and output tabs."""
         self.active_scheme = scheme
@@ -2780,9 +2761,9 @@ class MainWindow(FramelessMainWindowMixin, QMainWindow):
         """Return the shell-level steps used by the Getting Started tutorial."""
         return [
             TourStep(
-                title="Start in the sidebar",
+                title="Start in the Samples panel",
                 body=(
-                    "Use the import box in the main sidebar to drop files or choose "
+                    "Use the import box at the top of the Samples panel to drop files or choose "
                     "the import path. This is the primary entry point for processed "
                     "sieve data and raw sieve weighings."
                 ),
@@ -2796,7 +2777,7 @@ class MainWindow(FramelessMainWindowMixin, QMainWindow):
             TourStep(
                 title="Loaded samples live here",
                 body=(
-                    "After loading, each dataset appears as a sample card. The sidebar "
+                    "After loading, each dataset appears as a sample card. The Samples panel "
                     "is the everyday navigation point for opening, inspecting, remapping, "
                     "including, or excluding datasets."
                 ),
@@ -2831,7 +2812,7 @@ class MainWindow(FramelessMainWindowMixin, QMainWindow):
                 tips=(
                     "Temperature affects water density and viscosity.",
                     "Dataset porosity can be managed separately when needed.",
-                    "The sidebar stays focused on importing and navigating samples.",
+                    "The Samples panel stays focused on importing and navigating samples.",
                 ),
             ),
             TourStep(
@@ -2855,7 +2836,7 @@ class MainWindow(FramelessMainWindowMixin, QMainWindow):
                     "close datasets or reset the current workspace."
                 ),
                 target=lambda: self.app_toolbar._nav_btns[HOME_TAB],
-                tips=("The Samples sidebar remains available on Home.",),
+                tips=("The Samples panel remains available on Home.",),
             ),
             TourStep(
                 title="Individual Samples",
@@ -2864,7 +2845,7 @@ class MainWindow(FramelessMainWindowMixin, QMainWindow):
                     "histograms, method results, warnings, and detailed per-sample tables."
                 ),
                 target=lambda: self.app_toolbar._nav_btns[INDIVIDUAL_TAB],
-                tips=("The Samples sidebar is the dataset switcher for this workspace.",),
+                tips=("The Samples panel is the dataset switcher for this workspace.",),
             ),
             TourStep(
                 title="Comparison",
@@ -2874,7 +2855,7 @@ class MainWindow(FramelessMainWindowMixin, QMainWindow):
                 ),
                 target=lambda: self.app_toolbar._nav_btns[COMPARISON_TAB],
                 tips=(
-                    "The plot sidebar controls visible samples and groups.",
+                    "The plot controls panel manages visible samples and groups.",
                     "Details and Statistics summarize individual and aggregate results.",
                 ),
             ),
@@ -2918,14 +2899,18 @@ class MainWindow(FramelessMainWindowMixin, QMainWindow):
                 tips=("This stays visible while moving between tabs.",),
             ),
             TourStep(
-                title="Tutorials and written guides",
+                title="Help menu: tutorials and written guides",
                 body=(
-                    "The Help menu separates interactive Tutorials from Written Guides. "
+                    "Use the Help menu as the complete support hub. It separates interactive "
+                    "Tutorials from Written Guides. "
                     "Use Tutorials for highlighted step-by-step orientation and Written "
                     "Guides for detailed reference material."
                 ),
-                target=lambda: self.app_toolbar._help_btn,
-                tips=("All Tutorials are also available directly from Home.",),
+                target=lambda: self._help_menu_btn,
+                tips=(
+                    "Press F1 to open Written Guides directly.",
+                    "All Tutorials are also available directly from Home.",
+                ),
             ),
         ]
 
@@ -3504,6 +3489,7 @@ class MainWindow(FramelessMainWindowMixin, QMainWindow):
             "dataset_scope_section": getattr(tab, "dataset_scope_section", None),
             "format_section": getattr(tab, "format_section", None),
             "content_section": getattr(tab, "content_section", None),
+            "plot_style_section": getattr(tab, "plot_style_section", None),
             "output_folder_section": getattr(tab, "output_folder_section", None),
             "file_tree_section": getattr(tab, "file_tree_section", None),
             "plot_queue_section": getattr(tab, "plot_queue_section", None),
@@ -3530,7 +3516,7 @@ class MainWindow(FramelessMainWindowMixin, QMainWindow):
         return getattr(self.reporting_tab, "_acc_sects", self.reporting_tab)
 
     def _export_format_card(self, format_key: str) -> QWidget | None:
-        return self.export_tab.findChild(QPushButton, f"format_card_{format_key}")
+        return self.export_tab.findChild(QPushButton, "format_card_selector")
 
     def _export_content_tabs(self) -> QTabWidget | None:
         area = getattr(self.export_tab, "content_area", None)
@@ -3806,7 +3792,7 @@ class MainWindow(FramelessMainWindowMixin, QMainWindow):
                 tips=(
                     "All exports every loaded dataset.",
                     "Current exports only the dataset selected in the source combo.",
-                    "Selected exports the sidebar/comparison selection and can be managed from the Manage button.",
+                    "Selected exports the inclusion set managed from Scope & Groups in the always-visible sidebar.",
                     "Group labels matter because group-aware statistics and comparison plots use them.",
                 ),
                 kicker="Export",
@@ -3817,20 +3803,42 @@ class MainWindow(FramelessMainWindowMixin, QMainWindow):
                 ),
             ),
             TourStep(
-                title="Choose table formats",
+                title="Start with an export recipe",
                 body=(
-                    "Format cards are independent toggles. CSV and Excel options write numeric "
-                    "tables; they are the best outputs when another tool or reviewer needs to "
-                    "filter, calculate, compare, or reuse the results."
+                    "A recipe selects a coherent set of file formats and included content. "
+                    "Its one-line description states the package it creates, and the live file "
+                    "count updates immediately."
                 ),
                 target=lambda: self._first_tour_target(
-                    self._export_format_card("csv_long"),
+                    getattr(self.export_tab, "recipe_combo", None),
                     getattr(self.export_tab, "format_section", None),
                 ),
                 tips=(
-                    "CSV Long is tidy: one row per K-value result, good for R, Python, databases, and filtered analysis.",
-                    "CSV Wide is comparison-oriented: one row per dataset with method columns, good for spreadsheets and statistics.",
-                    "Excel creates one combined workbook with separate sheets and numeric cells, good for review and manual follow-up.",
+                    "CSV + Grain Curves is the general-purpose starting point.",
+                    "Summary CSV and Analysis Tables are data-first packages; Workbook + Plots is presentation-oriented.",
+                    "Changing any format or content choice marks the recipe as Custom without discarding the change.",
+                ),
+                kicker="Export",
+                before_step=lambda: self._prepare_export_tour_step(
+                    inspector_index=0,
+                    open_sections=("format_section",),
+                    target=lambda: getattr(self.export_tab, "recipe_combo", None),
+                ),
+            ),
+            TourStep(
+                title="Adjust file formats when needed",
+                body=(
+                    "The Formats selector summarizes the active outputs in one line. Open it "
+                    "to independently toggle reusable data files and figure files."
+                ),
+                target=lambda: self._first_tour_target(
+                    self._export_format_card("png"),
+                    getattr(self.export_tab, "format_section", None),
+                ),
+                tips=(
+                    "CSV Long is tidy, CSV Wide is comparison-oriented, and Excel creates one combined workbook with typed cells.",
+                    "PNG is a raster image; SVG is vector graphics; PDF plot output is static and print-ready.",
+                    "Plot Appearance is a separate section and only affects exported figure files.",
                 ),
                 kicker="Export",
                 before_step=lambda: self._prepare_export_tour_step(
@@ -3840,43 +3848,20 @@ class MainWindow(FramelessMainWindowMixin, QMainWindow):
                 ),
             ),
             TourStep(
-                title="Choose plot file formats",
+                title="Refine included content",
                 body=(
-                    "PNG, SVG, and PDF create figure files for the selected plot types. "
-                    "They export the visual figure, not the full report document and not a hidden data dump."
-                ),
-                target=lambda: self._first_tour_target(
-                    self._export_format_card("png"),
-                    getattr(self.export_tab, "format_section", None),
-                ),
-                tips=(
-                    "PNG is a raster image: easy for slides, email, and quick insertion, but fixed resolution.",
-                    "SVG is vector graphics: best for scaling and editing later in tools such as Inkscape or Illustrator.",
-                    "PDF plot output is static and print-ready: good for publication-style figures and controlled sharing.",
-                ),
-                kicker="Export",
-                before_step=lambda: self._prepare_export_tour_step(
-                    inspector_index=0,
-                    open_sections=("format_section",),
-                    target=lambda: self._export_format_card("png"),
-                ),
-            ),
-            TourStep(
-                title="Select data table content",
-                body=(
-                    "Included Content controls which categories are written inside the selected "
-                    "table formats. The Data tables tab covers grain-size distribution data, "
-                    "K-value results, statistics, and sample metadata."
+                    "Included Content is the optional detail layer. Data controls table fields, "
+                    "Individual controls figures made once per sample, and Comparison controls "
+                    "figures built across the full export scope."
                 ),
                 target=lambda: self._first_tour_target(
                     self._export_content_tabs(),
                     getattr(self.export_tab, "content_section", None),
                 ),
                 tips=(
-                    "Grain-size rows are the measured or interpolated curve values.",
-                    "K-value rows come from the same calculation results shown in the Results tab.",
-                    "Soil Classification adds the label, descriptor, detailed sub-class fractions, and calculation internals (Excel/JSON); CSV gets the descriptor column.",
-                    "Statistics and metadata add context so files can be understood outside the application.",
+                    "Keep this section collapsed when a recipe already matches the deliverable.",
+                    "Per-sample plot counts multiply by dataset count and selected plot formats.",
+                    "Comparison rows with a breakdown selector can create per-group, per-dataset, or both variants.",
                 ),
                 kicker="Export",
                 before_step=lambda: self._prepare_export_tour_step(
@@ -3887,60 +3872,37 @@ class MainWindow(FramelessMainWindowMixin, QMainWindow):
                 ),
             ),
             TourStep(
-                title="Select individual plot exports",
+                title="Set plot appearance once",
                 body=(
-                    "The Individual plots tab controls figures created once per exported dataset. "
-                    "Use these when each sample needs its own grain-size curve, K-value figure, "
-                    "or other per-sample visual output."
+                    "Plot Appearance is separate from plot selection. The Individual and "
+                    "Comparison lists decide which figure files are created; Plot Appearance "
+                    "decides how every selected figure looks."
                 ),
                 target=lambda: self._first_tour_target(
-                    self._export_content_checkbox("plot_scope_single_header"),
-                    self._export_content_tabs(),
-                    getattr(self.export_tab, "content_section", None),
+                    getattr(self.export_tab, "_style_controls", None),
+                    getattr(self.export_tab, "plot_style_section", None),
+                    self._export_format_card("png"),
                 ),
                 tips=(
-                    "Per-sample plot counts multiply by dataset count and by every selected plot file format.",
-                    "Plot file options such as legend and grid apply to generated figure files.",
-                    "Plot Style (the shared footer below the tabs) sets the preset and palette for every exported plot — individual and comparison — and matches Reports.",
+                    "This section is shown only while PNG, SVG, or PDF is selected in Formats.",
+                    "Preset sets typography and density; Palette sets the data colours.",
+                    "Customize adjusts type, curves, grids, and legend layout. Reports uses the same saved style.",
                 ),
                 kicker="Export",
                 before_step=lambda: self._prepare_export_tour_step(
                     inspector_index=0,
-                    content_index=1,
-                    open_sections=("content_section",),
-                    target=lambda: self._export_content_checkbox("plot_scope_single_header"),
-                ),
-            ),
-            TourStep(
-                title="Select comparison plot exports",
-                body=(
-                    "The Comparison plots tab controls figures built across the export scope. "
-                    "These plots are used for overlays, K-value comparisons, distributions, "
-                    "and other summary views where multiple datasets belong in one visual family."
-                ),
-                target=lambda: self._first_tour_target(
-                    self._export_first_plot_breakdown_combo(),
-                    self._export_content_checkbox("plot_scope_collection_header"),
-                    self._export_content_tabs(),
-                ),
-                tips=(
-                    "Per group creates one variant per group when group labels are available.",
-                    "Per dataset creates dataset-specific variants when a combined plot would be too crowded.",
-                    "The file tree updates immediately so the user sees how a breakdown changes the batch size.",
-                ),
-                kicker="Export",
-                before_step=lambda: self._prepare_export_tour_step(
-                    inspector_index=0,
-                    content_index=2,
-                    open_sections=("content_section",),
-                    target=lambda: self._export_first_plot_breakdown_combo()
-                    or self._export_content_checkbox("plot_scope_collection_header"),
+                    open_sections=("plot_style_section",),
+                    target=lambda: self._first_tour_target(
+                        getattr(self.export_tab, "_style_controls", None),
+                        getattr(self.export_tab, "plot_style_section", None),
+                        self._export_format_card("png"),
+                    ),
                 ),
             ),
             TourStep(
                 title="Choose the output folder",
                 body=(
-                    "The Output tab shows where files will be written and what the batch will contain. "
+                    "The Review tab shows where files will be written and what the batch will contain. "
                     "The folder path is the root; Export creates the structured subfolders underneath it."
                 ),
                 target=lambda: self._first_tour_target(
@@ -3962,9 +3924,8 @@ class MainWindow(FramelessMainWindowMixin, QMainWindow):
             TourStep(
                 title="Review files to create",
                 body=(
-                    "Files to Create is the export manifest. It shows the folders and files that "
-                    "will be produced from the current scope, format cards, content switches, "
-                    "and plot breakdown choices."
+                    "Files to Create is the export manifest: the exact table, workbook, and plot "
+                    "paths planned from the current scope, formats, content, and breakdown choices."
                 ),
                 target=lambda: self._first_tour_target(
                     getattr(self.export_tab, "file_tree", None),
@@ -3974,7 +3935,7 @@ class MainWindow(FramelessMainWindowMixin, QMainWindow):
                     "CSV files are grouped under tables/csv.",
                     "Excel workbooks are grouped under workbooks.",
                     "Plot files are grouped by dataset and by collection plot family.",
-                    "If the manifest looks wrong, adjust scope/content before exporting.",
+                    "If the manifest or file count looks wrong, return to Configure before exporting.",
                 ),
                 kicker="Export",
                 before_step=lambda: self._prepare_export_tour_step(
@@ -3996,7 +3957,7 @@ class MainWindow(FramelessMainWindowMixin, QMainWindow):
                     self.export_tab,
                 ),
                 tips=(
-                    "Open Source Sample is only enabled for single-sample plots, because collection plots do not belong to one dataset.",
+                    "Go to Sample opens an individual plot's source sample in Individual Samples; collection plots have no single source.",
                     "CSV and Excel previews show representative table structure; plot preview shows the actual figure renderer.",
                     "Preview is for checking the batch before committing files to disk.",
                 ),

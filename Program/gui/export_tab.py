@@ -8,17 +8,19 @@ from PyQt6.QtWidgets import (
     QLineEdit, QSpinBox, QMessageBox, QScrollArea, QButtonGroup,
     QProgressDialog, QTabWidget, QTableWidget, QTableWidgetItem,
     QTextEdit, QHeaderView, QSplitter, QFrame, QTreeWidget, QTreeWidgetItem,
-    QToolButton, QSizePolicy, QGridLayout, QAbstractItemView
+    QToolButton, QSizePolicy, QGridLayout, QAbstractItemView, QMenu
 )
 from PyQt6.QtCore import Qt, pyqtSignal, QSize
 from PyQt6.QtGui import QFont, QIcon, QColor
 from typing import Any, Dict, List, Optional
+import json
 import os
 from datetime import datetime
 
 from data_loader import GrainSizeData
 from k_calculations_v2 import KCalculationResult
 from grain_classification import ISO14688
+from natural_order import natural_sort_key
 from .matplotlib_canvas import FigureCanvas
 from .accordion_section import AccordionSection
 from .report_style_controls import ReportStyleControls
@@ -35,7 +37,19 @@ from .report_export_plot_registry import (
 )
 from .loading_dialog import LoadingDialog
 from .stack_fade import TabFadeInController
-from .theme import C, icon
+from .theme import C, icon, opaque_combo_qss
+
+
+class _CheckableFormatMenu(QMenu):
+    """Keep the multi-select menu open while checkable formats are toggled."""
+
+    def mouseReleaseEvent(self, event) -> None:
+        action = self.actionAt(event.position().toPoint())
+        if action is not None and action.isEnabled() and action.isCheckable():
+            action.trigger()
+            event.accept()
+            return
+        super().mouseReleaseEvent(event)
 
 
 class ExportTab(QWidget):
@@ -45,7 +59,50 @@ class ExportTab(QWidget):
     export_started = pyqtSignal()
     export_completed = pyqtSignal(str)  # Export path
     jump_to_dataset_requested = pyqtSignal(str)
-    dataset_selection_requested = pyqtSignal(list)
+
+    RECIPE_SPECS = (
+        (
+            'standard',
+            'CSV + Grain Curves',
+            'Long/wide CSV plus selected grain/aggregate tables and PNG curves.',
+        ),
+        (
+            'minimal',
+            'Summary CSV',
+            'One wide CSV with core grain and K metrics; no plot files.',
+        ),
+        (
+            'statistical',
+            'Analysis Tables',
+            'Wide/aggregate CSV tables plus an Excel workbook; no plot files.',
+        ),
+        (
+            'client',
+            'Workbook + Plots',
+            'Excel workbook plus common PNG and PDF presentation figures.',
+        ),
+        (
+            'full',
+            'Complete Package',
+            'Every table format, detailed field and exportable plot type.',
+        ),
+        (
+            'custom',
+            'Custom',
+            'Formats or included content have been adjusted manually.',
+        ),
+    )
+
+    FORMAT_SPECS = (
+        ('Data', 'csv_long', 'CSV Long', 'One row per K-value result'),
+        ('Data', 'csv_wide', 'CSV Wide', 'One row per sample for comparison and statistics'),
+        ('Data', 'excel', 'Excel', 'Combined typed workbook'),
+        ('Plots', 'png', 'PNG', 'High-resolution raster images'),
+        ('Plots', 'svg', 'SVG', 'Scalable vector graphics'),
+        ('Plots', 'pdf', 'PDF', 'Print-ready vector figures'),
+    )
+
+    FILENAME_TEMPLATE = '{sample_name}_results_{date}'
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -64,6 +121,9 @@ class ExportTab(QWidget):
         # Active background export (None when idle) — see export_now / _run_export.
         self._export_worker = None
         self._export_dialog = None
+        self._active_recipe_key = 'standard'
+        self._active_recipe_signature = None
+        self._applying_recipe = False
 
         # Selected formats (for card-based selection)
         self.selected_formats = self._default_selected_formats()
@@ -133,7 +193,6 @@ class ExportTab(QWidget):
         plot_items = export_plot_items()
         plot_items.update({
             'include_legend': True,
-            'include_grid': True,
         })
         self.content_selection = {
             # === GRAIN SIZE DATA ===
@@ -244,111 +303,56 @@ class ExportTab(QWidget):
             }
         }
 
-    def _create_format_card(self, format_key: str, title: str, description: str, icon_name: str) -> QPushButton:
-        """Create a dense clickable format toggle."""
-        card = QPushButton()
-        card.setCheckable(True)
-        card.setChecked(self.selected_formats.get(format_key, False))
-        card.setObjectName(f"format_card_{format_key}")
-        card.setMinimumHeight(34)
-        card.setMaximumHeight(36)
-        card.setCursor(Qt.CursorShape.PointingHandCursor)
-        card.setToolTip(description)
-        card.setProperty("format_key", format_key)
-
-        card_layout = QHBoxLayout(card)
-        card_layout.setSpacing(5)
-        card_layout.setContentsMargins(7, 2, 7, 2)
-
-        icon_label = QLabel()
-        icon_label.setPixmap(icon(icon_name, C.TEXT_MUTED, 12).pixmap(QSize(12, 12)))
-        icon_label.setFixedWidth(17)
-        icon_label.setStyleSheet("background: transparent; border: none;")
-        card_layout.addWidget(icon_label)
-
-        title_label = QLabel(title)
-        title_label.setFont(QFont("Segoe UI", 8, QFont.Weight.Bold))
-        title_label.setStyleSheet("background: transparent; border: none;")
-        title_label.setWordWrap(False)
-        card_layout.addWidget(title_label, 1)
-
-        self._update_card_style(card, format_key)
-        card.clicked.connect(lambda: self._toggle_format(format_key))
-        return card
-
-    def _update_card_style(self, card: QPushButton, format_key: str):
-        """Update card styling based on selection state"""
-        is_selected = self.selected_formats.get(format_key, False)
-
-        # Update checked state
-        card.setChecked(is_selected)
-
-        if is_selected:
-            card.setStyleSheet(f"""
-                QPushButton {{
-                    background-color: #eef5de;
-                    border: 1px solid {C.OLIVE_DK};
-                    border-radius: 5px;
-                    text-align: left;
-                    padding-left: 0px;
-                    color: {C.TEXT};
-                }}
-                QPushButton:hover {{
-                    background-color: #e5f0cf;
-                    border-color: {C.OLIVE};
-                }}
-                QPushButton:pressed {{
-                    background-color: #d9e8ba;
-                }}
-                QLabel {{
-                    background: transparent;
-                    border: none;
-                }}
-            """)
-        else:
-            card.setStyleSheet(f"""
-                QPushButton {{
-                    background-color: #fbf8f1;
-                    border: 1px solid {C.BORDER_DK};
-                    border-radius: 5px;
-                    text-align: left;
-                    padding-left: 0px;
-                    color: {C.TEXT_MID};
-                }}
-                QPushButton:hover {{
-                    background-color: #fffaf0;
-                    border-color: {C.EARTH};
-                    color: {C.TEXT};
-                }}
-                QPushButton:pressed {{
-                    background-color: {C.BG_LOW};
-                }}
-                QLabel {{
-                    background: transparent;
-                    border: none;
-                }}
-            """)
+    def _format_summary(self) -> str:
+        labels = [
+            label
+            for _group, key, label, _description in self.FORMAT_SPECS
+            if self.selected_formats.get(key, False)
+        ]
+        if not labels:
+            return 'No formats selected'
+        if len(labels) <= 3:
+            return ', '.join(labels)
+        return f'{labels[0]}, {labels[1]} +{len(labels) - 2}'
 
     def _sync_format_cards(self) -> None:
-        if not hasattr(self, "formats_layout"):
+        """Synchronize the checkable menu and its one-line format summary."""
+        for key, action in getattr(self, '_format_actions', {}).items():
+            action.blockSignals(True)
+            action.setChecked(bool(self.selected_formats.get(key, False)))
+            action.blockSignals(False)
+        if hasattr(self, 'format_selector_btn'):
+            summary = self._format_summary()
+            full_summary = ', '.join(
+                label
+                for _group, key, label, _description in self.FORMAT_SPECS
+                if self.selected_formats.get(key, False)
+            ) or 'No formats selected'
+            self.format_selector_btn.setText(summary)
+            self.format_selector_btn.setToolTip(f'Selected formats: {full_summary}')
+        self._sync_plot_appearance_visibility()
+
+    def _set_format_enabled(self, format_key: str, enabled: bool) -> None:
+        if self.selected_formats.get(format_key, False) == bool(enabled):
             return
-        for i in range(self.formats_layout.count()):
-            widget = self.formats_layout.itemAt(i).widget()
-            if widget and hasattr(widget, 'property'):
-                key = widget.property("format_key")
-                if key:
-                    self._update_card_style(widget, key)
-
-    def _toggle_format(self, format_key: str):
-        """Toggle format selection"""
-        self.selected_formats[format_key] = not self.selected_formats.get(format_key, False)
+        self.selected_formats[format_key] = bool(enabled)
         self._sync_format_cards()
-
-        # Update preview and file tree
         self.update_file_tree()
         self.update_summary_card()
         self._update_format_section_meta()
         self.update_preview()
+
+    def _toggle_format(self, format_key: str) -> None:
+        """Compatibility helper for callers that toggle a format by key."""
+        self._set_format_enabled(
+            format_key,
+            not self.selected_formats.get(format_key, False),
+        )
+
+    def _sync_plot_appearance_visibility(self) -> None:
+        section = getattr(self, 'plot_style_section', None)
+        if section is not None:
+            section.setVisible(bool(self._selected_plot_formats()))
 
     def _selected_plot_formats(self) -> List[str]:
         """Return selected plot file formats in display/export order."""
@@ -418,12 +422,12 @@ class ExportTab(QWidget):
             csv_folder.setFont(0, QFont("Segoe UI", 10, QFont.Weight.Bold))
 
             if self.selected_formats.get('csv_long'):
-                long_item = QTreeWidgetItem(["combined_all_datasets.csv", "long"])
+                long_item = QTreeWidgetItem([self._planned_filename('combined_all_datasets', '.csv'), "long"])
                 self._set_tree_icon(long_item, "fa6s.file-lines")
                 csv_folder.addChild(long_item)
 
             if self.selected_formats.get('csv_wide'):
-                wide_item = QTreeWidgetItem(["wide_format_all_datasets.csv", "wide"])
+                wide_item = QTreeWidgetItem([self._planned_filename('wide_format_all_datasets', '.csv'), "wide"])
                 self._set_tree_icon(wide_item, "fa6s.file-lines")
                 csv_folder.addChild(wide_item)
 
@@ -431,12 +435,12 @@ class ExportTab(QWidget):
                 self.content_selection['grain_size']['enabled']
                 and self.content_selection['grain_size']['items']['raw_distribution']
             ):
-                grain_item = QTreeWidgetItem(["grain_distribution.csv", "raw curve rows"])
+                grain_item = QTreeWidgetItem([self._planned_filename('grain_distribution', '.csv'), "raw curve rows"])
                 self._set_tree_icon(grain_item, "fa6s.file-lines")
                 csv_folder.addChild(grain_item)
 
             if len(datasets_to_export) > 1 and self._collection_aggregates_enabled():
-                aggregate_item = QTreeWidgetItem(["aggregate_statistics.csv", "overall + groups"])
+                aggregate_item = QTreeWidgetItem([self._planned_filename('aggregate_statistics', '.csv'), "overall + groups"])
                 self._set_tree_icon(aggregate_item, "fa6s.chart-simple")
                 csv_folder.addChild(aggregate_item)
 
@@ -449,7 +453,7 @@ class ExportTab(QWidget):
             self._set_tree_icon(excel_folder, "fa6s.folder")
             excel_folder.setFont(0, QFont("Segoe UI", 10, QFont.Weight.Bold))
 
-            excel_item = QTreeWidgetItem(["combined_all_datasets.xlsx", "typed workbook"])
+            excel_item = QTreeWidgetItem([self._planned_filename('combined_all_datasets', '.xlsx'), "typed workbook"])
             self._set_tree_icon(excel_item, "fa6s.file-excel")
             excel_folder.addChild(excel_item)
 
@@ -468,14 +472,16 @@ class ExportTab(QWidget):
             for name, _, _ in datasets_to_export:
                 if not single_plot_types:
                     continue
-                dataset_folder = QTreeWidgetItem([name, f"{len(single_plot_types) * len(self._selected_plot_formats())} files"])
+                folder_name = self._format_filename('{sample_name}', name, '')
+                plot_base = self._planned_filename(name)
+                dataset_folder = QTreeWidgetItem([folder_name, f"{len(single_plot_types) * len(self._selected_plot_formats())} files"])
                 self._set_tree_icon(dataset_folder, "fa6s.vial")
                 dataset_folder.setFont(0, QFont("Segoe UI", 9, QFont.Weight.Bold))
                 plots_folder.addChild(dataset_folder)
                 for fmt in self._selected_plot_formats():
                     for plot_type in single_plot_types:
                         plot_item = QTreeWidgetItem([
-                            f"{self._plot_file_suffix(plot_type)}.{fmt}",
+                            f"{plot_base}_{self._plot_file_suffix(plot_type)}.{fmt}",
                             f"{labels[fmt]}",
                         ])
                         self._set_tree_icon(plot_item, "fa6s.image")
@@ -493,8 +499,10 @@ class ExportTab(QWidget):
                     self._comparison_plot_variant_count(plot_type)
                     for plot_type in collection_plot_types
                 ) * len(self._selected_plot_formats())
+                collection_folder_name = self._format_filename('{sample_name}', collection_name, '')
+                collection_base = self._planned_filename(collection_name)
                 collection_folder = QTreeWidgetItem([
-                    collection_name,
+                    collection_folder_name,
                     f"{collection_file_count} files",
                 ])
                 self._set_tree_icon(collection_folder, "fa6s.layer-group")
@@ -507,7 +515,7 @@ class ExportTab(QWidget):
                             suffix = f"{suffix}_{variant_suffix}"
                         for fmt in self._selected_plot_formats():
                             plot_item = QTreeWidgetItem([
-                                f"{suffix}.{fmt}",
+                                f"{collection_base}_{suffix}.{fmt}",
                                 f"{labels[fmt]}",
                             ])
                             plot_item.setToolTip(0, self._plot_record_label(plot_type, breakdown))
@@ -583,13 +591,19 @@ class ExportTab(QWidget):
         else:
             size_str = f"{estimated_size / 1024:.1f} MB"
 
-        self.summary_size_label.setText(f"~{size_str} estimated - ready")
+        output_path = self.output_dir.text() if hasattr(self, 'output_dir') else ''
+        destination = os.path.basename(os.path.normpath(output_path)) if output_path else 'Choose folder'
+        self.summary_size_label.setText(f"{destination} - ~{size_str} - ready")
+        self.summary_size_label.setToolTip(output_path)
         if hasattr(self, "export_btn"):
             label = f"Export {file_count} File" if file_count == 1 else f"Export {file_count} Files"
             self.export_btn.setText(label)
             self.export_btn.setEnabled(bool(dataset_count and file_count))
         if hasattr(self, "file_tree_section"):
             self.file_tree_section.set_meta(f"{file_count} files")
+        if hasattr(self, 'export_inspector_tabs'):
+            self.export_inspector_tabs.setTabText(1, f'Review · {file_count}')
+        self._sync_recipe_modified_state()
 
     def _create_content_toggle(self, content_key: str, icon: str, label: str) -> QPushButton:
         """Create a compact toggle button for content selection"""
@@ -633,7 +647,7 @@ class ExportTab(QWidget):
         """Create the reorganized included-content section."""
         section = AccordionSection("fa6s.sliders", "Included Content")
         section.set_meta("tables + plots")
-        section.set_open(True)
+        section.set_open(False)
 
         self.content_checkboxes = {}
         self.plot_breakdown_combos = {}
@@ -669,7 +683,10 @@ class ExportTab(QWidget):
         content_area_layout.setSpacing(7)
 
         tabs = QTabWidget()
+        self.content_tabs = tabs
         tabs.setDocumentMode(True)
+        tabs.tabBar().setExpanding(True)
+        tabs.tabBar().setUsesScrollButtons(False)
         tabs.setMinimumHeight(335)
         tabs.setStyleSheet("""
             QTabBar::tab {
@@ -682,7 +699,6 @@ class ExportTab(QWidget):
         data_layout = QVBoxLayout(data_tab)
         data_layout.setContentsMargins(6, 6, 6, 6)
         data_layout.setSpacing(7)
-        data_layout.addWidget(self._create_content_preset_bar())
         data_layout.addWidget(self._create_grain_size_category())
         data_layout.addWidget(self._create_content_category(
             "K-Value Results",
@@ -718,25 +734,20 @@ class ExportTab(QWidget):
         individual_layout = QVBoxLayout(individual_tab)
         individual_layout.setContentsMargins(6, 6, 6, 6)
         individual_layout.setSpacing(7)
-        individual_layout.addWidget(self._create_plot_content_category("Individual Sample Plots", "single"))
-        individual_layout.addWidget(self._create_plot_file_options_category())
+        individual_layout.addWidget(self._create_plot_content_category("single"))
         individual_layout.addStretch()
 
         comparison_tab = QWidget()
         comparison_layout = QVBoxLayout(comparison_tab)
         comparison_layout.setContentsMargins(6, 6, 6, 6)
         comparison_layout.setSpacing(7)
-        comparison_layout.addWidget(self._create_plot_content_category("Comparison Plots", "collection"))
+        comparison_layout.addWidget(self._create_plot_content_category("collection"))
         comparison_layout.addStretch()
 
-        tabs.addTab(self._create_content_tab_scroll(data_tab), icon("fa6s.table", C.TEXT_MUTED, 11), "Data tables")
-        tabs.addTab(self._create_content_tab_scroll(individual_tab), icon("fa6s.chart-line", C.TEXT_MUTED, 11), "Individual plots")
-        tabs.addTab(self._create_content_tab_scroll(comparison_tab), icon("fa6s.images", C.TEXT_MUTED, 11), "Comparison plots")
+        tabs.addTab(self._create_content_tab_scroll(data_tab), icon("fa6s.table", C.TEXT_MUTED, 11), "Data")
+        tabs.addTab(self._create_content_tab_scroll(individual_tab), icon("fa6s.chart-line", C.TEXT_MUTED, 11), "Individual")
+        tabs.addTab(self._create_content_tab_scroll(comparison_tab), icon("fa6s.images", C.TEXT_MUTED, 11), "Comparison")
         content_area_layout.addWidget(tabs, 1)
-
-        # Plot Style applies to every exported plot (individual and comparison),
-        # so it lives below the sub-tabs as a shared footer rather than inside one.
-        content_area_layout.addWidget(self._create_plot_style_section())
 
         section.body_layout().addWidget(self.content_area, 1)
         self.content_section = section
@@ -771,14 +782,14 @@ class ExportTab(QWidget):
         """)
         return scroll
 
-    def _create_plot_content_category(self, title: str, scope: str) -> QWidget:
-        section = AccordionSection(
-            "fa6s.chart-line" if scope == "single" else "fa6s.images",
-            title,
-        )
+    def _create_plot_content_category(self, scope: str) -> QWidget:
+        """Create a flat plot-file checklist for one plot scope.
+
+        The containing tab already names the scope, so another titled group or
+        include-all checkbox only repeats hierarchy and makes a short list feel
+        more complex than it is.
+        """
         rows = export_plot_rows(scope)  # shared report/export vocabulary
-        section.set_meta(f"{len(rows)} types")
-        section.set_open(True)
 
         group = QFrame()
         group.setStyleSheet(f"""
@@ -804,18 +815,10 @@ class ExportTab(QWidget):
         layout.setContentsMargins(6, 4, 6, 4)
         layout.setSpacing(4)
 
-        scope_keys = [key for key, *_rest in rows]
-        header_cb = QCheckBox(f"Include {title.lower()}")
-        header_cb.setFont(QFont("Segoe UI", 9, QFont.Weight.Bold))
-        header_cb.setChecked(any(self.content_selection['plots']['items'].get(key, False) for key in scope_keys))
-        header_cb.stateChanged.connect(lambda state, keys=scope_keys: self._toggle_plot_scope(keys, state == 2))
-        layout.addWidget(header_cb)
-        self.content_checkboxes[f'plot_scope_{scope}_header'] = header_cb
-
         for key, _fa, label, _default_on, has_breakdown, source_label in rows:
             row = QFrame()
             row_layout = QHBoxLayout(row)
-            row_layout.setContentsMargins(20, 0, 0, 0)
+            row_layout.setContentsMargins(2, 0, 0, 0)
             row_layout.setSpacing(6)
 
             item_cb = QCheckBox(label)
@@ -842,43 +845,9 @@ class ExportTab(QWidget):
 
             layout.addWidget(row)
 
-        section.body_layout().addWidget(group)
-        return section
+        return group
 
-    def _create_plot_file_options_category(self) -> QWidget:
-        return self._create_content_category(
-            "Plot File Options",
-            [
-                ("include_legend", "Include legend"),
-                ("include_grid", "Include grid lines"),
-            ],
-            'plots',
-        )
-
-    def _toggle_plot_scope(self, keys: list[str], enabled: bool) -> None:
-        for key in keys:
-            cb = self.content_checkboxes.get(f'plots_{key}')
-            if cb is not None and cb.isChecked() != enabled:
-                cb.setChecked(enabled)
-            else:
-                self.content_selection['plots']['items'][key] = enabled
-        self.content_selection['plots']['enabled'] = any(
-            bool(self.content_selection['plots']['items'].get(key, False))
-            for key in export_plot_items().keys()
-        )
-        self.update_file_tree()
-        self.update_summary_card()
-        self.update_preview()
-
-    def _sync_plot_scope_headers(self) -> None:
-        for scope in ('single', 'collection'):
-            rows = export_plot_rows(scope)
-            keys = [key for key, *_rest in rows]
-            header = self.content_checkboxes.get(f'plot_scope_{scope}_header')
-            if header is not None:
-                header.blockSignals(True)
-                header.setChecked(any(self.content_selection['plots']['items'].get(key, False) for key in keys))
-                header.blockSignals(False)
+    def _sync_plot_selection_controls(self) -> None:
         for key, combo in self.plot_breakdown_combos.items():
             combo.setEnabled(
                 bool(self.content_selection['plots'].get('enabled', True))
@@ -925,71 +894,109 @@ class ExportTab(QWidget):
             return f"{label} - per dataset"
         return label
 
-    def _create_content_preset_bar(self) -> QWidget:
-        panel = QFrame()
-        panel.setObjectName("contentPresetBar")
-        panel.setStyleSheet(f"""
-            QFrame#contentPresetBar {{
-                background: {C.BG_LOW};
-                border: 1px solid {C.BORDER};
-                border-radius: 4px;
-            }}
-            QFrame#contentPresetBar QLabel {{
-                background: transparent;
-                border: none;
-                color: {C.TEXT_MID};
-            }}
-        """)
+    def _recipe_description(self, key: str) -> str:
+        return next(
+            (description for recipe_key, _label, description in self.RECIPE_SPECS
+             if recipe_key == key),
+            '',
+        )
+
+    def _create_recipe_control(self) -> QWidget:
+        panel = QWidget()
+        panel.setObjectName('exportRecipeControl')
+        panel.setStyleSheet('background: transparent; border: none;')
         layout = QVBoxLayout(panel)
-        layout.setContentsMargins(7, 6, 7, 6)
-        layout.setSpacing(5)
+        layout.setContentsMargins(0, 0, 0, 2)
+        layout.setSpacing(3)
 
-        preset_row = QHBoxLayout()
-        preset_row.setSpacing(4)
-        preset_label = QLabel("Preset")
-        preset_label.setFont(QFont("Segoe UI", 8, QFont.Weight.Bold))
-        preset_row.addWidget(preset_label)
+        row = QHBoxLayout()
+        row.setContentsMargins(0, 0, 0, 0)
+        row.setSpacing(7)
+        label = QLabel('Recipe')
+        label.setFixedWidth(58)
+        label.setFont(QFont('Segoe UI', 8, QFont.Weight.DemiBold))
+        label.setStyleSheet(f'color: {C.TEXT_MID}; background: transparent;')
+        row.addWidget(label)
 
-        preset_specs = [
-            ("Simple", "fa6s.list", "One clean statistics table", lambda: self._apply_preset('minimal')),
-            ("Client", "fa6s.briefcase", "Workbook plus common plots", lambda: self._apply_preset('client')),
-            ("Stats", "fa6s.chart-simple", "Analysis tables without figures", lambda: self._apply_preset('statistical')),
-            ("Archive", "fa6s.layer-group", "All data and plot files", lambda: self._apply_preset('full')),
-            ("Default", "fa6s.rotate-left", "Restore startup defaults", self._reset_content_defaults),
-        ]
-        for text, icon_name, tooltip, callback in preset_specs:
-            btn = QPushButton(text)
-            btn.setIcon(icon(icon_name, C.TEXT_MID, 11))
-            btn.setMaximumHeight(24)
-            btn.setFont(QFont("Segoe UI", 8))
-            btn.setToolTip(tooltip)
-            btn.clicked.connect(callback)
-            preset_row.addWidget(btn)
-        preset_row.addStretch()
-        layout.addLayout(preset_row)
+        self.recipe_combo = QComboBox()
+        self.recipe_combo.setObjectName('exportRecipeCombo')
+        self.recipe_combo.setFixedHeight(29)
+        # This control sits inside a transparent export panel. Apply the shared
+        # opaque combo treatment directly so both the field and popup remain
+        # visually solid regardless of ancestor styles.
+        self.recipe_combo.setStyleSheet(opaque_combo_qss())
+        self.recipe_combo.setCursor(Qt.CursorShape.PointingHandCursor)
+        for key, recipe_label, _description in self.RECIPE_SPECS:
+            self.recipe_combo.addItem(recipe_label, key)
+        self.recipe_combo.currentIndexChanged.connect(self._on_recipe_changed)
+        row.addWidget(self.recipe_combo, 1)
+        layout.addLayout(row)
 
-        selection_row = QHBoxLayout()
-        selection_row.setSpacing(4)
-        for text, icon_name, callback in (
-            ("All", "fa6s.check-double", self._select_all_content),
-            ("None", "fa6s.xmark", self._deselect_all_content),
-        ):
-            btn = QPushButton(text)
-            btn.setIcon(icon(icon_name, C.TEXT_MID, 11))
-            btn.setMaximumHeight(22)
-            btn.setFont(QFont("Segoe UI", 8))
-            btn.clicked.connect(callback)
-            selection_row.addWidget(btn)
-        selection_row.addStretch()
-        layout.addLayout(selection_row)
-
+        self.recipe_description_label = QLabel()
+        self.recipe_description_label.setWordWrap(True)
+        self.recipe_description_label.setStyleSheet(
+            f'color: {C.TEXT_MUTED}; font-size: 8pt; background: transparent;'
+        )
+        layout.addWidget(self.recipe_description_label)
+        self._sync_recipe_controls()
         return panel
+
+    def _on_recipe_changed(self, index: int) -> None:
+        if self._applying_recipe or index < 0:
+            return
+        key = self.recipe_combo.itemData(index)
+        if key == 'custom':
+            return
+        if key == 'standard':
+            self._reset_content_defaults()
+        else:
+            self._apply_preset(str(key))
+
+    def _sync_recipe_controls(self) -> None:
+        if not hasattr(self, 'recipe_combo'):
+            return
+        self.recipe_combo.blockSignals(True)
+        index = self.recipe_combo.findData(self._active_recipe_key)
+        if index >= 0:
+            self.recipe_combo.setCurrentIndex(index)
+        self.recipe_combo.blockSignals(False)
+        self.recipe_description_label.setText(
+            self._recipe_description(self._active_recipe_key)
+        )
+
+    def _export_recipe_signature(self) -> str:
+        breakdowns = (
+            self._collect_plot_breakdowns()
+            if hasattr(self, 'plot_breakdown_combos')
+            else {}
+        )
+        return json.dumps(
+            {
+                'formats': self.selected_formats,
+                'content': self.content_selection,
+                'breakdowns': breakdowns,
+            },
+            sort_keys=True,
+        )
+
+    def _set_active_recipe(self, key: str) -> None:
+        self._active_recipe_key = key
+        self._active_recipe_signature = self._export_recipe_signature()
+        self._sync_recipe_controls()
+
+    def _sync_recipe_modified_state(self) -> None:
+        if self._applying_recipe or self._active_recipe_signature is None:
+            return
+        if self._export_recipe_signature() != self._active_recipe_signature:
+            self._active_recipe_key = 'custom'
+            self._active_recipe_signature = self._export_recipe_signature()
+            self._sync_recipe_controls()
 
     def _create_grain_size_category(self) -> QWidget:
         """Create grain size data category with expandable percentile grid"""
         section = AccordionSection("fa6s.ruler-horizontal", "Grain Size Data")
         section.set_meta("curve")
-        section.set_open(True)
+        section.set_open(False)
 
         group = QFrame()
         group.setStyleSheet(f"""
@@ -1232,9 +1239,10 @@ class ExportTab(QWidget):
         plot. Collection figures already default to ``resolve_report_style()`` /
         the chosen palette; this just exposes those controls in the Export tab.
         """
-        section = AccordionSection("fa6s.palette", "Plot Style")
-        section.set_meta("global")
-        section.set_open(True)
+        section = AccordionSection("fa6s.palette", "Plot Appearance")
+        section.set_meta("plot files")
+        section.set_open(False)
+        self.plot_style_section = section
 
         group = QFrame()
         group.setStyleSheet(
@@ -1244,11 +1252,12 @@ class ExportTab(QWidget):
         layout.setContentsMargins(6, 4, 6, 6)
         layout.setSpacing(3)
 
-        hint = QLabel("Preset, palette and tweaks applied to every exported plot.")
+        hint = QLabel("Preset, palette and tweaks applied to every exported plot file.")
         hint.setFont(QFont("Segoe UI", 8))
         hint.setStyleSheet(f"color: {C.TEXT_MUTED}; background: transparent;")
         hint.setWordWrap(True)
         layout.addWidget(hint)
+
 
         self._style_controls = ReportStyleControls()
         # A palette/preset change invalidates the cached file preview counts/labels.
@@ -1277,7 +1286,7 @@ class ExportTab(QWidget):
         }
         section = AccordionSection(icon_map.get(category_key, "fa6s.list-check"), title)
         section.set_meta(f"{len(items)} items")
-        section.set_open(True)
+        section.set_open(False)
 
         group = QFrame()
         group.setStyleSheet(f"""
@@ -1374,7 +1383,7 @@ class ExportTab(QWidget):
             if key.startswith(f'{category_key}_') and key != f'{category_key}_header':
                 cb.setEnabled(enabled)
         if category_key == 'plots':
-            self._sync_plot_scope_headers()
+            self._sync_plot_selection_controls()
         self.update_file_tree()
         self.update_summary_card()
         self.update_preview()
@@ -1409,7 +1418,7 @@ class ExportTab(QWidget):
                 bool(category.get('items', {}).get(key, False))
                 for key in export_plot_items().keys()
             )
-            self._sync_plot_scope_headers()
+            self._sync_plot_selection_controls()
 
         self.update_file_tree()
         self.update_summary_card()
@@ -1427,6 +1436,7 @@ class ExportTab(QWidget):
 
     def _reset_content_defaults(self):
         """Reset content and output formats to the default export workspace."""
+        self._applying_recipe = True
         self.selected_formats = self._default_selected_formats()
         self._init_content_selection()
         self._sync_legacy_content_enabled()
@@ -1436,6 +1446,8 @@ class ExportTab(QWidget):
         self.update_summary_card()
         self._update_format_section_meta()
         self.update_preview()
+        self._applying_recipe = False
+        self._set_active_recipe('standard')
 
     def _set_selected_formats(self, enabled: set[str]) -> None:
         self.selected_formats = {
@@ -1454,7 +1466,6 @@ class ExportTab(QWidget):
         for key in export_plot_items().keys():
             plot_items[key] = key in enabled
         plot_items['include_legend'] = True
-        plot_items['include_grid'] = True
         self.content_selection['plots']['enabled'] = bool(enabled)
 
     def _sync_legacy_content_enabled(self) -> None:
@@ -1467,6 +1478,7 @@ class ExportTab(QWidget):
 
     def _apply_preset(self, preset_name: str):
         """Apply a complete export workflow preset."""
+        self._applying_recipe = True
         self._init_content_selection()
 
         if preset_name == 'minimal':
@@ -1474,6 +1486,7 @@ class ExportTab(QWidget):
             self._set_selected_formats({'csv_wide'})
             self._set_percentile_defaults({'d10', 'd30', 'd50', 'd60'})
             self.content_selection['grain_size']['items']['raw_distribution'] = False
+            self.content_selection['statistics']['items']['collection_aggregates'] = False
             self._set_plot_type_defaults(set())
 
         elif preset_name == 'client':
@@ -1518,6 +1531,8 @@ class ExportTab(QWidget):
         self.update_summary_card()
         self._update_format_section_meta()
         self.update_preview()
+        self._applying_recipe = False
+        self._set_active_recipe(preset_name)
 
     def _update_all_checkboxes(self):
         """Update all UI checkboxes to match content_selection state"""
@@ -1555,7 +1570,7 @@ class ExportTab(QWidget):
                 if checkbox_key.startswith(prefix) and checkbox_key != f'{category_key}_header':
                     item_key = checkbox_key[len(prefix):]
                     cb.setChecked(self._content_item_checked(category_key, item_key))
-        self._sync_plot_scope_headers()
+        self._sync_plot_selection_controls()
 
     def setup_ui(self):
         """Setup the export tab as a two-pane preview/export workspace."""
@@ -1591,6 +1606,7 @@ class ExportTab(QWidget):
         self.update_file_tree()
         self.update_summary_card()
         self.update_preview()
+        self._set_active_recipe('standard')
 
     def _create_left_sidebar(self) -> QWidget:
         panel = QFrame()
@@ -1648,9 +1664,11 @@ class ExportTab(QWidget):
         setup_layout.addWidget(content_panel)
         self._setup_layout = setup_layout
         self._content_panel_index = setup_layout.count() - 1
+        setup_layout.addWidget(self._create_plot_style_section())
         setup_layout.addStretch(0)
         self._setup_spacer_index = setup_layout.count() - 1
         content_panel.toggled.connect(self._sync_content_panel_stretch)
+        self._sync_plot_appearance_visibility()
         self._sync_content_panel_stretch(content_panel.is_open())
 
         output_tab = QWidget()
@@ -1662,8 +1680,8 @@ class ExportTab(QWidget):
         output_layout.addWidget(self._create_plot_queue_section())
         output_layout.addStretch(1)
 
-        inspector_tabs.addTab(setup_tab, icon("fa6s.sliders", C.TEXT_MUTED, 12), "Setup")
-        inspector_tabs.addTab(output_tab, icon("fa6s.folder-tree", C.TEXT_MUTED, 12), "Output")
+        inspector_tabs.addTab(setup_tab, icon("fa6s.sliders", C.TEXT_MUTED, 12), "Configure")
+        inspector_tabs.addTab(output_tab, icon("fa6s.folder-tree", C.TEXT_MUTED, 12), "Review")
         self.export_inspector_tabs = inspector_tabs
         layout.addWidget(inspector_tabs, 1)
         layout.addWidget(self._create_export_actions())
@@ -1720,8 +1738,8 @@ class ExportTab(QWidget):
             }}
         """)
         layout = QVBoxLayout(body)
-        layout.setContentsMargins(10, 8, 10, 10)
-        layout.setSpacing(8)
+        layout.setContentsMargins(10, 7, 10, 8)
+        layout.setSpacing(6)
 
         self.scope_group = QButtonGroup(self)
         self.scope_group.setExclusive(True)
@@ -1778,10 +1796,10 @@ class ExportTab(QWidget):
 
         all_row = QHBoxLayout()
         all_row.setSpacing(6)
-        scope_source_label = QLabel("Export source")
-        scope_source_label.setFont(QFont("Segoe UI", 8, QFont.Weight.Bold))
-        scope_source_label.setStyleSheet(f"color: {C.TEXT_MID}; background: transparent; border: none;")
-        all_row.addWidget(scope_source_label)
+        self.scope_source_label = QLabel("All loaded datasets")
+        self.scope_source_label.setFont(QFont("Segoe UI", 8, QFont.Weight.Bold))
+        self.scope_source_label.setStyleSheet(f"color: {C.TEXT_MID}; background: transparent; border: none;")
+        all_row.addWidget(self.scope_source_label)
         self.all_datasets_label = QLabel("0 datasets")
         self.all_datasets_label.setFont(QFont("Segoe UI", 8))
         self.all_datasets_label.setStyleSheet(f"color: {C.TEXT_MUTED}; background: transparent; border: none;")
@@ -1795,46 +1813,19 @@ class ExportTab(QWidget):
         self.current_dataset_combo.setMinimumHeight(26)
         self.current_dataset_combo.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
         self.current_dataset_combo.setFont(QFont("Segoe UI", 8))
+        self.current_dataset_combo.setVisible(False)
         current_row.addWidget(self.current_dataset_combo, 1)
         layout.addLayout(current_row)
 
         selected_row = QHBoxLayout()
         selected_row.setSpacing(6)
-        self.selected_scope_label = QLabel("sidebar/comparison selection")
+        self.selected_scope_label = QLabel("Use sidebar Scope & Groups to change this selection")
         self.selected_scope_label.setFont(QFont("Segoe UI", 8))
         self.selected_scope_label.setStyleSheet(f"color: {C.TEXT_MUTED}; background: transparent; border: none;")
+        self.selected_scope_label.setVisible(False)
         selected_row.addWidget(self.selected_scope_label)
         selected_row.addStretch()
         layout.addLayout(selected_row)
-
-        self.manage_datasets_btn = QPushButton("Manage")
-        self.manage_datasets_btn.setIcon(icon("fa6s.list-check", C.TEXT_MID, 12))
-        self.manage_datasets_btn.setMinimumHeight(28)
-        self.manage_datasets_btn.setStyleSheet(f"""
-            QPushButton {{
-                background: #fbf8f1;
-                border: 1px solid {C.BORDER_DK};
-                border-radius: 4px;
-                color: {C.TEXT_MID};
-                padding: 3px 8px;
-            }}
-            QPushButton:hover {{
-                background: #fffaf0;
-                border-color: {C.EARTH};
-                color: {C.TEXT};
-            }}
-            QPushButton:pressed {{
-                background: {C.BG_LOW};
-                border-color: {C.EARTH};
-            }}
-            QPushButton:disabled {{
-                background: {C.BG_LOW};
-                color: {C.TEXT_MUTED};
-                border-color: {C.BORDER};
-            }}
-        """)
-        self.manage_datasets_btn.clicked.connect(self._on_manage_export_datasets)
-        layout.addWidget(self.manage_datasets_btn)
 
         section.body_layout().addWidget(body)
         self.dataset_scope_section = section
@@ -1874,26 +1865,104 @@ class ExportTab(QWidget):
                 background: {C.BG_RAISED};
             }}
         """)
-        self.formats_layout = QGridLayout(body)
+        self.formats_layout = QVBoxLayout(body)
         self.formats_layout.setContentsMargins(10, 7, 10, 8)
-        self.formats_layout.setHorizontalSpacing(5)
-        self.formats_layout.setVerticalSpacing(5)
+        self.formats_layout.setSpacing(5)
+        self._format_actions = {}
 
-        cards = [
-            ('csv_long', 'CSV Long', 'One row per K-value result', 'fa6s.table-columns'),
-            ('csv_wide', 'CSV Wide', 'For statistical analysis', 'fa6s.table-cells'),
-            ('excel', 'Excel', 'Combined workbook', 'fa6s.file-excel'),
-            ('png', 'PNG', 'High-resolution images', 'fa6s.image'),
-            ('svg', 'SVG', 'Vector graphics', 'fa6s.pen-nib'),
-            ('pdf', 'PDF', 'Publication-ready plots', 'fa6s.file-pdf'),
-        ]
-        for index, args in enumerate(cards):
-            card = self._create_format_card(*args)
-            self.formats_layout.addWidget(card, index // 3, index % 3)
+        self.formats_layout.addWidget(self._create_recipe_control())
+        self.formats_layout.addWidget(self._create_format_selector())
 
         section.body_layout().addWidget(body)
         self.format_section = section
         return section
+
+    def _create_format_selector(self) -> QWidget:
+        """Create one summary control with grouped checkable format choices."""
+        row = QWidget()
+        row.setStyleSheet('background: transparent; border: none;')
+        layout = QHBoxLayout(row)
+        layout.setContentsMargins(0, 0, 0, 0)
+        layout.setSpacing(7)
+
+        label = QLabel('Formats')
+        label.setFixedWidth(58)
+        label.setFont(QFont('Segoe UI', 8, QFont.Weight.DemiBold))
+        label.setStyleSheet(f'color: {C.TEXT_MID}; background: transparent;')
+        layout.addWidget(label)
+
+        self.format_selector_btn = QPushButton()
+        self.format_selector_btn.setObjectName('format_card_selector')
+        self.format_selector_btn.setFixedHeight(29)
+        self.format_selector_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.format_selector_btn.setStyleSheet(f"""
+            QPushButton {{
+                background: #ffffff;
+                border: 1px solid {C.BORDER_DK};
+                border-radius: 4px;
+                padding: 3px 24px 3px 8px;
+                color: {C.TEXT_MID};
+                text-align: left;
+            }}
+            QPushButton:hover {{ border-color: {C.EARTH}; }}
+            QPushButton:focus {{ border-color: {C.OLIVE}; }}
+            QPushButton::menu-indicator {{
+                subcontrol-position: right center;
+                subcontrol-origin: padding;
+                right: 7px;
+            }}
+        """)
+
+        menu = _CheckableFormatMenu(self.format_selector_btn)
+        menu.setToolTipsVisible(True)
+        menu.setStyleSheet(f"""
+            QMenu {{
+                background: {C.BG_RAISED};
+                border: 1px solid {C.BORDER_DK};
+                padding: 4px;
+            }}
+            QMenu::item {{
+                color: {C.TEXT_MID};
+                padding: 5px 26px 5px 10px;
+                border-radius: 3px;
+            }}
+            QMenu::item:selected {{
+                color: {C.TEXT};
+                background: #e8f0d5;
+            }}
+            QMenu::item:disabled {{
+                color: {C.TEXT_MUTED};
+                font-weight: 700;
+            }}
+            QMenu::separator {{
+                height: 1px;
+                background: {C.BORDER};
+                margin: 4px 6px;
+            }}
+        """)
+        current_group = None
+        for group, key, format_label, description in self.FORMAT_SPECS:
+            if group != current_group:
+                if current_group is not None:
+                    menu.addSeparator()
+                header = menu.addAction(group.upper())
+                header.setEnabled(False)
+                current_group = group
+            action = menu.addAction(format_label)
+            action.setCheckable(True)
+            action.setChecked(bool(self.selected_formats.get(key, False)))
+            action.setToolTip(description)
+            action.toggled.connect(
+                lambda checked, format_key=key: self._set_format_enabled(
+                    format_key, checked
+                )
+            )
+            self._format_actions[key] = action
+
+        self.format_selector_btn.setMenu(menu)
+        layout.addWidget(self.format_selector_btn, 1)
+        self._sync_format_cards()
+        return row
 
     def _create_plot_queue_section(self) -> QWidget:
         section = AccordionSection("fa6s.chart-line", "Selected Plots")
@@ -1925,10 +1994,10 @@ class ExportTab(QWidget):
         action_layout.setContentsMargins(10, 6, 10, 8)
         action_layout.setSpacing(6)
 
-        self.open_dataset_btn = QPushButton("Open Source Sample")
+        self.open_dataset_btn = QPushButton("Go to Sample")
         self.open_dataset_btn.setIcon(icon("fa6s.arrow-up-right-from-square", C.TEXT_MID, 11))
         self.open_dataset_btn.setMinimumHeight(26)
-        self.open_dataset_btn.setToolTip("Open the sample used by the selected single-sample plot.")
+        self.open_dataset_btn.setToolTip("Open this plot's sample in Individual Samples.")
         self.open_dataset_btn.clicked.connect(self._open_selected_plot_dataset)
         self.open_dataset_btn.setEnabled(False)
         action_layout.addWidget(self.open_dataset_btn)
@@ -2116,18 +2185,25 @@ class ExportTab(QWidget):
 
     def _selected_dataset_indices(self) -> List[int]:
         if self.scope_current.isChecked():
-            idx = self.current_dataset_combo.currentIndex()
+            idx = self.current_dataset_combo.currentData()
+            if idx is None:
+                idx = self.current_dataset_combo.currentIndex()
             return [idx] if 0 <= idx < len(self.datasets) else []
 
         if self.scope_selected.isChecked():
             if not self.selected_dataset_keys:
                 return []
-            return [
+            indices = [
                 idx for idx, (name, dataset, _results) in enumerate(self.datasets)
                 if self._dataset_key(name, dataset) in self.selected_dataset_keys
             ]
+        else:
+            indices = list(range(len(self.datasets)))
 
-        return list(range(len(self.datasets)))
+        return sorted(
+            indices,
+            key=lambda idx: natural_sort_key(self.datasets[idx][0]),
+        )
 
     def _collection_sample_name(self) -> str:
         return "selected_datasets" if self.scope_selected.isChecked() else "all_datasets"
@@ -2140,9 +2216,27 @@ class ExportTab(QWidget):
             1 for name, dataset, _results in self.datasets
             if self._dataset_key(name, dataset) in self.selected_dataset_keys
         ])
-        self.all_datasets_label.setText(f"{count} dataset{'s' if count != 1 else ''}")
+        if self.scope_current.isChecked():
+            self.scope_source_label.setText('Current dataset')
+            self.all_datasets_label.setText('1 dataset' if count else '0 datasets')
+            self.current_dataset_combo.setVisible(True)
+            self.selected_scope_label.setVisible(False)
+        elif self.scope_selected.isChecked():
+            self.scope_source_label.setText('Selected datasets')
+            self.all_datasets_label.setText(
+                f"{selected_count} dataset{'s' if selected_count != 1 else ''}"
+            )
+            self.current_dataset_combo.setVisible(False)
+            self.selected_scope_label.setVisible(True)
+        else:
+            self.scope_source_label.setText('All loaded datasets')
+            self.all_datasets_label.setText(f"{count} dataset{'s' if count != 1 else ''}")
+            self.current_dataset_combo.setVisible(False)
+            self.selected_scope_label.setVisible(False)
         self.selected_scope_label.setText(
-            f"{selected_count} selected" if selected_count else "sidebar/comparison selection"
+            f"{selected_count} selected · edit in sidebar Scope & Groups"
+            if selected_count
+            else "No selected samples · use sidebar Scope & Groups"
         )
         if hasattr(self, "dataset_scope_section"):
             active_count = len(self._get_datasets_to_export())
@@ -2150,52 +2244,15 @@ class ExportTab(QWidget):
 
     def _update_format_section_meta(self) -> None:
         if hasattr(self, "format_section"):
-            self.format_section.set_meta(f"{self._selected_format_count()} formats")
-
-    def _on_manage_export_datasets(self) -> None:
-        if not self.dataset_tabs:
-            return
-
-        from .dataset_selection_dialog import DatasetSelectionDialog
-
-        current_tabs = [
-            tab for tab in self.dataset_tabs
-            if self._dataset_key_from_tab(tab) in self.selected_dataset_keys
-        ] or list(self.dataset_tabs)
-
-        dialog = DatasetSelectionDialog(
-            self.dataset_tabs,
-            currently_selected=current_tabs,
-            title="Export Scope & Groups",
-            subtitle="Choose which samples to export and assign group labels if needed",
-            action_text="Use Selected",
-            action_icon="fa6s.check",
-            minimum_selection=1,
-            allow_grouping=True,
-            parent=self,
-        )
-        if dialog.exec():
-            if hasattr(dialog, "get_group_assignments"):
-                for tab, group_name in dialog.get_group_assignments().items():
-                    try:
-                        tab.get_dataset().group_name = group_name
-                    except Exception:
-                        pass
-            selected_tabs = dialog.get_selected_tabs()
-            self._set_selected_tabs(selected_tabs)
-            self.scope_selected.setChecked(True)
-            self.dataset_selection_requested.emit(self._dataset_paths(selected_tabs))
-            self._refresh_export_surface()
-
-    @staticmethod
-    def _dataset_paths(dataset_tabs: List[Any]) -> list[str]:
-        paths: list[str] = []
-        for tab in dataset_tabs:
-            dataset = tab.get_dataset() if hasattr(tab, "get_dataset") else getattr(tab, "dataset", None)
-            file_path = getattr(dataset, "file_path", "") if dataset is not None else ""
-            if file_path:
-                paths.append(file_path)
-        return paths
+            data_count = sum(
+                bool(self.selected_formats.get(key))
+                for key in ('csv_long', 'csv_wide', 'excel')
+            )
+            plot_count = sum(
+                bool(self.selected_formats.get(key))
+                for key in ('png', 'svg', 'pdf')
+            )
+            self.format_section.set_meta(f'{data_count} data · {plot_count} plot')
 
     def update_preview(self):
         """Update preview tabs based on selected formats"""
@@ -2554,7 +2611,7 @@ class ExportTab(QWidget):
 
         text = []
         if datasets_to_export:
-            text.append("Workbook: combined_all_datasets.xlsx")
+            text.append(f"Workbook: {self._planned_filename('combined_all_datasets', '.xlsx')}")
             text.append("")
             text.append("Sheets:")
             text.append("  - K_Results_Long - selected K rows and table context")
@@ -2913,8 +2970,11 @@ class ExportTab(QWidget):
         # Update current dataset combo
         self.current_dataset_combo.blockSignals(True)
         self.current_dataset_combo.clear()
-        for name, _, _ in datasets:
-            self.current_dataset_combo.addItem(name)
+        for source_index in sorted(
+            range(len(datasets)),
+            key=lambda idx: natural_sort_key(datasets[idx][0]),
+        ):
+            self.current_dataset_combo.addItem(datasets[source_index][0], source_index)
         self.current_dataset_combo.blockSignals(False)
 
         # Update count label
@@ -2927,7 +2987,6 @@ class ExportTab(QWidget):
         self.scope_all.setEnabled(has_datasets)
         self.scope_selected.setEnabled(has_datasets)
         self.current_dataset_combo.setEnabled(has_datasets)
-        self.manage_datasets_btn.setEnabled(has_datasets and bool(self.dataset_tabs))
         self.export_btn.setEnabled(has_datasets)
 
         # Update preview and summary
@@ -2948,7 +3007,7 @@ class ExportTab(QWidget):
         self._refresh_export_surface()
 
     def update_format_options(self):
-        """No longer needed in new design - format cards handle their own state"""
+        """No longer needed; format chips synchronize their own state."""
         pass
 
     def browse_output_dir(self):
@@ -2960,10 +3019,14 @@ class ExportTab(QWidget):
         )
         if dir_path:
             self.output_dir.setText(dir_path)
+            self.update_summary_card()
 
     def select_datasets(self):
         """No longer needed - using simple All/Current selection"""
         pass
+
+    def _planned_filename(self, name: str, extension: str = "") -> str:
+        return self._format_filename(self.FILENAME_TEMPLATE, name, extension)
 
     def _format_filename(self, template: str, name: str, extension: str = "") -> str:
         """Format filename from template (helper method)"""
@@ -3103,7 +3166,7 @@ class ExportTab(QWidget):
 
         # Show CSV Long Format preview if selected
         if self.selected_formats.get('csv_long'):
-            preview_text.append("=== CSV LONG FORMAT (combined_all_datasets.csv) ===")
+            preview_text.append(f"=== CSV LONG FORMAT ({self._planned_filename('combined_all_datasets', '.csv')}) ===")
             preview_text.append("")
             preview_text.append("Sample Name,Method,K (m/s),K (cm/s),K (m/d),Status,D10 (mm),D50 (mm),D60 (mm),Cu,Cc")
 
@@ -3142,7 +3205,7 @@ class ExportTab(QWidget):
                 preview_text.append("=" * 60)
                 preview_text.append("")
 
-            preview_text.append("=== CSV WIDE FORMAT (wide_format_all_datasets.csv) ===")
+            preview_text.append(f"=== CSV WIDE FORMAT ({self._planned_filename('wide_format_all_datasets', '.csv')}) ===")
             preview_text.append("(One row per dataset, one column per method)")
             preview_text.append("")
 
@@ -3201,7 +3264,7 @@ class ExportTab(QWidget):
             preview_text.append("")
 
             if datasets_to_export:
-                preview_text.append("Workbook: combined_all_datasets.xlsx")
+                preview_text.append(f"Workbook: {self._planned_filename('combined_all_datasets', '.xlsx')}")
                 preview_text.append("  Sheets:")
                 preview_text.append("    - K_Results_Long")
                 preview_text.append("    - Sample_Wide")
@@ -3245,7 +3308,7 @@ class ExportTab(QWidget):
             preview_text.append(f"  ({len(datasets_to_export)} datasets × {len(plot_formats)} format(s))")
 
         if not preview_text:
-            preview_text.append("Click format cards on the left to select what to export")
+            preview_text.append("Choose at least one output in the Formats selector")
             preview_text.append("")
             preview_text.append("Available formats:")
             preview_text.append("  CSV Long - One row per K-value result")
@@ -3569,9 +3632,18 @@ class ExportTab(QWidget):
         ]
 
     def _get_plot_contexts_to_export(self) -> List[Dict[str, Any]]:
-        """Return plot contexts aligned to the dataset export selection."""
+        """Return aligned contexts with output-wide visibility controls normalized.
+
+        Grid and legend presentation belong to the shared Plot Appearance
+        style. Live sample-tab visibility must not create a second gate for
+        either in exported figures.
+        """
         return [
-            self.plot_contexts[idx]
+            {
+                **self.plot_contexts[idx],
+                'show_grid': True,
+                'show_legend': True,
+            }
             for idx in self._selected_dataset_indices()
             if 0 <= idx < len(self.plot_contexts)
         ]
@@ -3633,7 +3705,8 @@ class ExportTab(QWidget):
             'selected_plot_types': self._selected_plot_types(),
             'plot_breakdowns': self._collect_plot_breakdowns(),
             'plot_include_legend': plots_items.get('include_legend', True),
-            'plot_include_grid': plots_items.get('include_grid', True),
+            # Grid visibility is owned solely by the shared Plot Appearance style.
+            'plot_include_grid': True,
             'formulas': k_values_enabled and k_values_config['include_formulas'],
             'validation': k_values_enabled and k_values_config['include_validation'],
 
@@ -3667,7 +3740,7 @@ class ExportTab(QWidget):
 
             # Output
             'output_dir': self.output_dir.text(),
-            'filename_template': '{sample_name}_results_{date}',  # Default template
+            'filename_template': self.FILENAME_TEMPLATE,
             'collection_sample_name': self._collection_sample_name(),
             'enforce_folder_structure': True,
             'expected_file_count': self._estimate_export_file_count(),

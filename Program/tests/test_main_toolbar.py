@@ -48,7 +48,6 @@ class TestAppToolbar(unittest.TestCase):
 
     def test_toolbar_uses_explicit_chrome_icon_sizes(self):
         self.assertEqual(self.toolbar._log_btn.iconSize().width(), 13)
-        self.assertEqual(self.toolbar._help_btn.iconSize().width(), 13)
         self.assertEqual(self.toolbar._nav_btns[HOME_TAB].iconSize().width(), 13)
 
     def test_log_toolbar_button_emits_and_shows_warning_badge(self):
@@ -74,6 +73,8 @@ class TestAppToolbar(unittest.TestCase):
         self.assertFalse(hasattr(self.toolbar, "add_files_mode_clicked"))
         self.assertFalse(hasattr(self.toolbar, "_calc_btn"))
         self.assertFalse(hasattr(self.toolbar, "calculate_clicked"))
+        self.assertFalse(hasattr(self.toolbar, "_help_btn"))
+        self.assertFalse(hasattr(self.toolbar, "help_clicked"))
 
         button_texts = [
             button.text().strip()

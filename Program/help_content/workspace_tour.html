@@ -4,15 +4,15 @@
   <p class="lead">This page explains where to work in the app and what each selection changes.</p>
 
   <div class="callout tip">
-    <div class="callout-title">Prefer an interactive tour?</div>
-    <p>Open <strong>Help &gt; Startup Guide</strong> to have the app spotlight each area in turn, or <strong>Help &gt; Guide Individual Samples</strong> for a focused walkthrough of one dataset's subtabs. This page is the written version.</p>
+    <div class="callout-title">Prefer an interactive Tutorial?</div>
+    <p>Open <strong>Help &gt; Tutorials &gt; Getting Started</strong> to spotlight each area in turn, or choose a workspace-specific Tutorial such as Individual Samples or Export. This page is the written reference.</p>
   </div>
 
   <h2>Window Layout</h2>
   <p>The top of the window has two horizontal strips, one above the other:</p>
   <ul>
-    <li><strong>Menu bar</strong> (top strip) — the classic menus <strong>File</strong>, <strong>Analysis</strong>, <strong>View</strong>, and <strong>Help</strong>, plus the window title and the minimise / maximise / close buttons. Data loading, exports, K methods, the analysis settings, and the guided tours all live here.</li>
-    <li><strong>Toolbar</strong> (just below the menus) — the four workspace tabs on the left (<strong>Individual Samples</strong>, <strong>Comparison</strong>, <strong>Reports</strong>, <strong>Export</strong>) and the <strong>Log</strong> and <strong>Help</strong> buttons on the right. The same four tabs are also in the <strong>View</strong> menu as <code>Ctrl+1</code>–<code>Ctrl+4</code>.</li>
+    <li><strong>Menu bar</strong> (top strip) &mdash; File, Analysis, View, and Help, plus the window title and window controls. Data loading, K methods, analysis settings, Tutorials, and Written Guides live here.</li>
+    <li><strong>Toolbar</strong> (just below the menus) &mdash; Home, Individual Samples, Comparison, Reports, and Export on the left, with Log on the right. View shortcuts are <code>Ctrl+0</code> through <code>Ctrl+4</code>; Tutorials and Written Guides are in the menu-bar Help hub.</li>
   </ul>
 
   <h2>Top-Level Tabs</h2>
@@ -20,6 +20,10 @@
     <tr>
       <th>Tab</th>
       <th>Use it for</th>
+    </tr>
+    <tr>
+      <td>Home</td>
+      <td>Open files, tutorials, recent sources, and workspace status without clearing loaded samples.</td>
     </tr>
     <tr>
       <td><a href="individual_samples_tab.html">Individual Samples</a></td>
@@ -46,14 +50,14 @@
     <li>Inside a dataset tab you work across <strong>Plot</strong>, <strong>Results</strong>, and <strong>Statistics</strong>.</li>
   </ul>
 
-  <h2>Sidebar Behavior</h2>
+  <h2>Samples Panel Behavior</h2>
   <ul>
-    <li>The sidebar is hidden while the welcome screen is shown.</li>
-    <li>Once datasets load, the sidebar shows a drag-and-drop drop zone, file cards, status filter pills, and the <strong>Scope &amp; Groups</strong> control. Global analysis settings are in the <strong>Analysis</strong> menu, not the sidebar.</li>
-    <li>The <strong>drop zone</strong> at the top of the sidebar accepts dragged CSV, Excel, or TXT files; click it to choose processed or raw sieve import.</li>
+    <li>The Samples panel remains visible on Home and in every workspace.</li>
+    <li>It provides Add, loaded sample cards, status filters, batch actions, and <strong>Scope &amp; Groups</strong>. Global analysis settings remain in the <strong>Analysis</strong> menu.</li>
+    <li>The <strong>drop zone</strong> at the top of the Samples panel accepts dragged CSV, Excel, or TXT files; click it to choose processed or raw sieve import.</li>
     <li>Clicking a card opens the matching dataset tab.</li>
     <li>Expanding a card reveals quick actions such as inspect, log, properties, and remove.</li>
-    <li>The selection toggle on each card marks that dataset as part of the current comparison subset.</li>
+    <li>The inclusion control is shared by Comparison, Reports, and the Export <strong>Selected</strong> scope. Batch selection for removal is a separate state.</li>
   </ul>
 
   <h2>What Selection Changes</h2>
@@ -64,25 +68,25 @@
       <th>Does not affect</th>
     </tr>
     <tr>
-      <td>Sidebar-selected cards</td>
-      <td>The active dataset subset used by the <strong>Comparison</strong> tab.</td>
-      <td>The <strong>All</strong> or <strong>Current</strong> export scopes.</td>
+      <td>Included samples in Scope &amp; Groups</td>
+      <td>Comparison, report sample choices, and Export when its scope is <strong>Selected</strong>.</td>
+      <td>The active sample and Export scopes <strong>All</strong> or <strong>Current</strong>.</td>
     </tr>
     <tr>
-      <td>No sidebar cards selected</td>
-      <td>Comparison falls back to all loaded datasets.</td>
-      <td>Nothing is excluded from export automatically.</td>
+      <td>No samples included</td>
+      <td>Comparison may fall back to all loaded samples; Export <strong>Selected</strong> has no samples.</td>
+      <td>Export <strong>All</strong> and <strong>Current</strong>.</td>
     </tr>
     <tr>
       <td>Export scope selector</td>
-      <td>Whether export runs for <strong>All</strong> datasets, the <strong>Current</strong> dataset, or the <strong>Selected</strong> dataset set.</td>
-      <td>The comparison subset in the sidebar.</td>
+      <td>Whether one export uses <strong>All</strong>, <strong>Current</strong>, or the shared <strong>Selected</strong> inclusion set.</td>
+      <td>The inclusion set itself.</td>
     </tr>
   </table>
 
   <div class="callout note">
     <div class="callout-title">Practical rule</div>
-    <p>If comparison results look incomplete, check the sidebar selection first. If export results look incomplete, check the <strong>Export</strong> tab scope selector and whether <strong>Selected</strong> is meant to follow the sidebar/comparison dataset set.</p>
+    <p>If comparison or Selected-scope output looks incomplete, check <strong>Scope &amp; Groups</strong>. If Export has the wrong number of samples, also check whether its scope is All, Current, or Selected.</p>
   </div>
 
   <p class="link-list">

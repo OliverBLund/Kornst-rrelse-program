@@ -12,10 +12,10 @@ from PyQt6.QtWidgets import (QDialog, QVBoxLayout, QHBoxLayout, QLabel,
                             QStyledItemDelegate, QApplication)
 from PyQt6.QtCore import Qt, QSize
 from PyQt6.QtGui import QFont, QColor, QBrush, QPainter, QPen, QPainterPath
-import csv
 from typing import Dict, List, Optional, Tuple
 import os
 from data_loader import GrainSizeData
+from delimited_text import DELIMITED_TEXT_EXTENSIONS, read_delimited_rows
 from excel_import_detection import (
     ImportCandidate,
     detect_multi_sample_candidates,
@@ -2319,10 +2319,9 @@ class ColumnMapperDialog(FramelessDialogBase):
     def _load_rows_for_sheet(self, sheet_name: Optional[str] = None) -> List[List[str]]:
         """Load all rows for the specified sheet (or entire CSV)"""
         file_ext = os.path.splitext(self.file_path)[1].lower()
-        if file_ext == '.csv':
-            with open(self.file_path, 'r', encoding='utf-8') as file:
-                reader = csv.reader(file)
-                return list(reader)
+        if file_ext in DELIMITED_TEXT_EXTENSIONS:
+            rows, _delimiter, _encoding = read_delimited_rows(self.file_path)
+            return rows
 
         if file_ext in ['.xlsx', '.xls']:
             import pandas as pd
@@ -3299,10 +3298,7 @@ class ColumnMapperDialog(FramelessDialogBase):
                 df = pd.read_excel(actual_file_path, sheet_name=sheet_name, header=None)
                 data = df.fillna('').astype(str).values.tolist()
             else:
-                # CSV file
-                with open(actual_file_path, 'r', encoding='utf-8') as f:
-                    reader = csv.reader(f)
-                    data = list(reader)
+                data, _delimiter, _encoding = read_delimited_rows(actual_file_path)
 
             if pattern.get("data_type") == "raw_sieve":
                 return self._apply_raw_pattern_to_rows(

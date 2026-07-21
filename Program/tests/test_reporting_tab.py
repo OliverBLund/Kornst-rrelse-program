@@ -90,6 +90,37 @@ class TestReportingTabValidation(unittest.TestCase):
 
         self.assertIsNone(ReportingTab._generation_validation_error(state))
 
+    def test_unchanged_page_entry_sync_preserves_generated_report(self):
+        tabs = [object(), object()]
+        state = SimpleNamespace(
+            dataset_tabs=tabs,
+            current_report_html='<html><body>Existing report</body></html>',
+            _refresh_sample_list=lambda: None,
+        )
+
+        ReportingTab.set_dataset_tabs(
+            state,
+            tabs,
+            preserve_report_if_unchanged=True,
+        )
+
+        self.assertEqual(
+            state.current_report_html,
+            '<html><body>Existing report</body></html>',
+        )
+
+    def test_dataset_refresh_still_runs_for_unchanged_tabs_by_default(self):
+        tabs = [object(), object()]
+        refresh_calls = []
+        state = SimpleNamespace(
+            dataset_tabs=tabs,
+            _refresh_sample_list=lambda: refresh_calls.append(True),
+        )
+
+        ReportingTab.set_dataset_tabs(state, tabs)
+
+        self.assertEqual(refresh_calls, [True])
+
     def test_preview_css_does_not_inject_page_number_bars(self):
         html = "<html><head></head><body><h1>Report</h1></body></html>"
 
