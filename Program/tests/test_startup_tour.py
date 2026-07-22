@@ -282,6 +282,8 @@ class TestStartupTourOverlay(unittest.TestCase):
         self.assertIn("show_startup_guide", setup_menus_source)
         self.assertIn("Analysis Settings", setup_menus_source)
         self.assertIn("open_analysis_settings_dialog", setup_menus_source)
+        self.assertIn("Dataset Inputs", setup_menus_source)
+        self.assertNotIn("&Dataset Porosity", setup_menus_source)
         self.assertIn("StartupTourOverlay", launcher_source)
         self.assertIn("_global_tour_steps", show_source)
 

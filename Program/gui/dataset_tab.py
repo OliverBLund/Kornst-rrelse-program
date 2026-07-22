@@ -24,6 +24,7 @@ from PyQt6.QtWidgets import (
     QLineEdit,
     QScrollArea,
     QApplication,
+    QFileDialog,
 )
 from PyQt6.QtGui import QColor, QFont
 from PyQt6.QtCore import Qt, pyqtSignal, QSize
@@ -36,6 +37,8 @@ from k_calculations import KCalculator, KCalculationResult, CalculationStatus
 from k_aggregation import build_k_result_summary
 from method_registry import normalize_method_selection
 from .stack_fade import TabFadeInController
+from exporting.table_model import ExportTable
+from .table_export_dialog import export_table_dialog
 
 
 _SUPERSCRIPT_CHARS = {
@@ -333,7 +336,8 @@ class DatasetTab(QWidget):
         btn_fl = QHBoxLayout(btn_frame)
         btn_fl.setContentsMargins(0, 0, 10, 0)
         btn_fl.setSpacing(5)
-        self._res_export_btn = QPushButton("Export")
+        self._res_export_btn = QPushButton("Export Results...")
+        self._res_export_btn.setToolTip("Export the visible K-results table as an Excel workbook or CSV file.")
         self._res_export_btn.setFixedHeight(24)
         self._res_copy_btn = QPushButton("Copy")
         self._res_copy_btn.setFixedHeight(24)
@@ -1360,12 +1364,29 @@ class DatasetTab(QWidget):
             self.statistics_tab.set_k_results(self.current_results)
 
     def export_results(self):
-        """Export results to file"""
-        # TODO: Implement export functionality
-        QMessageBox.information(
+        """Export the active K-result table as XLSX or CSV."""
+        headers = ["Method", "Category", "K (m/s)", "K (m/d)", "K (cm/s)", "Status"]
+        rows = []
+        for result in self.current_results:
+            category = _METHOD_META.get(result.method_name, {}).get("category", "—")
+            status = result.status.value if hasattr(result.status, "value") else str(result.status)
+            if not getattr(result, "conditions_met", True) and "Warning" not in status:
+                status = "Warning"
+            if result.k_value is not None and result.k_value > 0:
+                k_m_s = float(result.k_value)
+                values = (k_m_s, k_m_s * 86400.0, k_m_s * 100.0)
+            else:
+                values = (None, None, None)
+            rows.append((result.method_name, category, *values, status))
+
+        export_table_dialog(
             self,
-            "Export",
-            f"Export functionality for {self.dataset.sample_name} will be implemented",
+            dialog_title="Export Hydraulic Conductivity Results",
+            default_stem=f"{self.dataset.sample_name}_k_results",
+            table=ExportTable.from_rows("K Results", headers, rows),
+            success_label="Results table",
+            file_dialog=QFileDialog,
+            message_box=QMessageBox,
         )
 
     def get_dataset_name(self) -> str:

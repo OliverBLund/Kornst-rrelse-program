@@ -9,13 +9,14 @@ import multiprocessing as mp
 import os
 import queue
 import time
+import uuid
 
 from PyQt6.QtWidgets import (
     QMainWindow, QWidget, QHBoxLayout, QVBoxLayout,
     QStatusBar, QStackedWidget, QTabWidget, QMessageBox,
     QProgressBar, QLabel, QFrame, QFileDialog,
     QPushButton, QSizePolicy, QToolButton, QMenu, QSplitter,
-    QGraphicsOpacityEffect, QApplication,
+    QGraphicsOpacityEffect, QApplication, QInputDialog,
 )
 from PyQt6.QtCore import Qt, pyqtSignal, QSettings, QSize, QTimer, QEasingCurve, QPropertyAnimation
 from PyQt6.QtGui import QAction, QColor, QFont
@@ -49,6 +50,7 @@ from method_registry import normalize_method_selection
 from grain_classification import ISO14688
 from load_process_worker import run_external_load
 from import_resolver import is_multi_sample_confirmation_message
+from version import VERSION_LABEL
 
 
 # ─────────────────────────────────────────────────────────────────────
@@ -390,7 +392,7 @@ class _RichStatusBar(QStatusBar):
         self.addPermanentWidget(self.progress_bar)
 
         # Version label (right side) — JetBrains Mono, st-dim color
-        ver = QLabel("v0.9-beta ")
+        ver = QLabel(f"{VERSION_LABEL} ")
         ver.setStyleSheet(
             f"color: {C.ST_DIM}; font-family: '{F.MONO}'; font-size: {F.SZ_XS}pt; "
             f"padding-left: 10px; border-left: 1px solid rgba(255,255,255,0.15);")
@@ -513,6 +515,10 @@ class MainWindow(FramelessMainWindowMixin, QMainWindow):
         self.dataset_tabs: List[DatasetTab] = []
         self.dataset_counter = 0
         self.active_scheme = ISO14688
+        self._current_workspace_id: str | None = None
+        self._current_workspace_name = ""
+        self._current_workspace_saved = False
+        self._current_workspace_pinned = False
         self._bulk_dataset_add_depth = 0
         self._bulk_dataset_add_dirty = False
         self._bulk_dataset_add_last_index = None
@@ -615,6 +621,7 @@ class MainWindow(FramelessMainWindowMixin, QMainWindow):
         self.control_panel.selection_changed.connect(self._on_sidebar_selection_changed)
         self.control_panel.manage_datasets_requested.connect(self._open_dataset_group_manager)
         self.control_panel.scheme_changed.connect(self._on_scheme_changed)
+        self.control_panel.dataset_inputs_changed.connect(self._on_dataset_inputs_changed)
 
         # ── Main area ──────────────────────────────────────────────
         main_widget = QWidget()
@@ -686,8 +693,8 @@ class MainWindow(FramelessMainWindowMixin, QMainWindow):
 
         # Page 2 — Comparison
         self.comparison_tab = ComparisonTab()
-        self.comparison_tab.dataset_selection_requested.connect(
-            self._on_comparison_selection_requested
+        self.comparison_tab.group_assignments_changed.connect(
+            self._on_comparison_group_assignments_changed
         )
         self.comparison_tab.method_selection_requested.connect(self.choose_k_methods)
         self.content_stack.addWidget(self.comparison_tab)
@@ -760,20 +767,41 @@ class MainWindow(FramelessMainWindowMixin, QMainWindow):
             lambda _checked=False: self.control_panel.add_multi_sample_file()
         )
         file_menu.addAction(open_multi_action)
+        file_menu.addSeparator()
+
+        save_workspace_action = QAction("&Save Workspace", self)
+        save_workspace_action.setShortcut("Ctrl+S")
+        save_workspace_action.setIcon(icon("fa6s.floppy-disk", C.TEXT_MUTED))
+        save_workspace_action.setToolTip(
+            "Save loaded datasets, import mappings, groups, active K methods, and dataset scope. "
+            "The workspace continues to reference the original data files."
+        )
+        save_workspace_action.triggered.connect(self.save_workspace)
+        file_menu.addAction(save_workspace_action)
+        self.addAction(save_workspace_action)
+
+        save_workspace_as_action = QAction("Save Workspace &As\u2026", self)
+        save_workspace_as_action.setShortcut("Ctrl+Shift+S")
+        save_workspace_as_action.setIcon(icon("fa6s.copy", C.TEXT_MUTED))
+        save_workspace_as_action.setToolTip(
+            "Save the current workspace under a new name while keeping the existing saved workspace."
+        )
+        save_workspace_as_action.triggered.connect(
+            lambda _checked=False: self.save_workspace(as_new=True)
+        )
+        file_menu.addAction(save_workspace_as_action)
 
         file_menu.addSeparator()
 
-        export_results_action = QAction("Export &Results\u2026", self)
-        export_results_action.setShortcut("Ctrl+E")
-        export_results_action.setIcon(icon("fa6s.file-export", C.TEXT_MUTED))
-        export_results_action.triggered.connect(self.export_results)
-        file_menu.addAction(export_results_action)
-        self.addAction(export_results_action)
-
-        export_plot_action = QAction("Export &Plot\u2026", self)
-        export_plot_action.setIcon(icon("fa6s.image", C.TEXT_MUTED))
-        export_plot_action.triggered.connect(self.export_plot)
-        file_menu.addAction(export_plot_action)
+        export_action = QAction("&Export\u2026", self)
+        export_action.setShortcut("Ctrl+E")
+        export_action.setIcon(icon("fa6s.file-export", C.TEXT_MUTED))
+        export_action.setToolTip(
+            "Open the Export workspace for multi-dataset CSV, Excel, plot, and report outputs."
+        )
+        export_action.triggered.connect(self.open_export_workspace)
+        file_menu.addAction(export_action)
+        self.addAction(export_action)
 
         file_menu.addSeparator()
 
@@ -789,41 +817,41 @@ class MainWindow(FramelessMainWindowMixin, QMainWindow):
         analysis_menu = QMenu("Analysis", self)
 
         analysis_settings_action = QAction("&Analysis Settings...", self)
+        analysis_settings_action.setToolTip(
+            "Configure shared calculation inputs such as temperature and related analysis settings."
+        )
         analysis_settings_action.setIcon(icon("fa6s.sliders", C.TEXT_MUTED))
         analysis_settings_action.triggered.connect(
             self.control_panel.open_analysis_settings_dialog
         )
         analysis_menu.addAction(analysis_settings_action)
 
-        porosity_settings_action = QAction("&Dataset Porosity...", self)
-        porosity_settings_action.setIcon(icon("fa6s.water", C.TEXT_MUTED))
-        porosity_settings_action.triggered.connect(self.control_panel.open_porosity_dialog)
-        analysis_menu.addAction(porosity_settings_action)
-
-        classification_action = QAction("&Classification Scheme...", self)
-        classification_action.setIcon(icon("fa6s.layer-group", C.TEXT_MUTED))
-        classification_action.triggered.connect(
-            self.control_panel.open_classification_dialog
+        dataset_inputs_action = QAction("&Dataset Inputs...", self)
+        dataset_inputs_action.setToolTip(
+            "Change temperature and effective porosity for one, selected, or all loaded datasets."
         )
-        analysis_menu.addAction(classification_action)
+        dataset_inputs_action.setIcon(icon("fa6s.table-list", C.TEXT_MUTED))
+        dataset_inputs_action.triggered.connect(
+            self.control_panel.open_dataset_inputs_dialog
+        )
+        analysis_menu.addAction(dataset_inputs_action)
 
         analysis_menu.addSeparator()
 
         calculate_action = QAction("&Recalculate K Values", self)
+        calculate_action.setToolTip(
+            "Recalculate active K methods for every loaded dataset using the current analysis settings."
+        )
         calculate_action.setShortcut("Ctrl+K")
         calculate_action.setIcon(icon("fa6s.bolt", C.TEXT_MUTED))
         calculate_action.triggered.connect(self.calculate_all_k_values)
         analysis_menu.addAction(calculate_action)
         self.addAction(calculate_action)
 
-        choose_methods_action = QAction("Choose &K Methods\u2026", self)
-        choose_methods_action.setIcon(icon("fa6s.sliders", C.TEXT_MUTED))
-        choose_methods_action.triggered.connect(self.choose_k_methods)
-        analysis_menu.addAction(choose_methods_action)
-
-        analysis_menu.addSeparator()
-
         update_comparison_action = QAction("&Update Comparison", self)
+        update_comparison_action.setToolTip(
+            "Refresh Comparison using the current Scope & Groups selection and latest calculations."
+        )
         update_comparison_action.setIcon(icon("fa6s.rotate", C.TEXT_MUTED))
         update_comparison_action.triggered.connect(self.update_comparison)
         analysis_menu.addAction(update_comparison_action)
@@ -1100,6 +1128,7 @@ class MainWindow(FramelessMainWindowMixin, QMainWindow):
             tab = self.dataset_tabs_widget.widget(i)
             if hasattr(tab, 'dataset') and tab.dataset.sample_name == sample_name:
                 self.dataset_tabs_widget.setCurrentIndex(i)
+                self._refresh_dataset_status_segments()
                 return
 
     def _on_export_dataset_requested(self, sample_name: str) -> None:
@@ -1109,6 +1138,7 @@ class MainWindow(FramelessMainWindowMixin, QMainWindow):
     def _on_dataset_tab_changed(self, index: int) -> None:
         """When a dataset tab is clicked, highlight the corresponding sidebar card."""
         self._refresh_dataset_tab_icons()
+        self._refresh_dataset_status_segments()
         tab = self.dataset_tabs_widget.widget(index)
         if tab and hasattr(tab, 'dataset'):
             workspace_key = getattr(tab.dataset, "_workspace_key", "")
@@ -1142,6 +1172,9 @@ class MainWindow(FramelessMainWindowMixin, QMainWindow):
         self.welcome_widget.load_sample_data_requested.connect(self.on_welcome_load_sample)
         self.welcome_widget.open_recent_file_requested.connect(self.on_welcome_open_recent)
         self.welcome_widget.open_recent_session_requested.connect(self.on_welcome_open_session)
+        self.welcome_widget.rename_workspace_requested.connect(self.on_rename_workspace)
+        self.welcome_widget.remove_workspace_requested.connect(self.on_remove_workspace)
+        self.welcome_widget.toggle_workspace_pin_requested.connect(self.on_toggle_workspace_pin)
         self.welcome_widget.open_help_topic_requested.connect(self.on_welcome_open_help)
         self.welcome_widget.tutorial_requested.connect(self.on_welcome_start_tutorial)
         self.welcome_widget.dont_show_again_changed.connect(self.on_welcome_dont_show_again)
@@ -1244,12 +1277,16 @@ class MainWindow(FramelessMainWindowMixin, QMainWindow):
         if not valid_sources:
             QMessageBox.warning(
                 self,
-                "Session Unavailable",
-                "None of the files in this saved session still exist.",
+                "Workspace Unavailable",
+                "None of the original files referenced by this workspace still exist.",
             )
             self._remove_recent_session(session)
             self._update_welcome_recents()
             return
+
+        if self._current_workspace_id != session.get("workspace_id"):
+            self._prepare_for_workspace_switch()
+        self._set_current_workspace_identity(session)
 
         open_paths = self._get_open_file_paths()
         skipped_count = 0
@@ -1270,28 +1307,29 @@ class MainWindow(FramelessMainWindowMixin, QMainWindow):
 
         if not files_to_load:
             self._upsert_recent_session(cleaned_session)
+            self._apply_workspace_state(cleaned_session)
             self._update_welcome_recents()
             if skipped_count:
                 self._hide_welcome()
                 self._show_status_message(
-                    f"Session already open ({skipped_count} file{'s' if skipped_count != 1 else ''})"
+                    f"Workspace already open ({skipped_count} file{'s' if skipped_count != 1 else ''})"
                 )
             if missing_files:
                 missing_lines = "\n".join(os.path.basename(path) for path in missing_files[:6])
-                QMessageBox.warning(self, "Session Partially Restored", "Missing files:\n" + missing_lines)
+                QMessageBox.warning(self, "Workspace Partially Restored", "Missing files:\n" + missing_lines)
             return
 
         self._start_external_load(
             files_to_load,
-            title="Restoring Session",
+            title="Restoring Workspace",
             subtitle="Loading saved datasets into the current workspace",
-            stage_title="Restoring saved session",
+            stage_title="Restoring saved workspace",
             context={
                 "mode": "session",
                 "missing_files": missing_files,
                 "skipped_count": skipped_count,
                 "session": cleaned_session,
-                "requested_label": cleaned_session.get("name", "Session"),
+                "requested_label": cleaned_session.get("name", "Workspace"),
                 "failed_files": [],
             },
         )
@@ -1315,14 +1353,15 @@ class MainWindow(FramelessMainWindowMixin, QMainWindow):
         return self._ui_font_bump
 
     def set_ui_font_bump(self, bump) -> bool:
-        """Persist the display-size preset. Full UI refresh happens on restart."""
+        """Persist the display-size preset without partially restyling the live UI."""
         settings = QSettings("GrainSizeAnalysis", "MainWindow")
         normalised = _save_ui_font_bump(settings, bump)
         changed = normalised != self._ui_font_bump
         self._ui_font_bump = normalised
-        set_font_bump(normalised)
         if changed:
-            self._show_status_message("Display size saved. Restart Grain Size Analysis to apply it everywhere.")
+            self._show_status_message(
+                "Display size saved; restart Grain Size Analysis to apply it"
+            )
         return changed
 
     def on_welcome_dont_show_again(self, dont_show: bool):
@@ -1330,14 +1369,87 @@ class MainWindow(FramelessMainWindowMixin, QMainWindow):
 
     def on_clear_sessions(self):
         reply = QMessageBox.question(
-            self, "Clear Sessions",
-            "Are you sure you want to clear all saved sessions?",
+            self, "Clear Recent Workspaces",
+            "Remove all recent and saved workspaces from this list?",
             QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
         )
         if reply == QMessageBox.StandardButton.Yes:
             self._save_recent_sessions([])
+            self._current_workspace_id = None
+            self._current_workspace_name = ""
+            self._current_workspace_saved = False
+            self._current_workspace_pinned = False
             self._update_welcome_recents()
-            self._show_status_message("All sessions cleared")
+            self._show_status_message("All recent workspaces cleared")
+
+    def _prompt_workspace_name(
+        self,
+        title: str,
+        current_name: str,
+        *,
+        accept_text: str,
+    ) -> str | None:
+        """Show a workspace-name editor sized for realistic project names."""
+        dialog = QInputDialog(self)
+        dialog.setInputMode(QInputDialog.InputMode.TextInput)
+        dialog.setWindowTitle(title)
+        dialog.setLabelText("Workspace name:")
+        dialog.setTextValue(current_name)
+        dialog.setOkButtonText(accept_text)
+        dialog.setCancelButtonText("Cancel")
+        text_width = dialog.fontMetrics().horizontalAdvance(current_name or "Workspace")
+        dialog_width = min(820, max(560, text_width + 220))
+        dialog.setMinimumSize(560, 160)
+        dialog.resize(dialog_width, 170)
+        if not dialog.exec():
+            return None
+        name = dialog.textValue().strip()
+        return name or None
+
+    def on_rename_workspace(self, session_data: dict) -> None:
+        session = self._normalize_session_entry(session_data)
+        if session is None:
+            return
+        name = self._prompt_workspace_name(
+            "Rename Workspace",
+            session["name"],
+            accept_text="Rename",
+        )
+        if name is None:
+            return
+        session["name"] = name
+        session["saved"] = True
+        session["custom_name"] = True
+        self._upsert_recent_session(session)
+        if session["workspace_id"] == self._current_workspace_id:
+            self._set_current_workspace_identity(session)
+        self._update_welcome_recents()
+        self._show_status_message(f"Workspace renamed: {name}")
+
+    def on_remove_workspace(self, session_data: dict) -> None:
+        session = self._normalize_session_entry(session_data)
+        if session is None:
+            return
+        self._remove_recent_session(session)
+        if session["workspace_id"] == self._current_workspace_id:
+            self._current_workspace_id = None
+            self._current_workspace_name = ""
+            self._current_workspace_saved = False
+            self._current_workspace_pinned = False
+        self._update_welcome_recents()
+        self._show_status_message(f"Workspace removed: {session['name']}")
+
+    def on_toggle_workspace_pin(self, session_data: dict) -> None:
+        session = self._normalize_session_entry(session_data)
+        if session is None:
+            return
+        session["pinned"] = not session.get("pinned", False)
+        self._upsert_recent_session(session)
+        if session["workspace_id"] == self._current_workspace_id:
+            self._set_current_workspace_identity(session)
+        self._update_welcome_recents()
+        action = "Kept" if session["pinned"] else "Unpinned"
+        self._show_status_message(f"{action} workspace: {session['name']}")
 
     # ──────────────────────────────────────────────────────────────────
     # RECENT FILES / SESSIONS
@@ -1562,18 +1674,43 @@ class MainWindow(FramelessMainWindowMixin, QMainWindow):
 
         name = str(session_data.get("name") or "").strip()
         if not name:
-            name = f"Session {timestamp[:16].replace('T', ' ')}" if timestamp else "Session"
+            name = f"Workspace {timestamp[:16].replace('T', ' ')}" if timestamp else "Workspace"
 
-        return {
+        workspace_id = str(session_data.get("workspace_id") or "").strip()
+        if not workspace_id:
+            legacy_identity = "\n".join(
+                sorted(
+                    f"{self._source_file_key(source)}::"
+                    f"{(source.get('mapping_state') or {}).get('multi_sample_candidate_key', '')}"
+                    for source in sources
+                )
+            )
+            workspace_id = str(uuid.uuid5(uuid.NAMESPACE_URL, f"grain-size-workspace:{legacy_identity}"))
+
+        normalized = {
+            "workspace_id": workspace_id,
             "name": name,
             "date": date,
             "files": files,
             "timestamp": timestamp,
             "samples": cleaned_samples,
             "sources": sources,
+            "saved": bool(session_data.get("saved", False)),
+            "custom_name": bool(session_data.get("custom_name", False)),
+            "pinned": bool(session_data.get("pinned", False)),
         }
+        active_methods = session_data.get("active_methods")
+        if isinstance(active_methods, (list, tuple)):
+            normalized["active_methods"] = [str(method) for method in active_methods if str(method)]
+        selected_paths = session_data.get("selected_paths")
+        if isinstance(selected_paths, (list, tuple)):
+            normalized["selected_paths"] = [str(path) for path in selected_paths if str(path)]
+        return normalized
 
     def _session_match_key(self, session_data: dict) -> tuple[str, ...]:
+        workspace_id = str(session_data.get("workspace_id") or "").strip()
+        if workspace_id:
+            return ("workspace", workspace_id)
         sources = session_data.get("sources")
         if sources:
             identities = []
@@ -1629,7 +1766,9 @@ class MainWindow(FramelessMainWindowMixin, QMainWindow):
 
     def _save_recent_sessions(self, sessions: List[dict]):
         settings = QSettings("GrainSizeAnalysis", "MainWindow")
-        settings.setValue("recent_sessions", sessions[:10])
+        pinned = [session for session in sessions if session.get("pinned", False)]
+        unpinned = [session for session in sessions if not session.get("pinned", False)]
+        settings.setValue("recent_sessions", (pinned + unpinned)[:10])
 
     def _build_dataset_source_descriptor(self, dataset: GrainSizeData) -> Optional[dict]:
         file_path = getattr(dataset, "file_path", "")
@@ -1708,13 +1847,20 @@ class MainWindow(FramelessMainWindowMixin, QMainWindow):
         from datetime import datetime
 
         now = datetime.now()
+        default_name = f"Recent workspace {now.strftime('%Y-%m-%d %H:%M')}"
         return {
-            "name": f"Session {now.strftime('%Y-%m-%d %H:%M')}",
+            "workspace_id": self._current_workspace_id or str(uuid.uuid4()),
+            "name": self._current_workspace_name or default_name,
             "date": now.strftime('%Y-%m-%d'),
             "files": current_files,
             "timestamp": now.isoformat(),
             "samples": sample_names,
             "sources": current_sources,
+            "saved": self._current_workspace_saved,
+            "custom_name": self._current_workspace_saved,
+            "pinned": self._current_workspace_pinned,
+            "active_methods": list(self.active_method_names),
+            "selected_paths": self._dataset_paths_for_tabs(self._get_selected_dataset_tabs()),
         }
 
     def _upsert_recent_session(self, session: dict):
@@ -1746,6 +1892,68 @@ class MainWindow(FramelessMainWindowMixin, QMainWindow):
             return
         self._upsert_recent_session(session)
         self._update_welcome_recents()
+
+    def _set_current_workspace_identity(self, session: dict) -> None:
+        self._current_workspace_id = session.get("workspace_id")
+        self._current_workspace_name = session.get("name", "")
+        self._current_workspace_saved = bool(session.get("saved", False))
+        self._current_workspace_pinned = bool(session.get("pinned", False))
+
+    def _prepare_for_workspace_switch(self) -> None:
+        """Preserve the current work, then clear its samples before restoring another workspace."""
+        if self.dataset_tabs:
+            self._save_current_session()
+        source_paths = list(getattr(self.control_panel, "file_statuses", {}))
+        if source_paths:
+            self.control_panel._remove_files_in_batch(source_paths)
+        self._current_workspace_id = None
+        self._current_workspace_name = ""
+        self._current_workspace_saved = False
+        self._current_workspace_pinned = False
+
+    def _apply_workspace_state(self, session: dict) -> None:
+        methods = session.get("active_methods")
+        if methods:
+            self.set_active_k_methods(methods)
+        if "selected_paths" in session:
+            self.control_panel.set_selected_paths(session["selected_paths"], emit_signal=False)
+            self._sync_scope_outputs()
+
+    def save_workspace(self, _checked: bool = False, *, as_new: bool = False) -> None:
+        if not self.dataset_tabs:
+            QMessageBox.information(
+                self,
+                "No Workspace to Save",
+                "Load at least one dataset before saving a workspace.",
+            )
+            return
+
+        if as_new or not self._current_workspace_saved:
+            suggested = self._current_workspace_name
+            if not suggested or suggested.startswith("Recent workspace "):
+                names = [tab.get_dataset_name() for tab in self.dataset_tabs]
+                suggested = names[0] if len(names) == 1 else "Grain size workspace"
+            name = self._prompt_workspace_name(
+                "Save Workspace As" if as_new else "Save Workspace",
+                suggested,
+                accept_text="Save",
+            )
+            if name is None:
+                return
+            if as_new or not self._current_workspace_id:
+                self._current_workspace_id = str(uuid.uuid4())
+            self._current_workspace_name = name
+            self._current_workspace_saved = True
+
+        session = self._build_current_session()
+        if session is None:
+            return
+        session["saved"] = True
+        session["custom_name"] = True
+        self._set_current_workspace_identity(session)
+        self._upsert_recent_session(session)
+        self._update_welcome_recents()
+        self._show_status_message(f"Workspace saved: {session['name']}")
 
     def _remove_recent_file(self, file_path: str):
         settings = QSettings("GrainSizeAnalysis", "MainWindow")
@@ -1984,6 +2192,8 @@ class MainWindow(FramelessMainWindowMixin, QMainWindow):
             session = context.get("session")
             if session:
                 self._upsert_recent_session(session)
+                self._set_current_workspace_identity(session)
+                self._apply_workspace_state(session)
 
         self._update_welcome_recents()
 
@@ -2000,12 +2210,12 @@ class MainWindow(FramelessMainWindowMixin, QMainWindow):
                 details.append(f"{len(failed_files)} failed")
             if confirmation_files:
                 details.append(f"{len(confirmation_files)} awaiting sample review")
-            headline = "Session restored" if not failed_files and not missing_files else "Session restore complete"
+            headline = "Workspace restored" if not failed_files and not missing_files else "Workspace restore complete"
             detail = f"{loaded} loaded"
             if details:
                 detail = f"{detail} ({', '.join(details)})"
             ok = not failed_files and not missing_files and not canceled
-            status = f"Resumed session: {detail}"
+            status = f"Resumed workspace: {detail}"
         else:
             requested_label = context.get("requested_label", "dataset")
             if confirmation_files and not failed_files and not canceled:
@@ -2168,6 +2378,14 @@ class MainWindow(FramelessMainWindowMixin, QMainWindow):
                 pass
         self._refresh_sidebar_group_labels()
 
+    def _on_comparison_group_assignments_changed(self, group_assignments: dict) -> None:
+        """Propagate Plot Visibility drag/drop groups to all shared outputs."""
+        self._apply_group_assignments(group_assignments)
+        if hasattr(self, 'reporting_tab'):
+            self.reporting_tab.set_dataset_tabs(self.dataset_tabs)
+        if hasattr(self, 'export_tab'):
+            self._update_export_tab()
+
     def _sync_scope_outputs(self) -> None:
         """Push current loaded/selected/group state into comparison, reports, and export."""
         self._sync_comparison_dataset_state()
@@ -2226,12 +2444,6 @@ class MainWindow(FramelessMainWindowMixin, QMainWindow):
         """Push the current selected-tab subset to the comparison tab."""
         self._sync_scope_outputs()
 
-    def _on_comparison_selection_requested(self, file_paths: list[str]) -> None:
-        """Apply comparison-dialog selections back onto the sidebar cards."""
-        self._refresh_sidebar_group_labels()
-        self.control_panel.set_selected_paths(file_paths, emit_signal=False)
-        self._sync_scope_outputs()
-
     def _on_scheme_changed(self, scheme):
         """Propagate a new classification scheme to all open dataset tabs and output tabs."""
         self.active_scheme = scheme
@@ -2283,18 +2495,70 @@ class MainWindow(FramelessMainWindowMixin, QMainWindow):
         self._bulk_dataset_add_last_index = None
         self._bulk_dataset_add_last_label = ""
 
+    def _status_dataset_tab(self, preferred_sample_name: str | None = None):
+        """Return the selected dataset tab, with a fallback during tab creation."""
+        tab_widget = getattr(self, "dataset_tabs_widget", None)
+        if tab_widget is not None and hasattr(tab_widget, "currentWidget"):
+            current = tab_widget.currentWidget()
+            if current is not None and hasattr(current, "dataset"):
+                return current
+        if preferred_sample_name:
+            for tab in getattr(self, "dataset_tabs", []):
+                dataset = getattr(tab, "dataset", None)
+                if getattr(dataset, "sample_name", None) == preferred_sample_name:
+                    return tab
+        return None
+
     def _refresh_dataset_status_segments(self, sample_name: str | None = None) -> None:
+        """Render status values from the currently selected dataset."""
         n = len(self.dataset_tabs)
-        temp = self.control_panel.temp_spinbox.value()
-        sample_label = sample_name or (self.dataset_tabs[-1].get_dataset_name() if self.dataset_tabs else "—")
+        tab = self._status_dataset_tab(sample_name)
+        sample_full = ""
+        sample_value = "—"
+        d50_value = "—"
+        k_value = "—"
+        temperature_value = "—"
+
+        if tab is not None:
+            dataset = getattr(tab, "dataset", None)
+            sample_full = str(getattr(dataset, "sample_name", "") or "")
+            sample_value = (
+                sample_full
+                if len(sample_full) <= 24
+                else f"{sample_full[:21]}…"
+            )
+            try:
+                d50 = dataset.get_d50()
+                if d50 is not None:
+                    d50_value = f"{d50:.2f} mm" if d50 >= 0.01 else f"{d50:.4f} mm"
+            except Exception:
+                pass
+            try:
+                temperature = float(
+                    getattr(tab, "temperature", getattr(dataset, "temperature", 20.0))
+                )
+                temperature_value = f"{temperature:.1f} °C"
+            except (TypeError, ValueError):
+                pass
+            try:
+                results = getattr(tab, "current_results", None) or []
+                summary = build_k_result_summary(results)
+                if summary.geometric_mean_m_s is not None:
+                    k_value = f"{summary.geometric_mean_m_s:.2e} m/s"
+            except Exception:
+                pass
 
         self.rich_status_bar.set_segment("DATASETS", str(n) if n else "—")
-        self.rich_status_bar.set_segment("SAMPLE", sample_label[:24] if sample_label else "—")
-        self.rich_status_bar.set_segment("TEMP", f"{temp}°C")
+        self.rich_status_bar.set_segment("SAMPLE", sample_value)
+        self.rich_status_bar.set_segment("D50", d50_value)
+        self.rich_status_bar.set_segment("K̄", k_value)
+        self.rich_status_bar.set_segment("TEMP", temperature_value)
         self.rich_status_bar.set_segment(
             "METHODS",
             f"{len(self.active_method_names)} / {len(self.available_method_names)}",
         )
+        if hasattr(self.rich_status_bar, "_seg_vals"):
+            self.rich_status_bar._seg_vals["SAMPLE"].setToolTip(sample_full)
         self.app_toolbar.set_badge(INDIVIDUAL_TAB, n)
 
     def add_dataset_tab(self, dataset: GrainSizeData):
@@ -2561,6 +2825,11 @@ class MainWindow(FramelessMainWindowMixin, QMainWindow):
 
         if self.dataset_tabs_widget.count() == 0:
             self._show_welcome()
+        if not self.dataset_tabs:
+            self._current_workspace_id = None
+            self._current_workspace_name = ""
+            self._current_workspace_saved = False
+            self._current_workspace_pinned = False
 
         self._sync_comparison_dataset_state()
         self.reporting_tab.set_dataset_tabs(self.dataset_tabs)
@@ -2632,9 +2901,7 @@ class MainWindow(FramelessMainWindowMixin, QMainWindow):
         self.progress_bar.setValue(0)
 
         try:
-            temperature = self.control_panel.temp_spinbox.value()
             for i, dataset_tab in enumerate(self.dataset_tabs):
-                dataset_tab.set_parameters(temperature)
                 dataset_tab.calculate_k_values(self.active_method_names)
                 self.progress_bar.setValue(i + 1)
 
@@ -2688,6 +2955,10 @@ class MainWindow(FramelessMainWindowMixin, QMainWindow):
                     dataset_tab.plot_workspace.export_plot("png")
         else:
             self.comparison_tab.export_comparison()
+
+    def open_export_workspace(self) -> None:
+        """Open the comprehensive export workflow from File > Export."""
+        self._switch_to_tab(EXPORT_TAB)
 
     def export_results(self):
         current = self.content_stack.currentIndex()
@@ -2804,9 +3075,9 @@ class MainWindow(FramelessMainWindowMixin, QMainWindow):
             TourStep(
                 title="Check calculation inputs",
                 body=(
-                    "Use the Analysis menu for global calculation settings: temperature, "
-                    "porosity mode, classification scheme, K-method selection, and manual "
-                    "recalculation."
+                    "Use the Analysis menu for global calculation settings and Dataset "
+                    "Inputs for per-dataset temperature and effective porosity. Manual "
+                    "recalculation remains available when needed."
                 ),
                 target=lambda: getattr(self, "_analysis_menu_btn", self.control_panel),
                 tips=(
@@ -2824,7 +3095,7 @@ class MainWindow(FramelessMainWindowMixin, QMainWindow):
                 ),
                 target=lambda: getattr(self, "_analysis_menu_btn", self.control_panel),
                 tips=(
-                    "Use Analysis > Classification Scheme to change the scheme.",
+                    "Use Analysis > Analysis Settings > Classification Scheme to change it.",
                     "Plots such as the grain-size histogram should follow the selected scheme.",
                 ),
             ),
@@ -3270,13 +3541,16 @@ class MainWindow(FramelessMainWindowMixin, QMainWindow):
                 body=(
                     "The Comparison tab puts two or more loaded samples side by side. Start "
                     "with 'Scope & Groups' to choose which datasets are included and how "
-                    "they are grouped; 'Export Selected' saves the current view. The "
-                    "comparison refreshes automatically when you enter the tab — 'Update' "
-                    "is a manual rebuild if you need it."
+                    "they are grouped. Comparison views refresh automatically. Export the "
+                    "figure from the Plot toolbar, or export the visible table from the "
+                    "Details and Statistics toolbars."
                 ),
                 target=lambda: self._first_tour_target(
-                    getattr(cmp, "_manage_btn", None),
-                    getattr(cmp, "_update_btn", None),
+                    getattr(
+                        getattr(self, "control_panel", None),
+                        "_manage_samples_btn",
+                        None,
+                    ),
                     cmp,
                 ),
                 tips=(
@@ -3332,20 +3606,20 @@ class MainWindow(FramelessMainWindowMixin, QMainWindow):
                 title="Plot: visibility & underlying data",
                 body=(
                     "The 'Plot Visibility' rail on the right lists each dataset with a "
-                    "show/hide toggle, so you can focus on a subset without changing the "
-                    "scope; 'Show all' clears any focus or hidden datasets. To change which "
-                    "datasets and groups are compared, use 'Scope & Groups' in the header "
-                    "above. The collapsible Table drawer beneath the chart holds the exact "
-                    "data behind the active plot and can export it to CSV."
+                    "single show/hide toggle. Hidden datasets remain part of the comparison "
+                    "scope; 'Show all' restores every dataset to the plot. To change which "
+                    "datasets and groups are compared, use 'Scope & Groups' in the main "
+                    "sidebar. The collapsible Table drawer beneath the chart holds the exact "
+                    "data behind the active plot and can export it to CSV or Excel."
                 ),
                 target=lambda: self._first_tour_target(
-                    getattr(cmp, "_pin_list_widget", None),
+                    getattr(cmp, "_plot_visibility_list_widget", None),
                     getattr(cmp, "_plot_show_all_btn", None),
                     cmp,
                 ),
                 tips=(
                     "Hiding a dataset here only affects the plot, not Details or Statistics.",
-                    "The drawer's CSV holds exactly what is plotted.",
+                    "The drawer export holds exactly what is plotted.",
                 ),
                 kicker="Comparison",
                 before_step=plot_step,
@@ -4015,14 +4289,9 @@ class MainWindow(FramelessMainWindowMixin, QMainWindow):
         return dialog
 
     def show_about(self):
-        QMessageBox.about(
-            self, "About",
-            "<h3>Grain Size Analysis Tool</h3>"
-            "<p>Version 0.9.0-\u03b2</p>"
-            "<p>Grain size distribution analysis and hydraulic conductivity calculations.</p>"
-            "<p>16 K-calculation methods \u00b7 batch import \u00b7 comparison \u00b7 export</p>"
-            "<p>\u00a9 2024 \u2014 DTU Geotechnical Analysis Suite</p>",
-        )
+        from gui.about_dialog import AboutDialog
+
+        AboutDialog(parent=self).exec()
 
     # ──────────────────────────────────────────────────────────────────
     # STATUS BAR HELPERS
@@ -4065,8 +4334,10 @@ class MainWindow(FramelessMainWindowMixin, QMainWindow):
             return
 
         self._update_export_tab()
-        # Update K̄ segment with current tab's result
-        if results:
+        if hasattr(self, "_refresh_dataset_status_segments"):
+            self._refresh_dataset_status_segments()
+        elif results:
+            # Lightweight compatibility path for calculation-only harnesses.
             try:
                 summary = build_k_result_summary(results)
                 if summary.geometric_mean_m_s is not None:
@@ -4087,6 +4358,17 @@ class MainWindow(FramelessMainWindowMixin, QMainWindow):
                 pass
         self._refresh_dataset_status_segments(sample_name)
         self._show_status_message(f"Updated data: {sample_name}")
+
+    def _on_dataset_inputs_changed(self, count: int) -> None:
+        """Refresh downstream views once after a batched dataset-input edit."""
+        if len(self.dataset_tabs) >= 2:
+            self.comparison_tab.update_comparison()
+        self.reporting_tab.set_dataset_tabs(self.dataset_tabs)
+        self._update_export_tab()
+        self._refresh_dataset_status_segments()
+        self._show_status_message(
+            f"Updated inputs for {count} dataset{'s' if count != 1 else ''}; outputs refreshed"
+        )
 
     def _update_export_tab(self):
         datasets = []

@@ -4,12 +4,15 @@ Regression tests for dataset-tab results table behavior and sizing.
 
 import os
 import sys
+import tempfile
 import unittest
+from pathlib import Path
 
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 sys.path.insert(0, "Program")
 
-from PyQt6.QtWidgets import QApplication, QLabel, QFrame, QHeaderView
+from openpyxl import load_workbook
+from PyQt6.QtWidgets import QApplication, QFileDialog, QLabel, QFrame, QHeaderView, QMessageBox
 
 from data_loader import GrainSizeData
 from gui.dataset_tab import DatasetTab, _format_formula_html
@@ -194,14 +197,17 @@ class TestDatasetTabResultsTable(unittest.TestCase):
         self.assertEqual(self.tab._stat_valid.text(), "2 / 3")
 
         stats = self.tab.statistics_tab
-        self.assertEqual(stats.k_summary_card._meta_label.text(), "All active / OK only")
+        self.assertEqual(
+            stats.k_summary_card._meta_label.text(),
+            "Basis: OK results from active methods",
+        )
         self.assertEqual(
             stats._k_table.item(stats._k_table.rowCount() - 1, 0).text(),
             "Included OK methods",
         )
         self.assertIn("Uses 2 of 3 active methods", stats._k_note.text())
         self.assertIn("Warnings and errors are excluded", stats._k_note.text())
-        self.assertIn("Analysis > Choose K Methods", stats._k_note.text())
+        self.assertIn("Analysis > Analysis Settings", stats._k_note.text())
 
         headers = [
             self.tab.results_table.horizontalHeaderItem(column).text()
@@ -252,6 +258,27 @@ class TestDatasetTabResultsTable(unittest.TestCase):
             ["Hazen", "Beyer", "Sauerbrei", "USBR"],
         )
         self.assertEqual(len(self.tab.get_all_results()), 4)
+
+    def test_results_export_writes_typed_xlsx_values(self):
+        self.tab.apply_precomputed_results([_k_result("Hazen", 1.0e-4)])
+        original_dialog = QFileDialog.getSaveFileName
+        original_info = QMessageBox.information
+        with tempfile.TemporaryDirectory() as tmp:
+            output = Path(tmp) / "sample_results"
+            QFileDialog.getSaveFileName = staticmethod(
+                lambda *args, **kwargs: (str(output), "Excel Workbook (*.xlsx)")
+            )
+            QMessageBox.information = staticmethod(lambda *args, **kwargs: None)
+            try:
+                self.tab.export_results()
+            finally:
+                QFileDialog.getSaveFileName = original_dialog
+                QMessageBox.information = original_info
+
+            worksheet = load_workbook(output.with_suffix(".xlsx"), data_only=True).active
+            self.assertEqual(worksheet["A2"].value, "Hazen")
+            self.assertAlmostEqual(worksheet["C2"].value, 1.0e-4)
+            self.assertAlmostEqual(worksheet["D2"].value, 8.64)
 
     def test_method_selection_normalization_keeps_canonical_order(self):
         self.assertEqual(

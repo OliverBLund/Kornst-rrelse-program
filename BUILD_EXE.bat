@@ -6,19 +6,20 @@ echo Grain Size Analysis - Build Script
 echo ==========================================
 echo.
 
-REM Get version number (from parameter or prompt)
-if "%~1"=="" (
-    echo No version specified. Please enter a version number.
-    echo Examples: 1.0.0, 1.2.3, 2.0.0-beta
-    echo.
-    set /p VERSION="Enter version number: "
-    if "!VERSION!"=="" (
-        echo ERROR: Version number cannot be empty!
-        pause
-        exit /b 1
-    )
-) else (
-    set VERSION=%~1
+REM Read the release identity from the same source used by the application UI.
+python --version >NUL 2>&1
+if ERRORLEVEL 1 (
+    echo ERROR: Python 3 is not installed or not in PATH.
+    pause
+    exit /b 1
+)
+for /f "usebackq delims=" %%v in (`python -c "import sys; sys.path.insert(0, 'Program'); from version import VERSION; print(VERSION)"`) do set "APP_VERSION=%%v"
+if "%~1"=="" (set "VERSION=!APP_VERSION!") else (set "VERSION=%~1")
+if /i not "!VERSION!"=="!APP_VERSION!" (
+    echo ERROR: Requested build version !VERSION! does not match Program/version.py ^(!APP_VERSION!^).
+    echo Update Program/version.py and the release communication before building a different version.
+    pause
+    exit /b 1
 )
 
 REM Ask for clean build option
@@ -52,15 +53,6 @@ echo   Version: %VERSION%
 echo   Output:  %RELEASE_DIR%
 echo   App:     %APP_NAME%
 echo.
-
-REM Check if Python is available
-python --version >NUL 2>&1
-if ERRORLEVEL 1 (
-    echo ERROR: Python 3 is not installed or not in PATH.
-    echo Please install Python 3.8 or newer.
-    pause
-    exit /b 1
-)
 
 REM Check if entry script exists
 if not exist "%ENTRY_SCRIPT%" (
@@ -211,6 +203,13 @@ echo Building in temporary location to avoid path length issues...
 echo Temp path: %TEMP_BUILD_DIR%
 echo.
 
+"%PYTHON_CMD%" "%PROJECT_DIR%\Program\build_version_info.py" --version "%VERSION%" --output "%TEMP_BUILD_DIR%\version_info.txt"
+if ERRORLEVEL 1 (
+    echo ERROR: Could not generate Windows executable version metadata.
+    pause
+    exit /b 1
+)
+
 REM Set build type based on mode
 if "%BUILD_MODE%"=="1" (
     set BUILD_TYPE=--onefile
@@ -232,6 +231,7 @@ if "%BUILD_MODE%"=="1" (
     %EXTRA_LAYOUT_FLAGS% ^
     --noconsole ^
     --noconfirm ^
+    --version-file "%TEMP_BUILD_DIR%\version_info.txt" ^
     --icon "%PROJECT_DIR%\Program\resources\app_icon.ico" ^
     --paths "%PROJECT_DIR%\Program" ^
     --add-data "%PROJECT_DIR%\Program\CHANGELOG.md;Program" ^

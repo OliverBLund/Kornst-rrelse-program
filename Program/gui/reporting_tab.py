@@ -371,6 +371,11 @@ class _SectionRow(QFrame):
         super().__init__(parent)
         self.setCursor(Qt.CursorShape.PointingHandCursor)
         self.setFixedHeight(30)
+        self.setToolTip(
+            f"Include {label} in the generated report."
+            if not required
+            else f"{label} is required and always included in the generated report."
+        )
 
         lay = QHBoxLayout(self)
         lay.setContentsMargins(9, 0, 9, 0)
@@ -791,10 +796,16 @@ class ReportingTab(QWidget):
         flay.addWidget(fhdr)
 
         self._format_combo = self._make_form_combo()
+        self._format_combo.setToolTip(
+            "Choose the primary report file type. PDF is fixed-layout; HTML and Word remain editable."
+        )
         self._format_combo.addItems(self.FORMATS)
         flay.addLayout(self._form_row("Output format", self._format_combo))
 
         self._language_combo = self._make_form_combo()
+        self._language_combo.setToolTip(
+            "Choose the language used for generated report headings and explanatory text."
+        )
         self._language_combo.addItems(["English", "Danish"])
         flay.addLayout(self._form_row("Language", self._language_combo))
 
@@ -817,6 +828,9 @@ class ReportingTab(QWidget):
             f'color: {C.TEXT_MID}; font-size: {F.SZ_XS}pt; font-weight: 600;'
         )
         self._excel_appendix_check = QCheckBox("Save companion Excel appendix")
+        self._excel_appendix_check.setToolTip(
+            "Move large report tables into a separate Excel workbook and leave references in the report."
+        )
         self._excel_appendix_check.setStyleSheet(
             f'color: {C.TEXT}; font-size: {F.SZ_SM}pt;'
         )
@@ -1409,6 +1423,9 @@ class ReportingTab(QWidget):
         self._gen_summary_lbl.setWordWrap(True)
 
         self.generate_btn = QPushButton("  Generate Report")
+        self.generate_btn.setToolTip(
+            "Build a new preview from the current report type, sample selection, sections, plots, and metadata."
+        )
         self.generate_btn.setIcon(theme_icon("fa6s.bolt", "#ffffff", 14))
         self.generate_btn.setIconSize(QSize(14, 14))
         self.generate_btn.setMinimumHeight(GEN_BTN_H)
@@ -1500,6 +1517,9 @@ class ReportingTab(QWidget):
         self.btn_refresh = pbtn(" Refresh", "fa6s.rotate",       self._on_generate)
         self.btn_print   = pbtn(" Print",   "fa6s.print",        self._on_print)
         self.btn_save    = pbtn(" Save",    "fa6s.floppy-disk",  self._on_save_primary)
+        self.btn_refresh.setToolTip("Regenerate the preview using the current report settings.")
+        self.btn_print.setToolTip("Print the currently generated report preview.")
+        self.btn_save.setToolTip("Save the currently generated report in the selected output format.")
         lay.addWidget(self.btn_refresh)
         lay.addWidget(self.btn_print)
         lay.addWidget(self.btn_save)

@@ -20,8 +20,8 @@ Usage:
 from __future__ import annotations
 import sys
 from pathlib import Path
-from PyQt6.QtCore import Qt, QRectF
-from PyQt6.QtGui import QColor, QFont, QFontDatabase, QIcon, QPainter, QPen, QPixmap
+from PyQt6.QtCore import Qt, QRectF, QEvent, QObject
+from PyQt6.QtGui import QColor, QFont, QFontDatabase, QIcon, QPainter, QPalette, QPen, QPixmap
 
 
 _MATPLOTLIB_FONTS_REGISTERED = False
@@ -97,10 +97,69 @@ def load_fonts() -> None:
             print(f"[theme] Loaded font: {font_file.name} -> {families}")
 
 
+class _ReadableToolTipFilter(QObject):
+    """Keep Qt's reused private tooltip popup independent of source-widget QSS."""
+
+    _QSS = (
+        'background-color: #fffdf7; color: #2f2f2f; '
+        'border: 1px solid #6b8e23; padding: 6px 9px;'
+    )
+
+    @classmethod
+    def _style_popup(cls, watched) -> None:
+        if watched.property('_readableTooltipApplying'):
+            return
+        watched.setProperty('_readableTooltipApplying', True)
+        try:
+            palette = watched.palette()
+            background = QColor('#fffdf7')
+            foreground = QColor(C.TEXT)
+            palette_changed = False
+            for role in (
+                QPalette.ColorRole.Window,
+                QPalette.ColorRole.Base,
+                QPalette.ColorRole.ToolTipBase,
+            ):
+                if palette.color(role) != background:
+                    palette.setColor(role, background)
+                    palette_changed = True
+            for role in (
+                QPalette.ColorRole.WindowText,
+                QPalette.ColorRole.Text,
+                QPalette.ColorRole.ToolTipText,
+            ):
+                if palette.color(role) != foreground:
+                    palette.setColor(role, foreground)
+                    palette_changed = True
+            if palette_changed:
+                watched.setPalette(palette)
+            watched.setAutoFillBackground(True)
+            watched.setAttribute(Qt.WidgetAttribute.WA_StyledBackground, True)
+            watched.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground, False)
+            if watched.styleSheet() != cls._QSS:
+                watched.setStyleSheet(cls._QSS)
+        finally:
+            watched.setProperty('_readableTooltipApplying', False)
+
+    def eventFilter(self, watched, event):
+        try:
+            is_tip = watched.metaObject().className() == 'QTipLabel'
+        except Exception:
+            is_tip = False
+        if is_tip and event.type() in {
+            QEvent.Type.Show,
+            QEvent.Type.Polish,
+            QEvent.Type.PaletteChange,
+            QEvent.Type.StyleChange,
+            QEvent.Type.ToolTipChange,
+        }:
+            self._style_popup(watched)
+        return False
+
+
 def apply_tooltip_style(app=None) -> None:
-    """Force readable tooltips on platforms that ignore QSS tooltip colors."""
+    """Force readable tooltips centrally, including controls with local QSS."""
     try:
-        from PyQt6.QtGui import QPalette
         from PyQt6.QtWidgets import QApplication, QToolTip
     except Exception:
         return
@@ -114,6 +173,11 @@ def apply_tooltip_style(app=None) -> None:
     palette.setColor(QPalette.ColorRole.ToolTipText, QColor(C.TEXT))
     target.setPalette(palette)
     QToolTip.setPalette(palette)
+    tooltip_filter = getattr(target, '_readable_tooltip_filter', None)
+    if tooltip_filter is None:
+        tooltip_filter = _ReadableToolTipFilter(target)
+        target.installEventFilter(tooltip_filter)
+        target._readable_tooltip_filter = tooltip_filter
 
 
 def default_ui_font_family(platform_name: str | None = None) -> str:

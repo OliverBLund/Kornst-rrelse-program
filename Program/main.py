@@ -24,6 +24,7 @@ QApplication.setHighDpiScaleFactorRoundingPolicy(
 QCoreApplication.setAttribute(Qt.ApplicationAttribute.AA_ShareOpenGLContexts, True)
 
 from Splash.simple_splash import SimpleSplash
+from version import VERSION
 # MainWindow imported later to speed up splash appearance
 
 
@@ -232,7 +233,7 @@ def main() -> None:
     _prime_qt_webengine()
     app = QApplication(sys.argv)
     app.setApplicationName("Grain Size Analysis")
-    app.setApplicationVersion("1.0.0")
+    app.setApplicationVersion(VERSION)
     app.setOrganizationName("Geotechnical Engineering")
     app.setOrganizationDomain("grainsize.app")
 

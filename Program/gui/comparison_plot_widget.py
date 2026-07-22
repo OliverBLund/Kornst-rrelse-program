@@ -7,7 +7,7 @@ from PyQt6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QFrame, QPushButton,
     QComboBox, QLabel, QButtonGroup, QSizePolicy, QScrollArea,
     QColorDialog, QFileDialog, QMessageBox, QTableWidget, QTableWidgetItem,
-    QHeaderView, QAbstractItemView,
+    QHeaderView, QAbstractItemView, QMenu,
 )
 from PyQt6.QtCore import Qt, pyqtSignal, QSize, QPropertyAnimation, QEasingCurve
 from PyQt6.QtGui import QColor, QFontMetrics
@@ -47,6 +47,8 @@ from analysis.comparison_snapshot import ComparisonSnapshotOptions, build_compar
 from grain_classification import ISO14688
 from k_aggregation import KAggregationOptions, UNGROUPED_LABEL, dataset_group_name
 from unit_conversions import HydraulicConductivityConverter, HydraulicConductivityUnit, get_default_plot_unit
+from exporting.table_model import ExportTable
+from .table_export_dialog import export_table_dialog
 
 
 def _cmp_sep() -> QFrame:
@@ -365,7 +367,8 @@ class ComparisonPlotWidget(QWidget):
         )
         header_lay.addWidget(self._drawer_count)
 
-        self._drawer_export_btn = QPushButton("Export CSV")
+        self._drawer_export_btn = QPushButton("Export Data...")
+        self._drawer_export_btn.setToolTip("Export the active plot data as an Excel workbook or CSV file.")
         self._drawer_export_btn.setProperty("pw-btn", True)
         self._drawer_export_btn.clicked.connect(self._export_drawer_data)
         header_lay.addWidget(self._drawer_export_btn)
@@ -417,6 +420,9 @@ class ComparisonPlotWidget(QWidget):
             "Combined",
             "Histogram",
         ])
+        self.plot_selector.setToolTip(
+            "Choose which comparison visualization to display. The available controls update for the selected plot."
+        )
         self.plot_selector.setMaximumWidth(134)
         self.plot_selector.currentTextChanged.connect(self.on_plot_type_changed)
         row.addWidget(self.plot_selector)
@@ -442,6 +448,9 @@ class ComparisonPlotWidget(QWidget):
         self.overlay_radio.setProperty("active", True)
         self.overlay_radio.setCheckable(True)
         self.overlay_radio.setChecked(True)
+        self.overlay_radio.setToolTip(
+            "Draw selected datasets together on shared axes for direct comparison."
+        )
         self.overlay_radio.setCursor(Qt.CursorShape.PointingHandCursor)
         self.overlay_radio.toggled.connect(lambda on: _sync_cmp_seg(self.overlay_radio, on))
         self.overlay_radio.toggled.connect(lambda checked: self._on_mode_toggled(checked, "overlay"))
@@ -452,6 +461,9 @@ class ComparisonPlotWidget(QWidget):
         self.grid_radio.setProperty("pw-seg", True)
         self.grid_radio.setProperty("active", False)
         self.grid_radio.setCheckable(True)
+        self.grid_radio.setToolTip(
+            "Draw datasets or groups in separate panels using the selected grid layout."
+        )
         self.grid_radio.setCursor(Qt.CursorShape.PointingHandCursor)
         self.grid_radio.toggled.connect(lambda on: _sync_cmp_seg(self.grid_radio, on))
         self.grid_radio.toggled.connect(lambda checked: self._on_mode_toggled(checked, "grid"))
@@ -483,6 +495,9 @@ class ComparisonPlotWidget(QWidget):
         self.bd_dataset_btn.setProperty("active", True)
         self.bd_dataset_btn.setCheckable(True)
         self.bd_dataset_btn.setChecked(True)
+        self.bd_dataset_btn.setToolTip(
+            "Create one plotted series or panel per selected dataset."
+        )
         self.bd_dataset_btn.setCursor(Qt.CursorShape.PointingHandCursor)
         self.bd_dataset_btn.toggled.connect(lambda on: _sync_cmp_seg(self.bd_dataset_btn, on))
         self.bd_dataset_btn.toggled.connect(lambda checked: self._on_breakdown_toggled(checked, "dataset"))
@@ -493,6 +508,9 @@ class ComparisonPlotWidget(QWidget):
         self.bd_group_btn.setProperty("pw-seg", True)
         self.bd_group_btn.setProperty("active", False)
         self.bd_group_btn.setCheckable(True)
+        self.bd_group_btn.setToolTip(
+            "Aggregate datasets by the groups assigned in Scope & Groups."
+        )
         self.bd_group_btn.setCursor(Qt.CursorShape.PointingHandCursor)
         self.bd_group_btn.toggled.connect(lambda on: _sync_cmp_seg(self.bd_group_btn, on))
         self.bd_group_btn.toggled.connect(lambda checked: self._on_breakdown_toggled(checked, "group"))
@@ -512,6 +530,9 @@ class ComparisonPlotWidget(QWidget):
         self.grid_selector.setObjectName("pw-style-sel")
         self.grid_selector.setStyleSheet(combo_popup_qss())
         self.grid_selector.addItems(["2x2", "3x2", "3x3", "4x3"])
+        self.grid_selector.setToolTip(
+            "Choose the panel grid used by Grid layout; additional panels continue as needed."
+        )
         self.grid_selector.setMaximumWidth(68)
         self.grid_selector.setVisible(False)
         self.grid_selector.currentTextChanged.connect(self.on_grid_layout_changed)
@@ -560,6 +581,57 @@ class ComparisonPlotWidget(QWidget):
         self.reset_btn = _cmp_btn(" Fit", "Reset active plot", "fa6s.arrows-to-circle")
         self.reset_btn.clicked.connect(self.reset_view)
         row.addWidget(self.reset_btn)
+
+        self._export_sep = _cmp_sep()
+        row.addWidget(self._export_sep)
+
+        self._tb_export_btn = _cmp_btn(
+            " Export Figure", "Export the active comparison plot", "fa6s.download"
+        )
+        self._tb_export_btn.setObjectName("plot-export-figure")
+        self._tb_export_btn.setStyleSheet(f"""
+            QPushButton#plot-export-figure {{
+                background-color: {C.BG_RAISED};
+                border: 1px solid {C.BORDER_DK};
+                border-radius: 5px;
+                padding: 3px 9px;
+                color: {C.TEXT_MID};
+            }}
+            QPushButton#plot-export-figure:hover {{
+                background-color: {C.BG_LOW};
+                border-color: {C.EARTH};
+                color: {C.TEXT};
+            }}
+            QPushButton#plot-export-figure:pressed,
+            QPushButton#plot-export-figure:open {{
+                background-color: #ebe1d2;
+                border-color: {C.EARTH};
+            }}
+        """)
+        export_menu = QMenu(self._tb_export_btn)
+        export_menu.setAttribute(Qt.WidgetAttribute.WA_StyledBackground, True)
+        export_menu.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground, False)
+        export_menu.setStyleSheet(f"""
+            QMenu {{
+                background-color: {C.BG_RAISED};
+                border: 1px solid {C.BORDER_DK};
+                padding: 4px;
+                color: {C.TEXT_MID};
+            }}
+            QMenu::item {{ background-color: {C.BG_RAISED}; padding: 6px 24px 6px 10px; }}
+            QMenu::item:selected {{ background-color: #e8f0d5; color: {C.TEXT}; }}
+        """)
+        export_menu.addAction("PNG image...").triggered.connect(
+            lambda _checked=False: self._export_figure("png")
+        )
+        export_menu.addAction("SVG vector...").triggered.connect(
+            lambda _checked=False: self._export_figure("svg")
+        )
+        export_menu.addAction("PDF figure...").triggered.connect(
+            lambda _checked=False: self._export_figure("pdf")
+        )
+        self._tb_export_btn.setMenu(export_menu)
+        row.addWidget(self._tb_export_btn)
 
         # NOTE: the interaction hint moved out of the toolbar into a slim footer
         # below the plot (see init_ui) so it no longer competes for toolbar space.
@@ -855,26 +927,6 @@ class ComparisonPlotWidget(QWidget):
         self._sect_units.add_widget(self._row_units)
         lay.addWidget(self._sect_units)
 
-        # ── Export ──
-        self._sect_export = CollapsibleSection(
-            "Export", "fa6s.download",
-            CollapsibleSection.RED, expanded=False,
-        )
-        export_w = QWidget()
-        export_lay = QVBoxLayout(export_w)
-        export_lay.setContentsMargins(10, 5, 10, 8)
-        export_lay.setSpacing(4)
-        btn_png = QPushButton("Export as PNG")
-        btn_png.setProperty("pw-btn", True)
-        btn_png.clicked.connect(lambda: self._export_figure("png"))
-        btn_svg = QPushButton("Export as SVG")
-        btn_svg.setProperty("pw-btn", True)
-        btn_svg.clicked.connect(lambda: self._export_figure("svg"))
-        export_lay.addWidget(btn_png)
-        export_lay.addWidget(btn_svg)
-        self._sect_export.add_widget(export_w)
-        lay.addWidget(self._sect_export)
-
         lay.addStretch(1)
         self._sync_contextual_sidebar_sections()
         return sidebar
@@ -1004,6 +1056,7 @@ class ComparisonPlotWidget(QWidget):
         if not self.datasets:
             self._color_container_lay.addWidget(self._empty_colors_hint)
             self._empty_colors_hint.show()
+            self._sync_series_appearance_visibility()
             return
 
         self._empty_colors_hint.hide()
@@ -1024,7 +1077,7 @@ class ComparisonPlotWidget(QWidget):
             color = self._group_color_map.get(group_name, self.dataset_colors[0])
             row, dot = make_color_row(group_name, color)
             row.setToolTip(
-                "Group color. Datasets in this group use this color with different line styles."
+                "Identity colour used when this group is drawn as a plot series."
             )
             dot.mousePressEvent = (
                 lambda _event, name=group_name, swatch=dot:
@@ -1054,6 +1107,7 @@ class ComparisonPlotWidget(QWidget):
             )
             self._color_container_lay.addWidget(row)
             self._dataset_color_rows[ds.sample_name] = dot
+        self._sync_series_appearance_visibility()
 
     def _make_line_style_row(
         self,
@@ -1400,7 +1454,11 @@ class ComparisonPlotWidget(QWidget):
         """Save the current comparison figure to disk."""
         if self.figure is None:
             return
-        ext_filter = {"png": "PNG (*.png)", "svg": "SVG (*.svg)"}.get(fmt, "All Files (*)")
+        ext_filter = {
+            "png": "PNG Image (*.png)",
+            "svg": "SVG Vector (*.svg)",
+            "pdf": "PDF Figure (*.pdf)",
+        }.get(fmt, "All Files (*)")
         path, _ = QFileDialog.getSaveFileName(
             self, "Export plot", f"comparison.{fmt}", ext_filter,
         )
@@ -1408,7 +1466,15 @@ class ComparisonPlotWidget(QWidget):
             return
         try:
             path = self._with_extension(path, fmt)
-            self.figure.savefig(path, format=fmt, dpi=200, bbox_inches="tight")
+            self.figure.savefig(
+                path,
+                format=fmt,
+                dpi=300,
+                bbox_inches="tight",
+                facecolor="white",
+                edgecolor="white",
+                transparent=False,
+            )
             QMessageBox.information(
                 self, "Export Successful", f"Plot exported to:\n{path}"
             )
@@ -1501,6 +1567,51 @@ class ComparisonPlotWidget(QWidget):
             self._style_control_sections.set_lines_markers_visible(
                 supports_curve_style
             )
+        self._sync_series_appearance_visibility()
+
+    def _series_appearance_mode(self) -> str:
+        """Return the controls meaningful for the active comparison rendering."""
+        if self.current_plot_type in {"distribution", "combined"}:
+            return "curves"
+        if self.current_plot_type == "histogram":
+            return "colors"
+        if (
+            self.current_plot_type == "k-values"
+            and self.display_mode == "overlay"
+        ):
+            return "colors"
+        if (
+            self.current_plot_type == "k-distribution"
+            and self._use_group_breakdown()
+        ):
+            return "group-colors"
+        return "hidden"
+
+    def _sync_series_appearance_visibility(self) -> None:
+        """Hide line/style choices that the active chart cannot render."""
+        section = getattr(self, "_sect_dataset_colors", None)
+        if section is None:
+            return
+        mode = self._series_appearance_mode()
+        section.setVisible(mode != "hidden")
+
+        show_line_styles = mode == "curves"
+        for combo in getattr(self, "_dataset_line_style_rows", {}).values():
+            row = combo.parentWidget()
+            if row is not None:
+                row.setVisible(show_line_styles)
+
+        show_group_colors = mode in {"curves", "colors", "group-colors"}
+        for swatch in getattr(self, "_group_color_rows", {}).values():
+            row = swatch.parentWidget()
+            if row is not None:
+                row.setVisible(show_group_colors)
+
+        show_dataset_colors = mode in {"curves", "colors"}
+        for swatch in getattr(self, "_dataset_color_rows", {}).values():
+            row = swatch.parentWidget()
+            if row is not None:
+                row.setVisible(show_dataset_colors)
 
     def _sync_mode_radios(self):
         """Reflect the active layout mode in the radio buttons without re-entering."""
@@ -1878,26 +1989,15 @@ class ComparisonPlotWidget(QWidget):
         safe_title = "".join(
             ch if ch.isalnum() else "_" for ch in title.lower()
         ).strip("_") or "plot_data"
-        path, _ = QFileDialog.getSaveFileName(
+        export_table_dialog(
             self,
-            f"Export {title} as CSV",
-            f"comparison_{safe_title}.csv",
-            "CSV Files (*.csv)",
+            dialog_title=f"Export {title}",
+            default_stem=f"comparison_{safe_title}",
+            table=ExportTable.from_rows(title, self._drawer_headers, self._drawer_rows),
+            success_label=title,
+            file_dialog=QFileDialog,
+            message_box=QMessageBox,
         )
-        if not path:
-            return
-        try:
-            import csv
-            path = self._with_extension(path, "csv")
-            with open(path, "w", newline="") as handle:
-                writer = csv.writer(handle)
-                writer.writerow(self._drawer_headers)
-                writer.writerows(self._drawer_rows)
-            QMessageBox.information(
-                self, "Export Successful", f"{title} exported to:\n{path}"
-            )
-        except Exception as exc:  # pragma: no cover - user-facing dialog
-            QMessageBox.warning(self, "Export failed", str(exc))
 
     def _grain_drawer_rows(self) -> tuple[list[str], list[tuple]]:
         grain = self._comparison_snapshot.grain

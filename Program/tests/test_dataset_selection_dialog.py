@@ -1,4 +1,5 @@
 import os
+import json
 import sys
 import unittest
 from types import SimpleNamespace
@@ -7,10 +8,11 @@ from unittest.mock import patch
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 sys.path.insert(0, "Program")
 
-from PyQt6.QtCore import Qt
+from PyQt6.QtCore import QPoint, Qt
 from PyQt6.QtGui import QColor
 from PyQt6.QtWidgets import QApplication, QPushButton
 
+import gui.dataset_selection_dialog as dataset_selection_dialog_module
 from gui.dataset_selection_dialog import DatasetSelectionDialog
 from gui.group_styles import clear_group_color, group_color_map
 
@@ -223,6 +225,91 @@ class TestDatasetSelectionDialog(unittest.TestCase):
         finally:
             dialog.deleteLater()
 
+    def test_dragging_an_already_selected_row_keeps_and_encodes_full_selection(self):
+        tabs = [
+            DummyDatasetTab(f"Sample {letter}", f"{letter}.csv")
+            for letter in "ABC"
+        ]
+        dialog = DatasetSelectionDialog(
+            tabs,
+            currently_selected=tabs,
+            minimum_selection=1,
+            allow_grouping=True,
+        )
+        captured = {}
+
+        class FakeDrag:
+            def __init__(self, source):
+                captured["source"] = source
+
+            def setMimeData(self, mime):
+                captured["mime"] = mime
+
+            def exec(self, action):
+                captured["action"] = action
+
+        try:
+            dialog._rows[0].mousePressEvent(DummyMouseEvent(80))
+            dialog._rows[1].mousePressEvent(
+                DummyMouseEvent(80, Qt.KeyboardModifier.ControlModifier)
+            )
+            # A plain press on either selected row begins a drag and must not
+            # collapse the existing multi-selection.
+            dialog._rows[0].mousePressEvent(DummyMouseEvent(80))
+            self.assertEqual(
+                [index for index, row in enumerate(dialog._rows) if row.is_selected()],
+                [0, 1],
+            )
+
+            with patch.object(dataset_selection_dialog_module, "QDrag", FakeDrag):
+                dialog._start_row_drag(dialog._rows[0])
+
+            indexes = json.loads(bytes(
+                captured["mime"].data(
+                    dataset_selection_dialog_module._DATASET_ROWS_MIME
+                )
+            ).decode("utf-8"))
+            self.assertEqual(indexes, [0, 1])
+            self.assertEqual(captured["action"], Qt.DropAction.MoveAction)
+        finally:
+            dialog.deleteLater()
+
+    def test_drag_near_viewport_edge_scrolls_continuously(self):
+        tabs = [
+            DummyDatasetTab(f"Sample {index:02d}", f"{index:02d}.csv")
+            for index in range(30)
+        ]
+        dialog = DatasetSelectionDialog(
+            tabs,
+            currently_selected=tabs,
+            minimum_selection=1,
+            allow_grouping=True,
+        )
+        try:
+            dialog.resize(820, 420)
+            dialog.show()
+            APP.processEvents()
+            viewport = dialog._list_scroll.viewport()
+            scrollbar = dialog._list_scroll.verticalScrollBar()
+            self.assertGreater(scrollbar.maximum(), 0)
+            scrollbar.setValue(0)
+
+            near_bottom = viewport.mapToGlobal(
+                QPoint(viewport.width() // 2, viewport.height() - 2)
+            )
+            dialog._update_drag_autoscroll_position(near_bottom)
+            first_value = scrollbar.value()
+            dialog._auto_scroll_during_drag()
+
+            self.assertTrue(dialog._drag_scroll_timer.isActive())
+            self.assertGreater(first_value, 0)
+            self.assertGreater(scrollbar.value(), first_value)
+            dialog._stop_drag_autoscroll()
+            self.assertFalse(dialog._drag_scroll_timer.isActive())
+        finally:
+            dialog._stop_drag_autoscroll()
+            dialog.deleteLater()
+
     def test_apply_group_button_does_not_cascade_after_row_edit_focus(self):
         tabs = [
             DummyDatasetTab("Sample A", "A.csv"),
@@ -325,11 +412,49 @@ class TestDatasetSelectionDialog(unittest.TestCase):
         )
         try:
             for row in dialog._rows:
-                self.assertIs(row.parent(), dialog._list_host)
+                self.assertIn(row.parent(), dialog._group_drop_areas)
                 self.assertFalse(row.isWindow())
             for header in dialog._group_headers:
-                self.assertIs(header.parent(), dialog._list_host)
+                self.assertIn(header.parent(), dialog._group_drop_areas)
                 self.assertFalse(header.isWindow())
+        finally:
+            dialog.deleteLater()
+
+    def test_entire_group_area_accepts_drop_and_moves_selected_rows(self):
+        tabs = [
+            DummyDatasetTab("Sample A", "A.csv", "Layer A"),
+            DummyDatasetTab("Sample B", "B.csv", "Layer B"),
+            DummyDatasetTab("Sample C", "C.csv", "Layer B"),
+        ]
+        dialog = DatasetSelectionDialog(
+            tabs,
+            currently_selected=tabs,
+            minimum_selection=1,
+            allow_grouping=True,
+        )
+        try:
+            layer_b_area = next(
+                area for area in dialog._group_drop_areas
+                if area.group_name == "Layer B"
+            )
+            self.assertTrue(layer_b_area.acceptDrops())
+            self.assertGreater(layer_b_area.layout().count(), 1)
+            self.assertTrue(any(
+                area.group_name == 'Ungrouped'
+                for area in dialog._group_drop_areas
+            ))
+            layer_b_area._set_drop_active(True)
+            self.assertIn('2px solid', layer_b_area.styleSheet())
+            self.assertIn('#6b8e23', layer_b_area.styleSheet())
+
+            dialog._drop_rows_into_group("Layer B", [0])
+
+            self.assertEqual(dialog._rows[0].group_name(), "Layer B")
+            rebuilt_area = next(
+                area for area in dialog._group_drop_areas
+                if area.group_name == "Layer B"
+            )
+            self.assertIs(dialog._rows[0].parent(), rebuilt_area)
         finally:
             dialog.deleteLater()
 

@@ -995,6 +995,31 @@ def _histogram_freq_for_labels(unit: dict, labels: list[str]) -> list[float]:
     return [values.get(label, 0.0) for label in labels]
 
 
+def _set_histogram_class_tick_labels(
+    ax,
+    labels: list[str],
+    style: PlotStyle,
+    *,
+    compact: bool = False,
+    dense: bool = False,
+) -> None:
+    """Apply readable class labels without adding another persistent UI control."""
+    if dense:
+        rotation = 30
+    else:
+        rotation = 45 if len(labels) > 6 else 0
+    fontsize_reduction = 2 if compact else 1
+    kwargs = {
+        "rotation": rotation,
+        "ha": "right" if rotation else "center",
+        "fontsize": max(6, style.tick_fontsize - fontsize_reduction),
+        "fontfamily": style.font_family,
+    }
+    if rotation:
+        kwargs["rotation_mode"] = "anchor"
+    ax.set_xticklabels(labels, **kwargs)
+
+
 def _plot_histogram_comparison(
     figure,
     spec: ComparisonPlotSpec,
@@ -1055,12 +1080,11 @@ def _plot_histogram_comparison(
     ax.set_xticks(x)
     ax.set_xlim(-0.6, len(labels) - 0.4)
     ax.set_ylim(bottom=0)
-    ax.set_xticklabels(
-        [label.replace(" ", "\n") for label in labels],
-        rotation=0,
-        ha="center",
-        fontsize=max(6, style.tick_fontsize - 1),
-        fontfamily=style.font_family,
+    _set_histogram_class_tick_labels(
+        ax,
+        labels,
+        style,
+        compact=len(units) > 1,
     )
     ax.tick_params(axis="y", labelsize=style.tick_fontsize)
     for tick in ax.get_yticklabels():
@@ -1130,20 +1154,13 @@ def _plot_histogram_heatmap(
         fontfamily=style.font_family,
     )
     ax.set_xticks(np.arange(len(labels)))
-    if spec.dense_report_layout:
-        ax.set_xticklabels(
-            labels,
-            rotation=30,
-            ha="right",
-            fontsize=style.tick_fontsize,
-            fontfamily=style.font_family,
-        )
-    else:
-        ax.set_xticklabels(
-            [label.replace(" ", "\n") for label in labels],
-            fontsize=max(6, style.tick_fontsize - 1),
-            fontfamily=style.font_family,
-        )
+    _set_histogram_class_tick_labels(
+        ax,
+        labels,
+        style,
+        compact=True,
+        dense=spec.dense_report_layout,
+    )
     ax.set_yticks(np.arange(len(units)))
     ax.set_yticklabels(
         [unit.get("label", f"Series {idx + 1}") for idx, unit in enumerate(units)],
@@ -1229,14 +1246,13 @@ def _plot_histogram(figure, spec: ComparisonPlotSpec) -> int:
         if labels:
             ax.set_xticks(range(len(labels)))
             ax.set_xlim(-0.6, len(labels) - 0.4)
-            ax.set_xticklabels(
-                [label.replace(" ", "\n") for label in labels],
-                rotation=0,
-                ha='center',
-                fontsize=max(6, style.tick_fontsize - 1),
-                fontfamily=style.font_family,
+            _set_histogram_class_tick_labels(
+                ax,
+                labels,
+                style,
+                compact=len(units) > 1 or cols > 1,
             )
-        ax.tick_params(labelsize=style.tick_fontsize)
+        ax.tick_params(axis='y', labelsize=style.tick_fontsize)
         for tick in ax.get_yticklabels():
             tick.set_fontfamily(style.font_family)
 

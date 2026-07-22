@@ -19,6 +19,8 @@ from PyQt6.QtCore import QTimer, QSettings
 from data_loader import DataLoader
 from gui.column_mapper import ColumnMapperDialog
 from gui.dataset_inspector_dialog import DataInspectorDialog
+from gui.dataset_inputs_dialog import DatasetInputsDialog
+from gui.application_settings_dialog import ApplicationSettingsDialog
 import os
 from PyQt6.QtCore import Qt, pyqtSignal, QSize, QRectF, QPoint
 from PyQt6.QtGui import (QIcon, QFont, QAction, QPainter, QColor,
@@ -35,6 +37,7 @@ from k_aggregation import build_k_result_summary
 from grain_classification import (
     ISO14688, GrainClassificationScheme, ClassificationResult,
 )
+from version import VERSION_LABEL
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -86,7 +89,7 @@ class _LogoCard(QWidget):
         title.setStyleSheet(
             f"color: {C.LOGO_TEXT}; background: transparent; "
             "letter-spacing: 0.01em;")
-        subtitle = QLabel("ANALYSIS \u00b7 v0.9-\u03b2")
+        subtitle = QLabel(f"ANALYSIS \u00b7 {VERSION_LABEL}")
         subtitle.setFont(QFont(F.MONO, F.SZ_XS - 1))
         subtitle.setStyleSheet(
             f"color: {C.LOGO_SUB}; background: transparent; "
@@ -1524,157 +1527,6 @@ class _FractionsLine(QWidget):
         painter.end()
 
 
-class ApplicationSettingsDialog(FramelessDialogBase):
-    """Small application settings dialog for persisted UI preferences."""
-
-    def __init__(self, show_welcome_on_startup: bool, ui_font_bump: int = 1, parent=None):
-        super().__init__(parent, default_mode="auto")
-        self.setWindowTitle("Settings")
-        self.setMinimumWidth(520)
-        self.setMaximumWidth(640)
-        self._show_welcome_on_startup = bool(show_welcome_on_startup)
-        self._ui_font_bump = max(0, min(1, int(ui_font_bump)))
-        self.init_ui()
-
-    def init_ui(self):
-        """Build the settings dialog UI."""
-        from gui.dialog_chrome import make_dialog_header, make_dialog_footer
-
-        root = QVBoxLayout(self)
-        root.setContentsMargins(0, 0, 0, 0)
-        root.setSpacing(0)
-
-        self._header_widget = make_dialog_header(
-            "Settings",
-            "Application preferences and startup behavior",
-            fa_icon="fa6s.gear",
-            close_fn=self.reject,
-        )
-        root.addWidget(self._header_widget)
-
-        body = QWidget()
-        body.setStyleSheet(f"background: {C.BG};")
-        body_lay = QVBoxLayout(body)
-        body_lay.setContentsMargins(14, 14, 14, 14)
-        body_lay.setSpacing(12)
-
-        section_card = QFrame()
-        section_card.setStyleSheet(
-            f"QFrame {{ background: {C.BG_RAISED}; border: 1px solid {C.BORDER}; "
-            f"border-radius: 6px; }}"
-        )
-        section_lay = QVBoxLayout(section_card)
-        section_lay.setContentsMargins(14, 12, 14, 12)
-        section_lay.setSpacing(8)
-
-        section_title = QLabel("Startup")
-        section_title.setStyleSheet(
-            f"color: {C.TEXT}; font-size: {F.SZ_LG}pt; font-weight: 600; background: transparent;"
-        )
-        section_lay.addWidget(section_title)
-
-        section_note = QLabel(
-            "Control whether the welcome screen is shown when the program launches."
-        )
-        section_note.setWordWrap(True)
-        section_note.setStyleSheet(
-            f"color: {C.TEXT_MUTED}; font-size: {F.SZ_SM}pt; background: transparent;"
-        )
-        section_lay.addWidget(section_note)
-
-        self.show_welcome_checkbox = QCheckBox("Show welcome screen on startup")
-        self.show_welcome_checkbox.setChecked(self._show_welcome_on_startup)
-        self.show_welcome_checkbox.setStyleSheet(
-            f"QCheckBox {{ color: {C.TEXT}; font-size: {F.SZ_MD}pt; spacing: 8px; background: transparent; }}"
-            f"QCheckBox::indicator {{ width: 16px; height: 16px; }}"
-        )
-        section_lay.addWidget(self.show_welcome_checkbox)
-
-        help_text = QLabel(
-            "This affects startup only. It does not interrupt an active session or overwrite recent-session data."
-        )
-        help_text.setWordWrap(True)
-        help_text.setStyleSheet(
-            f"color: {C.TEXT_MUTED}; font-size: {F.SZ_SM}pt; background: transparent;"
-        )
-        section_lay.addWidget(help_text)
-
-        body_lay.addWidget(section_card)
-
-        display_card = QFrame()
-        display_card.setStyleSheet(
-            f"QFrame {{ background: {C.BG_RAISED}; border: 1px solid {C.BORDER}; "
-            f"border-radius: 6px; }}"
-        )
-        display_lay = QVBoxLayout(display_card)
-        display_lay.setContentsMargins(14, 12, 14, 12)
-        display_lay.setSpacing(8)
-
-        display_title = QLabel("Display")
-        display_title.setStyleSheet(
-            f"color: {C.TEXT}; font-size: {F.SZ_LG}pt; font-weight: 600; background: transparent;"
-        )
-        display_lay.addWidget(display_title)
-
-        display_note = QLabel(
-            "Choose the interface text size. Restart the program to apply it consistently across all panels."
-        )
-        display_note.setWordWrap(True)
-        display_note.setStyleSheet(
-            f"color: {C.TEXT_MUTED}; font-size: {F.SZ_SM}pt; background: transparent;"
-        )
-        display_lay.addWidget(display_note)
-
-        size_row = QWidget()
-        size_row.setStyleSheet("background: transparent;")
-        size_lay = QHBoxLayout(size_row)
-        size_lay.setContentsMargins(0, 0, 0, 0)
-        size_lay.setSpacing(10)
-
-        size_label = QLabel("Text size")
-        size_label.setStyleSheet(
-            f"color: {C.TEXT}; font-size: {F.SZ_MD}pt; background: transparent;"
-        )
-        size_lay.addWidget(size_label)
-
-        self.text_size_combo = QComboBox()
-        self.text_size_combo.addItem("Normal", 0)
-        self.text_size_combo.addItem("Large", 1)
-        current_index = self.text_size_combo.findData(self._ui_font_bump)
-        self.text_size_combo.setCurrentIndex(max(0, current_index))
-        self.text_size_combo.setMinimumWidth(160)
-        size_lay.addWidget(self.text_size_combo)
-        size_lay.addStretch(1)
-        display_lay.addWidget(size_row)
-
-        body_lay.addWidget(display_card)
-        body_lay.addStretch(1)
-
-        root.addWidget(body, 1)
-        root.addWidget(make_dialog_footer([
-            ("Cancel", self.reject, "secondary"),
-            ("Save", self.accept, "primary"),
-        ]))
-
-        self.install_chrome_behavior(
-            header_widget=self._header_widget,
-            corner_radius=8,
-            resize_margin=6,
-        )
-
-    def show_welcome_on_startup(self) -> bool:
-        """Return the current welcome-screen startup preference."""
-        return bool(self.show_welcome_checkbox.isChecked())
-
-    def ui_font_bump(self) -> int:
-        """Return the selected display-size preset."""
-        value = self.text_size_combo.currentData()
-        try:
-            return max(0, min(1, int(value)))
-        except (TypeError, ValueError):
-            return 1
-
-
 class ControlPanel(QFrame):
     # Signals for communication with main window
     analysis_requested = pyqtSignal(dict)  # Emitted when analysis is requested
@@ -1690,6 +1542,7 @@ class ControlPanel(QFrame):
     selection_changed = pyqtSignal()  # Emitted when card selected-toggle state changes
     manage_datasets_requested = pyqtSignal()  # Emitted when the sidebar manager is requested
     scheme_changed = pyqtSignal(object)  # GrainClassificationScheme — emitted when user picks a new scheme
+    dataset_inputs_changed = pyqtSignal(int)  # number of datasets updated
 
     def __init__(self):
         super().__init__()
@@ -2302,11 +2155,11 @@ class ControlPanel(QFrame):
         params_v.addWidget(por_lbl)
         params_v.addWidget(self.porosity_mode_combo)
 
-        # Manage porosity button
-        self.porosity_settings_btn = QPushButton("Manage Dataset Porosity\u2026")
-        self.porosity_settings_btn.clicked.connect(self.open_porosity_dialog)
+        # Unified dataset inputs button (kept hidden with the legacy parameter area)
+        self.porosity_settings_btn = QPushButton("Manage Dataset Inputs\u2026")
+        self.porosity_settings_btn.clicked.connect(self.open_dataset_inputs_dialog)
         self.porosity_settings_btn.setToolTip(
-            "Edit porosity values for each dataset individually")
+            "Edit temperature and effective porosity for one, selected, or all datasets")
         self.porosity_settings_btn.setStyleSheet(
             f"QPushButton {{ background: {C.SB_UP}; border: 1px solid {C.SB_BDR};"
             f"  border-radius: 3px; padding: 4px 10px;"
@@ -2347,25 +2200,28 @@ class ControlPanel(QFrame):
         dtu_w = QWidget()
         dtu_w.setObjectName("sidebar-credit-box")
         dtu_w.setStyleSheet(
-            f"background: {C.SB_DN}; border-top: 1px solid {C.SB_BDR};")
+            "QWidget#sidebar-credit-box {"
+            " background: qlineargradient(x1:0, y1:0, x2:1, y2:0,"
+            " stop:0 #e8e1d3, stop:1 #ddd1ba);"
+            f" border-top: 1px solid {C.SB_BDR};"
+            "}")
         dtu_h = QHBoxLayout(dtu_w)
-        dtu_h.setContentsMargins(13, 9, 13, 8)
-        dtu_h.setSpacing(10)
+        dtu_h.setContentsMargins(14, 11, 13, 10)
+        dtu_h.setSpacing(11)
 
         # DTU red pill label — .dtu-logo in CSS
         dtu_pill = QLabel("DTU")
         self._sidebar_credit_logo = dtu_pill
         dtu_pill.setObjectName("sidebar-credit-logo")
         dtu_pill.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        dtu_pill.setStyleSheet(
-            "background: transparent; border-radius: 3px; border: 1px solid rgba(0,0,0,0.16);")
+        dtu_pill.setStyleSheet("background: transparent; border: none;")
         logo_px = QPixmap(self._resource_file("DTU_logo.png"))
         if not logo_px.isNull():
             dtu_pill.setText("")
             dtu_pill.setPixmap(
                 logo_px.scaled(
-                    40,
-                    40,
+                    48,
+                    48,
                     Qt.AspectRatioMode.KeepAspectRatio,
                     Qt.TransformationMode.SmoothTransformation,
                 )
@@ -2377,21 +2233,32 @@ class ControlPanel(QFrame):
                 f"  letter-spacing: 0.04em; padding: 3px 6px 2px;"
                 f"  border-radius: 2px; line-height: 1.2;")
         dtu_pill.setSizePolicy(QSizePolicy.Policy.Fixed, QSizePolicy.Policy.Fixed)
-        dtu_pill.setFixedSize(44, 44)
-        dtu_h.addWidget(dtu_pill)
+        dtu_pill.setFixedSize(50, 50)
+        dtu_h.addWidget(dtu_pill, 0, Qt.AlignmentFlag.AlignVCenter)
+
+        accent = QFrame()
+        accent.setObjectName("sidebar-credit-accent")
+        accent.setFixedSize(2, 44)
+        accent.setStyleSheet(
+            f"background: {C.DTU_RED}; border: none; border-radius: 1px;")
+        dtu_h.addWidget(accent, 0, Qt.AlignmentFlag.AlignVCenter)
 
         # Info column — .dtu-info in CSS
         dtu_info = QVBoxLayout()
         dtu_info.setSpacing(1)
+        kicker = QLabel("DTU SUSTAIN")
+        kicker.setObjectName("sidebar-credit-kicker")
+        kicker.setFont(QFont(F.MONO, 6, QFont.Weight.DemiBold))
+        kicker.setStyleSheet(
+            f"color: {C.DTU_RED}; background: transparent; letter-spacing: 0.06em;")
         dtu_prog = QLabel("Grain Size Analysis")
+        dtu_prog.setObjectName("sidebar-credit-title")
+        dtu_prog.setFont(QFont(F.DISP, 10, QFont.Weight.DemiBold))
         dtu_prog.setStyleSheet(
-            f"font-size: 10.5px; font-weight: 600; color: {C.SB_TEXT};"
-            f"  background: transparent;")
+            f"color: {C.SB_TEXT}; background: transparent;")
         dtu_dept = QLabel(
-            "Developed by Oliver Lund\n"
-            "Inspired by HydrogeoSieveXL by J.F Devlin\n"
-            "Made in collaboration with Poul Løgstrup Bjerg\n"
-            "DTU Sustain"
+            "Oliver Lund  ·  with Poul Løgstrup Bjerg\n"
+            "Based on HydrogeoSieveXL  ·  J. F. Devlin"
         )
         self._sidebar_credit_text = dtu_dept
         dtu_dept.setObjectName("sidebar-credit-text")
@@ -2399,27 +2266,36 @@ class ControlPanel(QFrame):
         dtu_dept.setWordWrap(True)
         dtu_dept.setFont(QFont(F.UI, 7))
         dtu_dept.setStyleSheet(
-            f"color: {C.SB_MUTED}; background: transparent;"
-            f"  line-height: 1.2;")
+            f"color: {C.SB_MID}; background: transparent;")
+        dtu_dept.setToolTip(
+            "Developed by Oliver Lund at DTU Sustain\n"
+            "Made in collaboration with Poul Løgstrup Bjerg\n"
+            "Based on HydrogeoSieveXL, developed by J. F. Devlin"
+        )
+        dtu_info.addWidget(kicker)
         dtu_info.addWidget(dtu_prog)
+        dtu_info.addSpacing(2)
         dtu_info.addWidget(dtu_dept)
         dtu_h.addLayout(dtu_info, 1)
         root.addWidget(dtu_w)
 
         # ── 4. Footer bar — matches .sb-foot in CSS ──────────────────
         footer = QWidget()
+        footer.setObjectName("sidebar-utility-footer")
         footer.setStyleSheet(
-            f"background: {C.SB_DN}; border-top: 1px solid {C.SB_BDR};")
+            f"QWidget#sidebar-utility-footer {{ background: #d8ccb5;"
+            f" border-top: 1px solid {C.SB_BDR}; }}")
         foot_h = QHBoxLayout(footer)
-        foot_h.setContentsMargins(6, 5, 6, 5)
-        foot_h.setSpacing(2)
+        foot_h.setContentsMargins(8, 4, 8, 5)
+        foot_h.setSpacing(3)
 
         _SF_BTN = (
             f"QPushButton {{ background: transparent; border: none;"
             f"  border-radius: {SZ.BORDER_RADIUS}px; padding: 5px 4px;"
-            f"  font-size: 9.5px; color: {C.SB_MUTED}; }}"
-            f"QPushButton:hover {{ background: rgba(255,255,255,0.5);"
+            f"  font-size: 8pt; font-weight: 500; color: {C.SB_MID}; }}"
+            f"QPushButton:hover {{ background: rgba(255,255,255,0.55);"
             f"  color: {C.SB_TEXT}; }}"
+            f"QPushButton:pressed {{ background: rgba(255,255,255,0.3); }}"
         )
 
         for btn_label, btn_icon_name, btn_slot in [
@@ -2428,11 +2304,20 @@ class ControlPanel(QFrame):
             ("Settings", "fa6s.gear", self.show_settings),
         ]:
             btn = QPushButton(btn_label)
+            btn.setObjectName(f"sidebar-{btn_label.lower()}-button")
             btn.setStyleSheet(_SF_BTN)
             try:
-                btn.setIcon(icon(btn_icon_name, C.SB_MUTED))
+                btn.setIcon(icon(btn_icon_name, C.SB_MID))
+                btn.setIconSize(QSize(12, 12))
             except Exception:
                 pass
+            btn.setToolTip(
+                {
+                    "Help": "Open written Guides (F1)",
+                    "About": "Version, credits, and project provenance",
+                    "Settings": "Application preferences",
+                }[btn_label]
+            )
             if btn_slot:
                 btn.clicked.connect(btn_slot)
             btn.setCursor(Qt.CursorShape.PointingHandCursor)
@@ -2666,142 +2551,16 @@ class ControlPanel(QFrame):
         """Compact description of the active global analysis settings."""
         scheme_name = getattr(self._active_scheme, "name", "Classification scheme")
         return (
-            f"{self.temp_spinbox.value():.1f} C | "
+            f"{self.temp_spinbox.value():.1f} °C | "
             f"{self.porosity_mode_combo.currentText()} | {scheme_name}"
         )
 
     def open_analysis_settings_dialog(self):
         """Open global analysis settings from the top Analysis menu."""
-        dlg = QDialog(self.window())
-        dlg.setWindowTitle("Analysis Settings")
-        dlg.setMinimumWidth(420)
+        from gui.analysis_settings_dialog import AnalysisSettingsDialog
 
-        root = QVBoxLayout(dlg)
-        root.setContentsMargins(14, 12, 14, 12)
-        root.setSpacing(10)
-
-        title = QLabel("Analysis Settings")
-        title.setStyleSheet(
-            f"font-family: '{F.UI}'; font-size: 14px; font-weight: 700;"
-            f" color: {C.TEXT};"
-        )
-        root.addWidget(title)
-
-        intro = QLabel(
-            "These settings affect hydraulic conductivity calculations and "
-            "classification across loaded datasets."
-        )
-        intro.setWordWrap(True)
-        intro.setStyleSheet(f"color: {C.TEXT_MUTED}; font-size: 11px;")
-        root.addWidget(intro)
-
-        fields = QWidget()
-        fields_lay = QVBoxLayout(fields)
-        fields_lay.setContentsMargins(0, 2, 0, 0)
-        fields_lay.setSpacing(8)
-
-        row_style = (
-            f"QLabel {{ color: {C.TEXT_MID}; font-size: 11px; }}"
-            f"QComboBox, QDoubleSpinBox {{ background: rgba(255,255,255,0.55);"
-            f" border: 1px solid {C.BORDER}; border-radius: 4px;"
-            f" padding: 3px 6px; color: {C.TEXT}; }}"
-        )
-
-        temp_row = QWidget()
-        temp_row.setStyleSheet(row_style)
-        temp_lay = QHBoxLayout(temp_row)
-        temp_lay.setContentsMargins(0, 0, 0, 0)
-        temp_lbl = QLabel("Temperature")
-        temp = QDoubleSpinBox()
-        temp.setRange(self.temp_spinbox.minimum(), self.temp_spinbox.maximum())
-        temp.setDecimals(self.temp_spinbox.decimals())
-        temp.setSingleStep(self.temp_spinbox.singleStep())
-        temp.setSuffix(" \u00b0C")
-        temp.setValue(self.temp_spinbox.value())
-        temp.setFixedWidth(100)
-        temp_lay.addWidget(temp_lbl)
-        temp_lay.addStretch()
-        temp_lay.addWidget(temp)
-        fields_lay.addWidget(temp_row)
-
-        porosity_row = QWidget()
-        porosity_row.setStyleSheet(row_style)
-        porosity_lay = QVBoxLayout(porosity_row)
-        porosity_lay.setContentsMargins(0, 0, 0, 0)
-        porosity_lay.setSpacing(4)
-        porosity_lay.addWidget(QLabel("Calculated porosity mode"))
-        porosity_combo = QComboBox()
-        for i in range(self.porosity_mode_combo.count()):
-            porosity_combo.addItem(self.porosity_mode_combo.itemText(i))
-        porosity_combo.setCurrentText(self.porosity_mode_combo.currentText())
-        porosity_lay.addWidget(porosity_combo)
-        fields_lay.addWidget(porosity_row)
-
-        scheme_row = QWidget()
-        scheme_row.setStyleSheet(row_style)
-        scheme_lay = QHBoxLayout(scheme_row)
-        scheme_lay.setContentsMargins(0, 0, 0, 0)
-        scheme_lay.setSpacing(8)
-        scheme_lbl = QLabel("Classification scheme")
-        scheme_value = QLabel(getattr(self._active_scheme, "name", "Current scheme"))
-        scheme_value.setStyleSheet(
-            f"font-family: '{F.MONO}'; font-size: 9px; color: {C.TEXT_MUTED};"
-        )
-        scheme_lay.addWidget(scheme_lbl)
-        scheme_lay.addWidget(scheme_value, 1)
-        fields_lay.addWidget(scheme_row)
-        root.addWidget(fields)
-
-        actions = QWidget()
-        actions_lay = QHBoxLayout(actions)
-        actions_lay.setContentsMargins(0, 0, 0, 0)
-        actions_lay.setSpacing(6)
-        porosity_btn = QPushButton("Dataset Porosity...")
-        scheme_btn = QPushButton("Classification Scheme...")
-        for btn in (porosity_btn, scheme_btn):
-            btn.setStyleSheet(
-                f"QPushButton {{ background: {C.BG_RAISED}; border: 1px solid {C.BORDER};"
-                f" border-radius: 4px; padding: 5px 9px; color: {C.TEXT_MID}; }}"
-                f"QPushButton:hover {{ background: {C.BG_LOW}; color: {C.TEXT}; }}"
-            )
-        actions_lay.addWidget(porosity_btn)
-        actions_lay.addWidget(scheme_btn)
-        actions_lay.addStretch()
-        root.addWidget(actions)
-
-        buttons = QDialogButtonBox(
-            QDialogButtonBox.StandardButton.Ok
-            | QDialogButtonBox.StandardButton.Cancel
-        )
-        root.addWidget(buttons)
-
-        def apply_state() -> None:
-            self.temp_spinbox.setValue(temp.value())
-            idx = self.porosity_mode_combo.findText(porosity_combo.currentText())
-            if idx >= 0:
-                self.porosity_mode_combo.setCurrentIndex(idx)
-            self.sample_info_label.setText(
-                f"Analysis settings updated: {self.analysis_settings_summary()}"
-            )
-
-        def apply_and_accept() -> None:
-            apply_state()
-            dlg.accept()
-
-        def open_dataset_porosity() -> None:
-            apply_state()
-            self.open_porosity_dialog()
-
-        def open_scheme() -> None:
-            apply_state()
-            self._open_classification_dialog()
-            scheme_value.setText(getattr(self._active_scheme, "name", "Current scheme"))
-
-        porosity_btn.clicked.connect(open_dataset_porosity)
-        scheme_btn.clicked.connect(open_scheme)
-        buttons.accepted.connect(apply_and_accept)
-        buttons.rejected.connect(dlg.reject)
-        dlg.exec()
+        dialog = AnalysisSettingsDialog(self, self.window(), parent=self.window())
+        dialog.exec()
 
     def _on_scheme_changed(self, scheme: GrainClassificationScheme):
         """Store the new active scheme, refresh stratigraphy, emit to main window."""
@@ -3534,103 +3293,13 @@ class ControlPanel(QFrame):
         dlg.exec()
 
     def show_file_props(self, file_path: str):
-        """Per-dataset properties editor: temperature + porosity override."""
+        """Open the shared dataset-input editor focused on this dataset."""
         _, entry = self._find_loaded_entry_by_card(file_path)
         if not entry:
             QMessageBox.information(self, "Props", "Dataset not yet loaded.")
             return
-
-        dataset = entry['data']
-
-        # Find the dataset tab so we can push recalculation
-        ds_tab = self._find_dataset_tab_for_dataset(dataset)
-
-        dlg = QDialog(self)
-        dlg.setWindowTitle(f"Properties — {dataset.sample_name}")
-        dlg.setFixedWidth(340)
-        dlg_v = QVBoxLayout(dlg)
-        dlg_v.setContentsMargins(16, 16, 16, 12)
-        dlg_v.setSpacing(12)
-
-        _LBL_SS = f"font-size: {F.SZ_SM}pt; color: {C.TEXT_MID};"
-
-        # Temperature
-        temp_row = QHBoxLayout()
-        temp_lbl = QLabel("Temperature")
-        temp_lbl.setStyleSheet(_LBL_SS)
-        temp_spin = QDoubleSpinBox()
-        temp_spin.setRange(0, 50)
-        temp_spin.setSuffix(" °C")
-        temp_spin.setDecimals(1)
-        temp_spin.setValue(float(getattr(dataset, 'temperature', 20)))
-        temp_spin.setFixedWidth(90)
-        temp_row.addWidget(temp_lbl)
-        temp_row.addStretch()
-        temp_row.addWidget(temp_spin)
-        dlg_v.addLayout(temp_row)
-
-        # Porosity
-        por_row = QHBoxLayout()
-        por_lbl = QLabel("Porosity")
-        por_lbl.setStyleSheet(_LBL_SS)
-        por_spin = QDoubleSpinBox()
-        por_spin.setRange(0.10, 0.80)
-        por_spin.setSingleStep(0.01)
-        por_spin.setDecimals(4)
-        current_por = float(getattr(dataset, 'current_porosity', None)
-                            or getattr(dataset, 'porosity', 0.3))
-        por_spin.setValue(current_por)
-        por_spin.setFixedWidth(90)
-        por_row.addWidget(por_lbl)
-        por_row.addStretch()
-        por_row.addWidget(por_spin)
-        dlg_v.addLayout(por_row)
-
-        # Calculated porosity hint
-        calc_por = getattr(dataset, 'calculated_porosity', None)
-        if calc_por is not None:
-            mode_label = (
-                dataset.calculated_porosity_mode_label()
-                if hasattr(dataset, 'calculated_porosity_mode_label')
-                else "Simple formula"
-            )
-            source_label = (
-                dataset.porosity_source_label()
-                if hasattr(dataset, 'porosity_source_label')
-                else f"Calculated ({mode_label})"
-            )
-            hint = QLabel(f"Auto ({mode_label}): {calc_por:.4f}\nUsing: {source_label}")
-            hint.setStyleSheet(f"font-size: {F.SZ_XS}pt; color: {C.SB_MUTED};")
-            hint.setWordWrap(True)
-            dlg_v.addWidget(hint)
-
-        dlg_v.addSpacing(4)
-
-        btn_box = QDialogButtonBox(
-            QDialogButtonBox.StandardButton.Apply |
-            QDialogButtonBox.StandardButton.Close)
-        apply_btn = btn_box.button(QDialogButtonBox.StandardButton.Apply)
-
-        def _apply():
-            dataset.temperature = temp_spin.value()
-            new_por = por_spin.value()
-            dataset.current_porosity = new_por
-            dataset.porosity = new_por
-            if ds_tab is not None:
-                if hasattr(ds_tab, 'porosity'):
-                    ds_tab.porosity = new_por
-                if hasattr(ds_tab, 'statistics_tab'):
-                    ds_tab.statistics_tab.porosity = new_por
-                    ds_tab.statistics_tab.update_display()
-                if hasattr(ds_tab, 'calculate_k_values') and \
-                        hasattr(ds_tab, 'current_results') and ds_tab.current_results:
-                    ds_tab.calculate_k_values()
-            self._push_card_meta(file_path)
-
-        apply_btn.clicked.connect(_apply)
-        btn_box.rejected.connect(dlg.reject)
-        dlg_v.addWidget(btn_box)
-        dlg.exec()
+        dataset = entry["data"]
+        self.open_dataset_inputs_dialog(focus_dataset_name=dataset.sample_name)
 
     def update_file_in_table(self, file_path: str, status: str):
         """Update file status in table"""
@@ -4416,32 +4085,45 @@ class ControlPanel(QFrame):
 
     def on_temperature_changed(self, new_temperature):
         """Handle temperature change and recalculate K values for all datasets"""
-        if hasattr(self.parent(), 'dataset_tabs_widget'):
-            main_window = self.parent()
-            recalculated_count = 0
+        window_getter = getattr(self, "window", None)
+        main_window = window_getter() if callable(window_getter) else self.parent()
+        if not hasattr(main_window, 'dataset_tabs_widget'):
+            return
+        from gui.dataset_inputs_dialog import apply_dataset_inputs
 
-            for i in range(main_window.dataset_tabs_widget.count()):
-                tab = main_window.dataset_tabs_widget.widget(i)
-                if hasattr(tab, 'dataset') and hasattr(tab, 'calculate_k_values'):
-                    # Update temperature in the dataset tab
-                    tab.temperature = new_temperature
-                    tab.dataset.temperature = new_temperature
+        changed_count = 0
+        for i in range(main_window.dataset_tabs_widget.count()):
+            tab = main_window.dataset_tabs_widget.widget(i)
+            dataset = getattr(tab, 'dataset', None)
+            if dataset is None:
+                continue
+            current_porosity = (
+                getattr(tab, 'porosity', None)
+                or getattr(dataset, 'current_porosity', None)
+                or getattr(dataset, 'porosity', 0.40)
+            )
+            changed_count += int(apply_dataset_inputs(
+                tab,
+                temperature=new_temperature,
+                porosity=current_porosity,
+            ))
 
-                    # Recalculate K-values if they've been calculated before
-                    if hasattr(tab, 'current_results') and tab.current_results:
-                        tab.calculate_k_values()
-                        recalculated_count += 1
-
-            if recalculated_count > 0:
-                self.sample_info_label.setText(f"🌡️ Temperature updated to {new_temperature}°C - {recalculated_count} dataset(s) recalculated")
+        if changed_count:
+            self.sample_info_label.setText(
+                f"Temperature updated to {new_temperature}°C | "
+                f"recalculated {changed_count} dataset(s)"
+            )
+            if hasattr(self, "dataset_inputs_changed"):
+                self.dataset_inputs_changed.emit(changed_count)
 
     def on_porosity_mode_changed(self, mode_text):
         """Handle calculated-porosity mode changes across loaded datasets."""
         mode_key = "simple" if "Simple Formula" in mode_text else "urumovic"
         mode_name = "Simple Formula" if mode_key == "simple" else "Urumovic Polynomial"
 
-        if hasattr(self.parent(), 'dataset_tabs_widget'):
-            main_window = self.parent()
+        window_getter = getattr(self, "window", None)
+        main_window = window_getter() if callable(window_getter) else self.parent()
+        if hasattr(main_window, 'dataset_tabs_widget'):
             recalculated_count = 0
             updated_count = 0
             preserved_overrides = 0
@@ -4491,6 +4173,8 @@ class ControlPanel(QFrame):
                 if recalculated_count > 0:
                     message += f" | recalculated {recalculated_count} dataset(s)"
                 self.sample_info_label.setText(message)
+                if hasattr(self, "dataset_inputs_changed"):
+                    self.dataset_inputs_changed.emit(max(updated_count, recalculated_count))
 
     def validate_porosity_mode(self):
         """Validate porosity calculation mode selection"""
@@ -4555,24 +4239,33 @@ class ControlPanel(QFrame):
 
         return len([err for err in self.validation_errors if '❌' in err or 'should be' in err]) == 0
 
-    def open_porosity_dialog(self):
-        """Open the porosity management dialog"""
-        # Get reference to main window - traverse up to find the actual main window
+    def open_dataset_inputs_dialog(self, *, focus_dataset_name: str | None = None):
+        """Edit temperature and porosity for one, selected, or all datasets."""
         main_window = self.window()
-
-        # Debug: Check if we found the right window
         if not hasattr(main_window, 'dataset_tabs_widget'):
-            print(f"Warning: Could not find main window with dataset_tabs_widget. Found: {type(main_window)}")
             QMessageBox.warning(
                 self,
                 "No Datasets",
                 "No datasets are currently loaded. Please load some data files first."
             )
             return
-
-        # Create and show dialog
-        dialog = PorosityDialog(main_window, self)
+        if main_window.dataset_tabs_widget.count() == 0:
+            QMessageBox.information(self, "Dataset Inputs", "Load a dataset before editing its inputs.")
+            return
+        dialog = DatasetInputsDialog(
+            main_window,
+            self,
+            focus_dataset_name=focus_dataset_name,
+        )
         dialog.exec()
+        if dialog.changes_applied:
+            for file_path in list(self.loaded_samples):
+                self._push_card_meta(file_path)
+            self.dataset_inputs_changed.emit(dialog.changes_applied)
+
+    def open_porosity_dialog(self):
+        """Compatibility entry point for the unified dataset-input editor."""
+        self.open_dataset_inputs_dialog()
 
     def process_files_with_immediate_tabs(self, file_entries: list, import_intent: str = "processed"):
         """Process files by creating tabs immediately, then attempting to load data
@@ -4934,35 +4627,10 @@ class ControlPanel(QFrame):
         help_dialog.activateWindow()
 
     def show_about(self):
-        """Show about dialog"""
-        QMessageBox.about(self, "About Grain Size Analysis Tool",
-            """<h3>Grain Size Analysis Tool</h3>
-            <p><b>Version 0.9.6</b></p>
-            <p>Released: July 2026</p>
+        """Show the shared application identity and attribution dialog."""
+        from gui.about_dialog import AboutDialog
 
-            <p>A comprehensive tool for grain size distribution analysis
-            and hydraulic conductivity calculations.</p>
-
-            <p><b>Features:</b></p>
-            <ul>
-            <li>Multiple dataset management</li>
-            <li>14+ K-calculation methods</li>
-            <li>Interactive plots with controls</li>
-            <li>Dataset comparison tools</li>
-            <li>Statistical analysis</li>
-            <li>Comprehensive help system</li>
-            </ul>
-
-            <p><b>Developed by:</b><br>
-            Oliver Lund<br>
-            DTU Sustain</p>
-
-            <p><b>Supervised by:</b><br>
-            Prof. Poul Løgstrup Bjerg</p>
-
-            <p>© 2025 - DTU Sustain</p>
-            <p><em>Press F1 for detailed help topics</em></p>""")
-
+        AboutDialog(parent=self.window()).exec()
     def _read_welcome_screen_enabled(self) -> bool:
         """Read the effective startup preference for the welcome screen."""
         host_window = self.window()

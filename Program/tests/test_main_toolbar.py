@@ -13,9 +13,11 @@ sys.path.insert(0, 'Program')
 
 from PyQt6.QtWidgets import QApplication, QPushButton
 
+import gui.main_window as main_window_module
 from gui.main_window import (
     HOME_TAB,
     INDIVIDUAL_TAB,
+    EXPORT_TAB,
     MainWindow,
     _AppToolbar,
 )
@@ -112,6 +114,14 @@ class TestAppToolbar(unittest.TestCase):
         self.assertNotIn("setVisible", inspect.getsource(MainWindow._show_welcome))
         self.assertNotIn("setVisible", inspect.getsource(MainWindow._hide_welcome))
 
+    def test_file_export_opens_comprehensive_export_workspace(self):
+        switched = []
+        harness = SimpleNamespace(_switch_to_tab=lambda index: switched.append(index))
+
+        MainWindow.open_export_workspace(harness)
+
+        self.assertEqual(switched, [EXPORT_TAB])
+
     def test_main_ui_has_no_sidebar_hide_path(self):
         setup_source = inspect.getsource(MainWindow.setup_ui)
 
@@ -131,6 +141,52 @@ class TestAppToolbar(unittest.TestCase):
         self.assertIn("_chrome_drag_spacer", setup_source)
         self.assertIn("bind_frameless_drag_widget(spacer", setup_source)
         self.assertIn("allow_double_click_maximize=True", setup_source)
+
+    def test_workspace_name_prompt_is_sized_for_realistic_names(self):
+        created = []
+
+        class FakeInputDialog:
+            class InputMode:
+                TextInput = object()
+
+            def __init__(self, parent):
+                self.parent = parent
+                self.minimum_size = None
+                self.resized_to = None
+                self.value = ''
+                created.append(self)
+
+            def setInputMode(self, _mode): pass
+            def setWindowTitle(self, _title): pass
+            def setLabelText(self, _label): pass
+            def setOkButtonText(self, _text): pass
+            def setCancelButtonText(self, _text): pass
+            def setTextValue(self, value): self.value = value
+            def fontMetrics(self):
+                return SimpleNamespace(horizontalAdvance=lambda text: len(text) * 8)
+            def setMinimumSize(self, width, height):
+                self.minimum_size = (width, height)
+            def resize(self, width, height):
+                self.resized_to = (width, height)
+            def exec(self): return 1
+            def textValue(self): return f'  {self.value}  '
+
+        original_dialog = main_window_module.QInputDialog
+        main_window_module.QInputDialog = FakeInputDialog
+        try:
+            name = MainWindow._prompt_workspace_name(
+                object(),
+                'Rename Workspace',
+                'North harbour investigation – long workspace name',
+                accept_text='Rename',
+            )
+        finally:
+            main_window_module.QInputDialog = original_dialog
+
+        self.assertEqual(name, 'North harbour investigation – long workspace name')
+        self.assertEqual(created[0].minimum_size, (560, 160))
+        self.assertGreaterEqual(created[0].resized_to[0], 560)
+        self.assertEqual(created[0].resized_to[1], 170)
 
 
 if __name__ == '__main__':

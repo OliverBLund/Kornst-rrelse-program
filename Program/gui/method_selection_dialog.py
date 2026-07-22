@@ -94,12 +94,18 @@ class MethodSelectionDialog(FramelessDialogBase):
         action_row = QHBoxLayout()
         action_row.setContentsMargins(0, 0, 0, 0)
         action_row.setSpacing(8)
+        action_tooltips = {
+            "Select all": "Activate every available K method across the workspace.",
+            "Clear": "Clear the selection; Apply remains unavailable until at least one method is active.",
+            "Restore default": "Restore the complete default workspace K-method set.",
+        }
         for label, callback in (
             ("Select all", self._select_all),
             ("Clear", self._clear_all),
             ("Restore default", self._restore_default),
         ):
             btn = QPushButton(label)
+            btn.setToolTip(action_tooltips[label])
             btn.setFixedHeight(26)
             btn.setCursor(Qt.CursorShape.PointingHandCursor)
             btn.setStyleSheet(
@@ -124,6 +130,9 @@ class MethodSelectionDialog(FramelessDialogBase):
         grid.setVerticalSpacing(7)
         for index, method in enumerate(self._available_methods):
             checkbox = QCheckBox(method)
+            checkbox.setToolTip(
+                f"Toggle {method} in the workspace-wide active method set used by Results, plots, comparison, reports, and exports."
+            )
             checkbox.setStyleSheet(
                 f"QCheckBox {{ background: transparent; color: {C.TEXT}; "
                 f"font-family: '{F.UI}'; font-size: {F.SZ_MD}pt; }}"

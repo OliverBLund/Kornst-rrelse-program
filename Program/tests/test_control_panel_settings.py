@@ -19,6 +19,8 @@ class _FakeHost:
     def __init__(self, enabled=True):
         self.enabled = bool(enabled)
         self.saved_values = []
+        self.font_bump = 0
+        self.saved_font_bumps = []
 
     def is_welcome_screen_enabled(self):
         return self.enabled
@@ -26,6 +28,15 @@ class _FakeHost:
     def set_welcome_screen_enabled(self, enabled: bool):
         self.enabled = bool(enabled)
         self.saved_values.append(bool(enabled))
+
+    def ui_font_bump(self):
+        return self.font_bump
+
+    def set_ui_font_bump(self, bump):
+        changed = int(bump) != self.font_bump
+        self.font_bump = int(bump)
+        self.saved_font_bumps.append(int(bump))
+        return changed
 
 
 class _SettingsPanelHarness(ControlPanel):
@@ -42,8 +53,9 @@ class _SettingsPanelHarness(ControlPanel):
 class _AcceptedDialog:
     created = []
 
-    def __init__(self, show_welcome_on_startup, parent=None):
+    def __init__(self, show_welcome_on_startup, ui_font_bump=0, parent=None):
         self.initial_value = bool(show_welcome_on_startup)
+        self.initial_font_bump = int(ui_font_bump)
         self.parent = parent
         type(self).created.append(self)
 
@@ -53,12 +65,16 @@ class _AcceptedDialog:
     def show_welcome_on_startup(self):
         return False
 
+    def ui_font_bump(self):
+        return self.initial_font_bump
+
 
 class _RejectedDialog:
     created = []
 
-    def __init__(self, show_welcome_on_startup, parent=None):
+    def __init__(self, show_welcome_on_startup, ui_font_bump=0, parent=None):
         self.initial_value = bool(show_welcome_on_startup)
+        self.initial_font_bump = int(ui_font_bump)
         self.parent = parent
         type(self).created.append(self)
 
@@ -67,6 +83,9 @@ class _RejectedDialog:
 
     def show_welcome_on_startup(self):
         return False
+
+    def ui_font_bump(self):
+        return self.initial_font_bump
 
 
 class TestControlPanelSettings(unittest.TestCase):
@@ -91,6 +110,7 @@ class TestControlPanelSettings(unittest.TestCase):
         self.assertEqual(len(_AcceptedDialog.created), 1)
         self.assertTrue(_AcceptedDialog.created[0].initial_value)
         self.assertEqual(host.saved_values, [False])
+        self.assertEqual(host.saved_font_bumps, [0])
 
     def test_show_settings_does_not_write_when_cancelled(self):
         host = _FakeHost(enabled=False)
@@ -103,6 +123,7 @@ class TestControlPanelSettings(unittest.TestCase):
         self.assertEqual(len(_RejectedDialog.created), 1)
         self.assertFalse(_RejectedDialog.created[0].initial_value)
         self.assertEqual(host.saved_values, [])
+        self.assertEqual(host.saved_font_bumps, [])
 
     def test_new_sample_cards_start_included_in_shared_scope(self):
         file_path = os.path.normpath(r"C:\temp\sample.csv")
@@ -145,10 +166,11 @@ class TestControlPanelSettings(unittest.TestCase):
         self.assertNotIn("background: #000", logo_style)
 
         credit_text = self.panel._sidebar_credit_text.text()
-        self.assertIn("Developed by Oliver Lund", credit_text)
-        self.assertIn("Inspired by HydrogeoSieveXL", credit_text)
-        self.assertIn("Supervisor: Poul Løgstrup Bjerg", credit_text)
-        self.assertIn("DTU Sustain", credit_text)
+        self.assertIn("Oliver Lund", credit_text)
+        self.assertIn("with Poul Løgstrup Bjerg", credit_text)
+        self.assertIn("Based on HydrogeoSieveXL", credit_text)
+        self.assertIn("J. F. Devlin", credit_text)
+        self.assertIn("Developed by Oliver Lund", self.panel._sidebar_credit_text.toolTip())
 
 
 if __name__ == "__main__":

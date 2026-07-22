@@ -6,7 +6,7 @@ conductivity estimates, and statistical summaries for 2+ datasets.
 
 Layout:
     ┌─ Header bar (44px) ───────────────────────────────────────────┐
-    │  "Comparison"   N datasets   [spacer]  [Update]  [Export…]    │
+    │  "Batch Comparison"   N selected / loaded datasets              │
     └───────────────────────────────────────────────────────────────┘
     ┌─ QTabWidget ──────────────────────────────────────────────────┐
     │  [Plot] [Details] [Statistics]                                 │
@@ -15,6 +15,7 @@ Layout:
 
 from __future__ import annotations
 
+import json
 import math
 import os
 from typing import List, Optional
@@ -37,17 +38,18 @@ from grain_classification import (
     permeability_class as _gc_perm_class,
 )
 from method_registry import DEFAULT_METHOD_ORDER
-from exporting.table_model import ExportTable, write_csv_table, write_excel_table
-from k_aggregation import UNGROUPED_LABEL, KAggregationOptions, dataset_group_name
+from exporting.table_model import ExportTable
+from k_aggregation import UNGROUPED_LABEL, KAggregationOptions, dataset_group_name, normalize_group_name
 from k_calculations_v2 import CalculationStatus
 from matplotlib.figure import Figure
 from matplotlib.patches import Patch
-from PyQt6.QtCore import QSize, Qt, pyqtSignal
-from PyQt6.QtGui import QBrush, QColor, QFont, QFontMetrics, QIcon, QPainter, QPixmap
+from PyQt6.QtCore import QMimeData, QPoint, QSize, Qt, pyqtSignal
+from PyQt6.QtGui import QBrush, QColor, QDrag, QFont, QFontMetrics, QIcon, QPainter, QPixmap
 
 # ── PyQt6 ─────────────────────────────────────────────────────────────────────
 from PyQt6.QtWidgets import (
     QAbstractItemView,
+    QApplication,
     QButtonGroup,
     QComboBox,
     QFileDialog,
@@ -68,6 +70,7 @@ from PyQt6.QtWidgets import (
     QVBoxLayout,
     QWidget,
 )
+from .table_export_dialog import export_table_dialog
 from unit_conversions import (
     HydraulicConductivityConverter,
     HydraulicConductivityUnit,
@@ -75,7 +78,6 @@ from unit_conversions import (
 )
 
 from .comparison_plot_widget import ComparisonPlotWidget
-from .dataset_selection_dialog import DatasetSelectionDialog
 from .group_styles import (
     dataset_line_style,
     dataset_series_key,
@@ -118,9 +120,139 @@ def _sync_segment_button(btn: QPushButton, on: bool) -> None:
 _SORT_VALUE_ROLE = Qt.ItemDataRole.UserRole
 _SORT_GROUP_ROLE = Qt.ItemDataRole.UserRole.value + 1
 _SORT_PINNED_ORDER_ROLE = Qt.ItemDataRole.UserRole.value + 2
+
+_SEGMENT_TOOLTIPS = {
+    "Individual": "Show one row per selected dataset.",
+    "Aggregate": "Show statistics aggregated across the selected datasets and groups.",
+    "Grain": "Show grain-size distribution and classification fields.",
+    "K-values": "Show hydraulic-conductivity results and method summaries.",
+    "Summary": "Show the compact set of key result rows.",
+    "All rows": "Show every available detail row for the current data type.",
+    "Classification": "Show classification and interpretation context rows.",
+    "Aggregate rows": "Show aggregate summary rows rather than method-by-method rows.",
+    "K spread": "Compare the distribution and agreement of included K values.",
+    "Coverage": "Show where active K methods are OK, warned, or unavailable.",
+    "Geo. mean": "Use the geometric mean of positive included K values; recommended for log-distributed K data.",
+    "Arith. mean": "Use the ordinary arithmetic average of positive included K values.",
+    "Median": "Use the middle positive included K value.",
+    "All active": "Consider every workspace-active K method; the status filter still controls which values contribute.",
+    "Valid in all": "Keep only methods with an includable result for every selected dataset.",
+    "Choose": "Choose the workspace-wide active K methods used in Results, plots, comparison, reports, and exports.",
+    "OK only": "Include only positive K results with OK status and satisfied applicability conditions.",
+    "Warnings": "Also include positive warning-status K results; errors remain excluded.",
+}
 _DETAILS_ROW_HEADER_WIDTH = 210
 _DETAILS_ROW_HEIGHT = 48
 _DETAILS_SUMMARY_ROW_HEIGHT = 50
+_PLOT_DATASET_MIME = 'application/x-grainsize-plot-dataset'
+
+
+class _PlotGroupDropArea(QFrame):
+    """Full Plot Visibility group area used as a drop target."""
+
+    datasets_dropped = pyqtSignal(object, str)
+
+    def __init__(self, group_name: str, parent=None):
+        super().__init__(parent)
+        self.group_name = group_name
+        self.setObjectName('plotGroupDropArea')
+        self.setAcceptDrops(True)
+        self.setToolTip(f'Drop a sample anywhere here to move it to {group_name}.')
+        self._set_drop_active(False)
+
+    def _set_drop_active(self, active: bool) -> None:
+        self.setStyleSheet(
+            'QFrame#plotGroupDropArea {'
+            f'background: {"rgba(107,142,35,0.12)" if active else "transparent"};'
+            f'border: {"2px" if active else "1px"} solid '
+            f'{C.OLIVE if active else C.BORDER}; border-radius: 6px;'
+            '}'
+        )
+
+    def dragEnterEvent(self, event) -> None:
+        if event.mimeData().hasFormat(_PLOT_DATASET_MIME):
+            self._set_drop_active(True)
+            event.acceptProposedAction()
+            return
+        event.ignore()
+
+    def dragMoveEvent(self, event) -> None:
+        if event.mimeData().hasFormat(_PLOT_DATASET_MIME):
+            event.acceptProposedAction()
+            return
+        event.ignore()
+
+    def dragLeaveEvent(self, event) -> None:
+        self._set_drop_active(False)
+        super().dragLeaveEvent(event)
+
+    def dropEvent(self, event) -> None:
+        self._set_drop_active(False)
+        payload = bytes(event.mimeData().data(_PLOT_DATASET_MIME)).decode('utf-8').strip()
+        try:
+            decoded = json.loads(payload)
+            names = decoded if isinstance(decoded, list) else [decoded]
+        except (json.JSONDecodeError, TypeError):
+            names = [payload]
+        names = [str(name).strip() for name in names if str(name).strip()]
+        if not names:
+            event.ignore()
+            return
+        self.datasets_dropped.emit(names, self.group_name)
+        event.acceptProposedAction()
+
+
+class _PlotDatasetDragRow(QFrame):
+    """Dataset row whose body starts a group-assignment drag."""
+
+    selection_requested = pyqtSignal(str, object)
+    drag_requested = pyqtSignal(object)
+
+    def __init__(self, dataset_name: str, parent=None):
+        super().__init__(parent)
+        self.dataset_name = dataset_name
+        self._drag_start_position: QPoint | None = None
+        self._base_background = 'transparent'
+        self.setObjectName('plotDatasetDragRow')
+        self.setCursor(Qt.CursorShape.OpenHandCursor)
+        self.setToolTip(
+            'Click to select. Ctrl-click or Shift-click selects multiple samples; '
+            'drag the selection into any group area.'
+        )
+
+    def set_selection_style(self, selected: bool, base_background: str | None = None) -> None:
+        if base_background is not None:
+            self._base_background = base_background
+        background = 'rgba(107,142,35,0.15)' if selected else self._base_background
+        border = f'1px solid {C.OLIVE}' if selected else '1px solid transparent'
+        self.setStyleSheet(
+            'QFrame#plotDatasetDragRow {'
+            f'background: {background}; border: {border}; border-radius: 4px;'
+            '}'
+        )
+
+    def mousePressEvent(self, event) -> None:
+        if event.button() == Qt.MouseButton.LeftButton:
+            self._drag_start_position = event.position().toPoint()
+            self.selection_requested.emit(self.dataset_name, event.modifiers())
+        super().mousePressEvent(event)
+
+    def mouseMoveEvent(self, event) -> None:
+        if (
+            self._drag_start_position is not None
+            and event.buttons() & Qt.MouseButton.LeftButton
+            and (event.position().toPoint() - self._drag_start_position).manhattanLength()
+            >= QApplication.startDragDistance()
+        ):
+            self._drag_start_position = None
+            self.drag_requested.emit(self)
+            event.accept()
+            return
+        super().mouseMoveEvent(event)
+
+    def mouseReleaseEvent(self, event) -> None:
+        self._drag_start_position = None
+        super().mouseReleaseEvent(event)
 
 
 class _SortableTableWidgetItem(QTableWidgetItem):
@@ -273,10 +405,9 @@ class ComparisonTab(QWidget):
 
     # Emitted whenever update_comparison() completes successfully
     comparison_updated = pyqtSignal()
-    # Emitted when the manage-datasets dialog requests a new comparison subset.
-    dataset_selection_requested = pyqtSignal(list)
     # Emitted by method-scope shortcut buttons.
     method_selection_requested = pyqtSignal()
+    group_assignments_changed = pyqtSignal(dict)
 
     # ── Grain parameter definitions ──────────────────────────────────────────
     # (label, tooltip, bold, olive-highlight)
@@ -317,8 +448,9 @@ class ComparisonTab(QWidget):
 
         self.dataset_tabs: list = []
         self.selected_datasets: list = []
-        self._pinned: set[str] = set()
         self._plot_hidden: set[str] = set()
+        self._plot_group_selection: set[str] = set()
+        self._plot_group_selection_anchor: str | None = None
         self._heat_on: bool = False
         self._active_scheme = ISO14688
         self._details_mode: str = "grain"
@@ -400,37 +532,13 @@ class ComparisonTab(QWidget):
             self,
             duration_ms=100,
         )
-        self._sync_export_action()
 
     def _on_comparison_subtab_changed(self, index: int) -> None:
         if self._tabs.tabText(index) == "Details":
             self._set_details_heat_enabled(False)
-        self._sync_export_action()
-
-    def _sync_export_action(self) -> None:
-        if not hasattr(self, '_export_btn') or not hasattr(self, '_tabs'):
-            return
-        label = self._tabs.tabText(self._tabs.currentIndex())
-        actions = {
-            'Plot': (
-                'Export Plot…',
-                'Save the active comparison figure as PNG, SVG or PDF.',
-            ),
-            'Details': (
-                'Export Details…',
-                'Save the currently visible Details table as Excel or CSV.',
-            ),
-            'Statistics': (
-                'Export Statistics…',
-                'Save the currently visible Statistics table as Excel or CSV.',
-            ),
-        }
-        text, tooltip = actions.get(label, ('Export…', 'Export the active comparison view.'))
-        self._export_btn.setText(text)
-        self._export_btn.setToolTip(tooltip)
 
     def _build_header(self) -> QWidget:
-        """Top 52 px header bar — title/subtitle block + action buttons."""
+        """Top header with comparison title and a concise scope summary."""
         bar = QWidget()
         bar.setFixedHeight(52)
         bar.setAttribute(Qt.WidgetAttribute.WA_StyledBackground)
@@ -464,44 +572,12 @@ class ComparisonTab(QWidget):
 
         lay.addWidget(title_block)
         lay.addStretch(1)
-
-        # Scope & Groups button
-        self._manage_btn = QPushButton("Scope & Groups")
-        self._manage_btn.setFixedHeight(28)
-        try:
-            self._manage_btn.setIcon(theme_icon("fa6s.list-check", C.TEXT_MID))
-            self._manage_btn.setIconSize(QSize(11, 11))
-        except Exception:
-            pass
-        self._manage_btn.setEnabled(False)
-        self._manage_btn.setToolTip("Choose compared datasets and assign group labels")
-        self._manage_btn.clicked.connect(self._on_manage_datasets)
-
-        self._update_btn = QPushButton("Update")
-        self._update_btn.setProperty("primary", "true")
-        self._update_btn.setFixedHeight(28)
-        self._update_btn.setEnabled(False)
-        self._update_btn.clicked.connect(self.update_comparison)
-
-        self._export_btn = QPushButton("Export Plot…")
-        self._export_btn.setFixedHeight(28)
-        self._export_btn.setEnabled(False)
-        self._export_btn.clicked.connect(self._export_active_view)
-        try:
-            self._export_btn.setIcon(theme_icon("fa6s.file-export", C.TEXT_MID))
-            self._export_btn.setIconSize(QSize(11, 11))
-        except Exception:
-            pass
-
-        lay.addWidget(self._manage_btn)
-        lay.addWidget(self._update_btn)
-        lay.addWidget(self._export_btn)
         return bar
 
     # ── Plot tab ──────────────────────────────────────────────────────────────
 
     def _build_plot_tab(self) -> QWidget:
-        """Plot tab: canvas on left, pinned-dataset sidebar on right."""
+        """Plot tab: canvas on left, plot-visibility sidebar on right."""
         page = QWidget()
         h = QHBoxLayout(page)
         h.setContentsMargins(0, 0, 0, 0)
@@ -513,12 +589,15 @@ class ComparisonTab(QWidget):
         self._plot_widget.plot_updated.connect(self._sync_plot_visibility_panel)
         h.addWidget(self._plot_widget, 1)
 
-        # Right sidebar: plot-only visibility/focus controls.
+        # Right sidebar: plot-only visibility and group reassignment controls.
         sidebar = QFrame()
+        sidebar.setObjectName('plotVisibilitySidebar')
         sidebar.setFixedWidth(252)
         sidebar.setSizePolicy(QSizePolicy.Policy.Fixed, QSizePolicy.Policy.Expanding)
         sidebar.setStyleSheet(
-            f"background: {C.BG_RAISED}; border-left: 1px solid {C.BORDER};"
+            'QFrame#plotVisibilitySidebar {'
+            f'background: {C.BG_RAISED}; border-left: 1px solid {C.BORDER};'
+            '}'
         )
         sb_lay = QVBoxLayout(sidebar)
         sb_lay.setContentsMargins(0, 0, 0, 0)
@@ -534,14 +613,18 @@ class ComparisonTab(QWidget):
         )
         sb_lay.addWidget(hdr)
 
-        self._pin_scope_label = QLabel("All selected datasets")
-        self._pin_scope_label.setWordWrap(True)
-        self._pin_scope_label.setFixedHeight(54)
-        self._pin_scope_label.setStyleSheet(
+        self._plot_visibility_scope_label = QLabel("All selected datasets")
+        self._plot_visibility_scope_label.setWordWrap(True)
+        self._plot_visibility_scope_label.setToolTip(
+            "Drag a sample row anywhere into another group area to reassign it. "
+            "Drop it in Ungrouped to remove its group."
+        )
+        self._plot_visibility_scope_label.setFixedHeight(54)
+        self._plot_visibility_scope_label.setStyleSheet(
             f"padding: 6px 10px; font-size: {F.SZ_XS}pt; color: {C.TEXT_MUTED};"
             f"background: {C.BG}; border: none;"
         )
-        sb_lay.addWidget(self._pin_scope_label)
+        sb_lay.addWidget(self._plot_visibility_scope_label)
 
         actions = QWidget()
         actions.setStyleSheet(f"background: {C.BG}; border: none;")
@@ -549,10 +632,10 @@ class ComparisonTab(QWidget):
         actions_lay.setContentsMargins(8, 6, 8, 6)
         actions_lay.setSpacing(6)
 
-        # Scope & Groups lives in the always-visible header; this panel only needs
-        # the plot-local "Show all" to clear focus/hidden datasets.
+        # Scope & Groups lives in the always-visible main sidebar; this panel only needs
+        # the plot-local "Show all" to restore hidden datasets.
         self._plot_show_all_btn = QPushButton("Show all")
-        self._plot_show_all_btn.setToolTip("Clear plot focus and hidden datasets")
+        self._plot_show_all_btn.setToolTip("Show every dataset in the current plot scope")
         self._plot_show_all_btn.setCursor(Qt.CursorShape.PointingHandCursor)
         self._plot_show_all_btn.clicked.connect(self._show_all_plot_datasets)
         self._plot_show_all_btn.setFixedHeight(24)
@@ -571,23 +654,25 @@ class ComparisonTab(QWidget):
         actions_lay.addStretch(1)
         sb_lay.addWidget(actions)
 
-        # Scrollable pin list
+        # Scrollable visibility list
         scroll = QScrollArea()
         scroll.setWidgetResizable(True)
         scroll.setFrameShape(QFrame.Shape.NoFrame)
         scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
-        self._pin_list_widget = QWidget()
-        self._pin_list_layout = QVBoxLayout(self._pin_list_widget)
+        self._plot_visibility_list_widget = QWidget()
+        self._plot_visibility_list_layout = QVBoxLayout(
+            self._plot_visibility_list_widget
+        )
         scrollbar_gutter = scroll.verticalScrollBar().sizeHint().width()
-        self._pin_list_layout.setContentsMargins(
+        self._plot_visibility_list_layout.setContentsMargins(
             8,
             4,
             8 + scrollbar_gutter + 4,
             0,
         )
-        self._pin_list_layout.setSpacing(2)
-        self._pin_list_layout.addStretch(1)
-        scroll.setWidget(self._pin_list_widget)
+        self._plot_visibility_list_layout.setSpacing(2)
+        self._plot_visibility_list_layout.addStretch(1)
+        scroll.setWidget(self._plot_visibility_list_widget)
         sb_lay.addWidget(scroll, 1)
 
         h.addWidget(sidebar)
@@ -595,9 +680,9 @@ class ComparisonTab(QWidget):
 
     def _sync_plot_visibility_panel(self) -> None:
         """Refresh the plot visibility rail after plot-side presentation changes."""
-        if not hasattr(self, "_pin_list_layout"):
+        if not hasattr(self, "_plot_visibility_list_layout"):
             return
-        self._refresh_pin_list()
+        self._refresh_plot_visibility_list()
         self._update_header_count()
 
     def _plot_widget_presentation(self) -> tuple[dict[str, str], dict[str, str]]:
@@ -622,11 +707,12 @@ class ComparisonTab(QWidget):
             )
         return colors, line_styles
 
-    def _refresh_pin_list(self) -> None:
-        """Rebuild plot-only visibility/focus controls from selected datasets."""
-        while self._pin_list_layout.count() > 1:
-            item = self._pin_list_layout.takeAt(0)
+    def _refresh_plot_visibility_list(self) -> None:
+        """Rebuild plot-only visibility controls from selected datasets."""
+        while self._plot_visibility_list_layout.count() > 1:
+            item = self._plot_visibility_list_layout.takeAt(0)
             if item.widget():
+                item.widget().hide()
                 item.widget().deleteLater()
 
         plot_tabs = self._plot_dataset_tabs()
@@ -638,17 +724,15 @@ class ComparisonTab(QWidget):
         group_colors = self._group_color_map(named_groups)
         live_colors, live_line_styles = self._plot_widget_presentation()
 
-        if hasattr(self, "_pin_scope_label"):
+        if hasattr(self, "_plot_visibility_scope_label"):
             total = len(self.selected_datasets)
             visible = len(plot_tabs)
             group_text = f" | {len(named_groups)} groups" if named_groups else ""
-            if self._pinned:
-                pin_text = f"Focused: {visible} visible of {total} scoped{group_text}"
-            elif self._plot_hidden:
-                pin_text = f"Visible: {visible} of {total} scoped{group_text}"
+            if self._plot_hidden:
+                visibility_text = f"Visible: {visible} of {total} scoped{group_text}"
             else:
-                pin_text = f"All scoped datasets visible: {total}{group_text}"
-            self._pin_scope_label.setText(pin_text)
+                visibility_text = f"All scoped datasets visible: {total}{group_text}"
+            self._plot_visibility_scope_label.setText(visibility_text)
 
         if not self.selected_datasets:
             hint = QLabel("No datasets in comparison scope.")
@@ -657,11 +741,22 @@ class ComparisonTab(QWidget):
                 f"padding: 12px 10px; color: {C.TEXT_MUTED}; font-size: {F.SZ_SM}pt;"
                 "background: transparent;"
             )
-            self._pin_list_layout.insertWidget(self._pin_list_layout.count() - 1, hint)
+            self._plot_visibility_list_layout.insertWidget(
+                self._plot_visibility_list_layout.count() - 1,
+                hint,
+            )
             return
 
         group_member_counts: dict[str, int] = {}
         for group_index, (group_name, tabs) in enumerate(grouped_tabs):
+            group_area = _PlotGroupDropArea(
+                group_name,
+                self._plot_visibility_list_widget,
+            )
+            group_area.datasets_dropped.connect(self._move_plot_datasets_to_group)
+            group_layout = QVBoxLayout(group_area)
+            group_layout.setContentsMargins(0, 0, 0, 0)
+            group_layout.setSpacing(2)
             names = [tab.get_dataset_name() for tab in tabs]
             color = (
                 live_colors.get(names[0], "")
@@ -674,24 +769,18 @@ class ComparisonTab(QWidget):
             hidden_all = bool(names) and all(
                 name in self._plot_hidden for name in names
             )
-            focused_all = bool(names) and all(name in self._pinned for name in names)
-
             group_row = self._make_plot_group_row(
                 group_name=group_name,
                 color=color,
                 dataset_count=len(tabs),
                 visible_count=visible_count,
                 hidden=hidden_all,
-                focused=focused_all,
             )
-            self._pin_list_layout.insertWidget(
-                self._pin_list_layout.count() - 1, group_row
-            )
+            group_layout.addWidget(group_row)
 
             for tab in tabs:
                 name = tab.get_dataset_name()
                 hidden = name in self._plot_hidden
-                focused = name in self._pinned
                 plotted = name in plotted_names
                 dataset_color = live_colors.get(name, color)
                 line_style = live_line_styles.get(name, "-")
@@ -711,18 +800,106 @@ class ComparisonTab(QWidget):
                     color=dataset_color,
                     line_style=line_style,
                     hidden=hidden,
-                    focused=focused,
                     plotted=plotted,
                 )
-                self._pin_list_layout.insertWidget(
-                    self._pin_list_layout.count() - 1, row
-                )
+                group_layout.addWidget(row)
+            self._plot_visibility_list_layout.insertWidget(
+                self._plot_visibility_list_layout.count() - 1,
+                group_area,
+            )
+
+    def _move_plot_dataset_to_group(self, dataset_name: str, group_name: str) -> None:
+        """Compatibility wrapper for moving one Plot Visibility dataset."""
+        self._move_plot_datasets_to_group([dataset_name], group_name)
+
+    def _move_plot_datasets_to_group(
+        self,
+        dataset_names: list[str],
+        group_name: str,
+    ) -> None:
+        """Apply one multi-row drop to the shared dataset group assignments."""
+        target_group = normalize_group_name(group_name)
+        requested = set(dataset_names)
+        changes = {}
+        for tab in self.selected_datasets:
+            if tab.get_dataset_name() not in requested:
+                continue
+            dataset = tab.get_dataset()
+            if dataset_group_name(dataset) == target_group:
+                continue
+            dataset.group_name = target_group
+            changes[tab] = target_group
+        if not changes:
+            return
+        self._plot_group_selection.difference_update(requested)
+        if self._plot_group_selection_anchor in requested:
+            self._plot_group_selection_anchor = None
+        self.group_assignments_changed.emit(changes)
+        if hasattr(self._plot_widget, 'reset_presentation_state'):
+            self._plot_widget.reset_presentation_state()
+        self.update_comparison()
+
+    def _on_plot_group_selection_requested(self, name: str, modifiers) -> None:
+        """Mirror file-list selection semantics without toggling the visibility eye."""
+        ordered_names = [tab.get_dataset_name() for tab in self.selected_datasets]
+        if name not in ordered_names:
+            return
+        control = bool(modifiers & Qt.KeyboardModifier.ControlModifier)
+        shift = bool(modifiers & Qt.KeyboardModifier.ShiftModifier)
+        if shift and self._plot_group_selection_anchor in ordered_names:
+            start = ordered_names.index(self._plot_group_selection_anchor)
+            end = ordered_names.index(name)
+            range_names = set(ordered_names[min(start, end):max(start, end) + 1])
+            self._plot_group_selection = (
+                self._plot_group_selection | range_names if control else range_names
+            )
+        elif control:
+            if name in self._plot_group_selection:
+                self._plot_group_selection.remove(name)
+            else:
+                self._plot_group_selection.add(name)
+            self._plot_group_selection_anchor = name
+        elif name not in self._plot_group_selection:
+            self._plot_group_selection = {name}
+            self._plot_group_selection_anchor = name
+        elif not self._plot_group_selection_anchor:
+            self._plot_group_selection_anchor = name
+        self._sync_plot_group_selection_styles()
+
+    def _sync_plot_group_selection_styles(self) -> None:
+        if not hasattr(self, '_plot_visibility_list_widget'):
+            return
+        for row in self._plot_visibility_list_widget.findChildren(
+            _PlotDatasetDragRow
+        ):
+            row.set_selection_style(row.dataset_name in self._plot_group_selection)
+
+    def _start_plot_dataset_drag(self, row: _PlotDatasetDragRow) -> None:
+        name = row.dataset_name
+        if name not in self._plot_group_selection:
+            self._plot_group_selection = {name}
+            self._plot_group_selection_anchor = name
+            self._sync_plot_group_selection_styles()
+        names = [
+            tab.get_dataset_name()
+            for tab in self.selected_datasets
+            if tab.get_dataset_name() in self._plot_group_selection
+        ]
+        if not names:
+            return
+        mime = QMimeData()
+        mime.setData(_PLOT_DATASET_MIME, json.dumps(names).encode('utf-8'))
+        drag = QDrag(row)
+        drag.setMimeData(mime)
+        drag.exec(Qt.DropAction.MoveAction)
 
     def _plot_grouped_selected_tabs(self) -> list[tuple[str, list]]:
         grouped: dict[str, list] = {}
         for tab in self.selected_datasets:
             group_name = dataset_group_name(tab.get_dataset())
             grouped.setdefault(group_name, []).append(tab)
+        if UNGROUPED_LABEL not in grouped:
+            grouped[UNGROUPED_LABEL] = []
         return list(grouped.items())
 
     def _make_plot_action_button(
@@ -758,7 +935,6 @@ class ComparisonTab(QWidget):
         dataset_count: int,
         visible_count: int,
         hidden: bool,
-        focused: bool,
     ) -> QWidget:
         row = QWidget()
         row.setFixedHeight(40)
@@ -802,17 +978,6 @@ class ComparisonTab(QWidget):
             lambda _checked=False, g=group_name: self._toggle_group_visibility(g)
         )
         layout.addWidget(visible_btn)
-
-        focus_btn = self._make_plot_action_button(
-            "fa6s.thumbtack",
-            "Clear group focus" if focused else "Focus this group in plot",
-            active=focused,
-            color=color if focused else C.TEXT_MUTED,
-        )
-        focus_btn.clicked.connect(
-            lambda _checked=False, g=group_name: self._toggle_group_pin(g)
-        )
-        layout.addWidget(focus_btn)
         return row
 
     def _make_plot_dataset_row(
@@ -823,30 +988,59 @@ class ComparisonTab(QWidget):
         color: str,
         line_style: str,
         hidden: bool,
-        focused: bool,
         plotted: bool,
     ) -> QWidget:
-        row = QWidget()
-        row.setFixedHeight(34 if plotted and not focused else 38)
-        row.setStyleSheet(
-            f"background: {'rgba(107,142,35,0.06)' if plotted and self._pinned else 'transparent'};"
-            "border: none;"
+        row = _PlotDatasetDragRow(name)
+        row.setFixedHeight(38 if hidden else 34)
+        row.set_selection_style(
+            name in self._plot_group_selection,
+            base_background='transparent',
         )
+        row.selection_requested.connect(self._on_plot_group_selection_requested)
+        row.drag_requested.connect(self._start_plot_dataset_drag)
         layout = QHBoxLayout(row)
         layout.setContentsMargins(12, 0, 6, 0)
         layout.setSpacing(6)
 
-        line_preview = LineStylePreview(
-            color if not hidden else C.TEXT_MUTED,
-            line_style,
-            muted=hidden,
-            width=28,
-            height=14,
+        plot_type = getattr(self._plot_widget, 'current_plot_type', 'distribution')
+        if plot_type in {'distribution', 'combined'}:
+            series_preview = LineStylePreview(
+                color if not hidden else C.TEXT_MUTED,
+                line_style,
+                muted=hidden,
+                width=28,
+                height=14,
+            )
+            series_preview.setToolTip(
+                f"Line style: {line_style_label(line_style)}"
+            )
+        else:
+            # Non-curve plots still benefit from a stable group/dataset colour
+            # cue, but dashed lines and markers would imply controls that the
+            # active chart does not use.
+            series_preview = QWidget()
+            series_preview.setObjectName('plotVisibilityColorCue')
+            series_preview.setFixedSize(28, 14)
+            cue_layout = QHBoxLayout(series_preview)
+            cue_layout.setContentsMargins(8, 2, 8, 2)
+            cue_layout.setSpacing(0)
+            cue = QFrame()
+            cue.setFixedSize(10, 10)
+            cue_color = color if not hidden else C.TEXT_MUTED
+            cue.setStyleSheet(
+                f'background: {cue_color}; border: none; border-radius: 3px;'
+            )
+            cue.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents, True)
+            cue_layout.addWidget(cue)
+            series_preview.setToolTip('Dataset or group identity colour')
+        series_preview.setAttribute(
+            Qt.WidgetAttribute.WA_TransparentForMouseEvents,
+            True,
         )
-        line_preview.setToolTip(f"Line style: {line_style_label(line_style)}")
-        layout.addWidget(line_preview, 0, Qt.AlignmentFlag.AlignVCenter)
+        layout.addWidget(series_preview, 0, Qt.AlignmentFlag.AlignVCenter)
 
         text_box = QWidget()
+        text_box.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents, True)
         text_lay = QVBoxLayout(text_box)
         text_lay.setContentsMargins(0, 2, 0, 2)
         text_lay.setSpacing(0)
@@ -859,11 +1053,7 @@ class ComparisonTab(QWidget):
         )
         lbl.setToolTip(name)
         text_lay.addWidget(lbl)
-        status_text = (
-            "Hidden"
-            if hidden
-            else ("Focused" if focused else ("" if plotted else "Outside focus"))
-        )
+        status_text = "Hidden" if hidden else ""
         if status_text:
             status_lbl = QLabel(status_text)
             status_lbl.setStyleSheet(
@@ -885,15 +1075,6 @@ class ComparisonTab(QWidget):
             lambda _checked=False, n=name: self._toggle_plot_visibility(n)
         )
         layout.addWidget(visible_btn)
-
-        focus_btn = self._make_plot_action_button(
-            "fa6s.thumbtack",
-            "Clear dataset focus" if focused else "Focus this dataset in plot",
-            active=focused,
-            color=color if focused else C.TEXT_MUTED,
-        )
-        focus_btn.clicked.connect(lambda _checked=False, n=name: self._toggle_pin(n))
-        layout.addWidget(focus_btn)
         return row
 
     def _build_details_tab_v2(self) -> QWidget:
@@ -1014,7 +1195,7 @@ class ComparisonTab(QWidget):
             status_buttons, ["OK only", "Warnings"], min_width=90
         )
         tb.addWidget(status_frame)
-        # Scope & Groups is reachable from the always-visible header, so the
+        # Scope & Groups is reachable from the always-visible main sidebar, so the
         # Details bar no longer duplicates it here.
         tb.addStretch(1)
 
@@ -1026,6 +1207,9 @@ class ComparisonTab(QWidget):
         tb.addWidget(self._details_unit_lbl)
 
         self._details_unit_combo = QComboBox()
+        self._details_unit_combo.setToolTip(
+            "Choose the display unit for K values in Details; calculations remain in m/s."
+        )
         self._details_unit_combo.setObjectName("pw-style-sel")
         for unit, symbol in HydraulicConductivityConverter.get_all_units().items():
             self._details_unit_combo.addItem(symbol, unit)
@@ -1080,6 +1264,15 @@ class ComparisonTab(QWidget):
             f"color: {C.TEXT_MUTED}; background: transparent; border: none;"
         )
         tb.addWidget(self._details_context)
+
+        self._details_export_btn = QPushButton("Export Table…")
+        self._details_export_btn.setProperty("pw-btn", True)
+        self._details_export_btn.setFixedHeight(26)
+        self._details_export_btn.setToolTip(
+            "Export the currently visible Details rows and columns as CSV or Excel."
+        )
+        self._details_export_btn.clicked.connect(lambda: self._export_details())
+        tb.addWidget(self._details_export_btn)
         v.addWidget(toolbar)
 
         self._details_dataset_strip = self._build_details_dataset_strip()
@@ -1144,6 +1337,9 @@ class ComparisonTab(QWidget):
             btn.setCheckable(True)
             btn.setChecked(active)
             btn.setCursor(Qt.CursorShape.PointingHandCursor)
+            tooltip = _SEGMENT_TOOLTIPS.get(text)
+            if tooltip:
+                btn.setToolTip(tooltip)
             btn.setIcon(
                 theme_icon(icon_name, C.OLIVE if active else C.TEXT_MID, size=12)
             )
@@ -1385,6 +1581,12 @@ class ComparisonTab(QWidget):
             self._details_preset_all_btn.setText("All rows")
             self._details_preset_context_btn.setText("Classification")
             self._details_preset_context_btn.setToolTip("")
+        for button in (
+            self._details_preset_core_btn,
+            self._details_preset_all_btn,
+            self._details_preset_context_btn,
+        ):
+            button.setToolTip(_SEGMENT_TOOLTIPS.get(button.text(), ""))
         if aggregate_mode:
             self._details_stack.setCurrentWidget(self._aggregate_table)
         else:
@@ -1476,17 +1678,6 @@ class ComparisonTab(QWidget):
             self._refresh_k_table()
             self._refresh_details_rail()
 
-    def _toggle_pin(self, name: str) -> None:
-        """Toggle pinned state for the named dataset and refresh."""
-        if name in self._pinned:
-            self._pinned.discard(name)
-        else:
-            self._pinned.add(name)
-            self._plot_hidden.discard(name)
-        self._refresh_pin_list()
-        self._update_plot()
-        self._update_header_count()
-
     def _selected_names_for_group(self, group_name: str) -> list[str]:
         """Return selected dataset names for a comparison group."""
         names: list[str] = []
@@ -1501,8 +1692,7 @@ class ComparisonTab(QWidget):
             self._plot_hidden.discard(name)
         else:
             self._plot_hidden.add(name)
-            self._pinned.discard(name)
-        self._refresh_pin_list()
+        self._refresh_plot_visibility_list()
         self._update_plot()
         self._update_header_count()
 
@@ -1515,32 +1705,16 @@ class ComparisonTab(QWidget):
             self._plot_hidden.difference_update(names)
         else:
             self._plot_hidden.update(names)
-            self._pinned.difference_update(names)
-        self._refresh_pin_list()
-        self._update_plot()
-        self._update_header_count()
-
-    def _toggle_group_pin(self, group_name: str) -> None:
-        """Focus/clear focus for all selected datasets in a group."""
-        names = self._selected_names_for_group(group_name)
-        if not names:
-            return
-        if all(name in self._pinned for name in names):
-            self._pinned.difference_update(names)
-        else:
-            self._pinned.update(names)
-            self._plot_hidden.difference_update(names)
-        self._refresh_pin_list()
+        self._refresh_plot_visibility_list()
         self._update_plot()
         self._update_header_count()
 
     def _show_all_plot_datasets(self) -> None:
-        """Clear plot-only hidden/focused state and redraw all scoped datasets."""
-        if not self._pinned and not self._plot_hidden:
+        """Restore all scoped datasets to the plot."""
+        if not self._plot_hidden:
             return
-        self._pinned.clear()
         self._plot_hidden.clear()
-        self._refresh_pin_list()
+        self._refresh_plot_visibility_list()
         self._update_plot()
         self._update_header_count()
 
@@ -2384,6 +2558,9 @@ class ComparisonTab(QWidget):
         tb.addWidget(unit_lbl, 0)
 
         self._stats_unit_combo = QComboBox()
+        self._stats_unit_combo.setToolTip(
+            "Choose the display unit for Statistics; calculations and filtering are unchanged."
+        )
         self._stats_unit_combo.setObjectName("pw-style-sel")
         for unit, symbol in HydraulicConductivityConverter.get_all_units().items():
             self._stats_unit_combo.addItem(symbol, unit)
@@ -2422,12 +2599,10 @@ class ComparisonTab(QWidget):
             min_width=112,
         )
         self._stats_methods_valid_all_btn.setToolTip(
-            "Only include methods valid for every selected dataset"
+            _SEGMENT_TOOLTIPS["Valid in all"]
         )
         self._stats_methods_choose_btn.setEnabled(True)
-        self._stats_methods_choose_btn.setToolTip(
-            "Choose the workspace K methods used across the program"
-        )
+        self._stats_methods_choose_btn.setToolTip(_SEGMENT_TOOLTIPS["Choose"])
         tb.addWidget(method_frame, 0)
 
         status_frame, status_buttons = self._make_details_segmented_control(
@@ -2451,7 +2626,7 @@ class ComparisonTab(QWidget):
             status_buttons, ["OK only", "Warnings"], min_width=90
         )
         tb.addWidget(status_frame, 0)
-        # Scope & Groups is reachable from the always-visible header (no per-subtab
+        # Scope & Groups is reachable from the always-visible main sidebar (no per-subtab
         # duplicate here).
 
         self._stats_context = QLabel("")
@@ -2464,6 +2639,15 @@ class ComparisonTab(QWidget):
         )
         tb.addStretch(1)
         tb.addWidget(self._stats_context, 0)
+
+        self._stats_export_btn = QPushButton("Export Table…")
+        self._stats_export_btn.setProperty("pw-btn", True)
+        self._stats_export_btn.setFixedHeight(26)
+        self._stats_export_btn.setToolTip(
+            "Export the currently visible Statistics rows and columns as CSV or Excel."
+        )
+        self._stats_export_btn.clicked.connect(lambda: self._export_statistics())
+        tb.addWidget(self._stats_export_btn)
         root.addWidget(toolbar)
 
         root.addWidget(self._build_stats_dataset_strip())
@@ -3636,7 +3820,7 @@ class ComparisonTab(QWidget):
             self.update_comparison()
 
     def _set_selected_datasets(self, selected_tabs) -> None:
-        """Apply a selected subset while preserving dataset order and valid pins."""
+        """Apply a selected subset while preserving dataset order and visibility."""
         selected_names = {tab.get_dataset_name() for tab in selected_tabs}
         self.selected_datasets = [
             tab for tab in self.dataset_tabs if tab.get_dataset_name() in selected_names
@@ -3645,15 +3829,14 @@ class ComparisonTab(QWidget):
             self.selected_datasets = list(self.dataset_tabs)
 
         active_names = {tab.get_dataset_name() for tab in self.selected_datasets}
-        self._pinned = {name for name in self._pinned if name in active_names}
         self._plot_hidden = {name for name in self._plot_hidden if name in active_names}
+        self._plot_group_selection.intersection_update(active_names)
+        if self._plot_group_selection_anchor not in active_names:
+            self._plot_group_selection_anchor = None
 
-        enabled = len(self.selected_datasets) >= 2
-        self._update_btn.setEnabled(enabled)
-        self._export_btn.setEnabled(enabled)
-        if not enabled:
+        if len(self.selected_datasets) < 2:
             self._clear_views()
-        self._refresh_pin_list()
+        self._refresh_plot_visibility_list()
         self._update_header_count()
 
     def set_dataset_state(self, dataset_tabs, selected_tabs=None) -> None:
@@ -3715,8 +3898,6 @@ class ComparisonTab(QWidget):
         n_plotted = len(self._plot_dataset_tabs()) if self.selected_datasets else 0
         if not self.selected_datasets:
             plot_scope = "no plot scope"
-        elif self._pinned:
-            plot_scope = f"{n_plotted} focused in plot"
         elif self._plot_hidden:
             plot_scope = f"{n_plotted} visible in plot"
         else:
@@ -3726,72 +3907,24 @@ class ComparisonTab(QWidget):
             if n_loaded == 0
             else f"{n_selected} selected  ·  {n_loaded} loaded  ·  {plot_scope}"
         )
-        self._manage_btn.setEnabled(n_loaded >= 1)
         if hasattr(self, "_plot_show_all_btn"):
-            self._plot_show_all_btn.setEnabled(bool(self._pinned or self._plot_hidden))
-
-    def _on_manage_datasets(self) -> None:
-        """Open dataset-selection dialog and sync the result back to the sidebar."""
-        if not self.dataset_tabs:
-            return
-
-        dialog = DatasetSelectionDialog(
-            self.dataset_tabs,
-            currently_selected=self.selected_datasets,
-            title="Scope & Groups",
-            subtitle="Choose active samples and assign group labels",
-            action_text="Apply Scope",
-            action_icon="fa6s.layer-group",
-            allow_grouping=True,
-            parent=self,
-        )
-        if dialog.exec():
-            if hasattr(dialog, "get_group_assignments"):
-                for tab, group_name in dialog.get_group_assignments().items():
-                    try:
-                        tab.get_dataset().group_name = group_name
-                    except Exception:
-                        pass
-            selected_tabs = dialog.get_selected_tabs()
-            self._set_selected_datasets(selected_tabs)
-            # A real scope/group edit should start color + breakdown fresh; only
-            # plot-visibility toggles keep the accumulated presentation state.
-            if hasattr(self._plot_widget, "reset_presentation_state"):
-                self._plot_widget.reset_presentation_state()
-            self.dataset_selection_requested.emit(self._dataset_paths(selected_tabs))
-            self.update_comparison()
-
-    @staticmethod
-    def _dataset_paths(dataset_tabs) -> list[str]:
-        """Return file-path keys for a comparison subset."""
-        paths: list[str] = []
-        for tab in dataset_tabs:
-            dataset = (
-                tab.get_dataset()
-                if hasattr(tab, "get_dataset")
-                else getattr(tab, "dataset", None)
-            )
-            file_path = getattr(dataset, "file_path", "") if dataset is not None else ""
-            if file_path:
-                paths.append(file_path)
-        return paths
+            self._plot_show_all_btn.setEnabled(bool(self._plot_hidden))
 
     def _plot_dataset_tabs(self) -> list:
         """Return the selected datasets currently visible in the plot."""
-        visible_tabs = [
+        return [
             tab
             for tab in self.selected_datasets
             if tab.get_dataset_name() not in self._plot_hidden
         ]
-        if not self._pinned:
-            return visible_tabs
-        return [tab for tab in visible_tabs if tab.get_dataset_name() in self._pinned]
 
     def _update_plot(self) -> None:
         """Push datasets into the comparison plot widget."""
         if not self.selected_datasets:
             if hasattr(self._plot_widget, "show_empty_state"):
-                self._plot_widget.show_empty_state("Select datasets and click Update")
+                self._plot_widget.show_empty_state(
+                    "Select at least 2 datasets in Scope & Groups"
+                )
             return
         plot_tabs = self._plot_dataset_tabs()
         if hasattr(self._plot_widget, "set_scheme"):
@@ -5457,15 +5590,6 @@ class ComparisonTab(QWidget):
 
     # ── Export ────────────────────────────────────────────────────────────────
 
-    def _export_active_view(self) -> None:
-        label = self._tabs.tabText(self._tabs.currentIndex())
-        if label == 'Details':
-            self._export_details()
-        elif label == 'Statistics':
-            self._export_statistics()
-        else:
-            self._export_plot()
-
     @staticmethod
     def _ensure_export_extension(
         path: str,
@@ -5522,39 +5646,15 @@ class ComparisonTab(QWidget):
         return ExportTable.from_rows(name, headers, rows)
 
     def _export_table_model(self, table: ExportTable, default_name: str) -> None:
-        path, selected_filter = QFileDialog.getSaveFileName(
+        export_table_dialog(
             self,
-            'Export Comparison Table',
-            f'{default_name}.xlsx',
-            'Excel Workbook (*.xlsx);;CSV File (*.csv)',
+            dialog_title="Export Comparison Table",
+            default_stem=default_name,
+            table=table,
+            success_label="Comparison table",
+            file_dialog=QFileDialog,
+            message_box=QMessageBox,
         )
-        if not path:
-            return
-        path, extension = self._ensure_export_extension(
-            path,
-            selected_filter,
-            ('xlsx', 'csv'),
-            'xlsx',
-        )
-        try:
-            if extension == 'csv':
-                write_csv_table(path, table)
-            else:
-                from openpyxl import Workbook
-
-                workbook = Workbook()
-                worksheet = workbook.active
-                worksheet.title = table.name[:31] or 'Comparison'
-                write_excel_table(worksheet, table)
-                worksheet.freeze_panes = 'A2'
-                workbook.save(path)
-            QMessageBox.information(
-                self,
-                'Export Successful',
-                f'Comparison table exported to:\n{path}',
-            )
-        except Exception as exc:
-            QMessageBox.warning(self, 'Export Failed', f'Could not save table:\n{exc}')
 
     def _export_details(self) -> None:
         table = self._details_stack.currentWidget()
@@ -5607,17 +5707,35 @@ class ComparisonTab(QWidget):
         try:
             if hasattr(self._plot_widget, "figure"):
                 self._plot_widget.figure.savefig(
-                    path, format=extension, dpi=300, bbox_inches="tight"
+                    path,
+                    format=extension,
+                    dpi=300,
+                    bbox_inches="tight",
+                    facecolor="white",
+                    edgecolor="white",
+                    transparent=False,
                 )
             elif hasattr(self._plot_widget, "_fig"):
                 self._plot_widget._fig.savefig(
-                    path, format=extension, dpi=300, bbox_inches="tight"
+                    path,
+                    format=extension,
+                    dpi=300,
+                    bbox_inches="tight",
+                    facecolor="white",
+                    edgecolor="white",
+                    transparent=False,
                 )
             elif hasattr(self._plot_widget, "canvas") and hasattr(
                 self._plot_widget.canvas, "figure"
             ):
                 self._plot_widget.canvas.figure.savefig(
-                    path, format=extension, dpi=300, bbox_inches="tight"
+                    path,
+                    format=extension,
+                    dpi=300,
+                    bbox_inches="tight",
+                    facecolor="white",
+                    edgecolor="white",
+                    transparent=False,
                 )
             QMessageBox.information(
                 self,

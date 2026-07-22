@@ -436,6 +436,10 @@ def render_k_overlay(
     n_datasets = len(k_results_dict)
     n_methods = len(methods)
     bar_width = 0.8 / max(n_datasets, 1)
+    method_centers = np.arange(n_methods, dtype=float)
+    series_offsets = (
+        np.arange(n_datasets, dtype=float) - (n_datasets - 1) / 2.0
+    ) * bar_width
 
     allow_labels = show_value_labels and n_datasets <= 4 and (n_methods * n_datasets) <= 36
     label_bars: list = []
@@ -446,7 +450,7 @@ def render_k_overlay(
 
     for i, (name, k_dict) in enumerate(k_results_dict.items()):
         values = [k_dict.get(m, 0) for m in methods]
-        positions = np.arange(n_methods) + i * bar_width
+        positions = method_centers + series_offsets[i]
         color = _colors[i % len(_colors)]
         sample_flagged = flagged.get(name, set())
 
@@ -467,13 +471,31 @@ def render_k_overlay(
     ax.set_ylabel(y_label, fontsize=style.label_fontsize, fontfamily=style.font_family)
     ax.set_title(title, fontsize=style.title_fontsize,
                  fontweight=style.title_fontweight, fontfamily=style.font_family)
-    ax.set_xticks(np.arange(n_methods) + bar_width * (n_datasets - 1) / 2)
+    ax.set_xticks(method_centers)
     ax.set_xticklabels(
         [format_method_label(m, compact=True) for m in methods],
         rotation=45,
         ha="right",
         fontsize=style.tick_fontsize,
         fontfamily=style.font_family,
+    )
+    if n_methods:
+        ax.set_xlim(-0.55, n_methods - 0.45)
+    for boundary in method_centers[1:] - 0.5:
+        separator = ax.axvline(
+            boundary,
+            color=style.grid_color,
+            linewidth=max(0.55, style.grid_linewidth * 0.7),
+            alpha=max(0.20, style.grid_alpha * 0.75),
+            zorder=0,
+        )
+        separator.set_gid('k-method-cluster-boundary')
+    ax.tick_params(
+        axis='x',
+        which='major',
+        length=5,
+        width=0.8,
+        pad=4,
     )
     ax.tick_params(axis="y", labelsize=style.tick_fontsize)
     max_label_level = max(label_levels, default=0)
@@ -493,6 +515,9 @@ def render_k_overlay(
         )
 
     apply_grid_style(ax, style, show_grid, axis="y")
+    # The x axis is categorical. ``minorticks_on`` used by the y-grid helper
+    # can otherwise leave a dense row of meaningless minor marks under bars.
+    ax.tick_params(axis='x', which='minor', bottom=False, top=False)
     if show_legend:
         if has_flagged:
             _add_flagged_legend_handle(ax, style)

@@ -6,17 +6,63 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
-## [0.9.7] - Unreleased
+## [0.9.7] - 2026-07-22
+
+### Added
+- Persistent, non-destructive Home navigation with recent-workspace rename, pin, remove, save, and reopen actions.
+- Delimited TXT input alongside CSV and Excel, using the same mapping, validation, and recovery workflow.
+- An explicit opt-in `Multiple Samples in One File (Experimental)` importer for worksheets containing several grain-size curves. Users can preview the detected curves, choose which samples to import, and open them as independent datasets. This has been verified with the program's included test files; real laboratory workbook layouts may still require manual mapping.
+- Multi-selection drag-and-drop grouping in Scope & Groups and Plot Visibility, including group-area drop targets, visual feedback, and edge auto-scroll.
+- Samples batch selection in the left Samples panel. Click a sample card to select one item, Ctrl+click to add or remove individual items, or Shift+click to select a range. The action row directly above the sample cards provides `Select all`, `Clear selection`, `Remove`, and confirmed `Clear all` actions; a blue outline distinguishes this temporary selection from samples included in comparisons and reports.
+- Granular table and batch exports: visible-table CSV/XLSX, per-dataset files, combined CSV outputs, and a documented multi-sheet Excel workbook.
+- A unified Dataset Inputs editor for changing temperature and effective porosity for one, selected, or all loaded datasets.
+- Written Guides and interactive Tutorials as distinct help paths, with every Tutorial launchable from Home.
 
 ### Changed
-- In-progress UI readability work: stronger muted-text contrast, a configurable Normal/Large text-size preference, and first responsive-toolbar experiments.
-- Single-sample plot toolbar now tests priority overflow behavior so secondary plot controls can move into a More menu before labels become clipped.
+- Reworked column mapping into an automatic-first detect-and-confirm workflow with header selection before roles, spreadsheet coordinates for duplicate headings, persistent curve preview, sequential irregular-range selection, collapsed metadata, and one clear import action.
+- Defined processed input as cumulative percent passing, stopped explicit retained-only columns from being silently mapped or converted, and blocked strongly reversed curves while allowing minor local irregularities as review information.
+- Preserved deliberate processed/raw column choices when the header row changes, restoring only valid positions and filling only previously unmapped roles through automatic detection.
+- Moved preview reading and header detection into shared import services so initial mapping, ErrorTab recovery, TXT/CSV/Excel preview, remapping, and saved mapping state follow the same path.
+- Kept native multi-file Shift/Ctrl selection and clarified the difference between selected source files, expanded workbook candidates, loaded datasets, and items that need review.
+- Made DOCX/PDF reports scale to larger workspaces with A4-aware composition, adaptive tables, class-fraction heatmaps at large scopes, mixed page orientation, and layouts verified at 1, 7, 15, and 51 samples.
+- Made reports retain only the plots the user selected and left visible, instead of substituting exporter-only fallback charts.
+- Replaced fixed horizontal legend layouts with shared `Auto (fit and wrap)` or explicit legend-column control across interactive, report, and export plots.
+- Cached generated reports while switching tabs so returning to Reports does not force regeneration when its inputs are unchanged.
+- Consolidated plot customization into shared Typography, Lines & Markers, Grid, and Legend controls, including contextual controls for line versus bar/histogram plots and independent major/minor grids.
+- Simplified Comparison plot controls and made Plot Visibility and Series Appearance appropriate to the active plot type.
+- Separated active, included, and batch-selected Samples states and reorganized the sidebar into a stable header, one-line inventory, filters, and contextual bulk actions.
+- Consolidated figure export in plot toolbars and redesigned Export around output-named recipes, one grouped format selector, separate content/appearance controls, real previews, and a manifest that matches generated filenames.
+- Improved categorical tick defaults and labels, including clearer K-method grouping and controllable tick rotation.
+- Centralized tooltip styling and polished workspace, About, Settings, Analysis Settings, Dataset Inputs, and export dialogs.
+- Clarified the Hydraulic Conductivity Summary as active methods with positive, OK results only.
+- Made the status bar follow the selected dataset and report its D50, mean K, temperature, active-method count, and workspace size.
+- Put valid processed/raw CSV and Excel examples first in Data Format & Files, aligned written Guides with the final workflows, and made Tutorials reveal and navigate to their required controls automatically.
 
 ### Fixed
-- Statistics tab Key Grain Distribution fact cards now show D50 instead of D30 in the prominent top row.
+- Prevented generated Word reports from being flagged as damaged or unreadable by Microsoft Word.
+- Fixed ErrorTab preview failures caused by calling mapper methods on the wrong dialog object; CSV, TXT, and Excel recovery now shows the real file or mapping problem.
+- Prevented percent-retained data mapped as passing, or predominantly reversed declared-passing data, from silently producing scientifically inverted curves.
+- Corrected header-row changes that previously erased deliberate mappings or moved missing positions to an unrelated column.
+- Restored the degree symbol in sample-overview temperature headings (`°C`).
+- Removed intermittent black or transparent tooltip and popup backgrounds across the application.
+- Exported PNG/SVG figures now use a clean white background instead of the application's cream canvas.
+- Preserved dataset-specific temperature during recalculation and synchronized temperature/porosity edits across views, reports, and exports.
+- Removed the ambiguous Plot Visibility pin control, reserved a scrollbar gutter, and corrected cramped or clipped visibility, source, action, and workspace-name controls.
+- Made shared Tick size affect both axes in overlay, grouped, and faceted K-value plots instead of leaving method labels at a fixed size.
+- Synchronized sample removal and Clear/New Workspace actions across tabs, comparison scope, reports, exports, and recent-workspace state.
+- Statistics Key Grain Distribution cards now show D50 instead of D30 in the prominent row.
 
-### Notes
-- This section tracks work after 0.9.6 and should be revised before packaging the next release.
+### Manual QA Checklist
+- Import representative processed/raw CSV, TXT, and Excel files; confirm mapped columns, units, warnings, recovery, and dataset counts.
+- Open mapping recovery from an ErrorTab and confirm its preview, sheet, and prior mapping state match the normal mapper.
+- Exercise the explicit experimental multi-sample command only with maintained fixtures; confirm candidate selection and independent dataset removal, then verify ordinary files continue through the supported single-sample mapper.
+- Generate DOCX and PDF reports for small and large workspaces; open the Word file in Microsoft Word and inspect A4 layout and temperature units.
+- Drag one and several selected datasets between groups in both grouping surfaces, including while auto-scrolling.
+- Batch-select adjacent and non-adjacent Samples without changing inclusion, then verify Clear selection, Remove selected, and Clear all have distinct effects.
+- Export visible tables and per-dataset/combined packages as CSV and XLSX; verify workbook sheet names and contents.
+- Export line, bar, and histogram figures as PNG/SVG; verify white backgrounds, readable ticks, and plot-type-appropriate controls.
+- Check automatic and explicit legend columns with small and large scopes and verify major/minor grid controls remain independent.
+- Change temperature and porosity for one, selected, and all datasets; confirm K values and status/report/export views refresh consistently.
 
 
 ## [0.9.6] - 2026-07-03
@@ -231,9 +277,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## Notes for Testers
 
-**Current Status:** 0.9.6 - Installer/source-distribution candidate for internal testing and web-release preparation. The 0.9.7 section tracks ongoing UI readability and responsive-layout work.
+**Current Release:** 0.9.7 - Released 2026-07-22, with application, documentation, executable metadata, and installer version aligned.
 
-**Known Review Areas:**
+**Release Verification Notes:**
 - Irregular Excel layouts may still require manual mapping or remapping.
 - Data-loading logs, warning visibility, and raw-vs-processed pathway feedback should be checked during testing.
 - Plot/export/report wording should be checked carefully wherever units or geometric/arithmetic K means are shown.

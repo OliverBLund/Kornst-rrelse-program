@@ -1043,6 +1043,49 @@ class TestRemapReplacement(unittest.TestCase):
         self.assertEqual(session["sources"][0]["sheet_name"], "English")
         self.assertEqual(session["sources"][0]["file_key"], file_key)
 
+    def test_session_normalization_migrates_identity_and_workspace_state(self):
+        harness = _SessionHarness()
+        raw = {
+            "name": "Named workspace",
+            "files": ["sample.csv"],
+            "saved": True,
+            "pinned": True,
+            "active_methods": ["Hazen", "Kozeny-Carman"],
+            "selected_paths": ["sample.csv"],
+        }
+
+        first = MainWindow._normalize_session_entry(harness, raw)
+        second = MainWindow._normalize_session_entry(harness, raw)
+
+        self.assertEqual(first["workspace_id"], second["workspace_id"])
+        self.assertTrue(first["saved"])
+        self.assertTrue(first["pinned"])
+        self.assertEqual(first["active_methods"], ["Hazen", "Kozeny-Carman"])
+        self.assertEqual(first["selected_paths"], ["sample.csv"])
+
+    def test_workspace_switch_preserves_current_snapshot_before_clearing(self):
+        events = []
+        control_panel = SimpleNamespace(
+            file_statuses={"first.csv": "loaded", "second.csv": "loaded"},
+            _remove_files_in_batch=lambda paths: events.append(("clear", list(paths))),
+        )
+        harness = SimpleNamespace(
+            dataset_tabs=[object()],
+            control_panel=control_panel,
+            _current_workspace_id="current-id",
+            _current_workspace_name="Current",
+            _current_workspace_saved=True,
+            _current_workspace_pinned=True,
+            _save_current_session=lambda: events.append(("save", None)),
+        )
+
+        MainWindow._prepare_for_workspace_switch(harness)
+
+        self.assertEqual(events[0], ("save", None))
+        self.assertEqual(events[1], ("clear", ["first.csv", "second.csv"]))
+        self.assertIsNone(harness._current_workspace_id)
+        self.assertFalse(harness._current_workspace_saved)
+
     def test_session_normalization_preserves_candidates_from_one_source(self):
         harness = _SessionHarness()
         file_key = os.path.normpath("multi_sample.xlsx")

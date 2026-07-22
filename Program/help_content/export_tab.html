@@ -35,9 +35,9 @@
   <h2>Configure: Recipes</h2>
   <table>
     <tr><th>Recipe</th><th>Starting package</th><th>Use it for</th></tr>
-    <tr><td>CSV + Grain Curves</td><td>CSV Long/Wide, selected grain/aggregate CSV tables, and PNG grain-size curves.</td><td>A general reusable handoff with tables and one curve per sample.</td></tr>
-    <tr><td>Summary CSV</td><td>One CSV Wide table with core grain and K metrics; no plots.</td><td>A compact spreadsheet or analysis handoff.</td></tr>
-    <tr><td>Analysis Tables</td><td>CSV Wide, aggregate CSV when applicable, and one combined Excel workbook; no plots.</td><td>Typed tables for analysis and review.</td></tr>
+    <tr><td>CSV + Grain Curves</td><td>Method-results and sample-summary CSV tables, selected aggregate tables, and PNG grain-size curves.</td><td>A general reusable handoff with tables and one curve per sample.</td></tr>
+    <tr><td>Summary CSV</td><td>One sample-summary CSV with core grain and K metrics; no plots.</td><td>A compact spreadsheet or analysis handoff.</td></tr>
+    <tr><td>Analysis Tables</td><td>Sample-summary and aggregate tables plus one combined Excel workbook; no plots.</td><td>Typed tables for analysis and review.</td></tr>
     <tr><td>Workbook + Plots</td><td>One Excel workbook plus common PNG and PDF individual/comparison plots.</td><td>A presentation-oriented package without a narrative report.</td></tr>
     <tr><td>Complete Package</td><td>Every table format, every plot format, all percentiles, detailed K fields, and all exportable plot types.</td><td>A comprehensive archive or technical handoff.</td></tr>
     <tr><td>Custom</td><td>The current manually adjusted formats or content.</td><td>Any package that differs from a named recipe.</td></tr>
@@ -47,13 +47,15 @@
   <p>The <strong>Formats</strong> field is a grouped multi-select menu. Open it and tick any combination of data and plot formats.</p>
   <table>
     <tr><th>Format</th><th>What it contains</th><th>Best use</th></tr>
-    <tr><td>CSV Long</td><td>One row per selected K-method result, with sample and selected context fields.</td><td>R, Python, databases, filtering, and tidy-data workflows.</td></tr>
-    <tr><td>CSV Wide</td><td>One row per sample, with grain metrics and K-method values in columns.</td><td>Spreadsheet comparison and statistical analysis.</td></tr>
-    <tr><td>Excel</td><td>One typed workbook with <code>K_Results_Long</code>, <code>Sample_Wide</code>, and conditional grain-distribution and aggregate sheets.</td><td>Review, calculation, and structured handoff in Excel.</td></tr>
+    <tr><td>Method results CSV</td><td>One row per selected K-method result, with sample and selected context fields. This is the long/tidy table.</td><td>R, Python, databases, filtering, and tidy-data workflows.</td></tr>
+    <tr><td>Sample summary CSV</td><td>One row per sample, with grain metrics and K-method values in columns. This is the wide comparison table.</td><td>Spreadsheet comparison and statistical analysis.</td></tr>
+    <tr><td>Excel workbooks</td><td>Combined and/or per-sample XLSX workbooks. User-facing sheets are named Method Results, Sample Summary, Grain Distribution, and Collection Statistics where applicable.</td><td>Review, calculation, and structured handoff in Excel.</td></tr>
     <tr><td>PNG</td><td>High-resolution 300 dpi raster plot files.</td><td>Slides, email, and quick insertion into documents.</td></tr>
     <tr><td>SVG</td><td>Scalable vector plot files.</td><td>Editing and lossless scaling in vector software.</td></tr>
     <tr><td>PDF</td><td>One print-ready vector file per selected plot.</td><td>Static figure sharing and publication workflows.</td></tr>
   </table>
+
+  <p><strong>File layout</strong> controls only Method results CSV and Excel workbooks: create one combined package, separate files per sample, or both. Sample summary CSV remains one comparison table.</p>
 
   <div class="callout warning">
     <div class="callout-title">Export PDF means a plot file</div>
@@ -120,7 +122,7 @@
   <p class="muted">Files are conditional: only the formats and content selected in Configure are created. With Selected scope, the collection plot folder is <code>selected_datasets</code>. Unsafe filename characters are replaced automatically.</p>
 
   <h2>Understand The File Count</h2>
-  <p>Individual plots multiply by the number of samples and selected plot formats. For example, five samples &times; one individual plot type &times; PNG produces five plot files. Comparison plots are added once per chosen variant and format. CSV tables and the combined workbook are package-level files.</p>
+  <p>Individual plots multiply by the number of samples and selected plot formats. For example, five samples &times; one individual plot type &times; PNG produces five plot files. Comparison plots are added once per chosen variant and format. Sample-summary and aggregate tables are package-level files; Method results and Excel workbooks follow the selected file layout.</p>
   <p>Samples and groups are written in natural name order, so <code>BH-2</code> comes before <code>BH-10</code>. If duplicate sample labels occur, the writer assigns stable disambiguated labels.</p>
 
   <h2>Common Checks</h2>

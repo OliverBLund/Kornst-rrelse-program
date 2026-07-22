@@ -9,10 +9,13 @@ import tempfile
 import unittest
 from pathlib import Path
 from types import SimpleNamespace
+from unittest.mock import patch
 
 os.environ.setdefault('QT_QPA_PLATFORM', 'offscreen')
 sys.path.insert(0, 'Program')
 
+from openpyxl import load_workbook
+from PyQt6.QtCore import Qt
 from PyQt6.QtWidgets import QApplication, QFileDialog, QMessageBox
 
 from data_loader import GrainSizeData
@@ -43,6 +46,17 @@ class TestPlotWorkspaceWiring(unittest.TestCase):
     def tearDown(self):
         self.workspace.hide()
         self.workspace.deleteLater()
+
+    def test_export_actions_have_one_figure_menu_and_one_data_button(self):
+        self.assertFalse(hasattr(self.workspace, "_sect_export"))
+        self.assertEqual(self.workspace._drawer_export_btn.text(), "Export Data...")
+        actions = [action.text() for action in self.workspace._tb_export_btn.menu().actions()]
+        self.assertEqual(actions, ["PNG image...", "SVG vector...", "PDF figure..."])
+        self.assertIn("background-color", self.workspace._tb_export_btn.styleSheet())
+        menu = self.workspace._tb_export_btn.menu()
+        self.assertTrue(menu.testAttribute(Qt.WidgetAttribute.WA_StyledBackground))
+        self.assertFalse(menu.testAttribute(Qt.WidgetAttribute.WA_TranslucentBackground))
+        self.assertIn("background-color", menu.styleSheet())
 
     def test_k_value_plot_becomes_active_axis_and_respects_grid_legend_toggles(self):
         self.workspace.add_k_results({'Hazen': 1.0e-4, 'Beyer': 1.5e-4})
@@ -341,6 +355,28 @@ class TestPlotWorkspaceWiring(unittest.TestCase):
         self.assertEqual([row[0] for row in rows[1:]].count('Coarse sand'), 1)
         self.assertAlmostEqual(sum(float(row[4]) for row in rows[1:]), 100.0, places=6)
 
+    def test_plot_drawer_data_can_export_as_xlsx(self):
+        self.workspace.current_plot_type = "distribution"
+        self.workspace.refresh_plot()
+        original_dialog = QFileDialog.getSaveFileName
+        original_info = QMessageBox.information
+        with tempfile.TemporaryDirectory() as tmp:
+            output = Path(tmp) / "distribution_data"
+            QFileDialog.getSaveFileName = staticmethod(
+                lambda *args, **kwargs: (str(output), "Excel Workbook (*.xlsx)")
+            )
+            QMessageBox.information = staticmethod(lambda *args, **kwargs: None)
+            try:
+                self.workspace.export_data()
+            finally:
+                QFileDialog.getSaveFileName = original_dialog
+                QMessageBox.information = original_info
+
+            worksheet = load_workbook(output.with_suffix(".xlsx"), data_only=True).active
+            self.assertEqual(worksheet["A1"].value, "Particle size (mm)")
+            self.assertEqual(worksheet["B1"].value, "Percent passing (%)")
+            self.assertEqual(worksheet.max_row, len(self.workspace._drawer_rows) + 1)
+
     def test_histogram_fraction_labels_respect_active_scheme(self):
         self.workspace.current_plot_type = 'histogram'
         self.workspace.set_scheme(USCS)
@@ -493,6 +529,28 @@ class TestPlotWorkspaceWiring(unittest.TestCase):
 
         self.assertEqual(exported, [str(written)])
         self.assertIn('<svg', content[:200].lower())
+
+    def test_figure_export_uses_white_paper_background_without_restyling_canvas(self):
+        canvas_facecolor = self.workspace.plot_widget.figure.get_facecolor()
+        with (
+            patch.object(
+                QFileDialog,
+                'getSaveFileName',
+                return_value=('sample_plot', 'PNG Files (*.png)'),
+            ),
+            patch.object(QMessageBox, 'information'),
+            patch.object(self.workspace.plot_widget.figure, 'savefig') as savefig,
+        ):
+            self.workspace.export_plot('png')
+
+        kwargs = savefig.call_args.kwargs
+        self.assertEqual(kwargs['facecolor'], 'white')
+        self.assertEqual(kwargs['edgecolor'], 'white')
+        self.assertFalse(kwargs['transparent'])
+        self.assertEqual(
+            self.workspace.plot_widget.figure.get_facecolor(),
+            canvas_facecolor,
+        )
 
     def test_single_plot_drawer_tracks_k_values_and_exports_same_rows(self):
         self.workspace.add_k_results(

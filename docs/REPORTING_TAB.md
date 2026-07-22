@@ -1,103 +1,80 @@
-# Reporting Tab — Status & Roadmap
+# Reporting Tab — Current Behavior
 
-## Current State (March 2026)
+## Current State (July 2026)
 
-### What works
+The Reports tab builds a formatted document from selected datasets. It uses the same calculated values, tables, visible plots, plot presets, palettes, and saved plot customizations as the application. The exporter does not create substitute or fallback charts.
 
-| Feature | Notes |
+## Workflow
+
+1. Choose a report type.
+2. Select the valid sample scope for that type.
+3. Adjust sections, plots, appendices, project information, and branding.
+4. Choose PDF, HTML, or Word (.docx).
+5. Generate the report, inspect the preview, then save it.
+
+Configuration is persisted through `QSettings`, including the report type, output format, section and plot choices, project information, branding, and report color.
+
+## Current Features
+
+| Feature | Behavior |
 |---|---|
-| HTML preview | `QWebEngineView` with `QTextEdit` fallback if WebEngine not installed |
-| A4 paper simulation | Gray surround, white paper sheet, drop shadow |
-| Page break preview | Word-style gray bands injected at ~952px intervals (JS, screen-only) |
-| Page numbers in PDF | `@page { @bottom-right { content: counter(page)... } }` via Chromium |
-| Brand system | Org name, subtitle, logo (PNG/JPG/SVG), primary color — persisted via `QSettings` |
-| Brand color injection | `--brand` CSS variable replaced at render time; `--brand-light` auto-computed |
-| Cover page | Optional (checkbox); shows logo, org name, project metadata |
-| Report types | Individual (Grain Size / K-Values / Combined), Comparison, Full Project |
-| Template presets | Standard / Executive / Technical / Appendix — sets section checkboxes in one click |
-| Section toggles | 11 checkboxes: Cover Page, Executive Summary, Methodology, Results, Plots, Interpretation, Percentile Table, Gradation Analysis, K-Value Statistics, Data Quality, Raw Data Tables |
-| Report metadata | Project name, Location, Client, Analyst, Notes |
-| **PDF export** | `page().printToPdf()` — async, A4 portrait, 15mm margins |
-| **HTML export** | Saves clean report HTML (no preview CSS injected) |
+| HTML preview | `QWebEngineView` preview with paper boundaries and mixed page orientations |
+| Report types | Individual Sample, Cross-Sample Comparison, Full Project Summary, and K-Value Focus |
+| Sample scope | Enforces the sample-count rule associated with the selected report type |
+| Section and plot selection | Report-type defaults remain editable before generation |
+| Plot style | Uses the shared report/export preset, palette, and saved Customize overrides |
+| Large-batch plots | Uses adaptive layouts and landscape plot sheets where required; small reports remain portrait |
+| Tables | Uses actual report data and can move qualifying large tables to a companion Excel appendix |
+| Project information | Project name, project number, date, location, client, analyst, and notes |
+| Branding | Organization name, subtitle, optional PNG/JPG/SVG logo, and report accent color |
+| Cover | Optional image-or-text cover with a dedicated first page |
+| Background generation | Long report generation runs as a cancellable background task |
 
----
-
-## Export Formats
+## Output Formats
 
 | Format | Status | Notes |
 |---|---|---|
-| HTML | ✅ Working | Clean self-contained file with embedded CSS and base64 charts |
-| PDF | ✅ Working | Via Chromium print pipeline; requires `PyQt6-WebEngine` |
-| Markdown | ❌ Not implemented | Shows "Coming Soon" dialog |
-| Word (.docx) | ❌ Not implemented | Shows "Coming Soon" dialog; `python-docx` already in requirements |
+| HTML | Working | Self-contained report with embedded CSS and images |
+| PDF | Working | Printed from the loaded Chromium preview using A4 portrait and landscape pages as composed |
+| Word (.docx) | Working | Editable headings, paragraphs, metadata, tables, captions, figures, page breaks, and section orientations |
+| Companion Excel (.xlsx) | Optional | Stores qualifying large report tables when requested; the primary report contains appendix notices |
 
----
+Word is the preferred output when the recipient needs to revise wording, reorder content, add commentary, or apply a client template. PDF is the fixed-layout delivery format.
 
-## Roadmap
+## Cover and Branding Contract
 
-### Markdown export
+- The cover remains balanced with or without an image.
+- No logo means no fabricated placeholder or initials badge.
+- The user can explicitly remove a saved logo and return to a text-only cover.
+- Wide and tall logos are bounded by both width and height.
+- Project number and the user-entered report date are shown when provided.
+- The Word cover is editable content rather than a flattened screenshot.
+- Word report content begins on a new page, and the first page omits report headers and footers.
+- SVG stays embedded in HTML/PDF and is rasterized only when Word compatibility requires it.
 
-The HTML report already has a clean, semantic structure making conversion straightforward.
+## Report Fidelity Contract
 
-**Approach**: Walk the HTML DOM (or generate in parallel from `ReportGenerator`) and emit:
-- `#` / `##` / `###` for headings
-- `|` pipe tables for percentile/K-value tables
-- `>` blockquotes for info/warning/metadata boxes
-- `![fig](data:...)` for embedded plots (or save as `.png` alongside the `.md`)
-- YAML front matter for project metadata
+Reports may include only:
 
-**Suggested implementation**: Add a `generate_*_markdown()` method in `ReportGenerator` mirroring the HTML methods, or add a lightweight `html_to_md()` converter in a new `markdown_exporter.py`.
+- tables containing data produced by the program; and
+- plots the user selects and can see in the application.
 
-**Dependency**: No new packages needed — pure Python string output.
+The exporter must not invent fallback plots, semantic substitutes, or decorative data visualizations. Composition changes such as page orientation, plot sizing, label wrapping, legend placement, and table externalization are allowed because they preserve the underlying report content.
 
----
+## Known Constraints
 
-### Word (.docx) export
+- PDF export requires `PyQt6-WebEngine`.
+- Word export requires `python-docx`.
+- Very large editable Word documents remain subject to the recipient's installed fonts, printer settings, and Word version.
+- Representative confidential client reports are not stored as fixtures when NDA restrictions prevent it; synthetic and non-confidential fixtures are used instead.
+- Plot-style changes are applied the next time the user explicitly generates the report.
 
-`python-docx` is already listed in `requirements.txt`.
-
-**Approach**: Build the `.docx` document programmatically in `ReportGenerator`, mirroring the HTML structure:
-- `doc.add_heading()` for h1/h2/h3
-- `doc.add_paragraph()` for body text
-- `doc.add_table()` for data tables — style with brand color header fill
-- `doc.add_picture(BytesIO(base64_decoded_plot))` for charts
-- Custom paragraph styles for metadata boxes, badges, stat cards
-- Header/footer with page numbers via `python-docx` section properties
-
-**Brand color**: Pass `brand.primary_color` to set table header fill and heading colors using `RGBColor`.
-
-**Suggested implementation**: New method `generate_*_docx(dataset, ..., brand) -> bytes` returning the `.docx` as bytes, saved by `_on_export_docx()` via `QFileDialog`.
-
-**Dependency**: `python-docx>=1.0.0` (already in requirements).
-
----
-
-### Other potential future formats
-
-| Format | Value | Difficulty |
-|---|---|---|
-| Excel (.xlsx) | High — easy for clients to edit/append data | Low — `openpyxl` already used in export tab |
-| LaTeX | High for academic users | Medium — needs template |
-| CSV data dump | Low — data already in export tab | Trivial |
-| Print directly | Medium — avoids PDF detour | Low — `QPrintDialog` + `page().print()` |
-
----
-
-## Known Limitations
-
-- **Full Project** report type is currently identical to Comparison (all samples selected). There is no dedicated "full project overview" report format yet.
-- **Plot styling** in `ReportGenerator` uses hardcoded matplotlib colors (`#6b8e23`, `#ff6b6b`, etc.) rather than the brand color. Charts don't visually match the brand color set by the user.
-- **PDF margins**: The `@page` CSS `margin: 20mm 20mm 25mm 20mm` is used for page number positioning, but `printToPdf()` is called with `QMarginsF(15, 15, 15, 15)` (15mm). These are slightly inconsistent — the `@page` margin wins for CSS content, but the QPageLayout margin controls the physical page margin in Chromium's print pipeline. Should be unified.
-- **No report config persistence**: Template choice, metadata fields, and section toggles reset on every app launch (brand settings do persist via QSettings).
-- **MD/DOCX export buttons** are enabled/disabled together with HTML, but clicking them only shows a "Coming Soon" dialog. They should remain visually disabled (grayed out) to avoid confusion.
-
----
-
-## Files
+## Main Files
 
 | File | Role |
 |---|---|
-| `Program/gui/reporting_tab.py` | Tab UI — left config panel, WebEngine preview, export bar |
-| `Program/report_generator.py` | HTML report generation for all 4 report types |
-| `Program/gui/report_brand.py` | `ReportBrand` dataclass — org identity, color, logo, QSettings persistence |
-| `requirements.txt` | `PyQt6-WebEngine>=6.4.0`, `python-docx>=1.0.0` already listed |
+| `Program/gui/reporting_tab.py` | Report configuration, preview, background generation, and save workflow |
+| `Program/report_generator.py` | HTML report generation and editable DOCX rendering |
+| `Program/gui/report_brand.py` | Persisted organization identity, accent color, and optional logo |
+| `Program/help_content/reports_tab.html` | User-facing written guide |
+| `docs/REPORTING_ROADMAP.md` | Longer-term reporting architecture and enhancement record |

@@ -5,10 +5,11 @@
 Build a new release from the project root:
 
 ```batch
-BUILD_EXE.bat 1.0.0
+BUILD_EXE.bat 0.9.7
 ```
 
-Replace `1.0.0` with the release version.
+The version may be omitted; the script reads `Program/version.py`. If supplied,
+it must match that canonical application version.
 
 ## Recommended Publish Mode
 
@@ -53,7 +54,7 @@ The build script reduces this risk by:
 Folder mode:
 
 ```text
-C:\gsa_build\1.0.0\
+C:\gsa_build\0.9.7\
     GrainSizeAnalysis\
         GrainSizeAnalysis.exe
         README_FIRST.txt
@@ -63,7 +64,7 @@ C:\gsa_build\1.0.0\
 Single-file mode:
 
 ```text
-C:\gsa_build\1.0.0\
+C:\gsa_build\0.9.7\
     GrainSizeAnalysis.exe
     README_FIRST.txt
 ```
@@ -72,7 +73,7 @@ For folder mode, distribute the entire `GrainSizeAnalysis` folder. Do not move
 only the `.exe` out of the folder.
 
 
-## Installer Experiment
+## Windows Installer
 
 A proper Windows installer can package the folder build without losing the fast
 startup behavior. The installer copies the app to a controlled short path under
@@ -85,26 +86,25 @@ Prerequisite: install Inno Setup 6 from https://jrsoftware.org/isinfo.php.
 Build flow:
 
 ```batch
-BUILD_EXE.bat 1.0.0
-BUILD_INSTALLER.bat 1.0.0
+BUILD_EXE.bat 0.9.7
+BUILD_INSTALLER.bat 0.9.7
 ```
 
 When `BUILD_EXE.bat` asks for build mode, choose `2` / `Folder`. The installer
 helper expects this folder build:
 
 ```text
-C:\gsa_build\1.0.0\GrainSizeAnalysis\GrainSizeAnalysis.exe
+C:\gsa_build\0.9.7\GrainSizeAnalysis\GrainSizeAnalysis.exe
 ```
 
 The installer output will be:
 
 ```text
-C:\gsa_build\1.0.0\GrainSizeAnalysis-1.0.0-Setup.exe
+C:\gsa_build\0.9.7\GrainSizeAnalysis-0.9.7-Setup.exe
 ```
 
-This is currently an experiment, but it is the likely best final distribution
-path if we want the immediate PyQt progress splash and fewer path-length support
-issues.
+This is the supported release distribution path. It preserves the immediate
+PyQt progress splash and avoids the extraction-path problems of a folder ZIP.
 
 ## Licensing Release Checklist
 
@@ -114,9 +114,9 @@ Before publishing an installer:
 
 1. Confirm the copyright holder line in `README.md` with DTU.
 2. Commit the exact source code used for the release.
-3. Tag the commit, for example `v0.96`.
-4. Build the folder package with `BUILD_EXE.bat 0.96`.
-5. Build the installer with `BUILD_INSTALLER.bat 0.96`.
+3. Tag the commit, for example `v0.9.7`.
+4. Build the folder package with `BUILD_EXE.bat 0.9.7`.
+5. Build the installer with `BUILD_INSTALLER.bat 0.9.7`.
 6. Publish the installer together with the matching source archive or GitHub release/tag.
 
 The folder package and installer include:

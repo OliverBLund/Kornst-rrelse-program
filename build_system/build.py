@@ -22,6 +22,12 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Dict, Iterable, List
 
+PROGRAM_DIR = Path(__file__).resolve().parents[1] / "Program"
+if str(PROGRAM_DIR) not in sys.path:
+    sys.path.insert(0, str(PROGRAM_DIR))
+
+from build_version_info import render_version_info
+
 
 DEFAULT_CONFIG: Dict[str, Any] = {
     "app_name": "GrainSizeAnalysis",
@@ -253,6 +259,9 @@ class BuildEnvironment:
         self.build_dir.mkdir(parents=True, exist_ok=True)
         self.spec_dir.mkdir(parents=True, exist_ok=True)
 
+        version_file = self.build_dir / "version_info.txt"
+        version_file.write_text(render_version_info(), encoding="utf-8")
+
         command: List[str] = [
             sys.executable,
             "-m",
@@ -267,6 +276,8 @@ class BuildEnvironment:
             "--specpath",
             self._to_cmd_path(self.spec_dir),
             "--noconfirm",
+            "--version-file",
+            self._to_cmd_path(version_file),
         ]
 
         if clean_before:

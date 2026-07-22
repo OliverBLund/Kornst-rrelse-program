@@ -161,6 +161,56 @@ class TestMainWindowScope(unittest.TestCase):
 
         self.assertEqual(segments["K̄"], "2.00e-04 m/s")
 
+    def test_status_segments_follow_selected_dataset_not_preferred_or_last(self):
+        segments = {}
+
+        def dataset(name, d50, temperature):
+            return SimpleNamespace(
+                sample_name=name,
+                temperature=temperature,
+                get_d50=lambda: d50,
+            )
+
+        first = SimpleNamespace(
+            dataset=dataset("First sample", 0.12, 8.0),
+            temperature=8.0,
+            current_results=[],
+        )
+        second = SimpleNamespace(
+            dataset=dataset("Selected sample", 0.42, 17.5),
+            temperature=17.5,
+            current_results=[
+                SimpleNamespace(
+                    method_name="Hazen",
+                    k_value=4.0e-4,
+                    status="OK",
+                    conditions_met=True,
+                    status_message="",
+                )
+            ],
+        )
+        harness = SimpleNamespace(
+            dataset_tabs=[first, second],
+            dataset_tabs_widget=SimpleNamespace(currentWidget=lambda: second),
+            rich_status_bar=SimpleNamespace(
+                set_segment=lambda key, value: segments.__setitem__(key, value)
+            ),
+            active_method_names=["Hazen"],
+            available_method_names=["Hazen", "Beyer"],
+            app_toolbar=SimpleNamespace(set_badge=lambda *_args: None),
+        )
+        harness._status_dataset_tab = lambda preferred=None: MainWindow._status_dataset_tab(
+            harness, preferred
+        )
+
+        MainWindow._refresh_dataset_status_segments(harness, "First sample")
+
+        self.assertEqual(segments["SAMPLE"], "Selected sample")
+        self.assertEqual(segments["D50"], "0.42 mm")
+        self.assertEqual(segments["K̄"], "4.00e-04 m/s")
+        self.assertEqual(segments["TEMP"], "17.5 °C")
+        self.assertEqual(segments["DATASETS"], "2")
+
 
 if __name__ == "__main__":
     unittest.main()

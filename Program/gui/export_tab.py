@@ -11,7 +11,7 @@ from PyQt6.QtWidgets import (
     QToolButton, QSizePolicy, QGridLayout, QAbstractItemView, QMenu
 )
 from PyQt6.QtCore import Qt, pyqtSignal, QSize
-from PyQt6.QtGui import QFont, QIcon, QColor
+from PyQt6.QtGui import QFont, QIcon
 from typing import Any, Dict, List, Optional
 import json
 import os
@@ -64,17 +64,17 @@ class ExportTab(QWidget):
         (
             'standard',
             'CSV + Grain Curves',
-            'Long/wide CSV plus selected grain/aggregate tables and PNG curves.',
+            'Method-result and sample-summary CSV tables plus PNG curves.',
         ),
         (
             'minimal',
             'Summary CSV',
-            'One wide CSV with core grain and K metrics; no plot files.',
+            'One sample-summary CSV with core grain and K metrics; no plot files.',
         ),
         (
             'statistical',
             'Analysis Tables',
-            'Wide/aggregate CSV tables plus an Excel workbook; no plot files.',
+            'Sample and aggregate tables plus an Excel workbook; no plot files.',
         ),
         (
             'client',
@@ -94,9 +94,9 @@ class ExportTab(QWidget):
     )
 
     FORMAT_SPECS = (
-        ('Data', 'csv_long', 'CSV Long', 'One row per K-value result'),
-        ('Data', 'csv_wide', 'CSV Wide', 'One row per sample for comparison and statistics'),
-        ('Data', 'excel', 'Excel', 'Combined typed workbook'),
+        ('Data', 'csv_long', 'Method results CSV', 'Long/tidy table: one row per selected method result'),
+        ('Data', 'csv_wide', 'Sample summary CSV', 'Wide comparison table: one row per sample'),
+        ('Data', 'excel', 'Excel workbooks', 'Combined and/or per-sample XLSX workbooks'),
         ('Plots', 'png', 'PNG', 'High-resolution raster images'),
         ('Plots', 'svg', 'SVG', 'Scalable vector graphics'),
         ('Plots', 'pdf', 'PDF', 'Print-ready vector figures'),
@@ -124,6 +124,7 @@ class ExportTab(QWidget):
         self._active_recipe_key = 'standard'
         self._active_recipe_signature = None
         self._applying_recipe = False
+        self.data_file_layout = 'combined'
 
         # Selected formats (for card-based selection)
         self.selected_formats = self._default_selected_formats()
@@ -331,6 +332,7 @@ class ExportTab(QWidget):
             self.format_selector_btn.setText(summary)
             self.format_selector_btn.setToolTip(f'Selected formats: {full_summary}')
         self._sync_plot_appearance_visibility()
+        self._sync_data_layout_visibility()
 
     def _set_format_enabled(self, format_key: str, enabled: bool) -> None:
         if self.selected_formats.get(format_key, False) == bool(enabled):
@@ -421,23 +423,46 @@ class ExportTab(QWidget):
             self._set_tree_icon(csv_folder, "fa6s.folder")
             csv_folder.setFont(0, QFont("Segoe UI", 10, QFont.Weight.Bold))
 
-            if self.selected_formats.get('csv_long'):
-                long_item = QTreeWidgetItem([self._planned_filename('combined_all_datasets', '.csv'), "long"])
+            if self.selected_formats.get('csv_long') and self.data_file_layout in {'combined', 'both'}:
+                long_item = QTreeWidgetItem([self._planned_filename('combined_all_datasets', '.csv'), 'method results'])
                 self._set_tree_icon(long_item, "fa6s.file-lines")
                 csv_folder.addChild(long_item)
 
             if self.selected_formats.get('csv_wide'):
-                wide_item = QTreeWidgetItem([self._planned_filename('wide_format_all_datasets', '.csv'), "wide"])
+                wide_item = QTreeWidgetItem([self._planned_filename('wide_format_all_datasets', '.csv'), 'sample summary'])
                 self._set_tree_icon(wide_item, "fa6s.file-lines")
                 csv_folder.addChild(wide_item)
 
             if (
+                self.data_file_layout in {'combined', 'both'}
+                and
                 self.content_selection['grain_size']['enabled']
                 and self.content_selection['grain_size']['items']['raw_distribution']
             ):
                 grain_item = QTreeWidgetItem([self._planned_filename('grain_distribution', '.csv'), "raw curve rows"])
                 self._set_tree_icon(grain_item, "fa6s.file-lines")
                 csv_folder.addChild(grain_item)
+
+            if self.selected_formats.get('csv_long') and self.data_file_layout in {'separate', 'both'}:
+                for name, _dataset, results in datasets_to_export:
+                    sample_folder = QTreeWidgetItem([
+                        self._format_filename('{sample_name}', name, ''),
+                        'per-sample tables',
+                    ])
+                    self._set_tree_icon(sample_folder, 'fa6s.vial')
+                    base = self._planned_filename(name)
+                    if (
+                        self.content_selection['grain_size']['enabled']
+                        and self.content_selection['grain_size']['items']['raw_distribution']
+                    ):
+                        sample_folder.addChild(QTreeWidgetItem([f'{base}_grain_size.csv', 'curve data']))
+                    if self.content_selection['k_values']['enabled'] and results:
+                        sample_folder.addChild(QTreeWidgetItem([f'{base}_k_values.csv', 'method results']))
+                    if self.content_selection['statistics']['enabled']:
+                        sample_folder.addChild(QTreeWidgetItem([f'{base}_statistics.csv', 'sample summary']))
+                    if sample_folder.childCount():
+                        csv_folder.addChild(sample_folder)
+                        sample_folder.setExpanded(True)
 
             if len(datasets_to_export) > 1 and self._collection_aggregates_enabled():
                 aggregate_item = QTreeWidgetItem([self._planned_filename('aggregate_statistics', '.csv'), "overall + groups"])
@@ -453,9 +478,26 @@ class ExportTab(QWidget):
             self._set_tree_icon(excel_folder, "fa6s.folder")
             excel_folder.setFont(0, QFont("Segoe UI", 10, QFont.Weight.Bold))
 
-            excel_item = QTreeWidgetItem([self._planned_filename('combined_all_datasets', '.xlsx'), "typed workbook"])
-            self._set_tree_icon(excel_item, "fa6s.file-excel")
-            excel_folder.addChild(excel_item)
+            if self.data_file_layout in {'combined', 'both'}:
+                excel_item = QTreeWidgetItem([self._planned_filename('combined_all_datasets', '.xlsx'), "combined workbook"])
+                self._set_tree_icon(excel_item, "fa6s.file-excel")
+                excel_folder.addChild(excel_item)
+            if self.data_file_layout in {'separate', 'both'}:
+                for name, _dataset, _results in datasets_to_export:
+                    excel_item = QTreeWidgetItem([self._planned_filename(name, '.xlsx'), "sample workbook"])
+                    self._set_tree_icon(excel_item, "fa6s.file-excel")
+                    excel_folder.addChild(excel_item)
+                if (
+                    self.data_file_layout == 'separate'
+                    and len(datasets_to_export) > 1
+                    and self._collection_aggregates_enabled()
+                ):
+                    aggregate_item = QTreeWidgetItem([
+                        self._planned_filename('aggregate_statistics', '.xlsx'),
+                        'collection statistics',
+                    ])
+                    self._set_tree_icon(aggregate_item, 'fa6s.file-excel')
+                    excel_folder.addChild(aggregate_item)
 
             self.file_tree.addTopLevelItem(excel_folder)
             excel_folder.setExpanded(True)
@@ -542,11 +584,21 @@ class ExportTab(QWidget):
         file_count = 0
 
         if self.selected_formats.get('csv_long'):
-            file_count += 1
+            if self.data_file_layout in {'combined', 'both'}:
+                file_count += 1
+            if self.data_file_layout in {'separate', 'both'}:
+                for _name, _dataset, results in datasets_to_export:
+                    file_count += int(
+                        self.content_selection['grain_size']['enabled']
+                        and self.content_selection['grain_size']['items']['raw_distribution']
+                    )
+                    file_count += int(self.content_selection['k_values']['enabled'] and bool(results))
+                    file_count += int(self.content_selection['statistics']['enabled'])
         if self.selected_formats.get('csv_wide'):
             file_count += 1
         if (
-            (self.selected_formats.get('csv_long') or self.selected_formats.get('csv_wide'))
+            self.data_file_layout in {'combined', 'both'}
+            and (self.selected_formats.get('csv_long') or self.selected_formats.get('csv_wide'))
             and self.content_selection['grain_size']['enabled']
             and self.content_selection['grain_size']['items']['raw_distribution']
         ):
@@ -558,7 +610,16 @@ class ExportTab(QWidget):
         ):
             file_count += 1
         if self.selected_formats.get('excel'):
-            file_count += 1
+            if self.data_file_layout in {'combined', 'both'}:
+                file_count += 1
+            if self.data_file_layout in {'separate', 'both'}:
+                file_count += dataset_count
+                if (
+                    self.data_file_layout == 'separate'
+                    and dataset_count > 1
+                    and self._collection_aggregates_enabled()
+                ):
+                    file_count += 1
 
         plot_formats = len(self._selected_plot_formats()) if self._plot_exports_enabled() else 0
         single_plot_types = len(self._selected_single_plot_types()) if self._plot_exports_enabled() else 0
@@ -975,6 +1036,7 @@ class ExportTab(QWidget):
                 'formats': self.selected_formats,
                 'content': self.content_selection,
                 'breakdowns': breakdowns,
+                'data_file_layout': self.data_file_layout,
             },
             sort_keys=True,
         )
@@ -1438,9 +1500,11 @@ class ExportTab(QWidget):
         """Reset content and output formats to the default export workspace."""
         self._applying_recipe = True
         self.selected_formats = self._default_selected_formats()
+        self.data_file_layout = 'combined'
         self._init_content_selection()
         self._sync_legacy_content_enabled()
         self._sync_format_cards()
+        self._sync_data_layout_control()
         self._update_all_checkboxes()
         self.update_file_tree()
         self.update_summary_card()
@@ -1480,6 +1544,7 @@ class ExportTab(QWidget):
         """Apply a complete export workflow preset."""
         self._applying_recipe = True
         self._init_content_selection()
+        self.data_file_layout = 'combined'
 
         if preset_name == 'minimal':
             # One clean table for the common handoff: core grain stats and K values.
@@ -1514,6 +1579,7 @@ class ExportTab(QWidget):
             self.content_selection['metadata']['items']['processing_notes'] = True
             self.content_selection['metadata']['items']['software_version'] = True
             self._set_plot_type_defaults(set(export_plot_items().keys()))
+            self.data_file_layout = 'both'
 
         elif preset_name == 'statistical':
             # Analysis package: typed wide table/workbook, no figure files.
@@ -1526,6 +1592,7 @@ class ExportTab(QWidget):
 
         self._sync_legacy_content_enabled()
         self._sync_format_cards()
+        self._sync_data_layout_control()
         self._update_all_checkboxes()
         self.update_file_tree()
         self.update_summary_card()
@@ -1810,6 +1877,9 @@ class ExportTab(QWidget):
         current_row = QHBoxLayout()
         current_row.setSpacing(6)
         self.current_dataset_combo = QComboBox()
+        self.current_dataset_combo.setToolTip(
+            "Choose the single dataset exported when Dataset Scope is Current."
+        )
         self.current_dataset_combo.setMinimumHeight(26)
         self.current_dataset_combo.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
         self.current_dataset_combo.setFont(QFont("Segoe UI", 8))
@@ -1833,6 +1903,12 @@ class ExportTab(QWidget):
 
     def _create_scope_segment(self, text: str, icon_name: str, checked: bool) -> QPushButton:
         button = QPushButton(f"  {text}")
+        scope_tooltips = {
+            "All": "Export every loaded dataset.",
+            "Current": "Export only the dataset chosen in the Current dataset list.",
+            "Selected": "Export the inclusion set managed in sidebar Scope & Groups.",
+        }
+        button.setToolTip(scope_tooltips.get(text, ""))
         button.setIcon(icon(icon_name, C.TEXT if checked else C.TEXT_MID, 12))
         button.setIconSize(QSize(12, 12))
         button.setProperty("exportScopeSeg", True)
@@ -1872,6 +1948,7 @@ class ExportTab(QWidget):
 
         self.formats_layout.addWidget(self._create_recipe_control())
         self.formats_layout.addWidget(self._create_format_selector())
+        self.formats_layout.addWidget(self._create_data_layout_selector())
 
         section.body_layout().addWidget(body)
         self.format_section = section
@@ -1963,6 +2040,65 @@ class ExportTab(QWidget):
         layout.addWidget(self.format_selector_btn, 1)
         self._sync_format_cards()
         return row
+
+    def _create_data_layout_selector(self) -> QWidget:
+        """Choose whether tabular exports are packaged or split by sample."""
+        row = QWidget()
+        row.setStyleSheet('background: transparent; border: none;')
+        layout = QHBoxLayout(row)
+        layout.setContentsMargins(0, 0, 0, 0)
+        layout.setSpacing(7)
+
+        label = QLabel('File layout')
+        label.setFixedWidth(58)
+        label.setFont(QFont('Segoe UI', 8, QFont.Weight.DemiBold))
+        label.setStyleSheet(f'color: {C.TEXT_MID}; background: transparent;')
+        layout.addWidget(label)
+
+        self.data_layout_combo = QComboBox()
+        self.data_layout_combo.setObjectName('export-data-layout')
+        self.data_layout_combo.addItem('Combined package', 'combined')
+        self.data_layout_combo.addItem('Separate by sample', 'separate')
+        self.data_layout_combo.addItem('Combined + per sample', 'both')
+        self.data_layout_combo.setToolTip(
+            'Controls Method results CSV and Excel packaging. Sample summary CSV remains one comparison table. '
+            'With Excel selected, each sample is written as an XLSX workbook with separate sheets. '
+            'Plots are always organized by sample.'
+        )
+        self.data_layout_combo.setStyleSheet(opaque_combo_qss())
+        self.data_layout_combo.currentIndexChanged.connect(self._on_data_layout_changed)
+        layout.addWidget(self.data_layout_combo, 1)
+        self.data_layout_row = row
+        self._sync_data_layout_control()
+        self._sync_data_layout_visibility()
+        return row
+
+    def _sync_data_layout_visibility(self) -> None:
+        """Only show organization controls when a selected format can use them."""
+        row = getattr(self, 'data_layout_row', None)
+        if row is not None:
+            row.setVisible(bool(
+                self.selected_formats.get('csv_long')
+                or self.selected_formats.get('excel')
+            ))
+
+    def _sync_data_layout_control(self) -> None:
+        combo = getattr(self, 'data_layout_combo', None)
+        if combo is None:
+            return
+        combo.blockSignals(True)
+        index = combo.findData(self.data_file_layout)
+        combo.setCurrentIndex(max(index, 0))
+        combo.blockSignals(False)
+
+    def _on_data_layout_changed(self, index: int) -> None:
+        layout = self.data_layout_combo.itemData(index)
+        if not layout or layout == self.data_file_layout:
+            return
+        self.data_file_layout = str(layout)
+        self.update_file_tree()
+        self.update_summary_card()
+        self.update_preview()
 
     def _create_plot_queue_section(self) -> QWidget:
         section = AccordionSection("fa6s.chart-line", "Selected Plots")
@@ -2271,8 +2407,11 @@ class ExportTab(QWidget):
         self._update_format_section_meta()
 
         # Add tabs only for selected formats
-        if self.selected_formats.get('csv_long'):
+        if self.selected_formats.get('csv_long') and self.data_file_layout in {'combined', 'both'}:
             self._add_csv_long_preview_tab(datasets_to_export)
+
+        if self.selected_formats.get('csv_long') and self.data_file_layout in {'separate', 'both'}:
+            self._add_sample_csv_preview_tab(datasets_to_export)
 
         if self.selected_formats.get('csv_wide'):
             self._add_csv_wide_preview_tab(datasets_to_export)
@@ -2325,7 +2464,7 @@ class ExportTab(QWidget):
         preview.horizontalHeader().setSectionResizeMode(QHeaderView.ResizeMode.ResizeToContents)
         preview.horizontalHeader().setStretchLastSection(False)
 
-        label = "CSV Long (50 rows)" if len(data_rows) == 50 else "CSV Long"
+        label = "Method Results (50 rows)" if len(data_rows) == 50 else "Method Results"
         self.preview_tabs.addTab(preview, icon("fa6s.table-columns", C.TEXT_MUTED, 12), label)
         return
 
@@ -2389,7 +2528,7 @@ class ExportTab(QWidget):
         preview.horizontalHeader().setSectionResizeMode(QHeaderView.ResizeMode.ResizeToContents)
         preview.horizontalHeader().setStretchLastSection(False)
 
-        label = f"CSV Long ({max_preview_rows} rows)" if total_rows > max_preview_rows else "CSV Long"
+        label = f"Method Results ({max_preview_rows} rows)" if total_rows > max_preview_rows else "Method Results"
         self.preview_tabs.addTab(preview, icon("fa6s.table-columns", C.TEXT_MUTED, 12), label)
 
     def _add_csv_wide_preview_tab(self, datasets_to_export):
@@ -2414,7 +2553,7 @@ class ExportTab(QWidget):
         preview.horizontalHeader().setSectionResizeMode(QHeaderView.ResizeMode.ResizeToContents)
         preview.horizontalHeader().setStretchLastSection(False)
 
-        label = "CSV Wide (20 datasets)" if len(data_rows) == 20 and len(datasets_to_export) > 20 else "CSV Wide"
+        label = "Sample Summary (20 samples)" if len(data_rows) == 20 and len(datasets_to_export) > 20 else "Sample Summary"
         self.preview_tabs.addTab(preview, icon("fa6s.chart-simple", C.TEXT_MUTED, 12), label)
         return
 
@@ -2571,7 +2710,7 @@ class ExportTab(QWidget):
         preview.horizontalHeader().setSectionResizeMode(QHeaderView.ResizeMode.ResizeToContents)
         preview.horizontalHeader().setStretchLastSection(False)
 
-        label = f"CSV Wide ({max_preview_rows} datasets)" if len(datasets_to_export) > max_preview_rows else "CSV Wide"
+        label = f"Sample Summary ({max_preview_rows} samples)" if len(datasets_to_export) > max_preview_rows else "Sample Summary"
         self.preview_tabs.addTab(preview, icon("fa6s.chart-simple", C.TEXT_MUTED, 12), label)
 
     def _add_aggregate_statistics_preview_tab(self, datasets_to_export):
@@ -2604,27 +2743,94 @@ class ExportTab(QWidget):
         self.preview_tabs.addTab(preview, icon("fa6s.layer-group", C.TEXT_MUTED, 12), label)
 
     def _add_excel_preview_tab(self, datasets_to_export):
-        """Add Excel format preview tab"""
+        """Show workbook organization without exposing internal table terminology."""
+        preview = QTreeWidget()
+        preview.setHeaderLabels(["Workbook output", "Contains"])
+        preview.setRootIsDecorated(True)
+        preview.setAlternatingRowColors(True)
+        preview.header().setSectionResizeMode(0, QHeaderView.ResizeMode.ResizeToContents)
+        preview.header().setSectionResizeMode(1, QHeaderView.ResizeMode.Stretch)
+
+        def add_content(parent, label: str, description: str) -> None:
+            child = QTreeWidgetItem([label, description])
+            self._set_tree_icon(child, 'fa6s.table')
+            parent.addChild(child)
+
+        if not datasets_to_export:
+            preview.addTopLevelItem(QTreeWidgetItem(["No samples selected", "Choose an export scope"]))
+        if datasets_to_export and self.data_file_layout in {'combined', 'both'}:
+            combined = QTreeWidgetItem([
+                "Combined workbook",
+                f"1 XLSX file · {len(datasets_to_export)} sample{'s' if len(datasets_to_export) != 1 else ''}",
+            ])
+            combined.setToolTip(0, self._planned_filename('combined_all_datasets', '.xlsx'))
+            self._set_tree_icon(combined, 'fa6s.file-excel')
+            add_content(combined, "Method results", "One row per selected method and sample")
+            add_content(combined, "Sample summary", "One row per sample for comparison")
+            if self.content_selection['grain_size']['enabled'] and self.content_selection['grain_size']['items']['raw_distribution']:
+                add_content(combined, "Grain distribution", "Measured particle-size and percent-passing points")
+            if len(datasets_to_export) > 1 and self._collection_aggregates_enabled():
+                add_content(combined, "Collection statistics", "Overall, group, and sample summaries")
+            preview.addTopLevelItem(combined)
+            combined.setExpanded(True)
+
+        if datasets_to_export and self.data_file_layout in {'separate', 'both'}:
+            samples = QTreeWidgetItem([
+                "Sample workbooks",
+                f"{len(datasets_to_export)} XLSX file{'s' if len(datasets_to_export) != 1 else ''} · one per sample",
+            ])
+            self._set_tree_icon(samples, 'fa6s.file-excel')
+            add_content(samples, "Sample overview", "Settings and selected summary values")
+            if self.content_selection['grain_size']['enabled']:
+                add_content(samples, "Grain-size data", "Measurements, percentiles, and gradation")
+            if self.content_selection['k_values']['enabled']:
+                add_content(samples, "Method results", "Selected K methods, units, and status")
+            if self.content_selection['statistics']['enabled']:
+                add_content(samples, "Sample statistics", "Selected statistics for that sample")
+            preview.addTopLevelItem(samples)
+            samples.setExpanded(True)
+
+        self.preview_tabs.addTab(preview, icon("fa6s.file-excel", C.TEXT_MUTED, 12), "Excel")
+
+    def _add_sample_csv_preview_tab(self, datasets_to_export):
+        """Explain the per-sample CSV artifacts selected by the content filters."""
         preview = QTextEdit()
         preview.setReadOnly(True)
         preview.setFont(QFont("Segoe UI", 9))
+        lines = [
+            f"Separate sample folders: {len(datasets_to_export)}",
+            "Each selected sample receives only the applicable files below:",
+            "",
+        ]
+        if (
+            self.content_selection['grain_size']['enabled']
+            and self.content_selection['grain_size']['items']['raw_distribution']
+        ):
+            lines.append("  - *_grain_size.csv - measured curve data")
+        if self.content_selection['k_values']['enabled']:
+            lines.append("  - *_k_values.csv - selected methods, units, status, and optional details")
+        if self.content_selection['statistics']['enabled']:
+            lines.append("  - *_statistics.csv - selected sample statistics and metadata")
+        lines.extend([
+            "",
+            "Sample summary and collection-statistics tables remain collection-level files.",
+        ])
+        preview.setPlainText("\n".join(lines))
+        self.preview_tabs.addTab(preview, icon("fa6s.folder-tree", C.TEXT_MUTED, 12), "Sample CSVs")
 
-        text = []
-        if datasets_to_export:
-            text.append(f"Workbook: {self._planned_filename('combined_all_datasets', '.xlsx')}")
-            text.append("")
-            text.append("Sheets:")
-            text.append("  - K_Results_Long - selected K rows and table context")
-            text.append("  - Sample_Wide - one row per exported dataset")
-            if self.content_selection['grain_size']['enabled'] and self.content_selection['grain_size']['items']['raw_distribution']:
-                text.append("  - Grain_Distribution - measured curve points")
-            if len(datasets_to_export) > 1 and self._collection_aggregates_enabled():
-                text.append("  - Aggregate_Statistics - overall, group, and dataset rows")
-            text.append("")
-            text.append("Total workbooks to create: 1")
-
-        preview.setPlainText("\n".join(text))
-        self.preview_tabs.addTab(preview, icon("fa6s.file-excel", C.TEXT_MUTED, 12), "Excel")
+    def _planned_excel_files(self, datasets_to_export):
+        """Yield planned workbook names for previews and tests."""
+        if self.data_file_layout in {'combined', 'both'}:
+            yield self._planned_filename('combined_all_datasets', '.xlsx')
+        if self.data_file_layout in {'separate', 'both'}:
+            for name, _dataset, _results in datasets_to_export:
+                yield self._planned_filename(name, '.xlsx')
+            if (
+                self.data_file_layout == 'separate'
+                and len(datasets_to_export) > 1
+                and self._collection_aggregates_enabled()
+            ):
+                yield self._planned_filename('aggregate_statistics', '.xlsx')
 
     def _add_plot_preview_tab(self, datasets_to_export):
         """Add a real plot preview tab backed by the export renderer."""
@@ -2896,10 +3102,10 @@ class ExportTab(QWidget):
         text.append("")
         text.append("Available formats:")
         text.append("")
-        text.append("  CSV Long - One row per K-value result")
+        text.append("  Method results CSV - One row per selected method result")
         text.append("     Best for: Data analysis, importing into other tools")
         text.append("")
-        text.append("  CSV Wide - One row per dataset, columns for each method")
+        text.append("  Sample summary CSV - One row per sample, with methods in columns")
         text.append("     Best for: Statistical analysis, method comparison")
         text.append("")
         text.append("  Excel - Combined typed workbook")
@@ -3166,7 +3372,7 @@ class ExportTab(QWidget):
 
         # Show CSV Long Format preview if selected
         if self.selected_formats.get('csv_long'):
-            preview_text.append(f"=== CSV LONG FORMAT ({self._planned_filename('combined_all_datasets', '.csv')}) ===")
+            preview_text.append(f"=== METHOD RESULTS CSV ({self._planned_filename('combined_all_datasets', '.csv')}) ===")
             preview_text.append("")
             preview_text.append("Sample Name,Method,K (m/s),K (cm/s),K (m/d),Status,D10 (mm),D50 (mm),D60 (mm),Cu,Cc")
 
@@ -3205,7 +3411,7 @@ class ExportTab(QWidget):
                 preview_text.append("=" * 60)
                 preview_text.append("")
 
-            preview_text.append(f"=== CSV WIDE FORMAT ({self._planned_filename('wide_format_all_datasets', '.csv')}) ===")
+            preview_text.append(f"=== SAMPLE SUMMARY CSV ({self._planned_filename('wide_format_all_datasets', '.csv')}) ===")
             preview_text.append("(One row per dataset, one column per method)")
             preview_text.append("")
 
@@ -3266,12 +3472,12 @@ class ExportTab(QWidget):
             if datasets_to_export:
                 preview_text.append(f"Workbook: {self._planned_filename('combined_all_datasets', '.xlsx')}")
                 preview_text.append("  Sheets:")
-                preview_text.append("    - K_Results_Long")
-                preview_text.append("    - Sample_Wide")
+                preview_text.append("    - Method Results")
+                preview_text.append("    - Sample Summary")
                 if self.content_selection['grain_size']['enabled'] and self.content_selection['grain_size']['items']['raw_distribution']:
-                    preview_text.append("    - Grain_Distribution")
+                    preview_text.append("    - Grain Distribution")
                 if len(datasets_to_export) > 1 and self._collection_aggregates_enabled():
-                    preview_text.append("    - Aggregate_Statistics")
+                    preview_text.append("    - Collection Statistics")
                 preview_text.append("")
                 preview_text.append("Total: 1 workbook will be created")
 
@@ -3311,8 +3517,8 @@ class ExportTab(QWidget):
             preview_text.append("Choose at least one output in the Formats selector")
             preview_text.append("")
             preview_text.append("Available formats:")
-            preview_text.append("  CSV Long - One row per K-value result")
-            preview_text.append("  CSV Wide - Statistical analysis format")
+            preview_text.append("  Method results CSV - One row per selected method result")
+            preview_text.append("  Sample summary CSV - One row per sample")
             preview_text.append("  Excel - Combined typed workbook")
             preview_text.append("  PNG - High-resolution plots")
             preview_text.append("  SVG - Vector plots")
@@ -3379,10 +3585,10 @@ class ExportTab(QWidget):
 
         # Use new selected_formats dict
         if self.selected_formats.get('csv_long'):
-            preview_lines.append("  - CSV Long Format: 1 file")
+            preview_lines.append("  - Method results CSV: 1 file")
             file_count += 1
         if self.selected_formats.get('csv_wide'):
-            preview_lines.append("  - CSV Wide Format: 1 file")
+            preview_lines.append("  - Sample summary CSV: 1 file")
             file_count += 1
         if (
             (self.selected_formats.get('csv_long') or self.selected_formats.get('csv_wide'))
@@ -3679,12 +3885,16 @@ class ExportTab(QWidget):
         config = {
             # Formats - using new selected_formats dict
             'csv': self.selected_formats.get('csv_long') or self.selected_formats.get('csv_wide'),
-            'csv_mode': 'combined',  # Always combined in new design
+            'csv_mode': self.data_file_layout,
             'csv_long': self.selected_formats.get('csv_long', False),
             'csv_wide': self.selected_formats.get('csv_wide', False),
 
             'excel': self.selected_formats.get('excel', False),
-            'excel_mode': 'combined',
+            'excel_mode': {
+                'combined': 'combined',
+                'separate': 'per_dataset',
+                'both': 'both',
+            }[self.data_file_layout],
 
             'json': False,
 

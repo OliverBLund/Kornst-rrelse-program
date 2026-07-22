@@ -1,0 +1,5 @@
+Particle Size (mm)|Percent Passing (%)
+2.000|100
+1.000|68
+0.500|24
+0.250|6

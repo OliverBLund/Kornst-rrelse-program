@@ -9,7 +9,7 @@ import unittest
 os.environ.setdefault('QT_QPA_PLATFORM', 'offscreen')
 sys.path.insert(0, 'Program')
 
-from PyQt6.QtCore import QPoint
+from PyQt6.QtCore import QPoint, Qt
 from PyQt6.QtWidgets import QApplication, QPushButton, QScrollArea
 
 import gui.comparison_tab as comparison_tab_module
@@ -100,58 +100,121 @@ class TestComparisonTabSelectionState(unittest.TestCase):
         )
         self.assertIn('2 selected', self.widget._count_label.text())
         self.assertIn('3 loaded', self.widget._count_label.text())
-        self.assertTrue(self.widget._update_btn.isEnabled())
+        self.assertFalse(hasattr(self.widget, '_manage_btn'))
+        self.assertFalse(hasattr(self.widget, '_update_btn'))
+        self.assertFalse(hasattr(self.widget, '_export_btn'))
 
-    def test_manage_dialog_emits_sidebar_file_keys(self):
-        self.widget.set_dataset_state(self.tabs, selected_tabs=[self.tabs[0], self.tabs[1]])
+    def test_each_table_view_has_a_local_export_action(self):
+        self.assertEqual(self.widget._details_export_btn.text(), 'Export Table…')
+        self.assertEqual(self.widget._stats_export_btn.text(), 'Export Table…')
+        self.assertIn('CSV or Excel', self.widget._details_export_btn.toolTip())
+        self.assertIn('CSV or Excel', self.widget._stats_export_btn.toolTip())
+        self.assertTrue(self.widget._details_export_btn.property('pw-btn'))
+        self.assertTrue(self.widget._stats_export_btn.property('pw-btn'))
 
-        captured: list[list[str]] = []
-        self.widget.dataset_selection_requested.connect(captured.append)
-
-        original_dialog = comparison_tab_module.DatasetSelectionDialog
-
-        class FakeDialog:
-            def __init__(self, dataset_tabs, currently_selected=None, parent=None, **_kwargs):
-                self._tabs = dataset_tabs
-                self._selected = [dataset_tabs[1], dataset_tabs[2]]
-
-            def exec(self):
-                return True
-
-            def get_selected_tabs(self):
-                return self._selected
-
-            def get_group_assignments(self):
-                return {
-                    self._tabs[1]: 'Layer 1',
-                    self._tabs[2]: 'Layer 2',
-                }
-
-        comparison_tab_module.DatasetSelectionDialog = FakeDialog
-        try:
-            self.widget._on_manage_datasets()
-        finally:
-            comparison_tab_module.DatasetSelectionDialog = original_dialog
-
-        self.assertEqual(captured, [['B.csv', 'C.csv']])
-        self.assertEqual(
-            [tab.get_dataset_name() for tab in self.widget.selected_datasets],
-            ['Sample B', 'Sample C'],
-        )
-        self.assertEqual(self.tabs[1].dataset.group_name, 'Layer 1')
-        self.assertEqual(self.tabs[2].dataset.group_name, 'Layer 2')
-
-    def test_plot_pin_filters_visible_plot_datasets(self):
+    def test_plot_visibility_has_no_pin_or_focus_actions(self):
         self.tabs[0].dataset.group_name = 'Layer 1'
         self.tabs[1].dataset.group_name = 'Layer 1'
         self.tabs[2].dataset.group_name = 'Layer 2'
         self.widget.set_dataset_state(self.tabs, selected_tabs=self.tabs)
 
-        self.widget._toggle_pin('Sample B')
+        action_tooltips = [
+            button.toolTip().lower()
+            for button in self.widget._plot_visibility_list_widget.findChildren(
+                QPushButton
+            )
+            if button.toolTip()
+        ]
 
-        plotted = [dataset.sample_name for dataset in self.widget._plot_widget.datasets]
-        self.assertEqual(plotted, ['Sample B'])
-        self.assertIn('Focused: 1 visible of 3 scoped', self.widget._pin_scope_label.text())
+        self.assertFalse(hasattr(self.widget, '_pinned'))
+        self.assertFalse(hasattr(self.widget, '_toggle_pin'))
+        self.assertFalse(hasattr(self.widget, '_toggle_group_pin'))
+        self.assertFalse(any('focus' in tooltip for tooltip in action_tooltips))
+        self.assertFalse(any('pin' in tooltip for tooltip in action_tooltips))
+        self.assertTrue(any('hide dataset' in tooltip for tooltip in action_tooltips))
+        self.assertTrue(any('hide group' in tooltip for tooltip in action_tooltips))
+
+    def test_plot_visibility_group_area_accepts_drop_and_updates_shared_group(self):
+        self.tabs[0].dataset.group_name = 'Layer 1'
+        self.tabs[1].dataset.group_name = 'Layer 2'
+        self.tabs[2].dataset.group_name = 'Layer 2'
+        self.widget.set_dataset_state(self.tabs, selected_tabs=self.tabs)
+        captured = []
+        self.widget.group_assignments_changed.connect(captured.append)
+
+        layer_two = next(
+            area for area in self.widget._plot_visibility_list_widget.findChildren(
+                comparison_tab_module._PlotGroupDropArea
+            )
+            if area.group_name == 'Layer 2'
+        )
+        self.assertTrue(layer_two.acceptDrops())
+        self.assertGreater(layer_two.layout().count(), 1)
+        layer_two._set_drop_active(True)
+        self.assertIn('2px solid', layer_two.styleSheet())
+        self.assertIn('#6b8e23', layer_two.styleSheet())
+        ungrouped = next(
+            area for area in self.widget._plot_visibility_list_widget.findChildren(
+                comparison_tab_module._PlotGroupDropArea
+            )
+            if area.group_name == 'Ungrouped'
+        )
+        self.assertTrue(ungrouped.acceptDrops())
+
+        self.widget._move_plot_dataset_to_group('Sample A', 'Layer 2')
+
+        self.assertEqual(self.tabs[0].dataset.group_name, 'Layer 2')
+        self.assertEqual(captured, [{self.tabs[0]: 'Layer 2'}])
+        rebuilt_layer_two = [
+            area for area in self.widget._plot_visibility_list_widget.findChildren(
+                comparison_tab_module._PlotGroupDropArea
+            )
+            if area.group_name == 'Layer 2'
+        ][-1]
+        dragged_rows = rebuilt_layer_two.findChildren(
+            comparison_tab_module._PlotDatasetDragRow
+        )
+        self.assertIn('Sample A', [row.dataset_name for row in dragged_rows])
+
+    def test_plot_visibility_multi_selection_moves_selected_datasets_together(self):
+        self.tabs[0].dataset.group_name = 'Layer 1'
+        self.tabs[1].dataset.group_name = 'Layer 1'
+        self.tabs[2].dataset.group_name = 'Layer 2'
+        self.widget.set_dataset_state(self.tabs, selected_tabs=self.tabs)
+        captured = []
+        self.widget.group_assignments_changed.connect(captured.append)
+
+        self.widget._on_plot_group_selection_requested(
+            'Sample A', Qt.KeyboardModifier.NoModifier
+        )
+        self.widget._on_plot_group_selection_requested(
+            'Sample B', Qt.KeyboardModifier.ControlModifier
+        )
+
+        self.assertEqual(
+            self.widget._plot_group_selection,
+            {'Sample A', 'Sample B'},
+        )
+        selected_rows = [
+            row.dataset_name
+            for row in self.widget._plot_visibility_list_widget.findChildren(
+                comparison_tab_module._PlotDatasetDragRow
+            )
+            if '#6b8e23' in row.styleSheet()
+        ]
+        self.assertEqual(set(selected_rows), {'Sample A', 'Sample B'})
+
+        self.widget._move_plot_datasets_to_group(
+            ['Sample A', 'Sample B'], 'Layer 2'
+        )
+
+        self.assertEqual(self.tabs[0].dataset.group_name, 'Layer 2')
+        self.assertEqual(self.tabs[1].dataset.group_name, 'Layer 2')
+        self.assertEqual(
+            captured,
+            [{self.tabs[0]: 'Layer 2', self.tabs[1]: 'Layer 2'}],
+        )
+        self.assertEqual(self.widget._plot_group_selection, set())
 
     def test_plot_dataset_visibility_hides_without_changing_scope(self):
         self.widget.set_dataset_state(self.tabs, selected_tabs=self.tabs)
@@ -164,7 +227,10 @@ class TestComparisonTabSelectionState(unittest.TestCase):
             [tab.get_dataset_name() for tab in self.widget.selected_datasets],
             ['Sample A', 'Sample B', 'Sample C'],
         )
-        self.assertIn('Visible: 2 of 3 scoped', self.widget._pin_scope_label.text())
+        self.assertIn(
+            'Visible: 2 of 3 scoped',
+            self.widget._plot_visibility_scope_label.text(),
+        )
 
         self.widget._toggle_plot_visibility('Sample B')
 
@@ -185,32 +251,34 @@ class TestComparisonTabSelectionState(unittest.TestCase):
             [tab.get_dataset_name() for tab in self.widget.selected_datasets],
             ['Sample A', 'Sample B', 'Sample C'],
         )
-        self.assertIn('Visible: 1 of 3 scoped', self.widget._pin_scope_label.text())
+        self.assertIn(
+            'Visible: 1 of 3 scoped',
+            self.widget._plot_visibility_scope_label.text(),
+        )
 
         self.widget._toggle_group_visibility('Layer 1')
 
         plotted = [dataset.sample_name for dataset in self.widget._plot_widget.datasets]
         self.assertEqual(plotted, ['Sample A', 'Sample B', 'Sample C'])
 
-    def test_plot_group_pin_focuses_group_and_show_all_resets(self):
+    def test_plot_show_all_restores_hidden_group(self):
         self.tabs[0].dataset.group_name = 'Layer 1'
         self.tabs[1].dataset.group_name = 'Layer 1'
         self.tabs[2].dataset.group_name = 'Layer 2'
         self.widget.set_dataset_state(self.tabs, selected_tabs=self.tabs)
 
-        self.widget._toggle_group_pin('Layer 1')
+        self.widget._toggle_group_visibility('Layer 1')
 
         plotted = [dataset.sample_name for dataset in self.widget._plot_widget.datasets]
-        self.assertEqual(plotted, ['Sample A', 'Sample B'])
-        self.assertEqual(self.widget._pinned, {'Sample A', 'Sample B'})
-        self.assertIn('Focused: 2 visible of 3 scoped', self.widget._pin_scope_label.text())
+        self.assertEqual(plotted, ['Sample C'])
+        self.assertTrue(self.widget._plot_show_all_btn.isEnabled())
 
         self.widget._show_all_plot_datasets()
 
         plotted = [dataset.sample_name for dataset in self.widget._plot_widget.datasets]
         self.assertEqual(plotted, ['Sample A', 'Sample B', 'Sample C'])
-        self.assertFalse(self.widget._pinned)
         self.assertFalse(self.widget._plot_hidden)
+        self.assertFalse(self.widget._plot_show_all_btn.isEnabled())
 
     def test_plot_visibility_panel_shows_dataset_line_style_preview(self):
         self.tabs[0].dataset.group_name = 'Layer 1'
@@ -220,7 +288,7 @@ class TestComparisonTabSelectionState(unittest.TestCase):
             set_dataset_line_style('B.csv', ':')
             self.widget.set_dataset_state(self.tabs, selected_tabs=self.tabs)
 
-            previews = self.widget._pin_list_widget.findChildren(
+            previews = self.widget._plot_visibility_list_widget.findChildren(
                 comparison_tab_module.LineStylePreview
             )
 
@@ -229,6 +297,49 @@ class TestComparisonTabSelectionState(unittest.TestCase):
             )
         finally:
             clear_dataset_line_style('B.csv')
+
+    def test_plot_visibility_uses_color_cues_for_non_curve_plots(self):
+        def current_group_areas():
+            return [
+                self.widget._plot_visibility_list_layout.itemAt(index).widget()
+                for index in range(self.widget._plot_visibility_list_layout.count() - 1)
+                if isinstance(
+                    self.widget._plot_visibility_list_layout.itemAt(index).widget(),
+                    comparison_tab_module._PlotGroupDropArea,
+                )
+            ]
+
+        def current_children(widget_type, name=''):
+            return [
+                child
+                for area in current_group_areas()
+                for child in area.findChildren(widget_type, name)
+            ]
+
+        self.widget.set_dataset_state(self.tabs, selected_tabs=self.tabs)
+        sidebar = self.widget.findChild(
+            comparison_tab_module.QFrame,
+            'plotVisibilitySidebar',
+        )
+        self.assertIsNotNone(sidebar)
+        self.assertIn('QFrame#plotVisibilitySidebar', sidebar.styleSheet())
+
+        self.widget._plot_widget.on_plot_type_changed('K-Values')
+        self.widget._plot_widget.set_display_mode('overlay')
+        APP.processEvents()
+
+        previews = current_children(comparison_tab_module.LineStylePreview)
+        color_cues = current_children(
+            comparison_tab_module.QWidget,
+            'plotVisibilityColorCue',
+        )
+        self.assertEqual(previews, [])
+        self.assertEqual(len(color_cues), len(self.tabs))
+
+        self.widget._plot_widget.on_plot_type_changed('Distribution')
+        APP.processEvents()
+        previews = current_children(comparison_tab_module.LineStylePreview)
+        self.assertEqual(len(previews), len(self.tabs))
 
     def test_plot_visibility_panel_refreshes_after_series_style_change(self):
         self.tabs[0].dataset.group_name = 'Layer 1'
@@ -241,7 +352,7 @@ class TestComparisonTabSelectionState(unittest.TestCase):
             combo.setCurrentIndex(combo.findData('--|s'))
             APP.processEvents()
 
-            previews = self.widget._pin_list_widget.findChildren(
+            previews = self.widget._plot_visibility_list_widget.findChildren(
                 comparison_tab_module.LineStylePreview
             )
 
@@ -251,7 +362,7 @@ class TestComparisonTabSelectionState(unittest.TestCase):
         finally:
             clear_dataset_line_style('B.csv')
 
-    def test_plot_visibility_pin_buttons_clear_scrollbar_gutter(self):
+    def test_plot_visibility_eye_buttons_clear_scrollbar_gutter(self):
         long_tabs = [
             DummyDatasetTab(
                 f'Example_{index + 1}_Case_{(index % 3) + 1}_Vukovic_Long_Sample_Name',
@@ -269,25 +380,25 @@ class TestComparisonTabSelectionState(unittest.TestCase):
         scroll = next(
             area
             for area in self.widget.findChildren(QScrollArea)
-            if area.widget() is self.widget._pin_list_widget
+            if area.widget() is self.widget._plot_visibility_list_widget
         )
         self.assertGreater(scroll.verticalScrollBar().maximum(), 0)
 
         gutter = scroll.verticalScrollBar().sizeHint().width()
-        pin_buttons = []
-        for index in range(self.widget._pin_list_layout.count() - 1):
-            row = self.widget._pin_list_layout.itemAt(index).widget()
+        visibility_buttons = []
+        for index in range(self.widget._plot_visibility_list_layout.count() - 1):
+            row = self.widget._plot_visibility_list_layout.itemAt(index).widget()
             if row is None:
                 continue
-            pin_buttons.extend(
+            visibility_buttons.extend(
                 button
                 for button in row.findChildren(QPushButton)
                 if 'dataset' in button.toolTip().lower()
-                and 'focus' in button.toolTip().lower()
+                and 'plot' in button.toolTip().lower()
             )
-        self.assertEqual(len(pin_buttons), len(long_tabs))
+        self.assertEqual(len(visibility_buttons), len(long_tabs))
 
-        for button in pin_buttons:
+        for button in visibility_buttons:
             left = button.mapTo(scroll.viewport(), QPoint(0, 0)).x()
             self.assertLessEqual(
                 left + button.width() + gutter + 4,
@@ -692,6 +803,14 @@ class TestComparisonTabSelectionState(unittest.TestCase):
             for col in range(self.widget._stats_scope_table.columnCount())
         ]
         self.assertTrue(any(header.startswith('K range') for header in scope_headers))
+
+    def test_statistics_scope_and_status_controls_explain_inclusion_rules(self):
+        self.assertIn('workspace-active', self.widget._stats_methods_all_btn.toolTip())
+        self.assertIn('every selected dataset', self.widget._stats_methods_valid_all_btn.toolTip())
+        self.assertIn('workspace-wide', self.widget._stats_methods_choose_btn.toolTip())
+        self.assertIn('positive K results', self.widget._stats_ok_only_btn.toolTip())
+        self.assertIn('warning-status', self.widget._stats_warnings_btn.toolTip())
+        self.assertIn('display unit', self.widget._stats_unit_combo.toolTip())
 
     def test_statistics_toolbar_and_tables_do_not_request_content_width_growth(self):
         self.widget.set_dataset_state(self.tabs, selected_tabs=self.tabs)

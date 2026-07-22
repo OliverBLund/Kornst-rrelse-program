@@ -17,7 +17,6 @@ from PyQt6.QtCore import (
 )
 from typing import Optional, Dict, Set
 import dataclasses
-import csv
 import math
 import re
 import numpy as np
@@ -46,6 +45,8 @@ from unit_conversions import (
     HydraulicConductivityConverter,
     get_default_plot_unit,
 )
+from exporting.table_model import ExportTable
+from .table_export_dialog import export_table_dialog
 
 
 # ─────────────────────────────────────────────────────────────
@@ -314,8 +315,50 @@ class PlotWorkspace(QWidget):
         self._export_sep = _pw_sep()
         lay.addWidget(self._export_sep)
 
-        self._tb_export_btn = _pw_btn(" Export", "Export plot", "fa6s.download")
-        self._tb_export_btn.clicked.connect(lambda: self.export_plot("png"))
+        self._tb_export_btn = _pw_btn(" Export Figure", "Export the active plot", "fa6s.download")
+        self._tb_export_btn.setObjectName("plot-export-figure")
+        self._tb_export_btn.setStyleSheet(f"""
+            QPushButton#plot-export-figure {{
+                background-color: {C.BG_RAISED};
+                border: 1px solid {C.BORDER_DK};
+                border-radius: 5px;
+                padding: 3px 9px;
+                color: {C.TEXT_MID};
+            }}
+            QPushButton#plot-export-figure:hover {{
+                background-color: {C.BG_LOW};
+                border-color: {C.EARTH};
+                color: {C.TEXT};
+            }}
+            QPushButton#plot-export-figure:pressed,
+            QPushButton#plot-export-figure:open {{
+                background-color: #ebe1d2;
+                border-color: {C.EARTH};
+            }}
+        """)
+        export_menu = QMenu(self._tb_export_btn)
+        export_menu.setAttribute(Qt.WidgetAttribute.WA_StyledBackground, True)
+        export_menu.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground, False)
+        export_menu.setStyleSheet(f"""
+            QMenu {{
+                background-color: {C.BG_RAISED};
+                border: 1px solid {C.BORDER_DK};
+                padding: 4px;
+                color: {C.TEXT_MID};
+            }}
+            QMenu::item {{ background-color: {C.BG_RAISED}; padding: 6px 24px 6px 10px; }}
+            QMenu::item:selected {{ background-color: #e8f0d5; color: {C.TEXT}; }}
+        """)
+        export_menu.addAction("PNG image...").triggered.connect(
+            lambda _checked=False: self.export_plot("png")
+        )
+        export_menu.addAction("SVG vector...").triggered.connect(
+            lambda _checked=False: self.export_plot("svg")
+        )
+        export_menu.addAction("PDF figure...").triggered.connect(
+            lambda _checked=False: self.export_plot("pdf")
+        )
+        self._tb_export_btn.setMenu(export_menu)
         lay.addWidget(self._tb_export_btn)
         self._export_toolbar_widgets = [self._export_sep, self._tb_export_btn]
 
@@ -366,6 +409,14 @@ class PlotWorkspace(QWidget):
         self._overflow_export_png_action = menu.addAction("Export PNG")
         self._overflow_export_png_action.triggered.connect(
             lambda _checked=False: self.export_plot("png")
+        )
+        self._overflow_export_svg_action = menu.addAction("Export SVG")
+        self._overflow_export_svg_action.triggered.connect(
+            lambda _checked=False: self.export_plot("svg")
+        )
+        self._overflow_export_pdf_action = menu.addAction("Export PDF")
+        self._overflow_export_pdf_action.triggered.connect(
+            lambda _checked=False: self.export_plot("pdf")
         )
 
         return menu
@@ -619,7 +670,8 @@ class PlotWorkspace(QWidget):
         )
         header_lay.addWidget(self._drawer_count)
 
-        self._drawer_export_btn = QPushButton("Export CSV")
+        self._drawer_export_btn = QPushButton("Export Data...")
+        self._drawer_export_btn.setToolTip("Export the active plot data as an Excel workbook or CSV file.")
         self._drawer_export_btn.setProperty("pw-btn", True)
         self._drawer_export_btn.clicked.connect(self.export_data)
         header_lay.addWidget(self._drawer_export_btn)
@@ -843,30 +895,6 @@ class PlotWorkspace(QWidget):
         unit_lay.addWidget(self._unit_combo)
         self._sect_units.add_widget(self._row_units)
         lay.addWidget(self._sect_units)
-
-        # ── Export controls ──
-        self._sect_export = CollapsibleSection(
-            "Export", "fa6s.download",
-            CollapsibleSection.RED, expanded=False,
-        )
-        export_w = QWidget()
-        export_lay = QVBoxLayout(export_w)
-        export_lay.setContentsMargins(10, 5, 10, 8)
-        export_lay.setSpacing(4)
-        btn_png = QPushButton("Export as PNG")
-        btn_png.setProperty("pw-btn", True)
-        btn_png.clicked.connect(lambda: self.export_plot("png"))
-        btn_svg = QPushButton("Export as SVG")
-        btn_svg.setProperty("pw-btn", True)
-        btn_svg.clicked.connect(lambda: self.export_plot("svg"))
-        btn_data = QPushButton("Export Data")
-        btn_data.setProperty("pw-btn", True)
-        btn_data.clicked.connect(self.export_data)
-        export_lay.addWidget(btn_png)
-        export_lay.addWidget(btn_svg)
-        export_lay.addWidget(btn_data)
-        self._sect_export.add_widget(export_w)
-        lay.addWidget(self._sect_export)
 
         lay.addStretch(1)
         self._update_contextual_controls()
@@ -1700,6 +1728,7 @@ class PlotWorkspace(QWidget):
         file_filter = {
             "png": "PNG Files (*.png)",
             "svg": "SVG Files (*.svg)",
+            "pdf": "PDF Files (*.pdf)",
         }
         file_path, _ = QFileDialog.getSaveFileName(
             self,
@@ -1715,7 +1744,9 @@ class PlotWorkspace(QWidget):
                     format=normalized_format,
                     dpi=300,
                     bbox_inches='tight',
-                    facecolor=self.plot_widget.figure.get_facecolor(),
+                    facecolor='white',
+                    edgecolor='white',
+                    transparent=False,
                 )
                 self.plot_exported.emit(file_path)
                 QMessageBox.information(
@@ -1731,23 +1762,12 @@ class PlotWorkspace(QWidget):
         title = self._drawer_title_text or "Plot data"
         filename_title = re.sub(r"[^A-Za-z0-9_]+", "_", title).strip("_").lower()
         filename_title = filename_title or "plot_data"
-        file_path, _ = QFileDialog.getSaveFileName(
+        export_table_dialog(
             self,
-            f"Export {title} as CSV",
-            f"{self.dataset.sample_name}_{filename_title}.csv",
-            "CSV Files (*.csv)",
+            dialog_title=f"Export {title}",
+            default_stem=f"{self.dataset.sample_name}_{filename_title}",
+            table=ExportTable.from_rows(title, self._drawer_headers, self._drawer_rows),
+            success_label=title,
+            file_dialog=QFileDialog,
+            message_box=QMessageBox,
         )
-        if file_path:
-            try:
-                file_path = self._with_extension(file_path, "csv")
-                with open(file_path, 'w', newline='') as f:
-                    writer = csv.writer(f)
-                    writer.writerow(self._drawer_headers)
-                    writer.writerows(self._drawer_rows)
-                QMessageBox.information(
-                    self, "Export Successful",
-                    f"{title} exported to:\n{file_path}")
-            except Exception as e:
-                QMessageBox.critical(
-                    self, "Export Error",
-                    f"Failed to export data:\n{str(e)}")

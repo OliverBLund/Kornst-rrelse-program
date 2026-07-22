@@ -419,7 +419,14 @@ class PlotWidget(QWidget):
     def export_plot(self, filename: str, dpi: int = 300):
         """Export current plot to file"""
         try:
-            self.figure.savefig(filename, dpi=dpi, bbox_inches='tight')
+            self.figure.savefig(
+                filename,
+                dpi=dpi,
+                bbox_inches='tight',
+                facecolor='white',
+                edgecolor='white',
+                transparent=False,
+            )
             return True
         except Exception as e:
             print(f"Error exporting plot: {e}")

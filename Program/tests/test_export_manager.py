@@ -16,7 +16,7 @@ sys.path.insert(0, 'Program')
 
 from data_loader import GrainSizeData
 from matplotlib.figure import Figure
-from PyQt6.QtWidgets import QApplication, QPushButton, QTableWidget, QTabWidget
+from PyQt6.QtWidgets import QApplication, QPushButton, QTableWidget, QTabWidget, QTreeWidget
 from gui.export_tab import ExportTab
 from gui.export_manager import ExportManager
 from gui.plot_styles import PROFESSIONAL_STYLE
@@ -321,6 +321,17 @@ class TestExportManagerExports(unittest.TestCase):
             self.assertNotIn(['Sample Name', self.dataset.sample_name], rows)
             self.assertFalse(any(row and row[0] == 'Grain Size Percentiles' for row in rows))
 
+    def test_both_csv_layout_writes_combined_and_per_sample_artifacts(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            config = self.make_config(temp_dir, csv_mode='both')
+
+            exported = ExportManager().export(self.datasets, config)
+
+            self.assertEqual(len(exported), 2)
+            names = {os.path.basename(path) for path in exported}
+            self.assertTrue(any('combined_all_datasets' in name for name in names))
+            self.assertTrue(any(name.endswith('_k_values.csv') for name in names))
+
     def test_json_export_honors_metadata_units_and_selected_statistics(self):
         with tempfile.TemporaryDirectory() as temp_dir:
             config = self.make_config(
@@ -424,18 +435,18 @@ class TestExportManagerExports(unittest.TestCase):
 
             self.assertEqual(len(exported), 1)
             workbook = load_workbook(exported[0], data_only=True)
-            self.assertIn('K_Results_Long', workbook.sheetnames)
-            self.assertIn('Sample_Wide', workbook.sheetnames)
-            self.assertIn('Grain_Distribution', workbook.sheetnames)
-            self.assertIn('Aggregate_Statistics', workbook.sheetnames)
+            self.assertIn('Method Results', workbook.sheetnames)
+            self.assertIn('Sample Summary', workbook.sheetnames)
+            self.assertIn('Grain Distribution', workbook.sheetnames)
+            self.assertIn('Collection Statistics', workbook.sheetnames)
 
-            wide_rows = list(workbook['Sample_Wide'].iter_rows(values_only=True))
+            wide_rows = list(workbook['Sample Summary'].iter_rows(values_only=True))
             header = list(wide_rows[0])
             hazen_col = header.index('K_Hazen_m/s')
             self.assertIsInstance(wide_rows[1][hazen_col], float)
             self.assertAlmostEqual(wide_rows[1][hazen_col], 1.0e-4)
 
-            grain_rows = list(workbook['Grain_Distribution'].iter_rows(values_only=True))
+            grain_rows = list(workbook['Grain Distribution'].iter_rows(values_only=True))
             self.assertIsInstance(grain_rows[1][2], float)
             self.assertIsInstance(grain_rows[1][3], (int, float))
 
@@ -591,7 +602,7 @@ class TestExportManagerExports(unittest.TestCase):
 
             aggregate_path = next(path for path in exported if 'aggregate_statistics' in os.path.basename(path))
             workbook = load_workbook(aggregate_path, data_only=True)
-            rows = list(workbook['Aggregate_Statistics'].iter_rows(values_only=True))
+            rows = list(workbook['Collection Statistics'].iter_rows(values_only=True))
             scope_pairs = {(row[0], row[1]) for row in rows[1:]}
             self.assertIn(('Overall', 'Overall'), scope_pairs)
             self.assertIn(('Group', 'Layer A'), scope_pairs)
@@ -673,7 +684,7 @@ class TestExportManagerExports(unittest.TestCase):
             ]
             k_rows = [
                 row
-                for row in workbook['K_Values'].iter_rows(values_only=True)
+                for row in workbook['Method Results'].iter_rows(values_only=True)
                 if row and row[0]
             ]
 
@@ -1293,6 +1304,12 @@ class TestExportTabConfig(unittest.TestCase):
             for labels in tab_sets
         ))
 
+    def test_dataset_scope_controls_explain_what_each_scope_exports(self):
+        self.assertIn('every loaded dataset', self.tab.scope_all.toolTip())
+        self.assertIn('only the dataset', self.tab.scope_current.toolTip())
+        self.assertIn('Scope & Groups', self.tab.scope_selected.toolTip())
+        self.assertIn('single dataset', self.tab.current_dataset_combo.toolTip())
+
 
     def test_closed_export_accordions_stack_without_internal_whitespace(self):
         self.tab.resize(430, 760)
@@ -1324,6 +1341,88 @@ class TestExportTabConfig(unittest.TestCase):
         self.assertTrue(config['excel'])
         self.assertEqual(config['excel_mode'], 'combined')
         self.assertEqual(self.tab._estimate_export_file_count(), 4)
+
+    def test_data_file_layout_exposes_per_sample_and_both_modes(self):
+        self.tab.selected_formats.update({
+            'csv_long': True,
+            'csv_wide': False,
+            'excel': True,
+            'png': False,
+            'svg': False,
+            'pdf': False,
+        })
+
+        separate_index = self.tab.data_layout_combo.findData('separate')
+        self.tab.data_layout_combo.setCurrentIndex(separate_index)
+        separate_config = self.tab._build_export_config()
+        self.assertEqual(separate_config['csv_mode'], 'separate')
+        self.assertEqual(separate_config['excel_mode'], 'per_dataset')
+        self.assertEqual(self.tab._estimate_export_file_count(), 4)
+        self.assertIn(
+            'Sample CSVs',
+            [self.tab.preview_tabs.tabText(index) for index in range(self.tab.preview_tabs.count())],
+        )
+
+        both_index = self.tab.data_layout_combo.findData('both')
+        self.tab.data_layout_combo.setCurrentIndex(both_index)
+        both_config = self.tab._build_export_config()
+        self.assertEqual(both_config['csv_mode'], 'both')
+        self.assertEqual(both_config['excel_mode'], 'both')
+        self.assertEqual(self.tab._estimate_export_file_count(), 7)
+
+        csv_folder = next(
+            self.tab.file_tree.topLevelItem(index)
+            for index in range(self.tab.file_tree.topLevelItemCount())
+            if self.tab.file_tree.topLevelItem(index).text(0) == 'tables/csv'
+        )
+        self.assertTrue(any(
+            csv_folder.child(index).text(1) == 'per-sample tables'
+            for index in range(csv_folder.childCount())
+        ))
+        excel_folder = next(
+            self.tab.file_tree.topLevelItem(index)
+            for index in range(self.tab.file_tree.topLevelItemCount())
+            if self.tab.file_tree.topLevelItem(index).text(0) == 'workbooks'
+        )
+        workbook_names = [
+            excel_folder.child(index).text(0)
+            for index in range(excel_folder.childCount())
+        ]
+        self.assertTrue(any(name.endswith('.xlsx') and 'Sample A' in name for name in workbook_names))
+
+        excel_index = next(
+            index for index in range(self.tab.preview_tabs.count())
+            if self.tab.preview_tabs.tabText(index) == 'Excel'
+        )
+        excel_preview = self.tab.preview_tabs.widget(excel_index)
+        self.assertIsInstance(excel_preview, QTreeWidget)
+        output_labels = [
+            excel_preview.topLevelItem(index).text(0)
+            for index in range(excel_preview.topLevelItemCount())
+        ]
+        self.assertEqual(output_labels, ['Combined workbook', 'Sample workbooks'])
+        combined_labels = [
+            excel_preview.topLevelItem(0).child(index).text(0)
+            for index in range(excel_preview.topLevelItem(0).childCount())
+        ]
+        self.assertIn('Method results', combined_labels)
+        self.assertIn('Sample summary', combined_labels)
+
+    def test_data_layout_control_is_only_shown_for_relevant_formats(self):
+        self.tab.selected_formats.update({
+            'csv_long': False,
+            'csv_wide': False,
+            'excel': False,
+            'png': True,
+            'svg': False,
+            'pdf': False,
+        })
+        self.tab._sync_format_cards()
+        self.assertTrue(self.tab.data_layout_row.isHidden())
+
+        self.tab.selected_formats['excel'] = True
+        self.tab._sync_format_cards()
+        self.assertFalse(self.tab.data_layout_row.isHidden())
 
     def test_simple_preset_creates_one_table_without_figures(self):
         self.tab._apply_preset('minimal')
@@ -1470,8 +1569,8 @@ class TestExportTabConfig(unittest.TestCase):
             self.tab.preview_tabs.tabText(index): self.tab.preview_tabs.widget(index)
             for index in range(self.tab.preview_tabs.count())
         }
-        long_preview = previews['CSV Long']
-        wide_preview = previews['CSV Wide']
+        long_preview = previews['Method Results']
+        wide_preview = previews['Sample Summary']
         long_headers = [
             long_preview.horizontalHeaderItem(column).text()
             for column in range(long_preview.columnCount())
@@ -1503,12 +1602,12 @@ class TestExportTabConfig(unittest.TestCase):
             for index in range(self.tab.preview_tabs.count())
         }
         long_headers = [
-            previews['CSV Long'].horizontalHeaderItem(column).text()
-            for column in range(previews['CSV Long'].columnCount())
+            previews['Method Results'].horizontalHeaderItem(column).text()
+            for column in range(previews['Method Results'].columnCount())
         ]
         wide_headers = [
-            previews['CSV Wide'].horizontalHeaderItem(column).text()
-            for column in range(previews['CSV Wide'].columnCount())
+            previews['Sample Summary'].horizontalHeaderItem(column).text()
+            for column in range(previews['Sample Summary'].columnCount())
         ]
 
         self.assertNotIn('Cu', long_headers)
@@ -1535,12 +1634,12 @@ class TestExportTabConfig(unittest.TestCase):
             for index in range(self.tab.preview_tabs.count())
         }
         long_headers = [
-            previews['CSV Long'].horizontalHeaderItem(column).text()
-            for column in range(previews['CSV Long'].columnCount())
+            previews['Method Results'].horizontalHeaderItem(column).text()
+            for column in range(previews['Method Results'].columnCount())
         ]
         wide_headers = [
-            previews['CSV Wide'].horizontalHeaderItem(column).text()
-            for column in range(previews['CSV Wide'].columnCount())
+            previews['Sample Summary'].horizontalHeaderItem(column).text()
+            for column in range(previews['Sample Summary'].columnCount())
         ]
 
         self.assertNotIn('Soil Classification', long_headers)
@@ -1564,8 +1663,8 @@ class TestExportTabConfig(unittest.TestCase):
             self.tab.preview_tabs.tabText(index): self.tab.preview_tabs.widget(index)
             for index in range(self.tab.preview_tabs.count())
         }
-        long_preview = previews['CSV Long']
-        wide_preview = previews['CSV Wide']
+        long_preview = previews['Method Results']
+        wide_preview = previews['Sample Summary']
 
         self.assertIsInstance(long_preview, QTableWidget)
         self.assertIsInstance(wide_preview, QTableWidget)

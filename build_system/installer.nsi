@@ -1,12 +1,13 @@
 
-; DataMerger NSIS Installer Script
-!define APP_NAME "DataMerger_Dev"
-!define APP_VERSION "1.0.0"
-!define APP_PUBLISHER "Your Organization"
+; Legacy developer-only NSIS route. Public releases use
+; ../installer/GrainSizeAnalysis.iss via ../BUILD_INSTALLER.bat.
+!define APP_NAME "GrainSizeAnalysis"
+!define APP_VERSION "0.9.7"
+!define APP_PUBLISHER "DTU Sustain"
 !define APP_DIR "${APP_NAME}"
 
 Name "${APP_NAME} ${APP_VERSION}"
-OutFile "DataMerger-Setup-${APP_VERSION}.exe"
+OutFile "GrainSizeAnalysis-${APP_VERSION}-Legacy-Setup.exe"
 InstallDir "$PROGRAMFILES\${APP_DIR}"
 RequestExecutionLevel admin
 

@@ -13,7 +13,7 @@ from pathlib import Path
 from typing import List
 
 from PyQt6.QtCore import QEvent, QPoint, QPointF, QRect, QRectF, QSize, Qt, QTimer, pyqtProperty, pyqtSignal, QEasingCurve, QPropertyAnimation
-from PyQt6.QtGui import QBrush, QColor, QCursor, QLinearGradient, QPainter, QPainterPath, QPaintEvent, QPen, QPixmap
+from PyQt6.QtGui import QAction, QBrush, QColor, QCursor, QLinearGradient, QPainter, QPainterPath, QPaintEvent, QPen, QPixmap
 from PyQt6.QtWidgets import (
     QApplication,
     QCheckBox,
@@ -22,13 +22,16 @@ from PyQt6.QtWidgets import (
     QHBoxLayout,
     QLabel,
     QPushButton,
+    QMenu,
     QScrollArea,
     QSizePolicy,
+    QToolButton,
     QVBoxLayout,
     QWidget,
 )
 
 from .theme import C, F, apply_tooltip_style, icon
+from version import RELEASE_DATE_ISO, RELEASE_HIGHLIGHTS, VERSION_LABEL
 
 # Max width of the centred cards (px)
 _CARD_W = 1040
@@ -111,6 +114,9 @@ class WelcomeWidget(QWidget):
     tutorial_requested         = pyqtSignal(str)
     dont_show_again_changed    = pyqtSignal(bool)
     clear_sessions_requested   = pyqtSignal()
+    rename_workspace_requested = pyqtSignal(dict)
+    remove_workspace_requested = pyqtSignal(dict)
+    toggle_workspace_pin_requested = pyqtSignal(dict)
 
     def __init__(self, recent_files: List[str] = None, recent_sessions: List[dict] = None, parent=None):
         super().__init__(parent)
@@ -741,7 +747,7 @@ class WelcomeWidget(QWidget):
         lay.addSpacing(10)
 
         # ── Version ────────────────────────────────────────────────
-        ver = QLabel("v0.9.6")
+        ver = QLabel(VERSION_LABEL)
         ver.setAlignment(Qt.AlignmentFlag.AlignCenter)
         ver.setStyleSheet(
             f"color: {C.TEXT_MID}; font-family: '{F.MONO}'; font-size: {F.SZ_XS}pt;"
@@ -781,7 +787,7 @@ class WelcomeWidget(QWidget):
         meta_lay.setSpacing(8)
         meta_lay.addStretch()
 
-        ver = QLabel("v0.9.6")
+        ver = QLabel(VERSION_LABEL)
         ver.setStyleSheet(
             f"color: {C.TEXT_MID}; font-family: '{F.MONO}'; font-size: {F.SZ_XS}pt;"
             " background: rgba(255,255,255,122); border: 1px solid rgba(120,95,60,36);"
@@ -821,7 +827,7 @@ class WelcomeWidget(QWidget):
         lay.addWidget(desc)
         lay.addSpacing(8)
 
-        attr = QLabel("Batch import  ·  session restore  ·  selected-scope export")
+        attr = QLabel("Batch import  ·  workspace restore  ·  selected-scope export")
         attr.setStyleSheet(
             f"color: {C.TEXT_MUTED}; font-family: '{F.MONO}'; font-size: {F.SZ_XS}pt;"
             " background: transparent; border: none;"
@@ -861,7 +867,7 @@ class WelcomeWidget(QWidget):
                                 accent=C.OLIVE), 0, 0, 1, 2
         )
         grid.addWidget(
-            self._build_section("fa6s.clock-rotate-left", "Recent Sessions",
+            self._build_section("fa6s.clock-rotate-left", "Recent Workspaces",
                                 self._build_recent(), clear_btn=True,
                                 accent=C.EARTH), 1, 0
         )
@@ -946,7 +952,7 @@ class WelcomeWidget(QWidget):
         primary_lay.addWidget(desc)
 
         session_count = len(self.recent_sessions)
-        sessions_label = f"{session_count} saved session{'s' if session_count != 1 else ''}"
+        sessions_label = f"{session_count} recent workspace{'s' if session_count != 1 else ''}"
         meta_row = QWidget()
         meta_row.setStyleSheet("background: transparent; border: none;")
         meta_lay = QHBoxLayout(meta_row)
@@ -1032,7 +1038,7 @@ class WelcomeWidget(QWidget):
 
         recent = self._build_section(
             "fa6s.clock-rotate-left",
-            "Recent Sessions",
+            "Recent Workspaces",
             self._build_recent(),
             clear_btn=True,
             accent=C.EARTH,
@@ -1242,7 +1248,7 @@ class WelcomeWidget(QWidget):
         raw_btn.clicked.connect(lambda _checked=False: self.load_files_with_mode_requested.emit("raw_sieve"))
         self._action_widgets.append(raw_btn)
 
-        resume_btn = QPushButton("Resume Latest Session")
+        resume_btn = QPushButton("Resume Latest Workspace")
         resume_btn.setIcon(icon("fa6s.clock-rotate-left", C.TEXT_MID))
         resume_btn.setMinimumHeight(34)
         resume_btn.setCursor(QCursor(Qt.CursorShape.PointingHandCursor))
@@ -1301,7 +1307,8 @@ class WelcomeWidget(QWidget):
             lay.addWidget(widget, 0, col)
             lay.setColumnStretch(col, 1)
 
-        latest_name = self.recent_sessions[0].get("name", "Latest session") if self.recent_sessions else "No saved session yet"
+        latest = self._latest_workspace()
+        latest_name = latest.get("name", "Latest workspace") if latest else "No saved workspace yet"
         note = QLabel(
             f"Latest workspace: {latest_name}" if self.recent_sessions
             else "No saved workspace yet. Load files or open the demo sample to begin."
@@ -1615,14 +1622,9 @@ class WelcomeWidget(QWidget):
     def _welcome_release_notes(self) -> list[dict[str, object]]:
         return [
             {
-                "version": "v0.9.6",
-                "date": "2026-07-03",
-                "changes": [
-                    "Windows installer packaging is now available alongside the folder build.",
-                    "License, source-code notice, README, and third-party notices are bundled with release packages.",
-                    "Installer setup now shows license/source information and lets testers choose the installation folder.",
-                    "Build notes now describe the versioned release and source-distribution workflow.",
-                ],
+                "version": VERSION_LABEL,
+                "date": RELEASE_DATE_ISO,
+                "changes": list(RELEASE_HIGHLIGHTS),
             },
             {
                 "version": "v0.9.5",
@@ -1724,6 +1726,7 @@ class WelcomeWidget(QWidget):
         if clear_btn:
             clr = QPushButton("Clear")
             clr.setIcon(icon("fa6s.trash-can", C.EARTH))
+            clr.setToolTip("Remove all recent and saved workspace references from this list.")
             clr.setFixedHeight(22)
             clr.setCursor(QCursor(Qt.CursorShape.PointingHandCursor))
             clr.setStyleSheet(f"""
@@ -1808,6 +1811,7 @@ class WelcomeWidget(QWidget):
         if clear_btn:
             clr = QPushButton("Clear")
             clr.setIcon(icon("fa6s.trash-can", C.EARTH))
+            clr.setToolTip("Remove all recent and saved workspace references from this list.")
             clr.setFixedHeight(22)
             clr.setCursor(QCursor(Qt.CursorShape.PointingHandCursor))
             clr.setStyleSheet(f"""
@@ -1863,10 +1867,20 @@ class WelcomeWidget(QWidget):
         sc_lay.setSpacing(6)
 
         if self.recent_sessions:
-            for index, s in enumerate(self.recent_sessions[:4]):
-                sc_lay.addWidget(self._build_session_row(s, is_latest=index == 0))
+            latest = max(
+                self.recent_sessions,
+                key=lambda session: str(session.get("timestamp", "")),
+            )
+            latest_id = latest.get("workspace_id")
+            for s in self.recent_sessions[:10]:
+                is_latest = (
+                    s.get("workspace_id") == latest_id
+                    if latest_id
+                    else s is latest
+                )
+                sc_lay.addWidget(self._build_session_row(s, is_latest=is_latest))
         else:
-            empty = QLabel("No saved sessions yet")
+            empty = QLabel("No recent workspaces yet")
             empty.setStyleSheet(
                 f"color: {C.TEXT_MUTED}; font-size: {F.SZ_BASE}pt;"
                 " background: transparent; border: none; padding: 14px 6px;"
@@ -1893,8 +1907,8 @@ class WelcomeWidget(QWidget):
         """One recent-session entry with stronger hierarchy and hover feedback."""
         files = s.get("files", [])
         date  = s.get("date", "")
-        name  = s.get("name", "Unnamed Session")
-        n     = len(files)
+        name  = s.get("name", "Unnamed workspace")
+        n     = len(s.get("samples") or files)
 
         row = _HoverFrame()
         row.setObjectName("rec-row")
@@ -1911,6 +1925,9 @@ class WelcomeWidget(QWidget):
             }}
         """)
         row.setCursor(QCursor(Qt.CursorShape.PointingHandCursor))
+        row.setToolTip(
+            "Open this workspace from its original data files. Moved or deleted source files cannot be restored."
+        )
         row.setProperty("hovered", False)
 
         row_lay = QHBoxLayout(row)
@@ -1958,6 +1975,15 @@ class WelcomeWidget(QWidget):
                 f" padding: 1px 6px; font-family: '{F.MONO}'; font-size: {F.SZ_XS - 1}pt; font-weight: 700;"
             )
             tr_lay.addWidget(latest)
+        if s.get("pinned", False):
+            kept = QLabel("Kept")
+            kept.setToolTip("Kept workspaces remain at the top of this list.")
+            kept.setStyleSheet(
+                f"color: {C.EARTH}; background: rgba(139,115,85,18);"
+                " border: 1px solid rgba(139,115,85,65); border-radius: 99px;"
+                f" padding: 1px 6px; font-family: '{F.MONO}'; font-size: {F.SZ_XS - 1}pt; font-weight: 700;"
+            )
+            tr_lay.addWidget(kept)
         tr_lay.addStretch()
 
         meta_parts = [f"{n} dataset{'s' if n != 1 else ''}"]
@@ -1972,14 +1998,67 @@ class WelcomeWidget(QWidget):
         tx_lay.addWidget(title_row)
         tx_lay.addWidget(meta_lbl)
 
-        chev = QLabel()
-        chev.setPixmap(icon("fa6s.chevron-right", C.TEXT_MUTED).pixmap(QSize(9, 9)))
-        chev.setStyleSheet("background: transparent; border: none;")
-        chev.setAlignment(Qt.AlignmentFlag.AlignVCenter)
+        menu_btn = QToolButton()
+        menu_btn.setObjectName("workspace-menu")
+        menu_btn.setIcon(icon("fa6s.ellipsis-vertical", C.TEXT_MUTED))
+        menu_btn.setToolTip("Rename, remove, or keep this workspace")
+        menu_btn.setCursor(QCursor(Qt.CursorShape.PointingHandCursor))
+        menu_btn.setPopupMode(QToolButton.ToolButtonPopupMode.InstantPopup)
+        menu_btn.setFixedSize(28, 28)
+        menu_btn.setStyleSheet(
+            "QToolButton { background-color: #fffdf7; border: 1px solid rgba(139,115,85,70); border-radius: 6px; }"
+            "QToolButton:hover { background-color: #f4eee3; border-color: rgba(139,115,85,120); }"
+            "QToolButton:pressed, QToolButton:open { background-color: #ebe1d2; border-color: rgba(139,115,85,150); }"
+            "QToolButton::menu-indicator { image: none; }"
+        )
+        menu = QMenu(menu_btn)
+        menu.setAttribute(Qt.WidgetAttribute.WA_StyledBackground, True)
+        menu.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground, False)
+        menu.setStyleSheet(f"""
+            QMenu {{
+                background-color: {C.BG_RAISED};
+                border: 1px solid {C.BORDER_DK};
+                border-radius: 6px;
+                padding: 4px;
+                color: {C.TEXT_MID};
+            }}
+            QMenu::item {{
+                background-color: {C.BG_RAISED};
+                padding: 6px 28px 6px 12px;
+                border-radius: 3px;
+            }}
+            QMenu::item:selected {{
+                background-color: #e8f0d5;
+                color: {C.TEXT};
+            }}
+            QMenu::separator {{
+                height: 1px;
+                background-color: {C.BORDER};
+                margin: 4px 6px;
+            }}
+        """)
+        rename_action = QAction(icon("fa6s.pen", C.TEXT_MUTED), "Rename...", menu)
+        rename_action.triggered.connect(
+            lambda _checked=False, session=dict(s): self.rename_workspace_requested.emit(session)
+        )
+        pin_text = "Stop keeping at top" if s.get("pinned", False) else "Keep at top"
+        pin_action = QAction(icon("fa6s.thumbtack", C.TEXT_MUTED), pin_text, menu)
+        pin_action.triggered.connect(
+            lambda _checked=False, session=dict(s): self.toggle_workspace_pin_requested.emit(session)
+        )
+        remove_action = QAction(icon("fa6s.trash-can", C.TEXT_MUTED), "Remove from list", menu)
+        remove_action.triggered.connect(
+            lambda _checked=False, session=dict(s): self.remove_workspace_requested.emit(session)
+        )
+        menu.addAction(rename_action)
+        menu.addAction(pin_action)
+        menu.addSeparator()
+        menu.addAction(remove_action)
+        menu_btn.setMenu(menu)
 
         row_lay.addWidget(ico_tile)
         row_lay.addWidget(tx, 1)
-        row_lay.addWidget(chev)
+        row_lay.addWidget(menu_btn)
 
         row.clicked.connect(lambda session=dict(s): self.open_recent_session_requested.emit(session))
         return row
@@ -2011,28 +2090,7 @@ class WelcomeWidget(QWidget):
         sc_lay.setContentsMargins(0, 0, 3, 0)
         sc_lay.setSpacing(9)
 
-        for index, v in enumerate([
-            {"version": "v0.9.6",  "date": "2026-07-03", "changes": [
-                "Installer packaging added for internal testing and web release",
-                "License, source-code notice, README, and third-party notices bundled",
-                "Installer setup now includes license/source screens and destination choice",
-            ]},
-            {"version": "v0.9.5",  "date": "2026-06-09", "changes": [
-                "Excel loading, sheet selection, and remapping paths simplified",
-                "Shared K geometric/arithmetic means across UI, reports, and exports",
-                "Aggregate/group summaries and plot data drawers added",
-            ]},
-            {"version": "v0.9.0-beta",  "date": "2025-01-15", "changes": [
-                "New batch export flow with scope selection",
-                "Wide format CSV export for statistical analysis",
-                "Enhanced welcome screen with recent sessions",
-            ]},
-            {"version": "v0.8.0-alpha", "date": "2024-12-20", "changes": [
-                "Added comparison tab for multiple datasets",
-                "Improved calculation methods validation",
-                "Bug fixes for column mapping",
-            ]},
-        ]):
+        for index, v in enumerate(self._welcome_release_notes()):
             blk = QFrame()
             blk.setStyleSheet(
                 "background: transparent; border: none;"
@@ -2204,7 +2262,7 @@ class WelcomeWidget(QWidget):
         raw_btn.clicked.connect(lambda _checked=False: self.load_files_with_mode_requested.emit("raw_sieve"))
         lay.addWidget(raw_btn, 0, 1)
 
-        resume_btn = QPushButton("Resume Latest Session")
+        resume_btn = QPushButton("Resume Latest Workspace")
         resume_btn.setIcon(icon("fa6s.clock-rotate-left", C.TEXT_MID))
         resume_btn.setMinimumHeight(32)
         resume_btn.setCursor(QCursor(Qt.CursorShape.PointingHandCursor))
@@ -2259,7 +2317,8 @@ class WelcomeWidget(QWidget):
         demo_btn.clicked.connect(lambda _checked=False: self.load_sample_data_requested.emit())
         lay.addWidget(demo_btn, 1, 1)
 
-        latest_name = self.recent_sessions[0].get("name", "Latest session") if self.recent_sessions else "No saved session yet"
+        latest = self._latest_workspace()
+        latest_name = latest.get("name", "Latest workspace") if latest else "No saved workspace yet"
         note = QLabel(
             f"Latest workspace: {latest_name}" if self.recent_sessions
             else "No saved workspace yet. Load files or open the demo sample to begin."
@@ -2572,10 +2631,19 @@ class WelcomeWidget(QWidget):
             )
 
     def _resume_latest_session(self):
-        if self.recent_sessions:
-            self.open_recent_session_requested.emit(dict(self.recent_sessions[0]))
+        latest = self._latest_workspace()
+        if latest:
+            self.open_recent_session_requested.emit(dict(latest))
         else:
             self.load_files_requested.emit()
+
+    def _latest_workspace(self) -> dict | None:
+        if not self.recent_sessions:
+            return None
+        return max(
+            self.recent_sessions,
+            key=lambda session: str(session.get("timestamp", "")),
+        )
 
     def _load_session_files(self, files: List[str]):
         for f in files:

@@ -4,13 +4,15 @@ Dataset selection dialog for comparison tab when many datasets are loaded.
 
 from __future__ import annotations
 
+import json
 import math
 from typing import List, Optional
 
-from PyQt6.QtCore import Qt, pyqtSignal
-from PyQt6.QtGui import QColor, QFont
+from PyQt6.QtCore import QMimeData, QPoint, QTimer, Qt, pyqtSignal
+from PyQt6.QtGui import QColor, QDrag, QFont
 from PyQt6.QtWidgets import (
     QColorDialog,
+    QApplication,
     QFrame,
     QHBoxLayout,
     QLabel,
@@ -27,6 +29,66 @@ from gui.group_styles import group_color_map, set_group_color
 from gui.theme import C, F, SZ, icon as _icon
 from k_aggregation import UNGROUPED_LABEL, dataset_group_name, normalize_group_name
 from qt_chrome.frameless_dialog_base import FramelessDialogBase
+
+
+_DATASET_ROWS_MIME = 'application/x-grainsize-dataset-rows'
+
+
+class _GroupDropArea(QFrame):
+    """A whole group section that accepts dataset rows, not just its header."""
+
+    rows_dropped = pyqtSignal(str, object)
+    drag_position_changed = pyqtSignal(object)
+
+    def __init__(self, group_name: str, parent=None):
+        super().__init__(parent)
+        self.group_name = group_name
+        self.setObjectName('datasetGroupDropArea')
+        self.setAcceptDrops(True)
+        self.setToolTip(f'Drop selected samples anywhere here to move them to {group_name}.')
+        self._set_drop_active(False)
+
+    def _set_drop_active(self, active: bool) -> None:
+        self.setStyleSheet(
+            'QFrame#datasetGroupDropArea {'
+            f'background: {"rgba(107,142,35,0.12)" if active else "transparent"};'
+            f'border: {"2px" if active else "1px"} solid '
+            f'{C.OLIVE if active else C.BORDER}; border-radius: 6px;'
+            '}'
+        )
+
+    def dragEnterEvent(self, event) -> None:
+        if event.mimeData().hasFormat(_DATASET_ROWS_MIME):
+            self._set_drop_active(True)
+            self.drag_position_changed.emit(
+                self.mapToGlobal(event.position().toPoint())
+            )
+            event.acceptProposedAction()
+            return
+        event.ignore()
+
+    def dragMoveEvent(self, event) -> None:
+        if event.mimeData().hasFormat(_DATASET_ROWS_MIME):
+            self.drag_position_changed.emit(
+                self.mapToGlobal(event.position().toPoint())
+            )
+            event.acceptProposedAction()
+            return
+        event.ignore()
+
+    def dragLeaveEvent(self, event) -> None:
+        self._set_drop_active(False)
+        super().dragLeaveEvent(event)
+
+    def dropEvent(self, event) -> None:
+        self._set_drop_active(False)
+        try:
+            indexes = json.loads(bytes(event.mimeData().data(_DATASET_ROWS_MIME)).decode('utf-8'))
+        except Exception:
+            event.ignore()
+            return
+        self.rows_dropped.emit(self.group_name, indexes)
+        event.acceptProposedAction()
 
 
 class DatasetSelectionDialog(FramelessDialogBase):
@@ -58,9 +120,14 @@ class DatasetSelectionDialog(FramelessDialogBase):
         self._allow_grouping = bool(allow_grouping)
         self._active_filter = ""
         self._group_headers: list[QWidget] = []
+        self._group_drop_areas: list[_GroupDropArea] = []
         self._selection_anchor: Optional[_DatasetRow] = None
         self._rebuilding_rows = False
         self._suppress_group_changed = False
+        self._drag_global_position: Optional[QPoint] = None
+        self._drag_scroll_timer = QTimer(self)
+        self._drag_scroll_timer.setInterval(35)
+        self._drag_scroll_timer.timeout.connect(self._auto_scroll_during_drag)
 
         self.setWindowTitle(self._title)
         self.setModal(True)
@@ -169,6 +236,12 @@ class DatasetSelectionDialog(FramelessDialogBase):
         self._list_scroll.setHorizontalScrollBarPolicy(
             Qt.ScrollBarPolicy.ScrollBarAlwaysOff
         )
+        if self._allow_grouping:
+            self._list_scroll.setToolTip(
+                "Drag selected samples anywhere into a group area. "
+                "Hold near the top or bottom edge to scroll; drop them in "
+                "Ungrouped to remove their group."
+            )
         self._list_scroll.setStyleSheet(
             f"QScrollArea {{ background: {C.BG}; border: none; }}"
             f"QScrollBar:vertical {{ background: transparent; width: 10px; margin: 6px 2px; }}"
@@ -246,6 +319,7 @@ class DatasetSelectionDialog(FramelessDialogBase):
                 row.group_changed.connect(self._on_group_changed)
                 row.selection_changed.connect(self._on_selection_changed)
                 row.selection_requested.connect(self._on_row_selection_requested)
+                row.drag_requested.connect(self._start_row_drag)
             self._rows.append(row)
         self._rebuild_rows_layout()
         self._on_selection_changed()
@@ -260,6 +334,9 @@ class DatasetSelectionDialog(FramelessDialogBase):
         return [row for row in self._rows if row.matches_filter(self._active_filter)]
 
     def _clear_rows_layout(self) -> None:
+        for row in self._rows:
+            row.hide()
+            row.setParent(self._list_host)
         while self._rows_layout.count():
             item = self._rows_layout.takeAt(0)
             widget = item.widget()
@@ -270,6 +347,7 @@ class DatasetSelectionDialog(FramelessDialogBase):
                 widget.setParent(None)
                 widget.deleteLater()
         self._group_headers = []
+        self._group_drop_areas = []
 
     def _rebuild_rows_layout(self) -> None:
         if self._rebuilding_rows:
@@ -296,20 +374,33 @@ class DatasetSelectionDialog(FramelessDialogBase):
                     grouped[group_name] = []
                     group_order.append(group_name)
                 grouped[group_name].append(row)
+            if UNGROUPED_LABEL not in grouped:
+                grouped[UNGROUPED_LABEL] = []
+                group_order.append(UNGROUPED_LABEL)
 
             group_colors = group_color_map(group_order)
             for group_name in group_order:
                 rows = grouped[group_name]
+                drop_area = _GroupDropArea(group_name, self._list_host)
+                drop_layout = QVBoxLayout(drop_area)
+                drop_layout.setContentsMargins(0, 0, 0, 0)
+                drop_layout.setSpacing(0)
                 header = self._make_group_header(
                     group_name,
                     rows,
                     group_colors.get(group_name, C.TEXT_MUTED),
                 )
                 self._group_headers.append(header)
-                self._rows_layout.addWidget(header)
+                self._group_drop_areas.append(drop_area)
+                drop_area.rows_dropped.connect(self._drop_rows_into_group)
+                drop_area.drag_position_changed.connect(
+                    self._update_drag_autoscroll_position
+                )
+                drop_layout.addWidget(header)
                 for row in rows:
                     row.setVisible(True)
-                    self._rows_layout.addWidget(row)
+                    drop_layout.addWidget(row)
+                self._rows_layout.addWidget(drop_area)
 
             self._rows_layout.addStretch(1)
         finally:
@@ -403,6 +494,11 @@ class DatasetSelectionDialog(FramelessDialogBase):
             widget = self._rows_layout.itemAt(index).widget()
             if isinstance(widget, _DatasetRow):
                 rows.append(widget)
+            elif isinstance(widget, _GroupDropArea) and widget.layout() is not None:
+                for child_index in range(widget.layout().count()):
+                    child = widget.layout().itemAt(child_index).widget()
+                    if isinstance(child, _DatasetRow):
+                        rows.append(child)
         return rows
 
     def _on_row_selection_requested(
@@ -432,9 +528,13 @@ class DatasetSelectionDialog(FramelessDialogBase):
             row.set_selected(not row.is_selected(), emit_signal=False)
             self._selection_anchor = row
         else:
-            for candidate in self._rows:
-                candidate.set_selected(candidate is row, emit_signal=False)
-            self._selection_anchor = row
+            selected_count = sum(1 for candidate in self._rows if candidate.is_selected())
+            # Pressing an already-selected row is commonly the beginning of a
+            # drag. Preserve the set so that drag carries every selected row.
+            if not row.is_selected() or selected_count <= 1:
+                for candidate in self._rows:
+                    candidate.set_selected(candidate is row, emit_signal=False)
+                self._selection_anchor = row
 
         self._on_selection_changed()
 
@@ -459,6 +559,74 @@ class DatasetSelectionDialog(FramelessDialogBase):
     def _assign_group_to_checked(self) -> None:
         """Backward-compatible internal alias for older tests/helpers."""
         self._assign_group_to_selected()
+
+    def _start_row_drag(self, dragged_row: '_DatasetRow') -> None:
+        selected = [row for row in self._rows if row.is_selected()]
+        rows = selected if dragged_row in selected else [dragged_row]
+        indexes = [self._rows.index(row) for row in rows]
+        mime = QMimeData()
+        mime.setData(_DATASET_ROWS_MIME, json.dumps(indexes).encode('utf-8'))
+        drag = QDrag(dragged_row)
+        drag.setMimeData(mime)
+        try:
+            drag.exec(Qt.DropAction.MoveAction)
+        finally:
+            self._stop_drag_autoscroll()
+
+    def _update_drag_autoscroll_position(self, global_position: object) -> None:
+        """Track the drag pointer and begin continuous viewport edge scrolling."""
+        if not isinstance(global_position, QPoint):
+            return
+        self._drag_global_position = QPoint(global_position)
+        if not self._drag_scroll_timer.isActive():
+            self._drag_scroll_timer.start()
+        self._auto_scroll_during_drag()
+
+    def _auto_scroll_during_drag(self) -> None:
+        """Scroll repeatedly while a held drag remains near either list edge."""
+        if self._drag_global_position is None:
+            return
+        viewport = self._list_scroll.viewport()
+        position = viewport.mapFromGlobal(self._drag_global_position)
+        if not (0 <= position.x() < viewport.width() and 0 <= position.y() < viewport.height()):
+            return
+
+        edge = min(64, max(36, viewport.height() // 5))
+        delta = 0
+        if position.y() < edge:
+            proximity = (edge - position.y()) / edge
+            delta = -max(6, round(24 * proximity))
+        elif position.y() >= viewport.height() - edge:
+            proximity = (position.y() - (viewport.height() - edge)) / edge
+            delta = max(6, round(24 * proximity))
+        if not delta:
+            return
+
+        scrollbar = self._list_scroll.verticalScrollBar()
+        scrollbar.setValue(scrollbar.value() + delta)
+
+    def _stop_drag_autoscroll(self) -> None:
+        self._drag_scroll_timer.stop()
+        self._drag_global_position = None
+
+    def _drop_rows_into_group(self, group_name: str, indexes: object) -> None:
+        valid_rows = [
+            self._rows[index]
+            for index in indexes
+            if isinstance(index, int) and 0 <= index < len(self._rows)
+        ] if isinstance(indexes, list) else []
+        if not valid_rows:
+            return
+        self._suppress_group_changed = True
+        try:
+            for row in valid_rows:
+                row.set_group_name(group_name)
+                row.set_selected(False, emit_signal=False)
+        finally:
+            self._suppress_group_changed = False
+        self._selection_anchor = None
+        self._rebuild_rows_layout()
+        self._on_selection_changed()
 
     def _on_group_changed(self) -> None:
         if self._rebuilding_rows or self._suppress_group_changed:
@@ -528,6 +696,7 @@ class _DatasetRow(QFrame):
     group_changed = pyqtSignal()
     selection_changed = pyqtSignal()
     selection_requested = pyqtSignal(object, object)
+    drag_requested = pyqtSignal(object)
 
     def __init__(self, tab, checked: bool = False, *, allow_grouping: bool = False, parent=None):
         super().__init__(parent)
@@ -536,6 +705,7 @@ class _DatasetRow(QFrame):
         self._selected = False
         self._allow_grouping = bool(allow_grouping)
         self._group_edit = None
+        self._drag_start_position: Optional[QPoint] = None
         self._status_color = _dataset_status_color(tab)
         self._build_ui()
         self._refresh_search_text()
@@ -625,7 +795,10 @@ class _DatasetRow(QFrame):
 
         if self._group_edit is not None:
             self._group_edit.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents, False)
-        self.setToolTip("Checkmark includes the dataset. Row body selects it for group assignment.")
+        self.setToolTip(
+            "Checkmark includes the dataset. Ctrl-click or Shift-click the row body "
+            "to select multiple rows, then drag the selection into a group."
+        )
 
     def matches_filter(self, text: str) -> bool:
         return not text or text in self._search_text
@@ -679,6 +852,12 @@ class _DatasetRow(QFrame):
 
     def mousePressEvent(self, event):
         if event.button() == Qt.MouseButton.LeftButton:
+            position = event.position()
+            self._drag_start_position = (
+                position.toPoint()
+                if hasattr(position, 'toPoint')
+                else QPoint(int(position.x()), int(position.y()) if hasattr(position, 'y') else 0)
+            )
             if self._allow_grouping and event.position().x() > 34:
                 self.selection_requested.emit(self, event.modifiers())
             else:
@@ -686,6 +865,24 @@ class _DatasetRow(QFrame):
             event.accept()
             return
         super().mousePressEvent(event)
+
+    def mouseMoveEvent(self, event):
+        if (
+            self._allow_grouping
+            and self._drag_start_position is not None
+            and event.buttons() & Qt.MouseButton.LeftButton
+            and (event.position().toPoint() - self._drag_start_position).manhattanLength()
+            >= QApplication.startDragDistance()
+        ):
+            self._drag_start_position = None
+            self.drag_requested.emit(self)
+            event.accept()
+            return
+        super().mouseMoveEvent(event)
+
+    def mouseReleaseEvent(self, event):
+        self._drag_start_position = None
+        super().mouseReleaseEvent(event)
 
     def _sync_styles(self):
         row_bg = (

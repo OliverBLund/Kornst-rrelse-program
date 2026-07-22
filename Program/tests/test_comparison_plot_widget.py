@@ -17,12 +17,13 @@ sys.path.insert(0, 'Program')
 
 from matplotlib.figure import Figure
 from matplotlib.colors import to_hex
+from PyQt6.QtCore import Qt
 from PyQt6.QtWidgets import QApplication, QFileDialog, QMessageBox
 
 from data_loader import GrainSizeData
 from grain_classification import USCS
 from gui.comparison_plot_widget import ComparisonPlotWidget
-from gui.plot_renderers import render_k_boxplot, render_k_histogram
+from gui.plot_renderers import render_k_boxplot, render_k_histogram, render_k_overlay
 from gui.group_styles import (
     clear_dataset_line_style,
     clear_group_color,
@@ -104,6 +105,10 @@ class TestComparisonPlotWidget(unittest.TestCase):
     def tearDown(self):
         self.widget.deleteLater()
 
+    def test_plot_data_export_is_owned_by_drawer_not_controls_panel(self):
+        self.assertFalse(hasattr(self.widget, "_sect_export"))
+        self.assertEqual(self.widget._drawer_export_btn.text(), "Export Data...")
+
     @staticmethod
     def _legend_handle_for(ax, name):
         """Return the legend handle whose label matches *name* (ignoring the
@@ -135,6 +140,45 @@ class TestComparisonPlotWidget(unittest.TestCase):
         self.widget.on_plot_type_changed('K Distribution')
         self.assertEqual(self.widget.display_mode, 'overlay')
         self.assertFalse(self.widget.grid_radio.isEnabled())
+
+    def test_plot_toolbar_controls_explain_layout_and_breakdown(self):
+        self.assertIn('visualization', self.widget.plot_selector.toolTip())
+        self.assertIn('shared axes', self.widget.overlay_radio.toolTip())
+        self.assertIn('separate panels', self.widget.grid_radio.toolTip())
+        self.assertIn('selected dataset', self.widget.bd_dataset_btn.toolTip())
+        self.assertIn('Scope & Groups', self.widget.bd_group_btn.toolTip())
+        self.assertIn('panel grid', self.widget.grid_selector.toolTip())
+
+    def test_plot_toolbar_exports_png_svg_and_pdf(self):
+        self.assertEqual(self.widget._tb_export_btn.objectName(), 'plot-export-figure')
+        self.assertTrue(self.widget._tb_export_btn.property('pw-btn'))
+        self.assertIn('background-color', self.widget._tb_export_btn.styleSheet())
+        menu = self.widget._tb_export_btn.menu()
+        self.assertIsNotNone(menu)
+        self.assertFalse(menu.testAttribute(Qt.WidgetAttribute.WA_TranslucentBackground))
+        self.assertEqual(
+            [action.text() for action in menu.actions()],
+            ['PNG image...', 'SVG vector...', 'PDF figure...'],
+        )
+
+    def test_figure_export_uses_white_paper_background_without_restyling_canvas(self):
+        canvas_facecolor = self.widget.figure.get_facecolor()
+        with (
+            patch.object(
+                QFileDialog,
+                'getSaveFileName',
+                return_value=('comparison', 'PNG Image (*.png)'),
+            ),
+            patch.object(QMessageBox, 'information'),
+            patch.object(self.widget.figure, 'savefig') as savefig,
+        ):
+            self.widget._export_figure('png')
+
+        kwargs = savefig.call_args.kwargs
+        self.assertEqual(kwargs['facecolor'], 'white')
+        self.assertEqual(kwargs['edgecolor'], 'white')
+        self.assertFalse(kwargs['transparent'])
+        self.assertEqual(self.widget.figure.get_facecolor(), canvas_facecolor)
 
     def test_breakdown_defaults_to_group_when_groups_exist(self):
         self.widget.set_datasets([
@@ -276,6 +320,48 @@ class TestComparisonPlotWidget(unittest.TestCase):
         self.widget._on_kdist_view_changed("cdf")
         self.assertFalse(section.isHidden())
 
+    def test_series_appearance_only_shows_controls_used_by_active_plot(self):
+        self.widget.set_datasets([
+            DummyDatasetTab('Layer A-1', 1.0, group='Layer A'),
+            DummyDatasetTab('Layer A-2', 1.5, group='Layer A'),
+            DummyDatasetTab('Sample C', 2.0),
+        ])
+        line_rows = [
+            combo.parentWidget()
+            for combo in self.widget._dataset_line_style_rows.values()
+        ]
+        group_rows = [
+            swatch.parentWidget()
+            for swatch in self.widget._group_color_rows.values()
+        ]
+        dataset_color_rows = [
+            swatch.parentWidget()
+            for swatch in self.widget._dataset_color_rows.values()
+        ]
+
+        self.widget.on_plot_type_changed('Distribution')
+        self.assertFalse(self.widget._sect_dataset_colors.isHidden())
+        self.assertTrue(all(not row.isHidden() for row in line_rows))
+
+        self.widget.on_plot_type_changed('K-Values')
+        self.widget.set_display_mode('overlay')
+        self.assertFalse(self.widget._sect_dataset_colors.isHidden())
+        self.assertTrue(all(row.isHidden() for row in line_rows))
+        self.assertTrue(all(not row.isHidden() for row in group_rows))
+        self.assertTrue(all(not row.isHidden() for row in dataset_color_rows))
+
+        self.widget.set_display_mode('grid')
+        self.assertTrue(self.widget._sect_dataset_colors.isHidden())
+
+        self.widget.on_plot_type_changed('Histogram')
+        self.assertFalse(self.widget._sect_dataset_colors.isHidden())
+        self.assertTrue(all(row.isHidden() for row in line_rows))
+
+        self.widget.on_plot_type_changed('K Distribution')
+        self.assertFalse(self.widget._sect_dataset_colors.isHidden())
+        self.assertTrue(all(row.isHidden() for row in line_rows))
+        self.assertTrue(all(row.isHidden() for row in dataset_color_rows))
+
     def test_k_distribution_histogram_density_toggle_changes_axis(self):
         self.widget.on_plot_type_changed('K Distribution')
         self.widget._on_kdist_ymode_changed('density')
@@ -344,10 +430,32 @@ class TestComparisonPlotWidget(unittest.TestCase):
         self.assertAlmostEqual(sum(heights), 100.0, places=6)
         self.assertEqual(first_ax.get_ylabel(), 'Weight (%)')
         self.assertEqual(first_ax.get_xlabel(), 'Grain-size class (ISO 14688)')
-        tick_labels = [tick.get_text() for tick in first_ax.get_xticklabels()]
+        tick_labels = [
+            tick.get_text().replace('\n', ' ')
+            for tick in first_ax.get_xticklabels()
+        ]
         self.assertEqual(tick_labels.count('Coarse sand'), 1)
         self.assertEqual(self.widget.display_mode, 'grid')
         self.assertTrue(self.widget.grid_radio.isChecked())
+
+    def test_histogram_adapts_tick_rotation_to_class_count(self):
+        self.widget.on_plot_type_changed('Histogram')
+
+        for ax in self.widget.figure.axes:
+            labels = ax.get_xticklabels()
+            self.assertGreater(len(labels), 6)
+            self.assertTrue(all(tick.get_rotation() == 45 for tick in labels))
+            self.assertTrue(all(tick.get_ha() == 'right' for tick in labels))
+            self.assertTrue(all('\n' not in tick.get_text() for tick in labels))
+
+        self.widget.set_scheme(USCS)
+        self.widget.refresh_plot()
+
+        for ax in self.widget.figure.axes:
+            labels = ax.get_xticklabels()
+            self.assertLessEqual(len(labels), 6)
+            self.assertTrue(all(tick.get_rotation() == 0 for tick in labels))
+            self.assertTrue(all(tick.get_ha() == 'center' for tick in labels))
 
     def test_group_colors_stable_across_hide_and_show(self):
         tabs = [
@@ -398,6 +506,51 @@ class TestComparisonPlotWidget(unittest.TestCase):
 
         self.assertIn('////', hatches)
         self.assertTrue(any(line.get_visible() for line in ax.yaxis.get_gridlines()))
+
+    def test_sparse_k_overlay_centers_ticks_and_separates_method_clusters(self):
+        figure = Figure()
+        ax = figure.add_subplot(1, 1, 1)
+        render_k_overlay(
+            ax,
+            {
+                'g1': {'Hazen': 1.0e-4},
+                'g2': {'Beyer': 2.0e-4},
+                'Sample': {'Kozeny-Carman': 3.0e-4},
+            },
+            show_value_labels=False,
+            show_grid=True,
+        )
+
+        tick_centers = list(ax.get_xticks())
+        self.assertEqual(tick_centers, [0.0, 1.0, 2.0])
+        bars = list(ax.patches)
+        self.assertEqual(len(bars), 9)
+        series_count = 3
+        method_count = 3
+        for method_index, tick_center in enumerate(tick_centers):
+            cluster_centers = [
+                bars[series_index * method_count + method_index].get_x()
+                + bars[series_index * method_count + method_index].get_width() / 2
+                for series_index in range(series_count)
+            ]
+            self.assertAlmostEqual(
+                sum(cluster_centers) / len(cluster_centers),
+                tick_center,
+            )
+
+        separators = [
+            line for line in ax.lines
+            if line.get_gid() == 'k-method-cluster-boundary'
+        ]
+        self.assertEqual(len(separators), method_count - 1)
+        self.assertEqual(
+            [float(line.get_xdata()[0]) for line in separators],
+            [0.5, 1.5],
+        )
+        self.assertFalse(any(
+            tick.tick1line.get_visible()
+            for tick in ax.xaxis.get_minor_ticks()
+        ))
 
     def test_k_value_comparison_uses_linear_axis_by_default_and_log_when_enabled(self):
         self.widget.on_plot_type_changed('K-Values')

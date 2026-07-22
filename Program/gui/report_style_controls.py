@@ -150,6 +150,9 @@ class ReportStyleControls(QWidget):
         play.addWidget(self._label("Preset"))
 
         self._preset_combo = QComboBox()
+        self._preset_combo.setToolTip(
+            "Choose the shared visual preset for every report and export plot; changing it clears custom overrides."
+        )
         self._preset_combo.addItems(get_available_style_names())
         self._select_text(self._preset_combo, get_report_style_preset())
         # Set the opaque-popup QSS on the combo itself so the transparent panel
@@ -159,6 +162,9 @@ class ReportStyleControls(QWidget):
         play.addWidget(self._preset_combo, 1)
 
         self._customize_btn = QPushButton("Customize…")
+        self._customize_btn.setToolTip(
+            "Adjust typography, legend, grid, and other plot settings on top of the selected preset."
+        )
         self._customize_btn.setCursor(Qt.CursorShape.PointingHandCursor)
         self._customize_btn.clicked.connect(self._on_customize)
         play.addWidget(self._customize_btn)

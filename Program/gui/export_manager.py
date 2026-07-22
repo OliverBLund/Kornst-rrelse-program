@@ -764,13 +764,14 @@ class ExportManager:
 
         # CSV Export
         if config.get('csv', False):
-            if config.get('csv_mode') == 'separate':
+            csv_mode = config.get('csv_mode', 'combined')
+            if csv_mode in {'separate', 'both'}:
                 if config.get('csv_long', True):
                     for name, dataset, results in datasets:
                         self._export_csv_single(name, dataset, results, config)
                         if progress:
                             progress.setValue(len(self.exported_files))
-                if config.get('csv_wide', False):
+                if csv_mode == 'separate' and config.get('csv_wide', False):
                     self._export_csv_wide_format_filtered(datasets, config)
                     if progress:
                         progress.setValue(len(self.exported_files))
@@ -778,7 +779,7 @@ class ExportManager:
                     self._export_aggregate_statistics_csv(datasets, config)
                     if progress:
                         progress.setValue(len(self.exported_files))
-            else:
+            if csv_mode in {'combined', 'both'}:
                 if config.get('csv_long', True):
                     self._export_csv_combined_filtered(datasets, config)
                     if progress:
@@ -791,7 +792,7 @@ class ExportManager:
                     self._export_grain_distribution_csv(datasets, config)
                     if progress:
                         progress.setValue(len(self.exported_files))
-                if self._collection_statistics_enabled(datasets, config):
+                if csv_mode == 'combined' and self._collection_statistics_enabled(datasets, config):
                     self._export_aggregate_statistics_csv(datasets, config)
                     if progress:
                         progress.setValue(len(self.exported_files))
@@ -800,13 +801,13 @@ class ExportManager:
         if config.get('excel', False):
             excel_mode = config.get('excel_mode', 'per_dataset')
 
-            if excel_mode == 'per_dataset':
+            if excel_mode in {'per_dataset', 'both'}:
                 for name, dataset, results in datasets:
                     self._export_excel_single(name, dataset, results, config)
                     if progress:
                         progress.setValue(len(self.exported_files))
 
-            elif excel_mode == 'combined':
+            if excel_mode in {'combined', 'both'}:
                 self._export_excel_combined(datasets, config)
                 if progress:
                     progress.setValue(len(self.exported_files))
@@ -816,7 +817,7 @@ class ExportManager:
                 if progress:
                     progress.setValue(len(self.exported_files))
 
-            if excel_mode != 'combined' and self._collection_statistics_enabled(datasets, config):
+            if excel_mode in {'per_dataset', 'method_organized'} and self._collection_statistics_enabled(datasets, config):
                 self._export_aggregate_statistics_excel(datasets, config)
                 if progress:
                     progress.setValue(len(self.exported_files))
@@ -1328,7 +1329,8 @@ class ExportManager:
         steps = 0
 
         if config.get('csv', False):
-            if config.get('csv_mode') == 'separate':
+            csv_mode = config.get('csv_mode', 'combined')
+            if csv_mode in {'separate', 'both'}:
                 if config.get('csv_long', True):
                     for _name, _dataset, results in datasets:
                         if config.get('grain_distribution', True):
@@ -1337,9 +1339,9 @@ class ExportManager:
                             steps += 1
                         if config.get('statistics', True):
                             steps += 1
-                if config.get('csv_wide', False):
+                if csv_mode == 'separate' and config.get('csv_wide', False):
                     steps += 1
-            else:
+            if csv_mode in {'combined', 'both'}:
                 if config.get('csv_long', True):
                     steps += 1
                 if config.get('csv_wide', False):
@@ -1353,9 +1355,11 @@ class ExportManager:
             excel_mode = config.get('excel_mode', 'per_dataset')
             if excel_mode == 'per_dataset':
                 steps += len(datasets)
+            elif excel_mode == 'both':
+                steps += len(datasets) + 1
             else:
                 steps += 1
-            if excel_mode != 'combined' and self._collection_statistics_enabled(datasets, config):
+            if excel_mode in {'per_dataset', 'method_organized'} and self._collection_statistics_enabled(datasets, config):
                 steps += 1
 
         if config.get('json', False):
@@ -1988,7 +1992,7 @@ class ExportManager:
 
         # Sheet 2: Grain Size Data
         if config.get('grain_distribution', True):
-            ws_grain = wb.create_sheet('Grain_Size_Data')
+            ws_grain = wb.create_sheet('Grain Size Data')
             self._write_excel_grain_size(ws_grain, dataset)
 
         # Sheet 3: Percentiles
@@ -1998,7 +2002,7 @@ class ExportManager:
 
         # Sheet 4: K-Values
         if config.get('k_values', True) and results:
-            ws_k = wb.create_sheet('K_Values')
+            ws_k = wb.create_sheet('Method Results')
             self._write_excel_k_values(ws_k, results, config)
 
         # Sheet 5: Statistics
@@ -2045,15 +2049,15 @@ class ExportManager:
             wb.remove(wb['Sheet'])
 
         used: set[str] = set()
-        self._add_excel_table_sheet(wb, 'K_Results_Long', self.build_csv_long_model(datasets, config), used)
-        self._add_excel_table_sheet(wb, 'Sample_Wide', self.build_csv_wide_model(datasets, config), used)
+        self._add_excel_table_sheet(wb, 'Method Results', self.build_csv_long_model(datasets, config), used)
+        self._add_excel_table_sheet(wb, 'Sample Summary', self.build_csv_wide_model(datasets, config), used)
         if config.get('grain_distribution', False):
             self._add_excel_table_sheet(
-                wb, 'Grain_Distribution', self.build_grain_distribution_model(datasets, config), used
+                wb, 'Grain Distribution', self.build_grain_distribution_model(datasets, config), used
             )
         if self._collection_statistics_enabled(datasets, config):
             self._add_excel_table_sheet(
-                wb, 'Aggregate_Statistics', self.build_aggregate_statistics_model(datasets, config), used
+                wb, 'Collection Statistics', self.build_aggregate_statistics_model(datasets, config), used
             )
 
         wb.save(filepath)
@@ -2110,7 +2114,7 @@ class ExportManager:
 
         wb = Workbook()
         ws = wb.active
-        ws.title = 'Aggregate_Statistics'
+        ws.title = 'Collection Statistics'
         self._write_excel_aggregate_statistics(ws, datasets, config)
         wb.save(filepath)
         self.exported_files.append(filepath)

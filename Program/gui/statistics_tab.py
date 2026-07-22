@@ -560,7 +560,10 @@ class StatisticsTab(QWidget):
         return frame
 
     def _build_k_summary_card(self) -> _Card:
-        card = _Card("Hydraulic Conductivity Summary", "All active / OK only")
+        card = _Card(
+            "Hydraulic Conductivity Summary",
+            "Basis: OK results from active methods",
+        )
         self._k_table = _make_table(["Statistic", "m/s", "cm/s", "m/d"])
         self._k_table.setToolTip(
             "Statistics use positive OK results from the active workspace K methods."
@@ -814,19 +817,19 @@ class StatisticsTab(QWidget):
 
     def _update_k_summary(self, summary) -> None:
         self._k_table.setRowCount(0)
-        self.k_summary_card.set_meta("All active / OK only")
+        self.k_summary_card.set_meta("Basis: OK results from active methods")
         if not summary:
             self._k_table.hide()
             self._k_note.setText(
                 "Calculate K-values to see the OK-only aggregate summary. "
-                "The active method set is controlled under Analysis > Choose K Methods."
+                "The active method set is controlled under Analysis > Analysis Settings."
             )
             self._k_note.show()
             return
         self._k_note.setText(
             f"Uses {summary.included_count} of {summary.total_cells} active methods: "
             "positive OK results only. Warnings and errors are excluded. "
-            "Change the active set under Analysis > Choose K Methods."
+            "Change the active set under Analysis > Analysis Settings."
         )
         self._k_note.show()
         self._k_table.show()

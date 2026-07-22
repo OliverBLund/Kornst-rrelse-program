@@ -2,19 +2,23 @@
 setlocal ENABLEDELAYEDEXPANSION
 
 echo ==========================================
-echo Grain Size Analysis - Installer Experiment
+echo Grain Size Analysis - Windows Installer
 echo ==========================================
 echo.
 
-if "%~1"=="" (
-    set /p VERSION="Enter version number to package: "
-    if "!VERSION!"=="" (
-        echo ERROR: Version number cannot be empty.
-        pause
-        exit /b 1
-    )
-) else (
-    set VERSION=%~1
+python --version >NUL 2>&1
+if ERRORLEVEL 1 (
+    echo ERROR: Python 3 is not installed or not in PATH.
+    pause
+    exit /b 1
+)
+for /f "usebackq delims=" %%v in (`python -c "import sys; sys.path.insert(0, 'Program'); from version import VERSION; print(VERSION)"`) do set "APP_VERSION=%%v"
+if "%~1"=="" (set "VERSION=!APP_VERSION!") else (set "VERSION=%~1")
+if /i not "!VERSION!"=="!APP_VERSION!" (
+    echo ERROR: Requested installer version !VERSION! does not match Program/version.py ^(!APP_VERSION!^).
+    echo Build and package the canonical application version only.
+    pause
+    exit /b 1
 )
 
 set RELEASE_DIR=C:\gsa_build\%VERSION%
