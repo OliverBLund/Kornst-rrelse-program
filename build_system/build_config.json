@@ -19,6 +19,10 @@
       "target": "Program/resources"
     },
     {
+      "source": "../Litterature/DevlinHydrogeoSieveXL_HydrogeologyJ-15.pdf",
+      "target": "Litterature"
+    },
+    {
       "source": "../Program/CHANGELOG.md",
       "target": "Program"
     },

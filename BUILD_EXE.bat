@@ -237,6 +237,7 @@ if "%BUILD_MODE%"=="1" (
     --add-data "%PROJECT_DIR%\Program\CHANGELOG.md;Program" ^
     --add-data "%PROJECT_DIR%\Program\help_content;Program\help_content" ^
     --add-data "%PROJECT_DIR%\Program\resources;Program\resources" ^
+    --add-data "%PROJECT_DIR%\Litterature\DevlinHydrogeoSieveXL_HydrogeologyJ-15.pdf;Litterature" ^
     --add-data "%PROJECT_DIR%\docs;docs" ^
     --add-data "%PROJECT_DIR%\test_data;Program\test_data" ^
     --hidden-import "PyQt6.QtWidgets" ^

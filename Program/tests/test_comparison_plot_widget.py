@@ -188,7 +188,28 @@ class TestComparisonPlotWidget(unittest.TestCase):
         ])
         self.assertEqual(self.widget.breakdown, 'group')
         self.assertTrue(self.widget._use_group_breakdown())
-        self.assertFalse(self.widget._breakdown_frame.isHidden())
+        self.widget.resize(900, 600)
+        self.widget.show()
+        APP.processEvents()
+        self.assertTrue(
+            not self.widget._breakdown_frame.isHidden()
+            or self.widget._tb_more_btn.isVisible()
+        )
+
+    def test_comparison_toolbar_moves_secondary_controls_into_more(self):
+        self.widget.resize(520, 600)
+        self.widget.show()
+        APP.processEvents()
+
+        self.assertTrue(self.widget._tb_more_btn.isVisible())
+        menu_text = [action.text() for action in self.widget._overflow_menu.actions()]
+        self.assertIn("Style", menu_text)
+        self.assertIn("View", menu_text)
+        self.assertIn("Export", menu_text)
+
+        self.widget.resize(1500, 600)
+        APP.processEvents()
+        self.assertFalse(self.widget._tb_more_btn.isVisible())
 
         # Ungrouped scope falls back to per-dataset and hides the control.
         self.widget.set_datasets([

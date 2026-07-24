@@ -43,6 +43,7 @@ DEFAULT_CONFIG: Dict[str, Any] = {
     "data": [
         {"source": "../Program/help_content", "target": "Program/help_content"},
         {"source": "../Program/resources", "target": "Program/resources"},
+        {"source": "../Litterature/DevlinHydrogeoSieveXL_HydrogeologyJ-15.pdf", "target": "Litterature"},
         {"source": "../Program/CHANGELOG.md", "target": "Program"},
         {"source": "../docs", "target": "docs"},
         {"source": "../test_data", "target": "Program/test_data"}

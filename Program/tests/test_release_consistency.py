@@ -78,6 +78,12 @@ def test_build_and_installer_versions_match_the_application():
     assert "from version import VERSION" in build_script
     assert "from version import VERSION" in installer_script
     assert "--version-file" in build_script
+    assert "DevlinHydrogeoSieveXL_HydrogeologyJ-15.pdf;Litterature" in build_script
+    companion = _read("README.csv")
+    assert "field,value" in companion
+    assert "GrainSizeAnalysis-0.9.7-Setup.exe" in companion
+    assert "https://doi.org/10.1007/s10040-015-1255-0" in companion
+    assert "README.csv" in installer_script
     assert f"FileVersion', '{VERSION}'" in metadata
     assert f"ProductVersion', '{VERSION}'" in metadata
 

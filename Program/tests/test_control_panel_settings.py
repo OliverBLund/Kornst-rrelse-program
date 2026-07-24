@@ -168,7 +168,7 @@ class TestControlPanelSettings(unittest.TestCase):
         credit_text = self.panel._sidebar_credit_text.text()
         self.assertIn("Oliver Lund", credit_text)
         self.assertIn("with Poul Løgstrup Bjerg", credit_text)
-        self.assertIn("Based on HydrogeoSieveXL", credit_text)
+        self.assertIn("Further development of HydrogeoSieveXL", credit_text)
         self.assertIn("J. F. Devlin", credit_text)
         self.assertIn("Developed by Oliver Lund", self.panel._sidebar_credit_text.toolTip())
 

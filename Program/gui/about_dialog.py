@@ -5,8 +5,9 @@ from __future__ import annotations
 from pathlib import Path
 
 from PyQt6.QtCore import Qt
-from PyQt6.QtGui import QIcon
-from PyQt6.QtWidgets import QFrame, QHBoxLayout, QLabel, QVBoxLayout, QWidget
+from PyQt6.QtGui import QDesktopServices, QIcon
+from PyQt6.QtCore import QUrl
+from PyQt6.QtWidgets import QFrame, QHBoxLayout, QLabel, QPushButton, QVBoxLayout, QWidget
 
 from gui.dialog_chrome import make_dialog_footer, make_dialog_header
 from gui.theme import C, F
@@ -89,7 +90,7 @@ class AboutDialog(FramelessDialogBase):
         layout.addWidget(self._divider())
         layout.addWidget(self._section_label("ORIGINAL TOOL"))
         lineage = QLabel(
-            "This application builds on the workflow established by "
+            "This program is a further development of "
             "<b>HydrogeoSieveXL</b>, the original grain-size and hydraulic-"
             "conductivity tool developed by <b>J. F. Devlin</b>."
         )
@@ -99,6 +100,51 @@ class AboutDialog(FramelessDialogBase):
             f"color: {C.TEXT_MID}; font-size: {F.SZ_MD}pt; background: transparent;"
         )
         layout.addWidget(lineage)
+
+        layout.addWidget(self._divider())
+        layout.addWidget(self._section_label("REFERENCES"))
+        references = QLabel(
+            'Original software: '
+            '<a href="https://jfdevlin.github.io/DevlinWebPages/Software.html">'
+            'HydrogeoSieveXL software page</a><br>'
+            'J. F. Devlin (2015), <i>HydrogeoSieveXL: an Excel-based tool to '
+            'estimate hydraulic conductivity from grain-size analysis</i>, '
+            '<i>Hydrogeology Journal</i>. '
+            '<a href="https://doi.org/10.1007/s10040-015-1255-0">'
+            'DOI 10.1007/s10040-015-1255-0</a>'
+        )
+        references.setObjectName("about-references")
+        references.setWordWrap(True)
+        references.setOpenExternalLinks(True)
+        references.setTextFormat(Qt.TextFormat.RichText)
+        references.setStyleSheet(
+            f"color: {C.TEXT_MID}; font-size: {F.SZ_SM}pt;"
+            f" background: transparent;"
+            f" selection-background-color: {C.OLIVE};"
+        )
+        layout.addWidget(references)
+
+        self._article_button = QPushButton("Open cited article (PDF)")
+        self._article_button.setObjectName("about-article-button")
+        self._article_button.setCursor(Qt.CursorShape.PointingHandCursor)
+        self._article_button.setFixedHeight(28)
+        self._article_button.setStyleSheet(
+            f"QPushButton {{ background: {C.BG_LOW}; color: {C.OLIVE_DK};"
+            f" border: 1px solid {C.BORDER}; border-radius: 5px; padding: 3px 9px; }}"
+            f"QPushButton:hover {{ background: {C.BG_RAISED}; border-color: {C.OLIVE}; }}"
+            f"QPushButton:disabled {{ color: {C.TEXT_MUTED}; background: transparent; }}"
+        )
+        article_path = self._article_path()
+        if article_path is not None:
+            self._article_button.clicked.connect(
+                lambda: QDesktopServices.openUrl(QUrl.fromLocalFile(str(article_path)))
+            )
+        else:
+            self._article_button.setEnabled(False)
+            self._article_button.setToolTip(
+                "The cited PDF is available in the source distribution or via the DOI above."
+            )
+        layout.addWidget(self._article_button, 0, Qt.AlignmentFlag.AlignLeft)
         layout.addStretch(1)
 
         copyright_label = QLabel("© 2025–2026 · DTU Sustain")
@@ -122,6 +168,14 @@ class AboutDialog(FramelessDialogBase):
         divider.setFrameShape(QFrame.Shape.HLine)
         divider.setStyleSheet(f"color: {C.BORDER};")
         return divider
+
+    @staticmethod
+    def _article_path() -> Path | None:
+        """Locate the cited PDF in both source and PyInstaller layouts."""
+        path = Path(__file__).resolve().parents[2] / "Litterature" / (
+            "DevlinHydrogeoSieveXL_HydrogeologyJ-15.pdf"
+        )
+        return path if path.is_file() else None
 
     @staticmethod
     def _section_label(text: str) -> QLabel:

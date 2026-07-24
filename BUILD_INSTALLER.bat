@@ -81,5 +81,12 @@ if ERRORLEVEL 1 (
 echo.
 echo Installer created:
 echo   %RELEASE_DIR%\GrainSizeAnalysis-%VERSION%-Setup.exe
+if exist "%CD%\README.csv" (
+    copy /Y "%CD%\README.csv" "%RELEASE_DIR%\README.csv" >nul
+    echo Companion metadata CSV:
+    echo   %RELEASE_DIR%\README.csv
+) else (
+    echo WARNING: README.csv companion file was not found in the project root.
+)
 echo.
 pause

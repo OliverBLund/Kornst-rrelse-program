@@ -30,6 +30,9 @@ class TestAboutAndApplicationSettings(unittest.TestCase):
         self.assertIn("Poul Løgstrup Bjerg", text)
         self.assertIn("HydrogeoSieveXL", text)
         self.assertIn("J. F. Devlin", text)
+        self.assertIn("jfdevlin.github.io/DevlinWebPages/Software.html", text)
+        self.assertIn("10.1007/s10040-015-1255-0", text)
+        self.assertEqual(dialog._article_button.text(), "Open cited article (PDF)")
         self.assertNotIn("Supervised by", text)
         dialog.deleteLater()
 

@@ -2258,7 +2258,7 @@ class ControlPanel(QFrame):
             f"color: {C.SB_TEXT}; background: transparent;")
         dtu_dept = QLabel(
             "Oliver Lund  ·  with Poul Løgstrup Bjerg\n"
-            "Based on HydrogeoSieveXL  ·  J. F. Devlin"
+            "Further development of HydrogeoSieveXL  ·  J. F. Devlin"
         )
         self._sidebar_credit_text = dtu_dept
         dtu_dept.setObjectName("sidebar-credit-text")
@@ -2270,7 +2270,8 @@ class ControlPanel(QFrame):
         dtu_dept.setToolTip(
             "Developed by Oliver Lund at DTU Sustain\n"
             "Made in collaboration with Poul Løgstrup Bjerg\n"
-            "Based on HydrogeoSieveXL, developed by J. F. Devlin"
+            "This program is a further development of HydrogeoSieveXL,\n"
+            "the original tool developed by J. F. Devlin"
         )
         dtu_info.addWidget(kicker)
         dtu_info.addWidget(dtu_prog)

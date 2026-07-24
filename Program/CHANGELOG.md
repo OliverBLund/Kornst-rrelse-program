@@ -34,6 +34,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Consolidated figure export in plot toolbars and redesigned Export around output-named recipes, one grouped format selector, separate content/appearance controls, real previews, and a manifest that matches generated filenames.
 - Improved categorical tick defaults and labels, including clearer K-method grouping and controllable tick rotation.
 - Centralized tooltip styling and polished workspace, About, Settings, Analysis Settings, Dataset Inputs, and export dialogs.
+- Updated the sidebar and About dialog to state clearly that this program is a further development of HydrogeoSieveXL, with direct links to J. F. Devlin's software page and the original Hydrogeology Journal article; the cited PDF is bundled with release builds.
 - Clarified the Hydraulic Conductivity Summary as active methods with positive, OK results only.
 - Made the status bar follow the selected dataset and report its D50, mean K, temperature, active-method count, and workspace size.
 - Put valid processed/raw CSV and Excel examples first in Data Format & Files, aligned written Guides with the final workflows, and made Tutorials reveal and navigate to their required controls automatically.

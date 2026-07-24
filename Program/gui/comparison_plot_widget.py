@@ -401,6 +401,7 @@ class ComparisonPlotWidget(QWidget):
         """Create the toolbar with plot controls."""
         toolbar = QWidget()
         toolbar.setObjectName("pw-toolbar")
+        self._toolbar = toolbar
         row = QHBoxLayout(toolbar)
         row.setContentsMargins(8, 0, 8, 0)
         row.setSpacing(4)
@@ -427,7 +428,8 @@ class ComparisonPlotWidget(QWidget):
         self.plot_selector.currentTextChanged.connect(self.on_plot_type_changed)
         row.addWidget(self.plot_selector)
 
-        row.addWidget(_cmp_sep())
+        self._grid_sep = _cmp_sep()
+        row.addWidget(self._grid_sep)
 
         mode_label = QLabel("Layout")
         mode_label.setStyleSheet("color: #6a6254;")
@@ -471,7 +473,8 @@ class ComparisonPlotWidget(QWidget):
         mode_row.addWidget(self.grid_radio)
 
         row.addWidget(mode_frame)
-        row.addWidget(_cmp_sep())
+        self._view_sep = _cmp_sep()
+        row.addWidget(self._view_sep)
 
         # Breakdown — render per dataset or per group. Reads the groups the
         # Scope & Groups dialog defined; it does not manage groups. Shown only
@@ -633,11 +636,202 @@ class ComparisonPlotWidget(QWidget):
         self._tb_export_btn.setMenu(export_menu)
         row.addWidget(self._tb_export_btn)
 
+        self._tb_more_btn = _cmp_btn(" More", "More comparison plot actions", "fa6s.ellipsis")
+        self._tb_more_btn.setObjectName("comparison-toolbar-more")
+        self._overflow_menu = self._build_toolbar_overflow_menu()
+        self._tb_more_btn.setMenu(self._overflow_menu)
+        self._tb_more_btn.setVisible(False)
+        row.addWidget(self._tb_more_btn)
+
+        self._overflow_groups = {
+            "context": (
+                self._tb_breakdown_label,
+                self._breakdown_frame,
+                self._breakdown_sep,
+                self.grid_label,
+                self.grid_selector,
+                self._grid_sep,
+            ),
+            "style": (self._tb_style_label, self.style_selector),
+            "utility": (self._tb_sidebar_btn, self._tb_drawer_btn),
+            "view": (
+                self._view_sep,
+                self.zoom_in_btn,
+                self.zoom_out_btn,
+                self.reset_btn,
+            ),
+            "export": (self._export_sep, self._tb_export_btn),
+        }
+        self._overflow_hidden_groups: set[str] = set()
+
         # NOTE: the interaction hint moved out of the toolbar into a slim footer
         # below the plot (see init_ui) so it no longer competes for toolbar space.
 
         row.addStretch(1)
         return toolbar
+
+    def _build_toolbar_overflow_menu(self) -> QMenu:
+        """Build the responsive comparison-toolbar overflow menu."""
+        menu = QMenu(self)
+        menu.setAttribute(Qt.WidgetAttribute.WA_StyledBackground, True)
+        menu.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground, False)
+        menu.setStyleSheet(f"""
+            QMenu {{
+                background-color: {C.BG_RAISED};
+                border: 1px solid {C.BORDER_DK};
+                padding: 4px;
+                color: {C.TEXT_MID};
+            }}
+            QMenu::item {{ background-color: {C.BG_RAISED}; padding: 6px 24px 6px 10px; }}
+            QMenu::item:selected {{ background-color: #e8f0d5; color: {C.TEXT}; }}
+            QMenu::separator {{ height: 1px; background: {C.BORDER}; margin: 4px 6px; }}
+        """)
+        menu.aboutToShow.connect(self._sync_toolbar_overflow_menu)
+
+        self._overflow_context_section = menu.addSection("Context")
+        self._overflow_breakdown_menu = menu.addMenu("Breakdown")
+        self._overflow_breakdown_dataset = self._overflow_breakdown_menu.addAction("Per dataset")
+        self._overflow_breakdown_dataset.setCheckable(True)
+        self._overflow_breakdown_dataset.triggered.connect(
+            lambda _checked=False: self.bd_dataset_btn.setChecked(True)
+        )
+        self._overflow_breakdown_group = self._overflow_breakdown_menu.addAction("Per group")
+        self._overflow_breakdown_group.setCheckable(True)
+        self._overflow_breakdown_group.triggered.connect(
+            lambda _checked=False: self.bd_group_btn.setChecked(True)
+        )
+
+        self._overflow_grid_menu = menu.addMenu("Grid columns")
+        self._overflow_grid_actions = {}
+        for value in ("2x2", "3x2", "3x3", "4x3"):
+            action = self._overflow_grid_menu.addAction(value)
+            action.setCheckable(True)
+            action.triggered.connect(
+                lambda _checked=False, selected=value: self.grid_selector.setCurrentText(selected)
+            )
+            self._overflow_grid_actions[value] = action
+
+        self._overflow_style_section = menu.addSection("Style")
+        self._overflow_style_menu = menu.addMenu("Plot style")
+        self._overflow_style_actions = {}
+        for name in get_available_style_names():
+            action = self._overflow_style_menu.addAction(name)
+            action.triggered.connect(
+                lambda _checked=False, selected=name: self.style_selector.setCurrentText(selected)
+            )
+            self._overflow_style_actions[name] = action
+
+        self._overflow_utility_section = menu.addSection("Panels")
+        self._overflow_controls_action = menu.addAction("Controls")
+        self._overflow_controls_action.setCheckable(True)
+        self._overflow_controls_action.triggered.connect(
+            lambda _checked=False: self._tb_sidebar_btn.click()
+        )
+        self._overflow_table_action = menu.addAction("Table")
+        self._overflow_table_action.setCheckable(True)
+        self._overflow_table_action.triggered.connect(
+            lambda _checked=False: self._tb_drawer_btn.click()
+        )
+
+        self._overflow_view_section = menu.addSection("View")
+        self._overflow_zoom_in_action = menu.addAction("Zoom in")
+        self._overflow_zoom_in_action.triggered.connect(lambda _checked=False: self.zoom_in())
+        self._overflow_zoom_out_action = menu.addAction("Zoom out")
+        self._overflow_zoom_out_action.triggered.connect(lambda _checked=False: self.zoom_out())
+        self._overflow_fit_action = menu.addAction("Fit")
+        self._overflow_fit_action.triggered.connect(lambda _checked=False: self.reset_view())
+
+        self._overflow_export_section = menu.addSection("Export")
+        self._overflow_export_png_action = menu.addAction("Export PNG")
+        self._overflow_export_png_action.triggered.connect(
+            lambda _checked=False: self._export_figure("png")
+        )
+        self._overflow_export_svg_action = menu.addAction("Export SVG")
+        self._overflow_export_svg_action.triggered.connect(
+            lambda _checked=False: self._export_figure("svg")
+        )
+        self._overflow_export_pdf_action = menu.addAction("Export PDF")
+        self._overflow_export_pdf_action.triggered.connect(
+            lambda _checked=False: self._export_figure("pdf")
+        )
+        return menu
+
+    @staticmethod
+    def _set_toolbar_group_visible(widgets, visible: bool) -> None:
+        for widget in widgets:
+            widget.setVisible(bool(visible))
+
+    def _restore_toolbar_natural_visibility(self) -> None:
+        """Restore contextual visibility before applying responsive overflow."""
+        for widgets in getattr(self, "_overflow_groups", {}).values():
+            self._set_toolbar_group_visible(widgets, True)
+        has_groups = self._has_named_groups()
+        for widget in (self._tb_breakdown_label, self._breakdown_frame, self._breakdown_sep):
+            widget.setVisible(has_groups)
+        show_grid = self.display_mode == "grid"
+        self.grid_label.setVisible(show_grid)
+        self.grid_selector.setVisible(show_grid)
+
+    def _apply_toolbar_overflow_groups(self, hidden_groups: set[str]) -> None:
+        self._restore_toolbar_natural_visibility()
+        self._overflow_hidden_groups = set(hidden_groups)
+        for group_name in hidden_groups:
+            self._set_toolbar_group_visible(self._overflow_groups[group_name], False)
+        self._tb_more_btn.setVisible(bool(hidden_groups))
+
+    def _toolbar_content_fits(self, available_width: int) -> bool:
+        layout = self._toolbar.layout()
+        if layout is not None:
+            layout.invalidate()
+            layout.activate()
+        return self._toolbar.sizeHint().width() <= max(0, available_width - 2)
+
+    def _sync_toolbar_overflow_menu(self) -> None:
+        hidden = self._overflow_hidden_groups
+        context_visible = "context" in hidden
+        style_visible = "style" in hidden
+        utility_visible = "utility" in hidden
+        view_visible = "view" in hidden
+        export_visible = "export" in hidden
+
+        self._overflow_context_section.setVisible(context_visible)
+        self._overflow_breakdown_menu.menuAction().setVisible(
+            context_visible and self._has_named_groups()
+        )
+        self._overflow_grid_menu.menuAction().setVisible(
+            context_visible and self.display_mode == "grid"
+        )
+        self._overflow_breakdown_dataset.setChecked(self.breakdown == "dataset")
+        self._overflow_breakdown_group.setChecked(self.breakdown == "group")
+        for value, action in self._overflow_grid_actions.items():
+            action.setChecked(self.grid_selector.currentText() == value)
+
+        self._overflow_style_section.setVisible(style_visible)
+        self._overflow_style_menu.menuAction().setVisible(style_visible)
+        for name, action in self._overflow_style_actions.items():
+            action.setChecked(False)
+            action.setText(name)
+
+        self._overflow_utility_section.setVisible(utility_visible)
+        self._overflow_controls_action.setVisible(utility_visible)
+        self._overflow_table_action.setVisible(utility_visible)
+        self._overflow_controls_action.setChecked(self.sidebar_visible)
+        self._overflow_table_action.setChecked(self.drawer_visible)
+
+        self._overflow_view_section.setVisible(view_visible)
+        for action in (
+            self._overflow_zoom_in_action,
+            self._overflow_zoom_out_action,
+            self._overflow_fit_action,
+        ):
+            action.setVisible(view_visible)
+        self._overflow_export_section.setVisible(export_visible)
+        for action in (
+            self._overflow_export_png_action,
+            self._overflow_export_svg_action,
+            self._overflow_export_pdf_action,
+        ):
+            action.setVisible(export_visible)
 
     def resizeEvent(self, event):
         """Keep the sidebar toggle handle aligned to the chart edge."""
@@ -648,19 +842,28 @@ class ComparisonPlotWidget(QWidget):
             self._drawer.setMaximumHeight(self._drawer_open_height())
 
     def _update_responsive_chrome(self) -> None:
-        width = self.width()
-        for label_name in ("_tb_plot_label", "_tb_mode_label", "_tb_style_label"):
-            label = getattr(self, label_name, None)
-            if label is not None:
-                label.setVisible(width >= 760)
-        # Breakdown label is also contextual (only when named groups exist).
-        bd_label = getattr(self, "_tb_breakdown_label", None)
-        if bd_label is not None:
-            bd_label.setVisible(width >= 760 and self._has_named_groups())
-        if hasattr(self, "style_selector"):
-            self.style_selector.setMaximumWidth(118 if width >= 820 else 96)
-        if hasattr(self, "plot_selector"):
-            self.plot_selector.setMaximumWidth(134 if width >= 820 else 114)
+        if not hasattr(self, "_tb_more_btn"):
+            return
+        width = self._toolbar.width() or self.width()
+        if width <= 0:
+            return
+        self.style_selector.setMaximumWidth(118 if width >= 820 else 96)
+        self.plot_selector.setMaximumWidth(134 if width >= 820 else 114)
+
+        # Keep plot type and layout visible; progressively move secondary
+        # controls into More as the available width shrinks.
+        for hidden_groups in (
+            set(),
+            {"style"},
+            {"style", "context"},
+            {"style", "context", "utility"},
+            {"style", "context", "utility", "view"},
+            {"style", "context", "utility", "view", "export"},
+        ):
+            self._apply_toolbar_overflow_groups(hidden_groups)
+            if self._toolbar_content_fits(width):
+                break
+        self._sync_toolbar_overflow_menu()
 
     def _position_toggle_handle(self) -> None:
         if not hasattr(self, "_toggle_handle") or not hasattr(self, "_chart_area"):
@@ -1383,8 +1586,9 @@ class ComparisonPlotWidget(QWidget):
         if not hasattr(self, "_breakdown_frame"):
             return
         has_groups = self._has_named_groups()
+        context_hidden = "context" in getattr(self, "_overflow_hidden_groups", set())
         for widget in (self._tb_breakdown_label, self._breakdown_frame, self._breakdown_sep):
-            widget.setVisible(has_groups)
+            widget.setVisible(has_groups and not context_hidden)
         if not has_groups and self.breakdown == "group":
             self.breakdown = "dataset"
         is_group = self.breakdown == "group"
@@ -1393,6 +1597,8 @@ class ComparisonPlotWidget(QWidget):
             button.setChecked(on)
             button.blockSignals(False)
             _sync_cmp_seg(button, on)
+        if hasattr(self, "_tb_more_btn"):
+            self._update_responsive_chrome()
 
     def _facet_dims(self, count: int) -> tuple[int, int, int, int]:
         """Return ``(rows, cols, shown, hidden)`` fitting *count* faceted panels."""
@@ -1511,6 +1717,8 @@ class ComparisonPlotWidget(QWidget):
         show_grid_selector = (self.display_mode == "grid")
         self.grid_label.setVisible(show_grid_selector)
         self.grid_selector.setVisible(show_grid_selector)
+        if hasattr(self, "_tb_more_btn"):
+            self._update_responsive_chrome()
 
         self.refresh_plot()
 
